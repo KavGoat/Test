@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPen
-from PySide6.QtWidgets import (QAbstractScrollArea, QLayout, QAbstractSpinBox, QColorDialog, QComboBox,
-                               QGridLayout, QHBoxLayout, QMenu, QSlider,
-                               QToolButton, QWidget, QWidgetAction, QSpinBox,
+from PySide6.QtWidgets import (QAbstractScrollArea, QLayout, QAbstractSpinBox, QComboBox,
+                               QHBoxLayout, QSlider,
+                               QToolButton, QWidget, QSpinBox,
                                QDoubleSpinBox)
 
-from ..items.base import PALETTE
 from .icons import colour_icon
 
 
@@ -38,7 +37,8 @@ def arrow_combo() -> QComboBox:
 
 
 class ColorButton(QToolButton):
-    """A swatch button with a palette pop-up and a 'more colours' escape hatch."""
+    """A swatch button opening Revu's colour picker: its palette, No Color,
+    the eyedropper and More Colors (ui/colorpicker.py)."""
 
     colorChanged = Signal(str)
 
@@ -47,47 +47,20 @@ class ColorButton(QToolButton):
         super().__init__()
         self._colour = colour
         self.allow_none = allow_none
-        self.setPopupMode(QToolButton.InstantPopup)
         self.setToolTip(label or "Colour")
         self.setAutoRaise(True)
         self.setIconSize(QSize(18, 18))
-        self._build_menu()
+        self.clicked.connect(self._pick)
         self._refresh()
 
-    def _build_menu(self) -> None:
-        menu = QMenu(self)
-        grid_widget = QWidget()
-        grid = QGridLayout(grid_widget)
-        grid.setContentsMargins(6, 6, 6, 6)
-        grid.setSpacing(3)
-        for index, colour in enumerate(PALETTE):
-            button = QToolButton()
-            button.setIcon(colour_icon(colour))
-            button.setIconSize(QSize(18, 18))
-            button.setAutoRaise(True)
-            button.setToolTip(colour)
-            button.clicked.connect(lambda _checked=False, c=colour: self._choose(c, menu))
-            grid.addWidget(button, index // 6, index % 6)
-        action = QWidgetAction(menu)
-        action.setDefaultWidget(grid_widget)
-        menu.addAction(action)
-        menu.addSeparator()
-        if self.allow_none:
-            menu.addAction("No colour", lambda: self._choose("", menu))
-        menu.addAction("More colours…", self._pick_custom)
-        self.setMenu(menu)
-
-    def _choose(self, colour: str, menu: QMenu) -> None:
-        menu.hide()
-        self.set_color(colour)
-        self.colorChanged.emit(colour)
-
-    def _pick_custom(self) -> None:
-        chosen = QColorDialog.getColor(QColor(self._colour or "#ffffff"), self,
-                                       "Choose a colour")
-        if chosen.isValid():
-            self.set_color(chosen.name())
-            self.colorChanged.emit(self._colour)
+    def _pick(self) -> None:
+        """Revu's colour picker under the swatch (ui/colorpicker.py)."""
+        from .colorpicker import choose
+        got = choose(self, self._colour, self.allow_none)
+        if got is None:
+            return
+        self.set_color(got)
+        self.colorChanged.emit(self._colour)
 
     def color(self) -> str:
         return self._colour

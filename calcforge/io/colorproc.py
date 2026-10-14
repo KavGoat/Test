@@ -348,7 +348,10 @@ def rewrite_stream(data: bytes, spaces: dict, fn, seen: Optional[set] = None) ->
                     seen.add(hex_of(colour))
                 new = fn(colour)
                 key = "stroke_none" if stroke else "fill_none"
-                if new is None:
+                if new is not None and max(abs(a - b) for a, b in zip(new, colour)) < 1e-9:
+                    # left as it is: kept byte for byte (a CMYK colour stays CMYK)
+                    state[key] = False
+                elif new is None:
                     state[key] = True
                     replace(operands[0][0], end, b"")
                 else:

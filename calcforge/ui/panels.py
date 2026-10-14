@@ -1143,15 +1143,17 @@ class MarkupsPanel(QWidget):
         return menu
 
     def batch_colour(self, field: str) -> None:
-        from PySide6.QtWidgets import QColorDialog
+        from PySide6.QtGui import QCursor
+        from .colorpicker import choose
         chosen = self.selected_markups()
         if not chosen:
             return
-        start = QColor(getattr(chosen[0].style, field) or "#e03131")
-        colour = QColorDialog.getColor(start, self, "Colour")
-        if colour.isValid():
-            self.batch_style(lambda style: setattr(style, field, colour.name()),
-                             "Colour" if field == "stroke" else "Fill")
+        colour = choose(QCursor.pos(), getattr(chosen[0].style, field) or "#e03131",
+                        allow_none=(field != "stroke"), parent=self)
+        if colour is None:
+            return
+        self.batch_style(lambda style: setattr(style, field, colour),
+                         "Colour" if field == "stroke" else "Fill")
 
     def _change(self, description: str, change) -> None:
         chosen = self.selected_markups()

@@ -14,11 +14,10 @@ import re
 from typing import Optional
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
-from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog,
-                               QDialogButtonBox, QFormLayout, QGridLayout, QGroupBox,
-                               QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton,
-                               QSlider, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGridLayout,
+                               QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSlider,
+                               QSpinBox, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
 from ..io import colorproc
 from ..io.colorproc import (BLACK_WHITE, COLORIZE, GRAYSCALE, LSH, MASK, MODIFY, NAMES,
@@ -43,46 +42,43 @@ def parse_pages(text: str, count: int) -> Optional[list]:
     return sorted(set(out)) or None
 
 
-def _swatch(colour: str) -> QIcon:
-    pix = QPixmap(14, 14)
-    pix.fill(QColor(colour))
-    return QIcon(pix)
+class _ColourButton(QToolButton):
+    """Revu's colour swatch: a small square of the colour (No Color: white,
+    a red slash); a click opens the picker (ui/colorpicker.py) — or, for a
+    Source Color, the colours found in the drawing (*found*)."""
 
-
-class _ColourButton(QPushButton):
-    """A colour, chosen with the colour picker; optionally "No Color"."""
-
-    def __init__(self, colour: Optional[str], changed, allow_none: bool = False):
+    def __init__(self, colour: Optional[str], changed, allow_none: bool = False,
+                 found: Optional[list] = None):
         super().__init__()
         self.colour = colour
         self.changed = changed
         self.allow_none = allow_none
-        self.setFixedWidth(90)
+        self.found = found
+        self.setFixedSize(26, 24)
+        self.setIconSize(QSize(18, 18))
+        self.setToolTip("Click to choose the colour")
         self.clicked.connect(self._pick)
         self._show()
 
     def _show(self):
-        if self.colour is None:
-            self.setText(NO_COLOR)
-            self.setStyleSheet("")
-        else:
-            self.setText("")
-            self.setStyleSheet(f"background:{self.colour}; border:1px solid #888;")
+        from .colorpicker import swatch_icon
+        if self.found is not None and not self.colour:
+            # a Source Color not chosen yet: Revu's empty grey square
+            self.setIcon(swatch_icon("#d4d4d4", 18))
+            self.setToolTip("Source Color: click for the colours in the drawing")
+            return
+        self.setIcon(swatch_icon(self.colour or "", 18))
+        self.setToolTip((self.colour or NO_COLOR).upper() if self.colour else NO_COLOR)
 
     def _pick(self):
-        from PySide6.QtWidgets import QMenu
-        if self.allow_none:
-            menu = QMenu(self)
-            menu.addAction(NO_COLOR, lambda: self.set(None))
-            menu.addAction("Choose a colour…", self._choose)
-            menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
+        from .colorpicker import choose, choose_found
+        if self.found is not None:
+            got = choose_found(self, self.found, self.colour)
         else:
-            self._choose()
-
-    def _choose(self):
-        got = QColorDialog.getColor(QColor(self.colour or "#000000"), self)
-        if got.isValid():
-            self.set(got.name())
+            got = choose(self, self.colour, self.allow_none)
+        if got is None:
+            return
+        self.set(got or None)
 
     def set(self, colour: Optional[str]):
         self.colour = colour
@@ -90,7 +86,15 @@ class _ColourButton(QPushButton):
         self.changed()
 
 
+# Bluebeam's Pages choices
+ALL, CURRENT, SELECTED, CUSTOM = "all", "current", "selected", "custom"
+
+
 class ColorProcessingDialog(QDialog):
+    """Bluebeam Revu's Color Processing, laid out as its dialog is: Process
+    Type; a Process group holding that type's settings with the Pages to do
+    at its foot; Preview, Before and After; OK and Cancel."""
+
     def __init__(self, parent, mode: str = PAGES, *, document=None, current: int = 0,
                  selected: Optional[list] = None, colours: Optional[list] = None,
                  picture: Optional[QImage] = None, preview=None):
@@ -109,164 +113,246 @@ class ColorProcessingDialog(QDialog):
         self.previewer = preview
         self.setWindowTitle("Change Colors" if mode == SNAPSHOT else "Color Processing")
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Process Type:"))
         self.kind = QComboBox()
         kinds = [COLORIZE, MASK] if mode == PHOTO else \
             [MODIFY, COLORIZE, GRAYSCALE, BLACK_WHITE, LSH, MASK]
         for key in kinds:
             self.kind.addItem(NAMES[key], key)
-        form.addRow("Process Type:", self.kind)
-        layout.addLayout(form)
+        self.kind.setMinimumWidth(190)
+        top.addWidget(self.kind)
+        top.addStretch(1)
+        layout.addLayout(top)
+        # the Process group: the type's settings, then the pages
+        self.process_box = QGroupBox("Process")
+        process = QVBoxLayout(self.process_box)
         self.pages_stack = QStackedWidget()
         self.page_of = {}
+        self.image_boxes: list = []                # each type's own Process Images
         for key in kinds:
             self.page_of[key] = self.pages_stack.addWidget(self._options(key))
-        layout.addWidget(self.pages_stack)
-        self.images = QCheckBox("Process Images")
-        self.images.setToolTip("Change the colours of pictures on the page too")
-        self.images.toggled.connect(self._changed)
-        layout.addWidget(self.images)
-        # the pages
-        self.pages_box = QGroupBox("Pages")
-        grid = QGridLayout(self.pages_box)
-        self.all_pages = QRadioButton("All Pages")
-        self.current_page = QRadioButton(f"Current ({current + 1})")
-        self.selected_pages = QRadioButton("Selected")
-        self.custom_pages = QRadioButton("Custom")
+        process.addWidget(self.pages_stack, 1)
+        pages = QHBoxLayout()
+        self.pages_label = QLabel("Pages")
+        pages.addWidget(self.pages_label)
+        self.pages = QComboBox()
+        count = len(document.pages) if document is not None else 1
+        self.page_count = count
+        self.pages.addItem(f"All Pages (1 - {count})", ALL)
+        self.pages.addItem(f"Current Page ({current + 1})", CURRENT)
+        if self.selected:
+            self.pages.addItem(f"Selected Pages ({len(self.selected)})", SELECTED)
+        self.pages.addItem("Custom", CUSTOM)
+        self.pages.setMinimumWidth(160)
         self.custom_text = QLineEdit()
         self.custom_text.setPlaceholderText("e.g. 1-3, 5, 9")
-        group = QButtonGroup(self)
-        for i, button in enumerate((self.all_pages, self.current_page, self.selected_pages,
-                                    self.custom_pages)):
-            group.addButton(button)
-            grid.addWidget(button, i, 0)
-        grid.addWidget(self.custom_text, 3, 1)
-        self.current_page.setChecked(True)
-        self.selected_pages.setVisible(bool(self.selected))
-        self.pages_box.setVisible(mode == PAGES)
-        layout.addWidget(self.pages_box)
+        self.custom_text.setFixedWidth(110)
+        self.custom_text.setVisible(False)
+        self.pages.currentIndexChanged.connect(
+            lambda _i: self.custom_text.setVisible(self.pages.currentData() == CUSTOM))
+        pages.addWidget(self.pages)
+        pages.addWidget(self.custom_text)
+        pages.addWidget(QLabel(f"of {count}"))
+        pages.addStretch(1)
+        self.pages_row = QWidget()
+        self.pages_row.setLayout(pages)
+        pages.setContentsMargins(0, 0, 0, 0)
+        self.pages_row.setVisible(mode == PAGES)
+        process.addWidget(self.pages_row)
+        layout.addWidget(self.process_box)
         # the preview
         preview = QGroupBox("Preview")
         row = QHBoxLayout(preview)
         self.before = QLabel()
         self.after = QLabel()
-        for label, caption in ((self.before, "Before"), (self.after, "After")):
+        for label, caption in ((self.before, "Before:"), (self.after, "After:")):
             column = QVBoxLayout()
-            label.setFixedSize(QSize(200, 200))
+            column.setSpacing(2)
+            column.addWidget(QLabel(caption))
+            label.setFixedSize(QSize(220, 220))
             label.setAlignment(Qt.AlignCenter)
-            label.setStyleSheet("background:#ffffff; border:1px solid #888;")
+            label.setStyleSheet("background:#ffffff; border:1px solid #6b6f76;")
             column.addWidget(label)
-            column.addWidget(QLabel(caption), 0, Qt.AlignHCenter)
             row.addLayout(column)
         layout.addWidget(preview)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self.pages.setCurrentIndex(self.pages.findData(CURRENT))
         self._timer.timeout.connect(self._preview)
         self.kind.currentIndexChanged.connect(self._kind_changed)
+        self.pages.currentIndexChanged.connect(self._changed)
         self._kind_changed()
 
     # -- each type's options ----------------------------------------------------------------
+    def _side(self, *boxes) -> QVBoxLayout:
+        column = QVBoxLayout()
+        for box in boxes:
+            column.addWidget(box)
+        column.addStretch(1)
+        return column
+
+    def _process_images(self) -> QCheckBox:
+        box = QCheckBox("Process Images")
+        box.setToolTip("Change the colours of pictures on the page too")
+        box.toggled.connect(self._changed)
+        self.image_boxes.append(box)
+        return box
+
     def _options(self, key: str) -> QWidget:
         page = QWidget()
-        form = QFormLayout(page)
-        form.setContentsMargins(0, 0, 0, 0)
+        outer = QHBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
         if key == MODIFY:
-            self.pairs_box = QVBoxLayout()
+            # Revu: Source Color and To columns at the left, Tolerance at the
+            # top right, Add New and Remove at the bottom right
+            left = QVBoxLayout()
+            self.pairs_grid = QGridLayout()
+            self.pairs_grid.setHorizontalSpacing(8)
+            self.pairs_grid.setVerticalSpacing(8)
+            self.pairs_grid.addWidget(QLabel("Source Color:"), 0, 0, Qt.AlignRight)
+            self.pairs_grid.addWidget(QLabel("To:"), 0, 2, Qt.AlignRight)
             self.pairs: list = []
-            holder = QWidget()
-            holder.setLayout(self.pairs_box)
-            form.addRow(holder)
-            buttons = QHBoxLayout()
-            add = QPushButton("Add New")
-            add.clicked.connect(lambda: self.add_pair())
-            remove = QPushButton("Remove")
-            remove.clicked.connect(self.remove_pair)
-            buttons.addWidget(add)
-            buttons.addWidget(remove)
-            buttons.addStretch(1)
-            form.addRow(buttons)
+            left.addLayout(self.pairs_grid)
+            left.addStretch(1)
+            outer.addLayout(left)
+            outer.addStretch(1)
+            self.tolerance_on = QCheckBox("Tolerance")
+            self.tolerance_on.setToolTip("Change colours close to the Source Color as well")
             self.tolerance = QSpinBox()
             self.tolerance.setRange(0, 100)
             self.tolerance.setSuffix(" %")
+            self.tolerance.setValue(10)
+            self.tolerance.setFixedWidth(84)
+            self.tolerance.setEnabled(False)
+            self.tolerance_on.toggled.connect(self.tolerance.setEnabled)
+            self.tolerance_on.toggled.connect(self._changed)
             self.tolerance.valueChanged.connect(self._changed)
-            form.addRow("Tolerance:", self.tolerance)
-            self.add_pair()
-        elif key == COLORIZE:
-            self.select = _ColourButton("#000000", self._changed)
-            self.to = _ColourButton("#ffffff", self._changed)
-            self.scale = QCheckBox("Scale Color")
-            self.scale.setChecked(True)
-            self.scale.setToolTip("Cleared: every colour becomes the Select Color (white stays white)")
-            self.scale.toggled.connect(self._changed)
-            form.addRow("Select Color:", self.select)
-            form.addRow("To:", self.to)
-            form.addRow("", self.scale)
+            right = QVBoxLayout()
+            tol = QHBoxLayout()
+            tol.addWidget(self.tolerance_on)
+            tol.addWidget(self.tolerance)
+            tol.addStretch(1)
+            right.addLayout(tol)
+            right.addStretch(1)
+            buttons = QHBoxLayout()
+            self.add_new = QPushButton("Add New")
+            self.add_new.clicked.connect(lambda: self.add_pair())
+            self.remove = QPushButton("Remove")
+            self.remove.clicked.connect(self.remove_pair)
+            buttons.addWidget(self.add_new)
+            buttons.addWidget(self.remove)
+            right.addLayout(buttons)
+            outer.addLayout(right)
+            self.add_pair(self.colours[0] if self.colours else None)
+        elif key in (COLORIZE, GRAYSCALE, BLACK_WHITE):
+            form = QGridLayout()
+            select = _ColourButton("#000000", self._changed)
+            to = _ColourButton("#ffffff", self._changed)
+            scale = QCheckBox("Scale Color")
+            scale.setChecked(True)
+            scale.setToolTip("Cleared: every colour becomes the Select Color (white stays white)")
+            scale.toggled.connect(self._changed)
+            form.addWidget(QLabel("Select Color:"), 0, 0, Qt.AlignRight)
+            form.addWidget(select, 0, 1)
+            form.addWidget(QLabel("To:"), 0, 2, Qt.AlignRight)
+            form.addWidget(to, 0, 3)
+            holder = QVBoxLayout()
+            holder.addLayout(form)
+            holder.addStretch(1)
+            outer.addLayout(holder)
+            outer.addStretch(1)
+            outer.addLayout(self._side(scale, self._process_images()))
+            if key == COLORIZE:
+                self.select, self.to, self.scale = select, to, scale
+            else:
+                # as Revu shows them for these: there, greyed
+                for widget in (select, to, scale, form.itemAtPosition(0, 0).widget(),
+                               form.itemAtPosition(0, 2).widget()):
+                    widget.setEnabled(False)
+                if key == BLACK_WHITE:
+                    select.colour, to.colour = "#000000", "#ffffff"
         elif key == LSH:
+            grid = QGridLayout()
             self.sliders = {}
-            for name, low, high in (("Luminosity", -100, 100), ("Saturation", -100, 100),
-                                    ("Hue", -180, 180)):
+            for r, (name, low, high) in enumerate((("Luminosity", -100, 100),
+                                                   ("Saturation", -100, 100),
+                                                   ("Hue", -180, 180))):
                 slider = QSlider(Qt.Horizontal)
                 slider.setRange(low, high)
+                slider.setMinimumWidth(150)
                 value = QLabel("0")
                 value.setFixedWidth(34)
                 slider.valueChanged.connect(lambda v, lab=value: (lab.setText(str(v)),
                                                                    self._changed()))
-                row = QHBoxLayout()
-                row.addWidget(slider, 1)
-                row.addWidget(value)
-                form.addRow(f"{name}:", row)
+                grid.addWidget(QLabel(f"{name}:"), r, 0)
+                grid.addWidget(slider, r, 1)
+                grid.addWidget(value, r, 2)
                 self.sliders[name] = slider
+            holder = QVBoxLayout()
+            holder.addLayout(grid)
+            holder.addStretch(1)
+            outer.addLayout(holder)
+            outer.addStretch(1)
+            outer.addLayout(self._side(self._process_images()))
         elif key == MASK:
+            row = QHBoxLayout()
             self.mask = _ColourButton("#ffffff", self._changed)
             self.mask_tolerance = QSpinBox()
             self.mask_tolerance.setRange(0, 100)
-            self.mask_tolerance.setSuffix(" %")
+            self.mask_tolerance.setToolTip("How close a colour must be to the Mask Color (%)")
             self.mask_tolerance.valueChanged.connect(self._changed)
-            form.addRow("Mask Color:", self.mask)
-            form.addRow("Tolerance:", self.mask_tolerance)
-            form.addRow("", QLabel("Markups are not processed."))
-        else:
-            form.addRow(QLabel({GRAYSCALE: "Converts colours to shades of grey.",
-                                BLACK_WHITE: "Converts colours to black; the paper's white stays."}
-                               [key]))
+            row.addWidget(QLabel("Mask Color:"))
+            row.addWidget(self.mask)
+            row.addWidget(QLabel("±"))
+            row.addWidget(self.mask_tolerance)
+            row.addStretch(1)
+            holder = QVBoxLayout()
+            holder.addLayout(row)
+            note = QLabel("Markups are not processed.")
+            note.setEnabled(False)
+            holder.addWidget(note)
+            holder.addStretch(1)
+            outer.addLayout(holder, 1)
         return page
 
     def add_pair(self, source: Optional[str] = None, target: Optional[str] = "#ff0000") -> None:
-        row = QHBoxLayout()
-        combo = QComboBox()
-        for colour in self.colours:
-            combo.addItem(_swatch(colour), colour, colour)
-        if source and source not in self.colours:
-            combo.addItem(_swatch(source), source, source)
-        if source:
-            combo.setCurrentIndex(combo.findData(source))
-        combo.currentIndexChanged.connect(self._changed)
+        r = len(self.pairs)
+        src = _ColourButton(source, self._changed, found=list(self.colours))
+        src.setToolTip("Source Color: click for the colours in the drawing")
         to = _ColourButton(target, self._changed, allow_none=True)
-        row.addWidget(QLabel("Source Color:"))
-        row.addWidget(combo, 1)
-        row.addWidget(QLabel("To:"))
-        row.addWidget(to)
-        holder = QWidget()
-        holder.setLayout(row)
-        self.pairs_box.addWidget(holder)
-        self.pairs.append((holder, combo, to))
+        self.pairs_grid.addWidget(src, r, 1)
+        self.pairs_grid.addWidget(to, r, 3)
+        self.pairs.append((None, src, to))
+        self.remove.setEnabled(len(self.pairs) > 1)
         self._changed()
 
     def remove_pair(self) -> None:
         if len(self.pairs) > 1:
-            holder, _c, _t = self.pairs.pop()
-            holder.deleteLater()
+            _h, src, to = self.pairs.pop()
+            src.deleteLater()
+            to.deleteLater()
+            self.remove.setEnabled(len(self.pairs) > 1)
             self._changed()
 
     # -- reading it -----------------------------------------------------------------------------
+    @property
+    def images(self) -> QCheckBox:
+        """The Process Images box of the type shown."""
+        page = self.pages_stack.currentWidget()
+        for box in self.image_boxes:
+            if page is not None and page.isAncestorOf(box):
+                return box
+        return self.image_boxes[0] if self.image_boxes else QCheckBox()
+
     def process(self) -> Process:
         kind = self.kind.currentData()
         proc = Process(kind, images=self.images.isChecked())
         if kind == MODIFY:
-            proc.pairs = [(combo.currentData(), to.colour) for _h, combo, to in self.pairs]
-            proc.tolerance = self.tolerance.value()
+            proc.pairs = [(src.colour, to.colour) for _h, src, to in self.pairs if src.colour]
+            proc.tolerance = self.tolerance.value() if self.tolerance_on.isChecked() else 0
         elif kind == COLORIZE:
             proc.select, proc.to, proc.scale = self.select.colour, self.to.colour, self.scale.isChecked()
         elif kind == LSH:
@@ -280,23 +366,21 @@ class ColorProcessingDialog(QDialog):
         return proc
 
     def page_indexes(self, count: int) -> Optional[list]:
-        if self.kind.currentData() == MODIFY or self.current_page.isChecked():
+        which = self.pages.currentData()
+        if self.kind.currentData() == MODIFY or which == CURRENT:
             return [self.current]
-        if self.all_pages.isChecked():
+        if which == ALL:
             return list(range(count))
-        if self.selected_pages.isChecked():
+        if which == SELECTED:
             return sorted(self.selected)
         return parse_pages(self.custom_text.text(), count)
 
     def _kind_changed(self, *_):
         kind = self.kind.currentData()
         self.pages_stack.setCurrentIndex(self.page_of[kind])
-        self.images.setVisible(self.mode != PHOTO and kind in (COLORIZE, GRAYSCALE, BLACK_WHITE, LSH))
+        self.process_box.setTitle("Mask Images" if kind == MASK else "Process")
         # Bluebeam: Modify Colors applies to the current page only
-        for button in (self.all_pages, self.selected_pages, self.custom_pages, self.custom_text):
-            button.setEnabled(kind != MODIFY)
-        if kind == MODIFY:
-            self.current_page.setChecked(True)
+        self.pages_row.setVisible(self.mode == PAGES and kind != MODIFY)
         self._changed()
 
     def _changed(self, *_):

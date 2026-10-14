@@ -52,15 +52,19 @@ def test_modify_colors_changes_vectors_only_and_keeps_them_vectors():
     assert colour_at(out, *RED) == (0, 255, 0)
     assert colour_at(out, *LINE)[2] > 200 and colour_at(out, *LINE)[0] < 60, "black, never set, too"
     assert colour_at(out, *PICTURE)[1] > 150, "pictures are left alone by Modify Colors"
+    assert colour_at(out, *BLUE) == colour_at(data, *BLUE), \
+        "a colour not asked for looks exactly as it did (the CMYK blue stays CMYK)"
+    assert b"1 1 0 0 k" in pymupdf.open(stream=out, filetype="pdf")[0].read_contents()
     doc = pymupdf.open(stream=out, filetype="pdf")
     assert doc[0].get_drawings(), "still vector line work"
     doc.close()
 
 
 def test_modify_to_no_color_leaves_the_shape_unpainted():
-    out = colorproc.process_pdf(a_page(), [0], Process(pairs=[("#ff0000", None)]))
+    data = a_page()
+    out = colorproc.process_pdf(data, [0], Process(pairs=[("#ff0000", None)]))
     assert colour_at(out, *RED) == (255, 255, 255)
-    assert colour_at(out, *BLUE)[2] > 200, "the others painted as before"
+    assert colour_at(out, *BLUE) == colour_at(data, *BLUE), "the others painted as before"
 
 
 def test_grayscale_black_and_white_and_colorize():
@@ -128,8 +132,11 @@ def test_color_processing_in_the_window_changes_the_pages_pdf_and_undoes(window,
     window.color_processing(0)
     dialog = window._last_color_dialog
     assert {"#000000", "#ff0000"} <= set(dialog.colours)
-    assert dialog.kind.currentData() == MODIFY and not dialog.all_pages.isEnabled()
-    dialog.pairs[0][1].setCurrentIndex(dialog.pairs[0][1].findData("#ff0000"))
+    # Revu's Modify Colors: the current page only (no Pages row), Source Color
+    # a swatch offering the page's own colours
+    assert dialog.kind.currentData() == MODIFY and dialog.pages_row.isHidden()
+    assert set(dialog.pairs[0][1].found) >= {"#000000", "#ff0000"}
+    dialog.pairs[0][1].set("#ff0000")
     dialog.pairs[0][2].set("#00ff00")
     assert colorprocess.finish_pages(window, dialog) == 1
     assert page.pdf_key != before
@@ -140,7 +147,9 @@ def test_color_processing_in_the_window_changes_the_pages_pdf_and_undoes(window,
     window.color_processing(0)
     dialog = window._last_color_dialog
     dialog.kind.setCurrentIndex(dialog.kind.findData(GRAYSCALE))
-    dialog.custom_pages.setChecked(True)
+    assert not dialog.pages_row.isHidden()
+    dialog.pages.setCurrentIndex(dialog.pages.findData("custom"))
+    assert not dialog.custom_text.isHidden()
     dialog.custom_text.setText("1")
     assert dialog.page_indexes(1) == [0]
     assert colorprocess.finish_pages(window, dialog) == 1
@@ -213,7 +222,7 @@ def test_a_snapshots_colours_are_its_drawings_and_modify_changes_them(window, tm
     assert red_and_green() == (True, False)
     dialog = window.change_colors(snap) or window._last_color_dialog
     assert {"#000000", "#ff0000"} <= set(dialog.colours), "the drawing's own colours"
-    dialog.pairs[0][1].setCurrentIndex(dialog.pairs[0][1].findData("#ff0000"))
+    dialog.pairs[0][1].set("#ff0000")
     dialog.pairs[0][2].set("#00ff00")
     assert colorprocess.finish_item(window, snap, dialog.process())
     (snap,) = [i for i in window.view.scene().items() if isinstance(i, SnapshotItem)]

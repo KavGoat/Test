@@ -270,8 +270,9 @@ QProgressBar {{
 }}
 QProgressBar::chunk {{ background: {accent}; }}
 QSlider::groove:horizontal {{
-    height: 4px; background: {chrome_edge}; border-radius: 2px;
+    height: 4px; background: {field_edge}; border-radius: 2px;
 }}
+QSlider::sub-page:horizontal {{ background: {accent_edge}; border-radius: 2px; }}
 QSlider::handle:horizontal {{
     background: {accent}; width: 12px; margin: -5px 0; border-radius: 6px;
 }}

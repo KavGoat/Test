@@ -13,8 +13,7 @@ from __future__ import annotations
 import copy
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget, QPushButton, QRadioButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
@@ -39,10 +38,12 @@ class _Swatch(QPushButton):
             self.setStyleSheet("")
 
     def _pick(self):
-        got = QColorDialog.getColor(QColor(self.colour or self.start), self, self.title)
-        if got.isValid():
-            self.colour = got.name()
-            self._show()
+        from .colorpicker import choose
+        got = choose(self, self.colour or self.start, allow_none=True)
+        if got is None:
+            return
+        self.colour = got or None
+        self._show()
 
     def clear(self):
         self.colour = None

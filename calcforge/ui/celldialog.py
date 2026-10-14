@@ -8,7 +8,7 @@ from __future__ import annotations
 
 
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                QDoubleSpinBox, QFontComboBox, QFormLayout, QGridLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QPushButton,
                                QSpinBox, QTabWidget, QVBoxLayout, QWidget)
@@ -42,10 +42,12 @@ class _Colour(QPushButton):
             self.setStyleSheet("")
 
     def _pick(self) -> None:
-        got = QColorDialog.getColor(QColor(self.colour or "#ffffff"), self, "Colour")
-        if got.isValid():
-            self.colour = got.name()
-            self._show()
+        from .colorpicker import choose
+        got = choose(self, self.colour, allow_none=True)
+        if got is None:
+            return
+        self.colour = got or None
+        self._show()
 
 
 class FormatCellsDialog(QDialog):

@@ -15,7 +15,7 @@ from __future__ import annotations
 import dataclasses
 
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QColorDialog, QMenu
+from PySide6.QtWidgets import QMenu
 
 # Set by tests to answer a colour dialog without showing it: {title: "#rrggbb"}.
 ANSWERS: dict = {}
@@ -170,7 +170,10 @@ def choose_colour(window, items, attr: str, title: str) -> None:
     if title in ANSWERS:
         picked = QColor(ANSWERS[title])
     else:
-        picked = QColorDialog.getColor(QColor(getattr(first, attr)), window, title)
+        from PySide6.QtGui import QCursor
+        from .colorpicker import choose
+        got = choose(QCursor.pos(), getattr(first, attr), parent=window)
+        picked = QColor(got) if got else QColor()
     if not picked.isValid():
         return
     change(window, items, title, lambda r: setattr(r, attr, picked.name()))

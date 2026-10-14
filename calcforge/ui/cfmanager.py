@@ -161,10 +161,10 @@ class _ColourButton(QPushButton):
         self.setStyleSheet(f"background:{self.colour}; border:1px solid #888;")
 
     def _pick(self):
-        from PySide6.QtWidgets import QColorDialog
-        got = QColorDialog.getColor(QColor(self.colour), self)
-        if got.isValid():
-            self.colour = got.name()
+        from .colorpicker import choose
+        got = choose(self, self.colour)
+        if got:
+            self.colour = got
             self._show()
             self.changed()
 
