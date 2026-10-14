@@ -426,6 +426,8 @@ class TableItem(MarkupItem):
             self._paint_cells(painter, xs, ys, rows, cols, r0, r1, c0, c1, printing, merges, covered)
         finally:
             self._shown_memo = None
+        from .nametags import paint_cell_tags
+        paint_cell_tags(self, painter, r0, r1, c0, c1)
 
     def _paint_cells(self, painter, xs, ys, rows, cols, r0, r1, c0, c1, printing, merges,
                      covered) -> None:
@@ -680,7 +682,15 @@ class TableItem(MarkupItem):
     def paint(self, painter: QPainter, option, widget=None) -> None:
         super().paint(painter, option, widget)
         frame = self._page_frame()
-        if getattr(frame, "print_mode", False) or self.sheet is None:
+        printing = bool(getattr(frame, "print_mode", False))
+        if self.sheet is not None and (printing or not (self.opened or self.isSelected())):
+            # the table's name above its top-left corner (printed); while it
+            # is picked or open its tab says it instead
+            from . import nametags
+            if nametags.shown(self):
+                nametags.draw_tag(painter, QPointF(0, -0.8), self.name, nametags.OUTER_PT,
+                                  above=True)
+        if printing or self.sheet is None:
             return
         painter.save()
         self._paint_marks(painter)

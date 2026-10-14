@@ -465,6 +465,9 @@ class DocumentSettings:
     # because a busy sheet offers a guide almost everywhere.
     snap_to_pdf_alignment: bool = False
     show_margins: bool = True
+    # a small tag with the name on a named cell or block, a table and a sheet,
+    # printed too, so the paper says what each is (items/nametags.py)
+    show_name_tags: bool = True
     header_left: str = ""
     header_center: str = ""
     header_right: str = ""

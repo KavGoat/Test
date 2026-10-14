@@ -926,6 +926,10 @@ class MainWindow(QMainWindow):
         self._act("dark", "Dark theme", self.toggle_theme, "", checkable=True)
         self._act("margins", "Show margins", self.toggle_margins, "", checkable=True)
         self.act_margins.setChecked(True)
+        self._act("name_tags", "Name Tags", self.toggle_name_tags, "", checkable=True,
+                  tip="A small printed tag with the name on each named cell, "
+                      "table and sheet")
+        self.act_name_tags.setChecked(True)
         self.act_snap_items.setChecked(True)
         self.act_snap_content.setChecked(True)
         self.act_snap_alignment.setChecked(True)
@@ -1686,7 +1690,7 @@ class MainWindow(QMainWindow):
                        self.act_turn_view_reset, None, self.act_grid,
                        self.act_snap, self.act_snap_items, self.act_snap_content,
                        self.act_snap_alignment, self.act_snap_pdf_alignment,
-                       self.act_margins,
+                       self.act_margins, self.act_name_tags,
                        self.act_dark, None,
                        self.act_prev_page,
                        self.act_next_page):
@@ -7489,6 +7493,14 @@ class MainWindow(QMainWindow):
         self.document.settings.show_margins = on
         self._refresh_all_scenes()
 
+    def toggle_name_tags(self, on: bool) -> None:
+        self.document.settings.show_name_tags = bool(on)
+        if self.scene is not None:
+            for item in self.scene.items():
+                if getattr(item, "sheet", None) is not None:
+                    item.update()          # a cached table draws itself again
+        self._refresh_all_scenes()
+
     def refresh_icons(self) -> None:
         """Redraw every icon in the colours of the theme now in use."""
         for action, name in self._icon_names.items():
@@ -7986,6 +7998,7 @@ class MainWindow(QMainWindow):
             self.act_snap_pdf_alignment.setChecked(
                 self.document.settings.snap_to_pdf_alignment)
             self.act_margins.setChecked(self.document.settings.show_margins)
+            self.act_name_tags.setChecked(self.document.settings.show_name_tags)
             self._refresh_all_scenes()
             self.update_title()
 

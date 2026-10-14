@@ -303,7 +303,8 @@ class SheetRunItem(TableItem):
         return path
 
     def boundingRect(self) -> QRectF:
-        return self.chrome_rect().adjusted(-2, -2, 16, 4)
+        # room above the headings for the sheet's name tag
+        return self.chrome_rect().adjusted(-2, -14, 16, 4)
 
     _on_paper = False
 
@@ -341,6 +342,11 @@ class SheetRunItem(TableItem):
         painter.restore()
         painter.save()
         self._paint_headings(painter, r0, r1)
+        from . import nametags
+        if nametags.shown(self):
+            # the sheet's name, above its first page's top-left corner
+            nametags.draw_tag(painter, QPointF(-ROWNUM_W, -HEADING_H - 0.8), self.name,
+                              nametags.OUTER_PT, above=True)
         if self.opened:
             self._paint_selection(painter)
             if self.overlay is not None:
@@ -378,7 +384,9 @@ class SheetRunItem(TableItem):
         paging = self.paging
         opts = options(sheet)
         rules = (sheet.cond_rules, sheet.workbook.version) if sheet.cond_rules else None
-        return (tuple(xs), tuple(ys[a:b + 2]), content, [tuple(m) for m in sheet.merges],
+        from .nametags import named_blocks, shown
+        tags = (shown(self), tuple(named_blocks(sheet)))
+        return (tuple(xs), tuple(ys[a:b + 2]), content, [tuple(m) for m in sheet.merges], tags,
                 paging.first_col, paging.last_col, paging.print_rows, tuple(paging.slices),
                 tuple(paging.groups),
                 sheet.show_gridlines, opts["print_gridlines"], self._on_paper, rules,
@@ -669,6 +677,12 @@ class SheetRunItem(TableItem):
             if heads:
                 self._print_headings(painter, ra, rb, c0, c1, x0, at, scale, hw, hh,
                                      first=(at == gy), title_cols=tc)
+        if k == 0:
+            from . import nametags
+            if nametags.shown(self):
+                # the sheet's name above its first page's top-left corner
+                nametags.draw_tag(painter, QPointF(x0, y0 - 0.8), self.name,
+                                  nametags.OUTER_PT, above=True)
         inner = QRectF(gx + tw * scale, gy + th * scale, w * scale, h * scale)
         source = QRectF(xs[c0] - self._lefts[k], ys[a] - self._tops[k], w, h)
         return source, inner

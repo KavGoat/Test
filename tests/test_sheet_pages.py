@@ -25,6 +25,9 @@ def w(window):
     window.show()
     window.activateWindow()
     window.view.set_zoom(1.0)
+    # these measure the ink on paper: the sheet's printed name tag (above its
+    # grid) is left off here and tested in test_name_tags.py
+    window.document.settings.show_name_tags = False
     return window
 
 

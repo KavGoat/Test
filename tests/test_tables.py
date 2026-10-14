@@ -424,6 +424,7 @@ def test_a_table_prints(w):
     table = make_table(w)
     fill_column(w, table, ["Hello"])
     w.view.tables.close()
+    w.toggle_name_tags(False)        # its printed name tag: tests/test_name_tags.py
     page = frame(w)
     image = QImage(595, 842, QImage.Format_RGB32)
     image.fill(Qt.white)
