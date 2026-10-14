@@ -12,19 +12,16 @@ def main() -> int:
     from PySide6.QtCore import Qt, QtMsgType, qInstallMessageHandler
     from PySide6.QtGui import QFont
 
-    _original_handler = None
-
     def _message_filter(msg_type, context, message):
         if "Cannot find font directory" in message:
             return
         if "propagateSizeHints" in message:
             return
-        if _original_handler is not None:
-            _original_handler(msg_type, context, message)
-        elif msg_type == QtMsgType.QtFatalMsg:
-            sys.stderr.write(message + "\n")
+        if "does not support" in message:
+            return
+        sys.stderr.write(message + "\n")
 
-    _original_handler = qInstallMessageHandler(_message_filter)
+    qInstallMessageHandler(_message_filter)
 
     if "QT_QPA_PLATFORM" not in os.environ and not os.environ.get("DISPLAY"):
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -57,5 +54,7 @@ def main() -> int:
         window._recalculate()
         window.setWindowTitle("CalcForge — Sample")
     window.show()
+    window.raise_()
+    window.activateWindow()
 
     return app.exec()
