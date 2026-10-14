@@ -20,7 +20,26 @@ from .panels import VariablesPanel, FunctionsPanel, ProblemsPanel, ThumbnailPane
 from .toolbar import MathToolbar, ViewToolbar
 from .dialogs import PageSetupDialog, DocumentPropertiesDialog, AboutDialog, CalcInputDialog
 from ..items.calculation import CalculationItem
+from ..items.text import TextItem
 from ..items.plot import PlotItem
+
+OPERATOR_MAP = {
+    "op_assign": ":=",
+    "op_eval": "=",
+    "op_convert": "->",
+    "op_plus": "+",
+    "op_minus": "-",
+    "op_mul": "*",
+    "op_div": "/",
+    "op_pow": "^",
+    "op_sqrt": "sqrt(",
+    "greek_alpha": "α",
+    "greek_beta": "β",
+    "greek_gamma": "γ",
+    "greek_delta": "δ",
+    "greek_pi": "π",
+    "greek_sigma": "σ",
+}
 
 
 class MainWindow(QMainWindow):
@@ -42,6 +61,7 @@ class MainWindow(QMainWindow):
         self._setup_toolbars()
         self._setup_panels()
         self._setup_statusbar()
+        self._connect_scene_signals()
 
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setInterval(120_000)
@@ -52,6 +72,10 @@ class MainWindow(QMainWindow):
             self._open_file(file_path)
 
         self._recalculate()
+
+    def _connect_scene_signals(self):
+        self._scene.selectionChanged.connect(self._on_selection_changed)
+        self._scene.focusItemChanged.connect(self._on_focus_changed)
 
     def _setup_menus(self):
         mb = self.menuBar()
@@ -120,8 +144,6 @@ class MainWindow(QMainWindow):
         self._thumb_panel.page_duplicate_requested.connect(self._duplicate_page)
         self._thumb_panel.update_pages(len(self._document.pages))
 
-        self._scene.selectionChanged.connect(self._on_selection_changed)
-
     def _setup_statusbar(self):
         self._status = QStatusBar()
         self.setStatusBar(self._status)
@@ -130,7 +152,18 @@ class MainWindow(QMainWindow):
         self._problems_label = QLabel("")
         self._status.addPermanentWidget(self._problems_label)
 
+    def _on_focus_changed(self, new_focus, old_focus, reason):
+        if isinstance(old_focus, CalculationItem):
+            self._recalculate()
+
     def _on_insert(self, item_id: str):
+        focused = self._scene.focusItem()
+        if isinstance(focused, (CalculationItem, TextItem)) and focused.editing:
+            text = OPERATOR_MAP.get(item_id)
+            if text:
+                focused.insert_text_at_cursor(text)
+                return
+
         if item_id == "calculation":
             self._insert_math()
         elif item_id == "text":
@@ -139,10 +172,30 @@ class MainWindow(QMainWindow):
             self._insert_plot()
 
     def _insert_math(self):
-        self._insert_region("calculation", 100, 24, {"lines": [""]})
+        region = Region(
+            type="calculation", x=40, y=40, width=100, height=24,
+            page_index=0, data={"lines": [""]},
+        )
+        page = self._document.pages[0]
+        page.add_region(region)
+        item = self._scene.add_region_item(region)
+        self._document.modified = True
+        if item:
+            item.setFocus()
+            item.start_edit()
 
     def _insert_text(self):
-        self._insert_region("text", 200, 30, {"text": "Text", "font_size": 10})
+        region = Region(
+            type="text", x=40, y=40, width=200, height=30,
+            page_index=0, data={"text": "", "font_size": 10},
+        )
+        page = self._document.pages[0]
+        page.add_region(region)
+        item = self._scene.add_region_item(region)
+        self._document.modified = True
+        if item:
+            item.setFocus()
+            item.start_edit()
 
     def _insert_plot(self):
         self._insert_region("plot", 300, 200, {
@@ -209,7 +262,7 @@ class MainWindow(QMainWindow):
         self._scene = DocumentScene(self._document)
         self._canvas.setScene(self._scene)
         self._canvas._scene = self._scene
-        self._scene.selectionChanged.connect(self._on_selection_changed)
+        self._connect_scene_signals()
         self._thumb_panel.update_pages(len(self._document.pages))
         self._recalculate()
         self.setWindowTitle("SMath Studio")
@@ -227,7 +280,7 @@ class MainWindow(QMainWindow):
             self._scene = DocumentScene(self._document)
             self._canvas.setScene(self._scene)
             self._canvas._scene = self._scene
-            self._scene.selectionChanged.connect(self._on_selection_changed)
+            self._connect_scene_signals()
             self._thumb_panel.update_pages(len(self._document.pages))
             self._recalculate()
             self.setWindowTitle(f"SMath Studio — {os.path.basename(path)}")

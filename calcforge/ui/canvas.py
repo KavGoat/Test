@@ -202,6 +202,10 @@ class DocumentCanvas(QGraphicsView):
         self.scale(scale, scale)
 
     def keyPressEvent(self, event: QKeyEvent):
+        focused = self._scene.focusItem()
+        if focused and isinstance(focused, PageItem) and getattr(focused, 'editing', False):
+            super().keyPressEvent(event)
+            return
         if event.key() == Qt.Key.Key_Escape:
             self.current_tool = "select"
             self._scene.clearSelection()
@@ -247,7 +251,9 @@ class DocumentCanvas(QGraphicsView):
         scene_pos = self.mapToScene(event.position().toPoint())
         item = self._scene.itemAt(scene_pos, self.transform())
         if isinstance(item, PageItem):
-            super().mouseDoubleClickEvent(event)
+            item.setFocus()
+            item.start_edit()
+            event.accept()
             return
         if isinstance(item, PageBackground) or item is None:
             page_idx = self._scene.page_at_scene_pos(scene_pos)
@@ -262,7 +268,11 @@ class DocumentCanvas(QGraphicsView):
             )
             page = self._scene.document.pages[page_idx]
             page.add_region(region)
-            self._scene.add_region_item(region)
+            new_item = self._scene.add_region_item(region)
             self._scene.document.modified = True
+            if new_item:
+                new_item.setFocus()
+                new_item.start_edit()
+            event.accept()
             return
         super().mouseDoubleClickEvent(event)

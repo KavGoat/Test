@@ -563,6 +563,8 @@ def eval_line(line: str, ctx: EvalContext) -> EvalResult:
         idx = line.index('#')
         comment = line[idx:]
         line = line[:idx].strip()
+    if line.endswith('=') and not line.endswith(':=') and not line.endswith('==') and not line.endswith('>=') and not line.endswith('<=') and not line.endswith('!='):
+        line = line[:-1].strip()
     try:
         ast = parse(line)
         value = evaluate(ast, ctx)
