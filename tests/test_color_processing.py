@@ -179,3 +179,45 @@ def test_a_photo_has_colorize_and_mask_only(window, tmp_path):
     done = QImage()
     done.loadFromData(window.document.asset(photo.asset_key))
     assert done.pixelColor(5, 5).alpha() == 0, "its white masked"
+
+
+def test_a_snapshots_colours_are_its_drawings_and_modify_changes_them(window, tmp_path):
+    """The user, 2026-10-14: a snapshot's Change Colors listed the wrong
+    colours (its markup style's, not its drawing's), so changing them did
+    nothing. It lists what the drawing sets and the change shows."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+    from calcforge.io import pdfio
+    from calcforge.items.snapshot import SnapshotItem
+    from calcforge.ui import colorprocess
+    path = tmp_path / "set.pdf"
+    path.write_bytes(a_page())
+    pdfio.import_pages(window.document, str(path), [0], at=0)
+    window.rebuild_scenes()
+    window.interactive_prompts = False
+    frame = window.document.pages[0].frame
+    window.take_snapshot(frame, QRectF(10, 20, 120, 60))
+    window.paste_items()
+    (snap,) = [i for i in window.view.scene().items() if isinstance(i, SnapshotItem)]
+
+    def red_and_green():
+        image = QImage(240, 120, QImage.Format_RGB32)
+        image.fill(0xFFFFFFFF)
+        painter = QPainter(image)
+        painter.scale(2, 2)
+        snap.paint_visible(painter) if hasattr(snap, "paint_visible") else snap.paint(painter, None)
+        painter.end()
+        colours = {image.pixelColor(x, y).name() for x in range(0, 240, 3) for y in range(0, 120, 3)}
+        return "#ff0000" in colours, "#00ff00" in colours
+
+    assert red_and_green() == (True, False)
+    dialog = window.change_colors(snap) or window._last_color_dialog
+    assert {"#000000", "#ff0000"} <= set(dialog.colours), "the drawing's own colours"
+    dialog.pairs[0][1].setCurrentIndex(dialog.pairs[0][1].findData("#ff0000"))
+    dialog.pairs[0][2].set("#00ff00")
+    assert colorprocess.finish_item(window, snap, dialog.process())
+    (snap,) = [i for i in window.view.scene().items() if isinstance(i, SnapshotItem)]
+    assert red_and_green() == (False, True)
+    window.undo_stack.undo()
+    (snap,) = [i for i in window.view.scene().items() if isinstance(i, SnapshotItem)]
+    assert red_and_green() == (True, False)

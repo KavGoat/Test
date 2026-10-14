@@ -141,6 +141,26 @@ class PdfSvgItem(MarkupItem):
         self._rect = QRectF(*data["rect"])
         self._renderer = None
 
+    def drawing_colours(self) -> list:
+        """The colours its drawing sets (fills, strokes, gradient stops), the
+        most used first — what Color Processing's Modify Colors offers."""
+        from collections import Counter
+        root = ET.fromstring(self.svg)
+        masks = {child for node in root.iter()
+                 if node.tag.rsplit("}", 1)[-1] in ("mask", "clipPath")
+                 for child in node.iter()}
+        found = Counter()
+        for node in root.iter():
+            if node in masks:
+                continue
+            if node.tag.rsplit("}", 1)[-1] in ("use", "path", "text", "stop"):
+                fields = ("stop-color",) if node.tag.endswith("stop") else ("fill", "stroke")
+                for name in fields:
+                    value = node.get(name, "#000000" if name == "fill" else "none")
+                    if value.startswith("#") and len(value) >= 7:
+                        found[value[:7].lower()] += 1
+        return [c for c, _n in found.most_common()]
+
     def process_colours(self, colour, image) -> int:
         """Color Processing (io/colorproc.py) on the drawing: *colour* maps
         "#rrggbb" to a colour ("" for none) for every fill and stroke,

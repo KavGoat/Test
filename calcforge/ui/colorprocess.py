@@ -528,8 +528,16 @@ def change_colors(window, item) -> Optional[ColorProcessingDialog]:
 
 
 def _item_colours(items) -> list:
+    """The colours what a snapshot was taken of shows: its drawing's own (a
+    PDF's line work), else each markup's line, fill and text colour."""
     found = []
     for item in items:
+        drawn = getattr(item, "drawing_colours", None)
+        if drawn is not None:
+            for colour in drawn():
+                if colour not in found:
+                    found.append(colour)
+            continue
         style = getattr(item, "style", None)
         for name in ("stroke", "fill", "text_color"):
             colour = getattr(style, name, "") if style is not None else ""
