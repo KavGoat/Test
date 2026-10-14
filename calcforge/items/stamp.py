@@ -6,6 +6,7 @@ from PySide6.QtGui import QPainter, QPen, QColor, QFont, QBrush
 
 from .base import PageItem
 from ..core.document import Region
+from ..core.typography import sans_family
 
 
 STAMP_TEXTS = [
@@ -42,7 +43,7 @@ class StampItem(PageItem):
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(r.adjusted(4, 4, -4, -4), 6, 6)
-        font = QFont("sans-serif", 20)
+        font = QFont(sans_family(), 20)
         font.setPixelSize(20)
         font.setBold(True)
         painter.setFont(font)

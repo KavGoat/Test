@@ -6,6 +6,7 @@ from PySide6.QtGui import QPainter, QPen, QColor, QFont, QTextDocument
 
 from .base import PageItem
 from ..core.document import Region
+from ..core.typography import sans_family
 
 
 class TextItem(PageItem):
@@ -28,7 +29,7 @@ class TextItem(PageItem):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self.bg_color.alpha() > 0:
             painter.fillRect(self.rect(), self.bg_color)
-        font = QFont("sans-serif", int(self.font_size))
+        font = QFont(sans_family(), int(self.font_size))
         font.setPixelSize(int(self.font_size))
         font.setBold(self.bold)
         font.setItalic(self.italic)

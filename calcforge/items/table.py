@@ -8,6 +8,7 @@ from .base import PageItem
 from ..core.document import Region
 from ..core.spreadsheet import Table, SpreadsheetEvaluator, _col_letter
 from ..core.evaluator import EvalContext
+from ..core.typography import sans_family
 
 
 class TableItem(PageItem):
@@ -53,10 +54,10 @@ class TableItem(PageItem):
         painter.setBrush(QBrush(QColor(255, 255, 255)))
         painter.drawRect(r)
 
-        hdr_font = QFont("sans-serif", 9)
+        hdr_font = QFont(sans_family(), 9)
         hdr_font.setPixelSize(9)
         hdr_font.setBold(True)
-        cell_font = QFont("sans-serif", 10)
+        cell_font = QFont(sans_family(), 10)
         cell_font.setPixelSize(10)
         row_num_w = 40.0
         x = row_num_w

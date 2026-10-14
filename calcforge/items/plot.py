@@ -9,6 +9,7 @@ from .base import PageItem
 from ..core.document import Region
 from ..core.evaluator import EvalContext, evaluate, parse
 from ..core.units import Quantity
+from ..core.typography import sans_family
 
 
 class PlotItem(PageItem):
@@ -87,7 +88,7 @@ class PlotItem(PageItem):
         painter.drawLine(QPointF(plot_rect.left(), plot_rect.top()),
                          QPointF(plot_rect.left(), plot_rect.bottom()))
 
-        font = QFont("sans-serif", 8)
+        font = QFont(sans_family(), 8)
         font.setPixelSize(8)
         painter.setFont(font)
         for i in range(5):
@@ -116,7 +117,7 @@ class PlotItem(PageItem):
             painter.drawPath(path)
 
         if self.title:
-            title_font = QFont("sans-serif", 10)
+            title_font = QFont(sans_family(), 10)
             title_font.setPixelSize(10)
             title_font.setBold(True)
             painter.setFont(title_font)

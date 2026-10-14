@@ -13,6 +13,8 @@ from PySide6.QtGui import (
     QPainter, QFont, QFontMetricsF, QPen, QColor, QPainterPath,
 )
 
+from .typography import serif_family
+
 
 @dataclass
 class Box:
@@ -100,11 +102,11 @@ class MathLayout:
 
     def __init__(self, base_font_size: float = 14.0):
         self.base_font_size = base_font_size
-        self._font = QFont("serif", int(base_font_size))
+        self._font = QFont(serif_family(), int(base_font_size))
         self._fm = QFontMetricsF(self._font)
 
     def _make_font(self, size: float, italic: bool = False, bold: bool = False) -> QFont:
-        f = QFont("serif", int(size))
+        f = QFont(serif_family(), int(size))
         f.setItalic(italic)
         f.setBold(bold)
         f.setPixelSize(int(size))
@@ -229,7 +231,7 @@ class MathPainter:
         y = oy + box.y
 
         if isinstance(box, TextBox):
-            font = QFont("serif", int(box.font_size))
+            font = QFont(serif_family(), int(box.font_size))
             font.setItalic(box.italic)
             font.setBold(box.bold)
             font.setPixelSize(int(box.font_size))
@@ -270,7 +272,7 @@ class MathPainter:
 
         elif isinstance(box, ParenBox):
             painter.setPen(QPen(QColor(0, 0, 0), 1.0))
-            font = QFont("serif")
+            font = QFont(serif_family())
             font.setPixelSize(int(box.height * 0.9))
             painter.setFont(font)
             painter.drawText(QPointF(x, y + box.ascent), box.left_char)

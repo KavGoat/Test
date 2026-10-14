@@ -7,6 +7,7 @@ from PySide6.QtGui import QPainter, QPen, QColor, QFont
 
 from .base import PageItem
 from ..core.document import Region
+from ..core.typography import sans_family
 
 
 class MeasureItem(PageItem):
@@ -71,7 +72,7 @@ class MeasureItem(PageItem):
             painter.setBrush(color)
             painter.drawEllipse(pt, 3, 3)
 
-        font = QFont("sans-serif", 9)
+        font = QFont(sans_family(), 9)
         font.setPixelSize(9)
         painter.setFont(font)
         painter.setPen(QPen(color))

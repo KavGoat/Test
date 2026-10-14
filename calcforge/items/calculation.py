@@ -8,6 +8,7 @@ from .base import PageItem
 from ..core.document import Region
 from ..core.evaluator import EvalContext, eval_line, EvalResult
 from ..core.mathrender import MathLayout, MathPainter, TextBox
+from ..core.typography import serif_family
 
 
 class CalculationItem(PageItem):
@@ -35,7 +36,7 @@ class CalculationItem(PageItem):
         line_h = 22.0
         total_h = max(line_h * len(self.lines), line_h)
         max_w = 100.0
-        font = QFont("serif", 14)
+        font = QFont(serif_family(), 14)
         font.setPixelSize(14)
         from PySide6.QtGui import QFontMetricsF
         fm = QFontMetricsF(font)
@@ -50,10 +51,10 @@ class CalculationItem(PageItem):
     def paint(self, painter: QPainter, option, widget=None):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         line_h = 22.0
-        font_normal = QFont("serif", 14)
+        font_normal = QFont(serif_family(), 14)
         font_normal.setPixelSize(14)
         font_normal.setItalic(True)
-        font_result = QFont("serif", 14)
+        font_result = QFont(serif_family(), 14)
         font_result.setPixelSize(14)
         for i, line in enumerate(self.lines):
             y = i * line_h

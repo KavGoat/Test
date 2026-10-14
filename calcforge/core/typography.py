@@ -6,11 +6,33 @@ to scene units and lets QPainter's transform handle scaling.
 """
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtGui import QFont, QFontMetricsF
 
 
-def make_page_font(family: str = "serif", size_pt: float = 10.0,
+def serif_family() -> str:
+    if sys.platform == "win32":
+        return "Cambria"
+    if sys.platform == "darwin":
+        return "Times New Roman"
+    return "DejaVu Serif"
+
+
+def sans_family() -> str:
+    if sys.platform == "win32":
+        return "Segoe UI"
+    if sys.platform == "darwin":
+        return "Helvetica Neue"
+    return "DejaVu Sans"
+
+
+def make_page_font(family: str = "", size_pt: float = 10.0,
                    bold: bool = False, italic: bool = False) -> QFont:
+    if not family or family == "serif":
+        family = serif_family()
+    elif family == "sans-serif":
+        family = sans_family()
     font = QFont(family)
     font.setPixelSize(int(size_pt))
     font.setBold(bold)
