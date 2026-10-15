@@ -7213,7 +7213,7 @@ class MainWindow(QMainWindow):
         timer = getattr(self, "_lists_timer", None)
         if timer is not None:
             timer.stop()
-        self.markups_panel.rebuild(self.document)
+        self.markups_panel.refresh(self.document)
         self.sync_text_bookmarks()
         self.bookmarks_panel.rebuild(self.document)
         self.variables_panel.watch(self.document)

@@ -2192,8 +2192,12 @@ class PageView(QGraphicsView):
                             if isinstance(other, MarkupItem) and self.editable(other)]
         from ..items.calc import blocks_holding
         self._held_in_blocks = blocks_holding(self.scene(), self._move_items)
+        # What the copies left behind are made from — only a Ctrl-drag leaves
+        # any, and copying four hundred markups for a plain move was an eighth
+        # of a second before the pointer had moved at all (QA, 2026-10-15).
         self._move_original_data = {
-            other.uid: deepcopy(other.serialize()) for other, _ in self._move_items}
+            other.uid: deepcopy(other.serialize())
+            for other, _ in self._move_items} if control else {}
         self.begin_snapshot(self.all_frames())
         event.accept()
 

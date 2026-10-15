@@ -129,6 +129,10 @@ class MarkupLayer:
         self._suspended: set = set()
         self._settle = None
         self._idle = None
+        #: what has gone wrong in the squares since they were last put right
+        #: (see dirty): put right together, once, not once per markup
+        self._wrong: list = []
+        self._mend = None
         self.enabled = True
         #: what the screen last showed: (step, page region, its middle)
         self.wanted = None
@@ -171,7 +175,7 @@ class MarkupLayer:
         if item in self.members:
             self._unbake(item)
             self.members.discard(item)
-            self._unfile(item, drop=True)        # its old drawing goes now
+            self._unfile(item, drop=True)        # its old drawing goes (dirty)
         elif item in self.pending:
             self.pending.discard(item)
             self._unfile(item, drop=False)
@@ -344,14 +348,43 @@ class MarkupLayer:
         """Everything drawn in *box* is wrong. On screen it is drawn again
         there and only there — the markups under *box*, into that part of
         each square: a markup picked up off a crowded sheet costs its own
-        neighbours' drawing, not the square's. Other zooms' squares go."""
+        neighbours' drawing, not the square's. Other zooms' squares go.
+
+        Not straight away: a selection of four hundred nudged or dragged was
+        four hundred of these, each drawing its neighbours again — markups
+        that were about to be taken out of the squares themselves — and one
+        press of an arrow took seconds (QA, 2026-10-15). They are put right
+        together, once, as soon as the event is done or before the squares
+        are next shown or drawn, whichever is first; until then nothing shows
+        them, so nothing is ever shown wrong."""
         if box.isEmpty():
             return
+        self._wrong.append(QRectF(box))
+        if self._mend is None:
+            self._mend = QTimer(self.frame)
+            self._mend.setSingleShot(True)
+            self._mend.timeout.connect(self._put_right)
+        if not self._mend.isActive():
+            self._mend.start(0)
+
+    def _put_right(self) -> None:
+        """Draw again what dirty said is wrong: each square once, over every
+        part of it that went wrong since it was last put right."""
+        if not self._wrong or not _valid(self.frame):
+            self._wrong = []
+            return
+        boxes, self._wrong = self._wrong, []
         current = self.wanted[0] if self.wanted else None
         for step in list(self.tiles):
             squares = self.tiles.get(step, {})
-            for col, row in self._keys(box, step):
-                square = squares.get((col, row))
+            wrong: dict = {}
+            for box in boxes:
+                for key in self._keys(box, step):
+                    if key in squares:
+                        known = wrong.get(key)
+                        wrong[key] = box if known is None else known.united(box)
+            for (col, row), box in wrong.items():
+                square = self.tiles.get(step, {}).get((col, row))
                 if square is None:
                     continue
                 if step == current and not square.redo:
@@ -379,6 +412,7 @@ class MarkupLayer:
         self._wake()
 
     def clear(self) -> None:
+        self._wrong = []
         for step in list(self.tiles):
             for col, row in list(self.tiles.get(step, {})):
                 self._drop((step, col, row))
@@ -402,6 +436,7 @@ class MarkupLayer:
 
         if self._suspended:
             self._resume()
+        self._put_right()
         if not self.members and not self.pending:
             return
         step = pdftiles.zoom_step(scale)
@@ -421,7 +456,7 @@ class MarkupLayer:
                 _drawing[0] = True
                 try:
                     for item in visible:
-                        self._paint_item(painter, item, base)  # handles and all
+                        self._paint_item(painter, item, base, handles=True)
                 finally:
                     _drawing[0] = False
                     painter.setWorldTransform(base)
@@ -536,6 +571,7 @@ class MarkupLayer:
         if pdftiles.TILES.held() or _busy():
             self._idle.start(40)
             return
+        self._put_right()
         step, seen, middle = self.wanted
         size = TILE / step
         deadline = time.perf_counter() + IDLE_SECONDS
@@ -692,13 +728,26 @@ class MarkupLayer:
         _remember(self, (step, col, row), pixmap)
         return square
 
-    def _paint_item(self, painter: QPainter, item, base: QTransform) -> None:
+    def _paint_item(self, painter: QPainter, item, base: QTransform,
+                    handles: bool = False) -> None:
+        """Draw *item* and what belongs to it. Into a square, without its
+        handles: the page draws a picked-out markup's handles over its squares
+        (_paint_handles), so in them as well they were drawn twice, and drawn
+        again with every neighbour each time a markup near it was put right —
+        and still there, in the squares, after it was let go."""
         children = [child for child in item.childItems() if child.isVisible()]
         behind = [child for child in children
                   if child.flags() & QGraphicsItem.ItemStacksBehindParent]
         for child in behind:
             self._paint_one(painter, child, base)
-        self._paint_one(painter, item, base, own=True)
+        hide = not handles and item.isSelected() and getattr(item, "_handles_visible", False)
+        if hide:
+            item._handles_visible = False
+        try:
+            self._paint_one(painter, item, base, own=True)
+        finally:
+            if hide:
+                item._handles_visible = True
         for child in children:
             if child not in behind:
                 self._paint_one(painter, child, base)
