@@ -95,7 +95,7 @@ def test_restyling_a_picked_markup_leaves_the_next_one_alone(w):
     first.setSelected(True)
     w.refresh_selection()
     w.hatch_combo.setCurrentIndex(w.hatch_combo.findData("diagonal") if
-                                  w.hatch_combo.findData("diagonal") >= 0 else 2)
+                                  w.hatch_combo.findData("diagonal") >= 0 else w.hatch_combo.findData("cross"))
     pump()
     assert first.style.hatch, "the picked rectangle is hatched"
     w.view.escape_everything()
@@ -104,10 +104,11 @@ def test_restyling_a_picked_markup_leaves_the_next_one_alone(w):
     second = draw(200)
     assert not second.style.hatch, "the next one is drawn as before"
     w.view.escape_everything()
-    w.hatch_combo.setCurrentIndex(2)            # nothing picked: this is the default now
+    pattern = w.hatch_combo.findData("cross")
+    w.hatch_combo.setCurrentIndex(pattern)      # nothing picked: this is the default now
     pump()
     third = draw(300)
-    assert third.style.hatch == w.hatch_combo.itemData(2)
+    assert third.style.hatch == "cross"
 
 
 def test_redo_after_a_page_was_added_and_taken_away(w):

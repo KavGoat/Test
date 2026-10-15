@@ -196,13 +196,19 @@ QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
     image: url("{arrow_down}"); width: 9px; height: 9px;
 }}
-/* on Revu's Properties toolbar the arrows sit before the number */
-QToolBar QSpinBox, QToolBar QDoubleSpinBox {{ padding-right: 5px; padding-left: 3px; }}
-QToolBar QSpinBox::up-button, QToolBar QDoubleSpinBox::up-button {{
+/* on Revu's Properties toolbar and Properties panel the arrows sit before
+   the number */
+QToolBar QSpinBox, QToolBar QDoubleSpinBox,
+#propertiesPanel QSpinBox, #propertiesPanel QDoubleSpinBox {{
+    padding-right: 5px; padding-left: 3px;
+}}
+QToolBar QSpinBox::up-button, QToolBar QDoubleSpinBox::up-button,
+#propertiesPanel QSpinBox::up-button, #propertiesPanel QDoubleSpinBox::up-button {{
     subcontrol-position: top left; border-left: 0; border-right: 1px solid {field_edge};
     border-top-right-radius: 0; border-top-left-radius: 3px;
 }}
-QToolBar QSpinBox::down-button, QToolBar QDoubleSpinBox::down-button {{
+QToolBar QSpinBox::down-button, QToolBar QDoubleSpinBox::down-button,
+#propertiesPanel QSpinBox::down-button, #propertiesPanel QDoubleSpinBox::down-button {{
     subcontrol-position: bottom left; border-left: 0; border-right: 1px solid {field_edge};
     border-bottom-right-radius: 0; border-bottom-left-radius: 3px;
 }}

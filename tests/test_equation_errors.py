@@ -1,6 +1,7 @@
 """Errors in the equations (the user, 2026-10-15): t:=fc with fc not defined
 says so as soon as it is left — not only once t= is asked for — and every
-error is written in red under its equation, selected or not, on screen."""
+error is written in red under its equation, selected or not, on screen, in
+print and in the saved PDF."""
 from __future__ import annotations
 
 import pytest
@@ -42,7 +43,9 @@ def test_a_definition_with_a_name_not_defined_says_so_in_red(win):
     assert _red_below(win, item) > 20
 
 
-def test_an_evaluation_error_shows_without_being_selected_and_not_in_print(win):
+def test_an_evaluation_error_shows_without_being_selected_and_prints(win, tmp_path):
+    """The user (2026-10-15): the red note prints and goes into the PDF too."""
+    import pymupdf
     item = an_equation(win, "q*2=", 100, 220)
     win.view.calc.leave()
     win.scene.clearSelection()
@@ -51,9 +54,14 @@ def test_an_evaluation_error_shows_without_being_selected_and_not_in_print(win):
     frame = item.parentItem()
     frame.print_mode = True
     try:
-        assert _red_below(win, item) == 0, "never printed"
+        assert _red_below(win, item) > 20, "printed as well"
     finally:
         frame.print_mode = False
+    path = str(tmp_path / "errors.pdf")
+    win.document.path = path
+    assert win.save_document()
+    with pymupdf.open(path) as saved:
+        assert "q - not defined." in saved[0].get_text()
 
 
 def test_a_good_equation_has_no_note(win):

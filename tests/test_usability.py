@@ -6573,7 +6573,7 @@ def test_line_and_hatch_choices_have_real_pattern_previews(window):
     assert not line.itemIcon(line.findData("solid")).isNull()
     assert (line.itemIcon(line.findData("solid")).pixmap(solid).toImage()
             != line.itemIcon(line.findData("dash")).pixmap(solid).toImage())
-    assert hatch.itemText(hatch.findData("")) == "None"          # Bluebeam's word
+    assert hatch.itemText(hatch.findData("")) == "(None)"        # Revu's word (its hatch menu)
     assert (hatch.itemIcon(hatch.findData("")).pixmap(hatch.iconSize()).toImage()
             != hatch.itemIcon(hatch.findData("diagonal cross")).pixmap(
                 hatch.iconSize()).toImage())

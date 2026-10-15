@@ -537,3 +537,16 @@ Properties toolbar and in the Properties panel, closed and open: every
 sample is drawn in light ink. The toolbar's line list now names its styles
 as the panel does (Solid, Dash … rather than solid, dash), and a list's
 highlighted entry is Revu's deep blue. `test_the_toolbars_line_styles_are_named_as_in_properties_and_still_apply`.
+
+**Line style and hatch drop-downs as Revu's** (the user, 2026-10-15 night):
+closed, the Properties panel's Style and Hatch boxes now show only the
+sample drawn across the box, with Revu's thin chevron and no name (the name
+is the tooltip), as the toolbar's already did and as Revu's panel does. The
+hatch list opens as Revu's hatch menu does: Manage… at the top, then (None)
+and every pattern. Number boxes in the Properties panel carry their arrows
+before the number, as in Revu's panel.
+
+**Equation errors print** (the user's answer): the red note under an
+equation with an error now prints and goes into the saved PDF as well as
+showing on screen; a definition with an undefined name keeps saying so as
+soon as it is committed. `test_an_evaluation_error_shows_without_being_selected_and_prints`.

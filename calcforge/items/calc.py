@@ -309,7 +309,7 @@ class CalcItem(MarkupItem):
 
     def _error_note_rect(self):
         """Where the error is written: just under the equation, in red,
-        whether it is selected or not (the user, 2026-10-15). On screen only."""
+        whether it is selected or not, and printed (the user, 2026-10-15)."""
         message = self._error_message()
         if not message:
             return None
@@ -331,6 +331,22 @@ class CalcItem(MarkupItem):
             return
         with self._looking():
             self._paint_view(painter, view)
+        self._paint_error_note(painter)
+
+    def _paint_error_note(self, painter: QPainter) -> None:
+        """The error in red just under the equation — on screen, in print and
+        in the exported PDF alike (the user, 2026-10-15: "Also print")."""
+        note = self._error_note_rect()
+        if note is None:
+            return
+        painter.save()
+        painter.translate(note.topLeft())
+        painter.scale(PT_PER_PX, PT_PER_PX)
+        painter.setFont(self._error_note_font())
+        painter.setPen(self.ERROR_INK)
+        painter.drawText(QRectF(2, 0, note.width() / PT_PER_PX, note.height() / PT_PER_PX),
+                         Qt.AlignLeft | Qt.AlignVCenter, self._error_message())
+        painter.restore()
 
     def _paint_view(self, painter: QPainter, view) -> None:
         painter.save()
@@ -374,16 +390,6 @@ class CalcItem(MarkupItem):
             self._view.selected_region = False
         if printing:
             return
-        note = self._error_note_rect()
-        if note is not None:
-            painter.save()
-            painter.translate(note.topLeft())
-            painter.scale(PT_PER_PX, PT_PER_PX)
-            painter.setFont(self._error_note_font())
-            painter.setPen(self.ERROR_INK)
-            painter.drawText(QRectF(2, 0, note.width() / PT_PER_PX, note.height() / PT_PER_PX),
-                             Qt.AlignLeft | Qt.AlignVCenter, self._error_message())
-            painter.restore()
         region = getattr(self, "region", None)
         if region is not None and region.is_global:
             # made global (calc sections): a bar down its left edge, on screen

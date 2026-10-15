@@ -42,8 +42,8 @@ from ..settings import app_settings
 from . import dialogs
 from .commands import DocumentStructureCommand
 from .icons import icon
-from .panels import (_hatch_icon, _line_style_icon, fill_hatch_combo, BookmarksPanel, MarkupsPanel, PagesPanel,
-                     PropertiesPanel, ToolSetsPanel)
+from .panels import (_hatch_icon, _line_style_icon, fill_hatch_combo, hatch_index,
+                     BookmarksPanel, MarkupsPanel, PagesPanel, PropertiesPanel, ToolSetsPanel)
 from .docks import PanelDock, load_panel_state, save_panel_state
 from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_order,
                    load_sides, save_order, save_sides)
@@ -4878,7 +4878,7 @@ class MainWindow(QMainWindow):
                      "setCurrentFont"),
                     (self.text_colour_button, active.style.text_color, "set_color"),
                     (self.text_align_combo, active.style.align, "setCurrentText"),
-                    (self.hatch_combo, max(self.hatch_combo.findData(active.style.hatch or ""), 0),
+                    (self.hatch_combo, hatch_index(self.hatch_combo, active.style.hatch),
                      "setCurrentIndex"),
                     (self.hatch_scale_spin, active.style.hatch_scale * 100, "setValue"),
                     (self.hatch_colour_button, active.style.hatch_color, "set_color"),
@@ -5373,7 +5373,7 @@ class MainWindow(QMainWindow):
             # Manage… opens Hatch Patterns; the markup keeps its pattern
             self.hatch_combo.blockSignals(True)
             self.hatch_combo.setCurrentIndex(
-                max(self.hatch_combo.findData(self._hatch_shown()), 0))
+                hatch_index(self.hatch_combo, self._hatch_shown()))
             self.hatch_combo.blockSignals(False)
             QTimer.singleShot(0, self.manage_hatches)
             return

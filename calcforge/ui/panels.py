@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
                                QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QListView, QListWidget,
-                               QListWidgetItem, QMenu, QPlainTextEdit, QPushButton,
+                               QListWidgetItem, QMenu, QPlainTextEdit, QPushButton, QSizePolicy,
                                QScrollArea, QSpinBox, QLayout, QStyledItemDelegate,
                                QToolButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
@@ -29,7 +29,7 @@ from .icons import drawn_icon, icon, visible_ink
 from .stylecaps import CLOUD, CORNER
 from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
                         WIDTH, common_capabilities)
-from .widgets import (ColorButton, UnitCombo, arrow_combo,
+from .widgets import (ColorButton, PatternCombo, UnitCombo, arrow_combo,
                       big_pattern_dropdown, set_arrow)
 
 
@@ -55,17 +55,25 @@ def _hatch_icon(name: str, colour: str) -> QIcon:
 
 
 def fill_hatch_combo(combo, colour: str, current: str = "") -> None:
-    """A hatch list as Revu's: None, every pattern drawn, then Manage…"""
+    """A hatch list as Revu's (the user's Revu, 2026-10-15): Manage… at the
+    top, then (None) and every pattern drawn."""
     from ..items import hatches
     from .hatchpatterns import MANAGE
     combo.blockSignals(True)
     combo.clear()
-    for name in HATCH_PATTERNS:
-        combo.addItem(_hatch_icon(name, colour), hatches.display_name(name), name)
-    combo.insertSeparator(combo.count())
     combo.addItem("Manage…", MANAGE)
-    combo.setCurrentIndex(max(combo.findData(current or ""), 0))
+    combo.insertSeparator(combo.count())
+    for name in HATCH_PATTERNS:
+        label = hatches.display_name(name) if name else "(None)"
+        combo.addItem(_hatch_icon(name, colour), label, name)
+    combo.setCurrentIndex(hatch_index(combo, current))
     combo.blockSignals(False)
+
+
+def hatch_index(combo, key: str) -> int:
+    """Where *key* is in a hatch list — (None) when it is not there."""
+    found = combo.findData(key or "")
+    return found if found >= 0 else max(combo.findData(""), 0)
 
 
 # ---------------------------------------------------------------------------
@@ -2394,6 +2402,7 @@ class PropertiesPanel(QScrollArea):
     def __init__(self, window):
         super().__init__()
         self.window = window
+        self.setObjectName("propertiesPanel")     # the theme's Revu-style number boxes
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -2556,7 +2565,7 @@ class PropertiesPanel(QScrollArea):
         from .hatchpatterns import MANAGE
         if combo.currentData() == MANAGE:
             combo.blockSignals(True)
-            combo.setCurrentIndex(max(combo.findData(style.hatch or ""), 0))
+            combo.setCurrentIndex(hatch_index(combo, style.hatch))
             combo.blockSignals(False)
             QTimer.singleShot(0, self.window.manage_hatches)
             return
@@ -2787,9 +2796,11 @@ class PropertiesPanel(QScrollArea):
 
         # A hatch over the fill: how a section reads as concrete or as steel.
         if HATCH in controls:
-            hatch = QComboBox()
+            # Revu's: closed, only the sample across the box; names in the list
+            hatch = PatternCombo()
             hatch.setObjectName("hatchPattern")
             big_pattern_dropdown(hatch, QSize(76, 22))
+            hatch.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             hatch_colour = style.hatch_color or style.stroke
             fill_hatch_combo(hatch, hatch_colour, style.hatch or "")
             hatch.currentIndexChanged.connect(lambda _index: self._hatch_chosen(hatch, style))
@@ -2841,9 +2852,11 @@ class PropertiesPanel(QScrollArea):
             form.addRow("Line Width:", width)
 
         if DASH in controls:
-            line_style = QComboBox()
+            # Revu's Style: the line itself across the whole box, no name
+            line_style = PatternCombo()
             line_style.setObjectName("lineStyle")
             big_pattern_dropdown(line_style, QSize(76, 22))
+            line_style.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             for name in DASH_ARRAYS:
                 line_style.addItem(_line_style_icon(name, style.stroke, style.width),
                                    name.title(), name)

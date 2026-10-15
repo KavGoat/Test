@@ -181,13 +181,15 @@ PAT = """;; from an AutoCAD acad.pat
 
 
 def test_hatch_patterns_import_a_pat_file_and_are_kept(window, tmp_path):
-    """Revu's hatch list ends in Manage…, which brings in AutoCAD .pat patterns."""
+    """Revu's hatch list opens with Manage… (the user's Revu, 2026-10-15), which
+    brings in AutoCAD .pat patterns; then (None) and the patterns."""
     from calcforge.items import hatches
     from calcforge.ui.hatchpatterns import MANAGE
     name, families = hatches.parse_pat(PAT)["ansi37"]
     assert name == "ANSI37" and [f[0] for f in families] == [45, 135]
     assert families[0][4] == pytest.approx(9.0)            # an eighth of an inch, in points
-    assert window.hatch_combo.itemData(window.hatch_combo.count() - 1) == MANAGE
+    assert window.hatch_combo.itemData(0) == MANAGE
+    assert window.hatch_combo.itemText(window.hatch_combo.findData("")) == "(None)"
     path = tmp_path / "mine.pat"
     path.write_text(PAT)
     dialog = window.manage_hatches()
