@@ -2490,6 +2490,14 @@ class PropertiesPanel(QScrollArea):
                 form.addRow("", colours)
             elif isinstance(first, RectItem) and first.kind in ("rect", "ellipse"):
                 self._add_size(first)
+        if len(self._items) > 1 and any(getattr(i, "style", None) is not None
+                                        for i in self._items):
+            # Revu's Change Multiple Colors, in Appearance for a selection
+            colours = QPushButton("Change Colors…")
+            colours.setObjectName("changeMultipleColors")
+            colours.setToolTip("Change one colour the selected markups use to another")
+            colours.clicked.connect(lambda: self.window.change_multiple_colors(list(self._items)))
+            self._group("Appearance").addRow("", colours)
         if len(self._items) == 1:
             self._add_geometry(first)
             if isinstance(first, PolyItem) and first.broken:

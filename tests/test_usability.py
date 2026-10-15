@@ -150,7 +150,7 @@ def test_right_click_offers_a_menu_for_the_item_under_it(window):
     menu = window.build_context_menu(markups(window)[0], QPointF(160, 150))
     labels = [a.text() for a in menu.actions() if a.text()]
     assert "Cut" in labels and "Duplicate" in labels
-    assert "Multiple Copies…" in labels
+    assert "Multiply…" in labels
 
 
 def test_right_click_on_empty_paper_offers_insertions(window):
@@ -619,7 +619,9 @@ def test_every_label_the_user_reads_is_one_or_two_words(window, qapp):
                  "Snap to Markup", "Align to Markups", "Align to Content",
                  "Rotate Counterclockwise", "Headers && Footers", "Apply to Pages",
                  "Set as Default", "Convert to Polygon", "Import Tool Set",
-                 "Manage Tool Sets")
+                 "Manage Tool Sets", "Show Cover Page in Side-by-Side",
+                 "Continuous Side-by-Side", "Clear Recent Files", "Nothing to undo",
+                 "No recent files")
     long = [entry for entry in long if not any(name in entry for name in bluebeams)]
     assert not long, "labels of more than two words:\n" + "\n".join(sorted(set(long)))
 

@@ -247,6 +247,33 @@ class DetachableTabBar(QTabBar):
             self.detachRequested.emit(index, event.globalPosition().toPoint())
 
 
+#: How many files Open Recent remembers.
+RECENT_FILES = 10
+
+
+def recent_files() -> list:
+    """File ▸ Open Recent: the newest first."""
+    from ..settings import app_settings
+    value = app_settings().value("files/recent", []) or []
+    if isinstance(value, str):
+        value = [value]
+    return [str(v) for v in value if v][:RECENT_FILES]
+
+
+def remember_recent_file(path: str) -> None:
+    from ..settings import app_settings
+    path = os.path.abspath(path)
+    kept = [p for p in recent_files() if os.path.normcase(p) != os.path.normcase(path)]
+    app_settings().setValue("files/recent", ([path] + kept)[:RECENT_FILES])
+
+
+def forget_recent_files(path: str = "") -> None:
+    """Take *path* off the list, or clear it."""
+    from ..settings import app_settings
+    kept = [p for p in recent_files() if path and p != path]
+    app_settings().setValue("files/recent", kept)
+
+
 class SplitDocumentWindow(QSplitter):
     """Two complete editing panes, with independent controls and keyboard focus."""
 
@@ -512,6 +539,10 @@ class MainWindow(QMainWindow):
         from ..app import current_theme
         from ..theme import DARK
         self.act_dark.setChecked(current_theme() == DARK)
+        from ..settings import app_settings as _settings
+        for key in ("rulers", "crosshair"):          # as they were left
+            if str(_settings().value(f"view/{key}", "false")).lower() == "true":
+                getattr(self, f"act_{key}").setChecked(True)
         # What the arrangement looks like out of the box, so it can be put
         # back later however far it has been dragged about.
         self._default_state = self.saveState()
@@ -677,6 +708,47 @@ class MainWindow(QMainWindow):
                   tip="Save chosen pages, with their markups, as a new PDF")
         self._act("split_pages", "Split Document…", lambda: self.split_into_files(),
                   tip="Save the document as several PDFs of so many pages each")
+        # Revu's four page layouts (View menu), one of them always on
+        self.page_layout_group = QActionGroup(self)
+        self.page_layout_group.setExclusive(True)
+        for key, text, tip in (
+                ("single", "Single Page", "One page at a time, fitted to the window; the wheel "
+                 "scrolls it and turns to the next page at its end"),
+                ("continuous", "Continuous", "Every page in one column"),
+                ("side", "Side-by-Side", "Two pages at a time: odd on the left, even on the right"),
+                ("continuous_side", "Continuous Side-by-Side",
+                 "Every page, two to a row, in one column")):
+            action = self._act(f"layout_{key}", text,
+                               lambda _checked=False, mode=key: self.set_page_layout(mode),
+                               tip=tip)
+            action.setCheckable(True)
+            action.setChecked(key == "continuous")
+            self.page_layout_group.addAction(action)
+        self._act("rulers", "Rulers", self.show_rulers, checkable=True,
+                  tip="Rulers along the top and left of the drawing, from the page's "
+                      "corner; right-click one for its units")
+        self._act("crosshair", "Full-Screen Crosshair", self.show_crosshair, checkable=True,
+                  tip="Lines across the whole drawing that meet at the pointer")
+        self._act("dim_content", "Dim Content", self.set_dimmer, "Ctrl+F5", checkable=True,
+                  tip="Tone down the page's own content so the markups stand out "
+                      "(on screen only)")
+        self.dimmer_levels = QActionGroup(self)
+        self.dimmer_levels.setExclusive(True)
+        for percent in range(0, 101, 10):
+            level = self.dimmer_levels.addAction(f"{percent}%")
+            level.setCheckable(True)
+            level.setData(percent)
+            level.setChecked(percent == 40)
+            level.triggered.connect(lambda _c=False, p=percent: self.set_dimmer_level(p))
+        self._act("full_screen", "Full Screen", self.set_full_screen, "F11", checkable=True,
+                  tip="The window over the whole screen, without the system's frame")
+        self._act("presentation", "Presentation", self.set_presentation, "Ctrl+Return",
+                  checkable=True,
+                  tip="Only the page, one at a time over the whole screen: arrows, Space "
+                      "and Page Up/Down turn the pages, Esc ends it")
+        self._act("cover_page", "Show Cover Page in Side-by-Side", self.set_cover_page,
+                  checkable=True,
+                  tip="In the side-by-side layouts the first page stands alone, as a cover")
         self._act("split_view", "Split View", self.toggle_split_view,
                   checkable=True,
                   tip="View this document beside another editable pane; "
@@ -684,6 +756,12 @@ class MainWindow(QMainWindow):
         self._act("separate_views", "Separate Views", self.separate_views,
                   tip="Return split panes to independent windows")
         self._act("open", "Open…", self.open_document, "Ctrl+O", "open")
+        self._act("close_tab", "Close", lambda: self.close_document_tab(self._active_tab),
+                  "Ctrl+W", tip="Close the document in view")
+        self._act("close_all", "Close All", self.close_all_documents,
+                  tip="Close every document in this window, asking about unsaved changes")
+        self._act("save_all", "Save All", self.save_all_documents,
+                  tip="Save every open document that has unsaved changes")
         self._act("save", "Save", self.save_document, "Ctrl+S", "save")
         self._act("save_as", "Save As…", self.save_document_as, "Ctrl+Shift+S")
         # Not Ctrl+I. That belongs to italic wherever there are words, and
@@ -816,7 +894,10 @@ class MainWindow(QMainWindow):
                       "(Ctrl+Shift+D in an equation)")
         self._act("lock", "Lock", self.toggle_lock, "Ctrl+L",
                   tip="Lock the selection so it cannot be moved, or let it go")
-        self._act("array", "Multiple Copies…", self.array_selection,
+        self._act("offset", "Offset", self.start_offset, "O",
+                  tip="A copy of the selected markup a set distance away, on the side "
+                      "the pointer is — Revu's Offset")
+        self._act("array", "Multiply…", self.array_selection,
                   "Ctrl+Shift+D",
                   tip="Repeat the selection at a fixed spacing, any number of times")
         self._act("front", "Bring to Front", lambda: self.reorder("front"), "Ctrl+Shift+]",
@@ -1678,8 +1759,13 @@ class MainWindow(QMainWindow):
             revu_menu.addSeparator() if action is None else revu_menu.addAction(action)
 
         file_menu = bar.addMenu("&File")
-        for action in (self.act_new, self.act_new_tab, self.act_new_window, self.act_open,
-                       None, self.act_save, self.act_save_as, None):
+        for action in (self.act_new, self.act_new_tab, self.act_new_window, self.act_open):
+            file_menu.addAction(action)
+        self.recent_menu = file_menu.addMenu("Open Recent")
+        self.recent_menu.setObjectName("menuOpenRecent")
+        self.recent_menu.aboutToShow.connect(self._fill_recent)
+        for action in (None, self.act_close_tab, self.act_close_all, None,
+                       self.act_save, self.act_save_as, self.act_save_all, None):
             file_menu.addSeparator() if action is None else file_menu.addAction(action)
         export_menu = file_menu.addMenu("Export")
         for action in (self.act_export_pdf, self.act_export_png, self.act_export_markups):
@@ -1689,9 +1775,16 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.act_print)
 
         edit_menu = bar.addMenu("&Edit")
-        for action in (self.act_undo, self.act_redo, None, self.act_cut, self.act_copy,
+        edit_menu.addAction(self.act_undo)
+        edit_menu.addAction(self.act_redo)
+        # Revu's Undo History: what has been done, newest first; choosing one
+        # undoes back to before it
+        self.undo_history_menu = edit_menu.addMenu("Undo History")
+        self.undo_history_menu.setObjectName("menuUndoHistory")
+        self.undo_history_menu.aboutToShow.connect(self._fill_undo_history)
+        for action in (None, self.act_cut, self.act_copy,
                        self.act_paste, self.act_paste_in_place, self.act_paste_here,
-                       self.act_duplicate, self.act_array, None, self.act_hide,
+                       self.act_duplicate, self.act_offset, self.act_array, None, self.act_hide,
                        self.act_show_hidden, self.act_delete, None,
                        self.act_select_all, self.act_format_painter, None,
                        self.act_lock, self.act_group, self.act_ungroup):
@@ -1717,15 +1810,25 @@ class MainWindow(QMainWindow):
         for action in (self.act_fit_page, self.act_fit_width, self.act_actual_size,
                        self.act_zoom_in, self.act_zoom_out, self.act_zoom_sel, None):
             view_menu.addSeparator() if action is None else view_menu.addAction(action)
+        for action in (self.act_layout_single, self.act_layout_continuous, self.act_layout_side,
+                       self.act_layout_continuous_side, self.act_cover_page, None):
+            view_menu.addSeparator() if action is None else view_menu.addAction(action)
         rotate_menu = view_menu.addMenu("Rotate View")
         for action in (self.act_turn_view_cw, self.act_turn_view_acw, self.act_turn_view_reset):
             rotate_menu.addAction(action)
         for action in (self.act_split_view, self.act_separate_views, None,
+                       self.act_rulers, self.act_crosshair, None,
                        self.act_grid, self.act_snap, self.act_snap_content,
                        self.act_snap_items, self.act_snap_alignment,
                        self.act_snap_pdf_alignment, None, self.act_margins,
-                       self.act_name_tags, self.act_dark, None,
-                       self.act_prev_page, self.act_next_page):
+                       self.act_name_tags, self.act_dark):
+            view_menu.addSeparator() if action is None else view_menu.addAction(action)
+        dimmer_menu = view_menu.addMenu("Dimmer")
+        dimmer_menu.addAction(self.act_dim_content)
+        dimmer_menu.addSeparator()
+        for level in self.dimmer_levels.actions():
+            dimmer_menu.addAction(level)
+        for action in (None, self.act_prev_page, self.act_next_page):
             view_menu.addSeparator() if action is None else view_menu.addAction(action)
 
         # Mnemonic on the "D": Revu's Document menu (Alt+P draws freehand).
@@ -1821,6 +1924,9 @@ class MainWindow(QMainWindow):
             panels_menu.addAction(dock.toggleViewAction())
         window_menu.addAction(self.act_markups_list)
         window_menu.addSeparator()
+        window_menu.addAction(self.act_full_screen)
+        window_menu.addAction(self.act_presentation)
+        window_menu.addSeparator()
         window_menu.addAction(self.act_show_panels)
         window_menu.addAction(self.act_pin_panels)
         window_menu.addAction(self.act_reset_layout)
@@ -1874,6 +1980,15 @@ class MainWindow(QMainWindow):
         self.status_position.setMinimumWidth(150)
         status.addWidget(self.status_position)
 
+
+        self.status_dimmer = QToolButton()
+        self.status_dimmer.setObjectName("statusDimmer")
+        self.status_dimmer.setAutoRaise(True)
+        self.status_dimmer.setDefaultAction(self.act_dim_content)
+        self.status_dimmer.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self._icon_names[self.act_dim_content] = "dimmer"
+        self.act_dim_content.setIcon(icon("dimmer"))
+        status.addPermanentWidget(self.status_dimmer)
 
         self.status_scale = QToolButton()
         self.status_scale.setText("Scale 1:1")
@@ -1953,20 +2068,12 @@ class MainWindow(QMainWindow):
         self.status_scroll = QToolButton()
         self.status_scroll.setAutoRaise(True)
         self.status_scroll.setText("Continuous")
-        self.status_scroll.setToolTip(
-            "Choose continuous document scrolling or one-page wheel navigation")
+        self.status_scroll.setToolTip("Page layout: Single Page, Continuous, Side-by-Side "
+                                      "or Continuous Side-by-Side")
         scroll_menu = QMenu(self.status_scroll)
-        scroll_group = QActionGroup(self.status_scroll)
-        scroll_group.setExclusive(True)
-        self.scroll_actions = {}
-        for mode, label in (("continuous", "Continuous"), ("page", "Page")):
-            action = scroll_menu.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(mode == "continuous")
-            action.triggered.connect(
-                lambda _checked=False, wanted=mode: self.set_scroll_mode(wanted))
-            scroll_group.addAction(action)
-            self.scroll_actions[mode] = action
+        for action in (self.act_layout_single, self.act_layout_continuous, self.act_layout_side,
+                       self.act_layout_continuous_side, None, self.act_cover_page):
+            scroll_menu.addSeparator() if action is None else scroll_menu.addAction(action)
         self.status_scroll.setMenu(scroll_menu)
         self.status_scroll.setPopupMode(QToolButton.InstantPopup)
         status.addPermanentWidget(self.status_scroll)
@@ -2091,6 +2198,7 @@ class MainWindow(QMainWindow):
         self.refresh_lists()
         self.update_title()
         self._refresh_undo_actions()
+        self._show_page_layout()
 
         mode = next((other.window_sync.currentIndex() for other in type(self)._windows
                      if other is not self and other.document is self.document), 0)
@@ -2427,6 +2535,9 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Open document", "", OPEN_FILTER)
         if not path:
             return
+        self._open_chosen(path)
+
+    def _open_chosen(self, path: str) -> None:
         try:
             if self.open_path(path) is False:
                 return
@@ -2438,12 +2549,70 @@ class MainWindow(QMainWindow):
         self.rebuild_scenes()
         self.view.fit_page()
         self.update_title()
+        remember_recent_file(path)
         self._say_what_the_workbook_left_out()
+
+    # -- Open Recent, Close All, Save All (Revu's File menu) -----------------------------------
+    def _fill_recent(self) -> None:
+        menu = self.recent_menu
+        menu.clear()
+        files = recent_files()
+        if not files:
+            nothing = menu.addAction("No recent files")
+            nothing.setEnabled(False)
+            return
+        for number, path in enumerate(files, 1):
+            name = os.path.basename(path)
+            action = menu.addAction(f"&{number % 10}  {name}", lambda p=path: self.open_recent(p))
+            action.setToolTip(path)
+            action.setStatusTip(path)
+        menu.addSeparator()
+        menu.addAction("Clear Recent Files", lambda: forget_recent_files())
+
+    def open_recent(self, path: str) -> None:
+        if not os.path.exists(path):
+            forget_recent_files(path)
+            QMessageBox.information(self, "Open Recent",
+                                    f"“{os.path.basename(path)}” is no longer there:\n{path}")
+            return
+        if not self.confirm_discard():
+            return
+        self._open_chosen(path)
+
+    def close_all_documents(self) -> bool:
+        """Close every tab, each asking about unsaved changes; False if one
+        was kept open."""
+        for index in range(len(self._open_documents) - 1, -1, -1):
+            count = len(self._open_documents)
+            state = self._state_for_tab(index)
+            last_and_empty = count == 1 and not state["document"].path \
+                and state["undo_stack"].isClean() and not state["document"].modified
+            if last_and_empty:
+                break
+            self.close_document_tab(index)
+            if len(self._open_documents) == count and count > 1:
+                return False                         # Cancel kept it
+            if count == 1 and self.document is state["document"]:
+                return False
+        return True
+
+    def save_all_documents(self) -> None:
+        """Save every open document with unsaved changes, then come back."""
+        here = self._active_tab
+        for index in range(len(self._open_documents)):
+            state = self._state_for_tab(index)
+            if state["undo_stack"].isClean() and not state["document"].modified:
+                continue
+            self.switch_to_document(index)
+            if not self.save_document():
+                break
+        self.switch_to_document(here)
 
     def open_from_command_line(self, path: str) -> None:
         """`calcforge drawing.pdf`: open it as File > Open would."""
         if self.open_path(path) is False:
             return
+        remember_recent_file(path)
         self.current_index = 0
         self.rebuild_scenes()
         self.view.fit_page()
@@ -2596,6 +2765,7 @@ class MainWindow(QMainWindow):
         if not self.save_document():
             self.document.path, self.document.title = old_path, old_title
             return False
+        remember_recent_file(path)
         if os.path.exists(old_recovery):
             try:
                 os.remove(old_recovery)
@@ -2778,6 +2948,7 @@ class MainWindow(QMainWindow):
         self.view.cancel_draft()
         self.current_index = index
         self.view._shown_page = index
+        self.scene.show_page(index)           # Single Page / Side-by-Side: its spread
         self.view.go_to_page_top(index)
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
@@ -3070,6 +3241,7 @@ class MainWindow(QMainWindow):
         if not isValid(self.page_spin) or not isValid(self.page_panel.width_mm):
             return                     # a last scroll while the window is being taken down
         self.current_index = index
+        self.scene.show_page(index)
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
         self.page_spin.blockSignals(False)
@@ -4328,15 +4500,246 @@ class MainWindow(QMainWindow):
         from . import stallwatch
         stallwatch.toggle(self, on)
 
+    PAGE_LAYOUTS = {"single": "Single Page", "continuous": "Continuous",
+                    "side": "Side-by-Side", "continuous_side": "Continuous Side-by-Side"}
+
     def set_scroll_mode(self, mode: str) -> None:
-        """Choose smooth document scrolling or one-page wheel navigation."""
-        mode = "page" if mode == "page" else "continuous"
-        self.view.scroll_mode = mode
-        label = "Page" if mode == "page" else "Continuous"
+        """One page at a time ("page") or every page ("continuous"), keeping
+        whether pages lie side by side."""
+        paired = self.scene.page_mode in ("side", "continuous_side")
+        if mode == "page":
+            self.set_page_layout("side" if paired else "single")
+        else:
+            self.set_page_layout("continuous_side" if paired else "continuous")
+
+    def set_page_layout(self, mode: str) -> None:
+        """Revu's page layouts (View menu). Only how the pages lie on the
+        screen changes; the document does not."""
+        if mode not in self.PAGE_LAYOUTS:
+            mode = "continuous"
+        index = self.current_index
+        self.scene.set_page_mode(mode, index)
+        label = self.PAGE_LAYOUTS[mode]
         self.status_scroll.setText(label)
-        for key, action in self.scroll_actions.items():
-            action.setChecked(key == mode)
-        self.status_hint.setText(f"{label} scrolling")
+        getattr(self, f"act_layout_{mode}").setChecked(True)
+        if mode == "single":
+            self.view.fit_page()              # Revu fits a single page to the window
+        self.view.go_to_page_top(index)
+        self.status_hint.setText(label)
+
+    def _show_page_layout(self) -> None:
+        """The layout controls showing the layout of the document in view."""
+        if self.scene is None or not hasattr(self, "status_scroll"):
+            return
+        mode = getattr(self.scene, "page_mode", "continuous")
+        self.status_scroll.setText(self.PAGE_LAYOUTS.get(mode, "Continuous"))
+        getattr(self, f"act_layout_{mode}").setChecked(True)
+        self.act_cover_page.blockSignals(True)
+        self.act_cover_page.setChecked(bool(getattr(self.scene, "cover_page", False)))
+        self.act_cover_page.blockSignals(False)
+
+    def show_rulers(self, on: bool) -> None:
+        from ..settings import app_settings
+        self.view.rulers.show(on)
+        app_settings().setValue("view/rulers", bool(on))
+
+    def show_crosshair(self, on: bool) -> None:
+        from ..settings import app_settings
+        self.view.crosshair.show(on)
+        app_settings().setValue("view/crosshair", bool(on))
+
+    def set_dimmer(self, on: bool) -> None:
+        """View ▸ Dimmer ▸ Dim Content (Revu's Ctrl+F5): every open drawing."""
+        from .scene import DIMMER
+        DIMMER["on"] = bool(on)
+        self._repaint_all_pages()
+        for other in list(type(self)._windows):
+            if other is not self and other.act_dim_content.isChecked() != bool(on):
+                other.act_dim_content.blockSignals(True)
+                other.act_dim_content.setChecked(bool(on))
+                other.act_dim_content.blockSignals(False)
+
+    def set_dimmer_level(self, percent: int) -> None:
+        """How strongly the content still shows while dimmed: Revu's 0–100 %."""
+        from .scene import DIMMER
+        DIMMER["level"] = max(0, min(100, int(percent))) / 100.0
+        if not self.act_dim_content.isChecked():
+            self.act_dim_content.setChecked(True)          # choosing a level dims
+        else:
+            self._repaint_all_pages()
+
+    def _repaint_all_pages(self) -> None:
+        for other in list(type(self)._windows):
+            for state in getattr(other, "_open_documents", []) or []:
+                scene = state.get("scene") if isinstance(state, dict) else None
+                for frame in getattr(scene, "frames", []) or []:
+                    frame.update()
+            for frame in getattr(other.scene, "frames", []) or []:
+                frame.update()
+
+    def offset_toolbar(self):
+        bar = getattr(self, "_offset_bar", None)
+        if bar is None:
+            from .offset import build_toolbar
+            bar = self._offset_bar = build_toolbar(self)
+            self.addToolBarBreak()
+            self.addToolBar(Qt.TopToolBarArea, bar)
+        return bar
+
+    def start_offset(self):
+        """Edit ▸ Offset (O)."""
+        from .offset import OffsetSession, can_offset
+        if getattr(self, "_offset", None) is not None:
+            self._offset.finish()
+        chosen = [i for i in self.scene.selectedItems() if isinstance(i, MarkupItem)]
+        if len(chosen) != 1 or not can_offset(chosen[0]):
+            self.status_hint.setText("Offset: select one line, polyline, polygon, shape "
+                                     "or length/area measurement first")
+            return None
+        self._offset = OffsetSession(self, chosen[0])
+        return self._offset
+
+    def crop_image_region(self, frame, region) -> bool:
+        """Revu's Crop Image: the selected image markup (or the one under the
+        dragged rectangle) keeps what the rectangle covers. One undo step."""
+        if frame is None:
+            return False
+        from ..items.media import ImageItem
+        area = frame.mapRectToScene(region.normalized())
+        images = [i for i in self.scene.selectedItems() if isinstance(i, ImageItem)]
+        if not images:
+            images = [i for i in frame.markups() if isinstance(i, ImageItem)
+                      and i.sceneBoundingRect().intersects(area)]
+        images = [i for i in images if i.sceneBoundingRect().intersects(area)][:1]
+        if not images:
+            self.status_hint.setText("Crop Image: drag over an image markup — select it first")
+            return False
+        image = images[0]
+        keep = image.mapFromScene(area).boundingRect()
+        self.view.begin_snapshot(self.view.involved_frames(image))
+        done = image.crop_to(keep)
+        image.touch()
+        self.view.commit_snapshot("Crop Image")
+        if done:
+            self.scene.clearSelection()
+            image.setSelected(True)
+            self.status_hint.setText("Image cropped — Undo brings the rest back")
+        return done
+
+    def change_multiple_colors(self, items=None) -> int:
+        from .changecolors import change_multiple_colors
+        items = items if items is not None else [
+            m for m in self.scene.selectedItems()
+            if isinstance(m, MarkupItem) and getattr(m, "style", None) is not None]
+        return change_multiple_colors(self, items) if items else 0
+
+    def _fill_undo_history(self) -> None:
+        menu = self.undo_history_menu
+        menu.clear()
+        stack = self.undo_stack
+        done = stack.index()
+        if done == 0:
+            nothing = menu.addAction("Nothing to undo")
+            nothing.setEnabled(False)
+            return
+        for index in range(done - 1, max(-1, done - 41), -1):
+            text = stack.text(index) or "Change"
+            menu.addAction(text, lambda i=index: self.undo_to(i))
+
+    def undo_to(self, index: int) -> None:
+        """Undo the change at *index* in the history and every one after it."""
+        self.view.end_item_edit()
+        self.view.cancel_draft()
+        if 0 <= index < self.undo_stack.index():
+            self.undo_stack.setIndex(index)
+
+    def set_full_screen(self, on: bool) -> None:
+        """Window ▸ Full Screen (F11)."""
+        if on:
+            self._before_full_screen = self.isMaximized()
+            self.showFullScreen()
+        elif self.isFullScreen():
+            self.showMaximized() if getattr(self, "_before_full_screen", False) else self.showNormal()
+
+    def set_presentation(self, on: bool) -> None:
+        """Window ▸ Presentation (Ctrl+Enter): the page alone, a page at a
+        time, over the whole screen; Esc puts everything back."""
+        if on and getattr(self, "_presenting", None) is None:
+            self._presenting = {
+                "state": self.saveState(),
+                "menu": self.menuBar().isVisible(),
+                "status": self.statusBar().isVisible(),
+                "tabs": self.document_tabs.isVisible(),
+                "layout": self.scene.page_mode,
+                "zoom": self.view.zoom(),
+                "full": self.isFullScreen(),
+                "maximized": self.isMaximized(),
+                "rulers": self.view.rulers.on,
+                "bars": [(bar, bar.isVisible()) for bar in self.toolbars],
+            }
+            for toolbar in self.toolbars:
+                toolbar.hide()
+            for dock in self.panels:
+                dock.hide()
+            from PySide6.QtWidgets import QDockWidget
+            for child in self.findChildren(QDockWidget):
+                child.hide()
+            self.menuBar().hide()
+            self.statusBar().hide()
+            self.document_tabs.hide()
+            self.view.rulers.show(False)
+            self.set_page_layout("single")
+            self.showFullScreen()
+            self.view.setFocus(Qt.OtherFocusReason)
+            QApplication.instance().installEventFilter(self._presentation_keys())
+            QTimer.singleShot(0, self.view.fit_page)
+        elif not on and getattr(self, "_presenting", None) is not None:
+            was, self._presenting = self._presenting, None
+            QApplication.instance().removeEventFilter(self._presentation_keys())
+            self.menuBar().setVisible(was["menu"])
+            self.statusBar().setVisible(was["status"])
+            self.document_tabs.setVisible(was["tabs"])
+            self.restoreState(was["state"])
+            for toolbar, shown in was["bars"]:
+                toolbar.setVisible(shown)
+            self.set_page_layout(was["layout"])
+            self.view.rulers.show(was["rulers"])
+            if not was["full"]:
+                self.showMaximized() if was["maximized"] else self.showNormal()
+            self.view.set_zoom(was["zoom"])
+            self.view.go_to_page_top(self.current_index)
+            self.act_presentation.blockSignals(True)
+            self.act_presentation.setChecked(False)
+            self.act_presentation.blockSignals(False)
+
+    def _presentation_keys(self):
+        keys = getattr(self, "_presentation_filter", None)
+        if keys is None:
+            window = self
+
+            class _Keys(QObject):
+                def eventFilter(self, _watched, event):
+                    if window._presenting is None or event.type() != QEvent.KeyPress:
+                        return False
+                    key = event.key()
+                    if key == Qt.Key_Escape:
+                        window.set_presentation(False)
+                        return True
+                    step = {Qt.Key_Right: 1, Qt.Key_Down: 1, Qt.Key_PageDown: 1, Qt.Key_Space: 1,
+                            Qt.Key_Left: -1, Qt.Key_Up: -1, Qt.Key_PageUp: -1,
+                            Qt.Key_Backspace: -1}.get(key)
+                    if step:
+                        window.go_to_page(window.current_index + step)
+                        window.view.fit_page()
+                        return True
+                    return False
+            keys = self._presentation_filter = _Keys(self)
+        return keys
+
+    def set_cover_page(self, on: bool) -> None:
+        self.scene.cover_page = bool(on)
+        self.scene.layout_pages()
+        self.view.go_to_page_top(self.current_index)
 
 
     def _refresh_style_controls(self) -> None:
@@ -7884,13 +8287,22 @@ class MainWindow(QMainWindow):
                 pasted = swap.addAction("From Clipboard",
                                         lambda: self.replace_image(item, "clipboard"))
                 pasted.setEnabled(self.clipboard_has_image())
+                menu.addAction("Crop Image", lambda: (self.scene.clearSelection(),
+                                                      item.setSelected(True),
+                                                      self.select_tool("crop_image")))
                 menu.addSeparator()
             if getattr(item, "TYPE", "") == "link":
                 menu.addAction("Follow Link", lambda: self.follow_link(item))
                 menu.addAction("Edit Link…", lambda: self.edit_link(item))
             if isinstance(item, _TextBase):
                 menu.addAction("Edit Text", lambda: self.view.begin_item_edit(item))
-            if isinstance(item, SnapshotItem):
+            several = [m for m in self.scene.selectedItems()
+                       if isinstance(m, MarkupItem) and getattr(m, "style", None) is not None]
+            if len(several) > 1:
+                # Revu's Change Multiple Colors: one colour of the selection
+                # becomes another
+                menu.addAction("Change Colors…", lambda: self.change_multiple_colors(several))
+            elif isinstance(item, SnapshotItem):
                 menu.addAction("Change Colors…", lambda: self.change_colors(item))
             elif isinstance(item, ImageItem):
                 menu.addAction("Color Processing…", lambda: self.change_colors(item))

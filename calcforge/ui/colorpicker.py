@@ -100,6 +100,7 @@ def eyedropper_icon(colour: str = "#d9dbde", size: int = 18) -> QIcon:
     from .icons import drawn_icon
 
     def draw(painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.Antialiasing, True)
         painter.scale(size / 18.0, size / 18.0)
         ink = QColor(colour)
         painter.setPen(QPen(ink, 1.3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))

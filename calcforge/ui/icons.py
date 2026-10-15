@@ -76,8 +76,6 @@ def _render(draw, width: int, height: int, scale: float) -> QPixmap:
     made = QPixmap(max(1, round(width * scale)), max(1, round(height * scale)))
     made.fill(Qt.transparent)
     painter = QPainter(made)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    painter.setRenderHint(QPainter.TextAntialiasing, True)
     painter.scale(made.width() / width, made.height() / height)
     painter.setBrush(Qt.NoBrush)
     draw(painter)
@@ -713,6 +711,17 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         _pen(painter, ACCENT, 1.4)
         for y in (14, 18, 22):
             painter.drawLine(QPointF(4, y), QPointF(20, y))
+    elif name == "dimmer":
+        # Revu's Dimmer: a circle half filled
+        _pen(painter, INK, 1.5)
+        painter.drawEllipse(QRectF(5, 5, 14, 14))
+        half = QPainterPath()
+        half.moveTo(12, 5)
+        half.arcTo(QRectF(5, 5, 14, 14), 90, 180)
+        half.closeSubpath()
+        painter.setBrush(QColor(INK))
+        painter.drawPath(half)
+        painter.setBrush(Qt.NoBrush)
     elif name == "panel_maths":
         # the Maths panel: an equals sign under x squared
         _glyph(painter, "x²", INK, 10, rect=QRectF(0, 0, 24, 16))
@@ -741,6 +750,8 @@ def icon(name: str, size: int = 24) -> QIcon:
     """Return a cached icon; drawn once per name and size, sharp at every
     screen's pixel ratio."""
     def draw(painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
         painter.scale(size / 24.0, size / 24.0)
         _draw(name, painter)
     return drawn_icon(draw, size)
@@ -749,6 +760,7 @@ def icon(name: str, size: int = 24) -> QIcon:
 @lru_cache(maxsize=64)
 def colour_icon(colour: str, size: int = 20) -> QIcon:
     def draw(painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setPen(QPen(QColor(120, 128, 140), 1))
         painter.setBrush(QBrush(QColor(colour)))
         painter.drawRoundedRect(QRectF(2.5, 2.5, size - 5, size - 5), 3, 3)

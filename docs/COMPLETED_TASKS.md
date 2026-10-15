@@ -370,3 +370,49 @@ page navigation, and Title Case on the Thumbnails page menu.
   down the right); Revu's tool menu — Drawing Mode / Properties Mode,
   **Scale** (a tool keeps its real size on a page of another drawing
   scale), Move Up / Move Down, Copy and Paste.
+
+## 2026-10-15 — a sharp picker, the eyedropper everywhere, and Revu's workspace
+
+**The colour picker looked blurry next to Revu's.** Its swatches, and every
+icon, were pictures made at 100 % and stretched by Windows at 125 % or 150 %,
+so each edge spread over two pixels. Icons are now drawn once for each
+screen's own pixel ratio and Qt shows the one that matches; the More Colors
+spectrum and hue strip are gradients drawn at the screen's pixels.
+`test_the_picker_swatches_are_drawn_at_the_screens_own_pixels`.
+
+**The eyedropper couldn't take the taskbar.** It held only the screen under
+the pointer still, and read the grab at the screen's stated ratio even when
+the grab did not say. It now holds every screen still, the loupe follows the
+pointer from one to the next, the mouse is held by one of them so a click
+anywhere comes to it, and a grab is read at its true pixels (its size over
+the screen's). `test_the_eyedropper_reaches_every_screen_and_a_scaled_one`.
+
+**Transparent line work: not applied.** Revu 21's manual gives the Line,
+Polyline, Rectangle and Pen tools an Opacity for the line itself ("Sets
+opacity level of the line and endpoints, from 0 (invisible) to 100
+(opaque)") beside Fill Opacity, so line opacity stays as Revu has it.
+
+**Already here under another name** (the user: don't add what exists):
+Revu's Erase Content and Cut Content are the Whiteout tool; Multiply is what
+was called Multiple Copies… (now named Multiply…, keeping Ctrl+Shift+D as
+Ctrl+M is SMath's matrix); the page relabelling, rotation, Page Scale,
+Calibrate, Link tool and a snapshot's Change Colors are built on, not beside.
+
+**Revu's workspace (gap list, group 1):**
+- **Page layouts** — View ▸ Single Page, Continuous, Side-by-Side and
+  Continuous Side-by-Side, with Show Cover Page in Side-by-Side; the status
+  bar's layout button lists them. The old Page/Continuous scroll switch is
+  Single Page/Continuous. In the one-spread layouts the wheel scrolls the page
+  and turns to the next at its end. Each document keeps its own layout.
+- **Rulers** along the top and left, from the page's corner, in inches,
+  centimetres, millimetres, points or picas (right-click), showing the page,
+  the selection and the pointer; **Full-Screen Crosshair** in the snap colour.
+- **Dimmer** — View ▸ Dimmer ▸ Dim Content (Ctrl+F5) and 0–100 %, and a
+  status-bar toggle: the page's content toned down under the markups, on
+  screen only.
+- **Full Screen** (F11) and **Presentation** (Ctrl+Enter): the page alone, a
+  page at a time; arrows, Space and Page Up/Down turn, Esc puts everything
+  back as it was.
+- **Edit ▸ Undo History** — newest first; choosing one undoes back to before it.
+- **File ▸ Open Recent, Close (Ctrl+W), Close All, Save All.**
+Tests: `tests/test_page_layouts.py`, `tests/test_view_workspace.py`.

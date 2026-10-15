@@ -471,6 +471,10 @@ class PageView(QGraphicsView):
         # a spreadsheet page's headings, kept in view as Excel keeps them
         from .sheetheadings import SheetHeadings
         self.sheet_headings = SheetHeadings(self)
+        # Revu's rulers and Full-Screen Crosshair (View menu), off at first
+        from .rulers import Crosshair, Rulers
+        self.rulers = Rulers(self)
+        self.crosshair = Crosshair(self)
         self.glide = _Glide(self)
         self.tool_key = "select"
         self.sticky_tool = False
@@ -507,7 +511,6 @@ class PageView(QGraphicsView):
         self._space_pan = False
         self._pan_origin = QPoint()
         self._zoom = 1.0
-        self.scroll_mode = "continuous"
 
         self._live_timer = None
         self._draw_origin: Optional[QPointF] = None
@@ -881,11 +884,14 @@ class PageView(QGraphicsView):
     def setScene(self, scene) -> None:
         super().setScene(scene)
         self._update_desk_margin()
+        if scene is not None and hasattr(self, "rulers"):
+            scene.selectionChanged.connect(self.rulers.refresh)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_desk_margin()
         self.sheet_headings.refresh_soon()
+        self.rulers.place()
 
     def _update_desk_margin(self) -> None:
         """Keep enough off-page desk to centre a page edge or corner."""
@@ -1031,6 +1037,44 @@ class PageView(QGraphicsView):
                       rect.top() + self.mapToScene(
                           self.viewport().rect()).boundingRect().height() / 2 - 12)
 
+    @property
+    def scroll_mode(self) -> str:
+        """"page" when one page or one spread is shown at a time (Revu's
+        Single Page and Side-by-Side), else "continuous"."""
+        scene = self.scene()
+        return "page" if getattr(scene, "page_mode", "continuous") in ("single", "side") \
+            else "continuous"
+
+    @scroll_mode.setter
+    def scroll_mode(self, mode: str) -> None:
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "set_page_mode"):
+            paired = getattr(scene, "page_mode", "") in ("side", "continuous_side")
+            if mode == "page":
+                scene.set_page_mode("side" if paired else "single",
+                                    getattr(self.window, "current_index", 0))
+            else:
+                scene.set_page_mode("continuous_side" if paired else "continuous")
+
+    def turn_spread(self, step: int) -> None:
+        """The next (+1) or previous (-1) page or spread; going back lands at
+        the foot of the page, as scrolling up onto it would."""
+        scene = self.scene()
+        if scene is None or not scene.frames:
+            return
+        here = self.window.current_index
+        spread = scene.spread_of(here) or [scene.frames[here]]
+        if step > 0:
+            target = scene.frames.index(spread[-1]) + 1
+        else:
+            target = scene.frames.index(spread[0]) - 1
+        if not 0 <= target < len(scene.frames):
+            return
+        self.window.go_to_page(target)
+        if step < 0:
+            bar = self.verticalScrollBar()
+            bar.setValue(bar.maximum())
+
     def _note_visible_page(self, _value: int = 0) -> None:
         """Scrolling past a page boundary makes that page the current one."""
         index = self.visible_page_index()
@@ -1088,10 +1132,23 @@ class PageView(QGraphicsView):
             return
         if (self.scroll_mode == "page"
                 and not event.modifiers() & Qt.ControlModifier):
+            # Single Page / Side-by-Side: the wheel scrolls the page in view
+            # and, at its end, turns to the next (or the previous) one
             delta = (pixels.y() if not pixels.isNull() else notches)
-            if delta:
-                step = -1 if delta > 0 else 1
-                self.window.go_to_page(self.window.current_index + step)
+            bar = self.verticalScrollBar()
+            shown = self.mapToScene(self.viewport().rect()).boundingRect()
+            spread = self.scene()._pages_rect
+            # the end of the page in sight (or nowhere left to scroll): turn
+            at_end = (shown.top() <= spread.top() + 0.5 or bar.value() <= bar.minimum()) \
+                if delta > 0 else \
+                (shown.bottom() >= spread.bottom() - 0.5 or bar.value() >= bar.maximum())
+            if delta and at_end:
+                self.turn_spread(-1 if delta > 0 else 1)
+            elif delta:
+                if not pixels.isNull():
+                    bar.setValue(bar.value() - pixels.y())
+                else:
+                    bar.setValue(bar.value() - int(notches * WHEEL_SCROLL_FACTOR))
             event.accept()
             return
         # What the wheel would do here if nothing were held, then Ctrl turns
@@ -3630,6 +3687,8 @@ class PageView(QGraphicsView):
                 self.window.whiteout_region(frame, region)
             elif tool.key == "crop":
                 self.window.crop_page_region(frame, region)
+            elif tool.key == "crop_image":
+                self.window.crop_image_region(frame, region)
             elif tool.key == "viewport":
                 self.window.add_viewport(frame, region)
             else:
@@ -4443,6 +4502,7 @@ class PageView(QGraphicsView):
             self._draw_pending_leader(painter, self._pending_anchor)
         if self._pending_arrow_leader is not None:
             self._draw_arrow_leader_preview(painter)
+        self.crosshair.paint(painter)
 
     def set_search_marks(self, marks) -> None:
         """Outline where the Search panel found words: [(scene rect, current)]."""

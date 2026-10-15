@@ -29,6 +29,11 @@ ROW_TOLERANCE = 9.0        # points; items this close vertically share a row
 PAPER = QColor("#ffffff")
 PAGE_EDGE = QColor(92, 98, 108)        # the line around the sheet
 PAGE_GAP = 26.0                        # points of desk between pages
+
+#: Revu's Dimmer (View ▸ Dimmer): whether the page's own content is toned
+#: down under the markups, and how strongly it still shows (Revu's 0–100 %:
+#: the lower, the fainter). On screen only, for every document.
+DIMMER = {"on": False, "level": 0.4}
 SHADOW_DEPTH = 7.0                     # how far the shadow reaches
 FOOTER_DEPTH = 14.0                    # how deep the running footer is
 
@@ -760,6 +765,11 @@ class PageFrame(QGraphicsObject):
             self.paint_the_pdf(painter, _exposed_part(option, rect, self),
                                _painted_scale(painter), consumer=widget)
             painter.restore()
+            if DIMMER["on"] and not self.print_mode:
+                # the content toned down, the markups (drawn after) not
+                veil = QColor(PAPER)
+                veil.setAlphaF(max(0.0, min(1.0, 1.0 - DIMMER["level"])))
+                painter.fillRect(rect, veil)
         exposed = _exposed_part(option, rect, self) if not self.print_mode else rect
         if not self.print_mode:
             self._paint_grid(painter, rect)
@@ -1531,6 +1541,12 @@ class DocumentScene(QGraphicsScene):
         # How far the pages are turned for reading, in degrees. A way of
         # looking at the document; nothing about the document itself.
         self.reading_turn = 0
+        # Revu's page layouts (View menu): "continuous", "single", "side"
+        # (two pages a spread) and "continuous_side"; in the first-page modes
+        # only the spread holding *shown_page* is on the canvas
+        self.page_mode = "continuous"
+        self.shown_page = 0
+        self.cover_page = False        # Show Cover Page in Side-by-Side
         self.frames: list[PageFrame] = []
         self.print_mode = False
         self._pages_rect = QRectF()
@@ -1650,12 +1666,29 @@ class DocumentScene(QGraphicsScene):
                 return frame.sheet_rect.height()
             return frame.page.width_pt if turned else frame.page.height_pt
 
-        widest = max((across(frame) for frame in self.frames), default=0.0)
+        paired = self.page_mode in ("side", "continuous_side")
+        # the rows of pages: one page a row, or two side by side — odd pages
+        # on the left, even on the right, as Revu lays them; a run of
+        # spreadsheet pages keeps a row of its own
+        rows: list = []
+        for frame in self.frames:
+            if (paired and not sheet(frame) and rows and len(rows[-1]) == 1
+                    and not sheet(rows[-1][0])
+                    and not (self.cover_page and rows[-1][0] is self.frames[0])):
+                rows[-1].append(frame)
+            else:
+                rows.append([frame])
+
+        def row_across(row):
+            return sum(across(f) for f in row) + PAGE_GAP * (len(row) - 1)
+
+        widest = max((row_across(row) for row in rows), default=0.0)
         y = 0.0
         right = widest
         previous = None
         run_at = None              # where the run of sheet pages being laid out starts
-        for frame in self.frames:
+        for row in rows:
+            frame = row[0]
             if sheet(frame):
                 # a run of spreadsheet pages is one continuous grid: no gap
                 # between its pages, a blue line where one ends; pages across
@@ -1674,20 +1707,41 @@ class DocumentScene(QGraphicsScene):
                 y = end + PAGE_GAP
                 previous = frame
                 continue
-            previous = frame
-            frame.setTransformOriginPoint(0, 0)
-            frame.setRotation(self.reading_turn)
-            # A rotated item hangs off its own corner, so it is pushed back
-            # by however far the turn took it.
-            left = (widest - across(frame)) / 2.0
-            offset = {
-                0: QPointF(0, 0),
-                90: QPointF(across(frame), 0),
-                180: QPointF(across(frame), down(frame)),
-                270: QPointF(0, down(frame)),
-            }.get(self.reading_turn % 360, QPointF(0, 0))
-            frame.setPos(left + offset.x(), y + offset.y())
-            y += down(frame) + PAGE_GAP
+            previous = row[-1]
+            left = (widest - row_across(row)) / 2.0
+            for frame in row:
+                frame.setTransformOriginPoint(0, 0)
+                frame.setRotation(self.reading_turn)
+                # A rotated item hangs off its own corner, so it is pushed back
+                # by however far the turn took it.
+                offset = {
+                    0: QPointF(0, 0),
+                    90: QPointF(across(frame), 0),
+                    180: QPointF(across(frame), down(frame)),
+                    270: QPointF(0, down(frame)),
+                }.get(self.reading_turn % 360, QPointF(0, 0))
+                frame.setPos(left + offset.x(), y + offset.y())
+                left += across(frame) + PAGE_GAP
+            y += max(down(frame) for frame in row) + PAGE_GAP
+        self.rows = rows
+        if self.page_mode in ("single", "side") and self.frames:
+            # one page, or one spread, at a time: the rest leave the canvas
+            self.shown_page = max(0, min(self.shown_page, len(self.frames) - 1))
+            spread = self.spread_of(self.shown_page)
+            box = QRectF()
+            for frame in self.frames:
+                showing = frame in spread
+                frame.setVisible(showing)
+                if showing:
+                    rect = frame.mapRectToScene(frame.page_rect()) if not sheet(frame) \
+                        else QRectF(frame.pos(), frame.sheet_rect.size())
+                    box = rect if box.isNull() else box.united(rect)
+            self._pages_rect = box
+            self._apply_desk_margin()
+            return
+        for frame in self.frames:
+            if not frame.isVisible():
+                frame.setVisible(True)
         height = max(y - PAGE_GAP, 0.0)
         self._pages_rect = QRectF(0, 0, right, height)
         self._apply_desk_margin()
@@ -1703,6 +1757,39 @@ class DocumentScene(QGraphicsScene):
         y = self._desk_margin.y()
         self.setSceneRect(self._pages_rect.adjusted(-x, -y, x, y))
 
+    def spread_of(self, index: int) -> list:
+        """The page at *index* and whatever shares its row: its spread."""
+        if not 0 <= index < len(self.frames):
+            return []
+        frame = self.frames[index]
+        for row in getattr(self, "rows", None) or [[f] for f in self.frames]:
+            if frame in row:
+                return list(row)
+        return [frame]
+
+    def set_page_mode(self, mode: str, shown: Optional[int] = None) -> None:
+        """Revu's page layout: Single Page, Continuous, Side-by-Side or
+        Continuous Side-by-Side. Changes no document."""
+        if mode not in ("continuous", "single", "side", "continuous_side"):
+            mode = "continuous"
+        self.page_mode = mode
+        if shown is not None:
+            self.shown_page = int(shown)
+        self.layout_pages()
+
+    def show_page(self, index: int) -> bool:
+        """In a one-spread layout, bring the spread with page *index* onto the
+        canvas. True when it changed what is shown."""
+        if self.page_mode not in ("single", "side"):
+            return False
+        if self.frames and 0 <= index < len(self.frames) and \
+                self.frames[index] in self.spread_of(self.shown_page):
+            self.shown_page = index
+            return False
+        self.shown_page = index
+        self.layout_pages()
+        return True
+
     def set_reading_turn(self, degrees: int) -> None:
         """Turn every page on the canvas for reading. Changes no document."""
         self.reading_turn = int(degrees) % 360
@@ -1714,11 +1801,14 @@ class DocumentScene(QGraphicsScene):
             return None
         best, best_distance = None, float("inf")
         for frame in self.frames:
+            if not frame.isVisible():
+                continue                    # off the canvas in a one-spread layout
             rect = frame.mapRectToScene(frame.page_rect())
             if rect.contains(scene_pos):
                 return frame
             centre = rect.center()
-            distance = abs(centre.y() - scene_pos.y())
+            # the nearest row first, then the nearer page in it (side by side)
+            distance = abs(centre.y() - scene_pos.y()) * 4 + abs(centre.x() - scene_pos.x())
             if distance < best_distance:
                 best, best_distance = frame, distance
         return best

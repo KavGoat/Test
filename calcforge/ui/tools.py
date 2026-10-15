@@ -130,6 +130,9 @@ TOOLS: list[Tool] = [
     Tool("image", "Image", "image", DRAG, "Annotate", "",
          "Place an image from disk", factory=lambda: ImageItem()),
 
+    Tool("crop_image", "Crop Image", "crop", SNAPSHOT, "Annotate", "",
+         "Select an image, then drag the part of it to keep",
+         factory=_rect("marquee")),
     Tool("table", "Table", "table", "table", "Annotate", "",
          "Drag out a table: the rows and columns follow the size you drag — "
          "a spreadsheet on the page, with Excel's formulas, formats and units"),

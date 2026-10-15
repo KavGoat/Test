@@ -312,9 +312,9 @@ def test_the_wheel_can_be_set_to_scroll_instead(window):
 def test_the_footer_switches_between_continuous_and_page_scrolling(window):
     _three_pages(window)
     page_action = next(action for action in window.status_scroll.menu().actions()
-                       if action.text() == "Page")
+                       if action.text() == "Single Page")
     page_action.trigger()
-    assert window.status_scroll.text() == "Page"
+    assert window.status_scroll.text() == "Single Page"
     assert window.view.scroll_mode == "page"
 
     wheel(window.view, -120)
@@ -333,6 +333,7 @@ def test_the_footer_switches_between_continuous_and_page_scrolling(window):
     continuous.trigger()
     assert window.status_scroll.text() == "Continuous"
     assert window.view.scroll_mode == "continuous"
+    assert all(frame.isVisible() for frame in window.scene.frames)
 
 
 def test_shift_and_the_wheel_scroll_sideways(window):
