@@ -139,9 +139,10 @@ def test_a_quantity_keeps_its_unit_and_loses_decimals(w):
     value = run.sheet.value(0, 1)
     assert isinstance(value, Qty)
     texts = drawn(run)
-    got = [t for t in texts if t.endswith("kN")]
-    assert got and "#" not in got[0] and got[0].startswith("3.33"), texts
-    assert len(got[0]) < len(format_value(value).text)
+    # the number and its blue unit are drawn as runs ("3.3333 ", "kN")
+    line = "".join(texts)
+    assert line.endswith("kN") and "#" not in line and line.startswith("3.33"), texts
+    assert len(line) < len(format_value(value).text)
     # the unit box sits after the shortened text, not after hashes
     kind, rect = run.unit_box_rect(0, 1)
     assert kind == "box" and rect.left() < run.cell_rect(0, 1).right() + 6
