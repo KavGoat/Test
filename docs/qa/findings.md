@@ -4,6 +4,27 @@ Kept by the lead agent (docs/AGENT_PROMPT.md §5). One line per finding, newest
 round at the top. Status: open · fixing (who) · merged · pushed · decision
 (waiting on the user) · not a bug.
 
+## Round 3 — Revu parity audit, 2026-10-15
+
+The full report is docs/qa/revu_audit.md (groups A–N). It finds mostly misplaced,
+misnamed, or prompt-instead-of-dialog commands, and no shared "Pages" range
+control anywhere. Status: open, queued after round 2 merges.
+
+User's decisions (pop-up):
+- Ctrl+M is Multiply in Markup mode and Matrix in Calc mode. The other Revu keys
+  are adopted (Ctrl+D Document Properties, Ctrl+9/0/8 zoom, Alt+panel keys,
+  Shift+F4 Hide Panels).
+- Page Setup follows Revu's layout and really resizes the content (Auto Scale,
+  Scale, Offset, Rotation, Center, Fit to Media), with a preview and a Pages range.
+- Build Revu's Print dialog, with the preview folded in. Print Pages… opens it
+  with Selected chosen. The per-page and per-markup print ticks stay.
+- UK spelling app-wide (Colour, Centre).
+
+Lead's calls, under "behave like Revu, keep everything":
+- Add Distribute and Flip to Alignment.
+- Keep Spacing, Corner Radius and Hatch Opacity at the end of Appearance.
+- Move the CalcForge-only items into a CalcForge section rather than delete them.
+
 ## Round 2 — 2026-10-15
 
 | # | Sev | Finding | Area | Status |
