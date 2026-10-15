@@ -111,6 +111,12 @@ def expr(draw, depth=0):
             k, _ = draw(leaf("none"))
             b = Expr(paren(a) + ["*"] + k.keys, a.value * k.value, a.dims)
         v = a.value + b.value if op == "+" else a.value - b.value
+        if abs(v) <= mpmath.mpf("1e-12") * (abs(a.value) + abs(b.value)):
+            # 0.01'm-1'cm: zero in the app, but 2·10^-19 here, where 1 cm is
+            # the binary float 0.01 taken exactly.  What is left of such a
+            # cancellation is rounding noise, not an answer to check (and
+            # dividing by it gave "Division by zero." against 10^18)
+            return a
         return Expr(paren(a) + [op] + paren(b), v, a.dims)
     if op == "*":
         a, b = draw(expr(depth + 1)), draw(expr(depth + 1))

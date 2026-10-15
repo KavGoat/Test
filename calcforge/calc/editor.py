@@ -6,8 +6,8 @@ Observed SMath behaviour this reproduces (see docs/SMATH_BEHAVIOUR.md):
   moves into the denominator; everything typed next stays there
   (``1/7*1000`` is 1 over 7·1000).  ``2*3/4`` is 2·(3/4).
 * ``^`` opens an exponent, ``(`` a bracket, ``[`` an index, ``|`` an
-  absolute value (``|`` alone is logical OR).  Typing continues inside until the right arrow leaves;
-  ``)`` does not close anything.  ``:`` inserts ``:=`` at the cursor.
+  absolute value (``|`` alone is logical OR).  Typing continues inside until the right arrow leaves
+  or, for a bracket, ``)`` closes it.  ``:`` inserts ``:=`` at the cursor.
 * ``=`` evaluates.  If what is left of it is a single name (or a call
   pattern ``f(x)``) that is not defined above, SMath turns it into ``:=``
   instead.  The cursor stays where it was.
@@ -69,6 +69,26 @@ def _inside_unit_marker(r: Row, q: int) -> bool:
     deletes the first visible letter."""
     items = r.items
     return 0 < q < len(items) and items[q - 1] == "'" and _is_word_char(items[q]) and items[q] != "'"
+
+
+def _split_args(items: list) -> list:
+    """The pieces of a call's argument list, split at "," and ";"."""
+    pieces, cur = [], []
+    for it in items:
+        if it in (",", ";"):
+            pieces.append(cur)
+            cur = []
+        else:
+            cur.append(it)
+    pieces.append(cur)
+    return pieces
+
+
+def _is_parameter(piece: list) -> bool:
+    """Whether a piece of an argument list could be a function's parameter:
+    a plain name (x, L.A), not a number, a unit or an expression."""
+    return (bool(piece) and all(isinstance(it, str) and it in IDENT_CHARS for it in piece)
+            and piece[0] not in DIGITS and piece[0] != ".")
 
 
 def _row_path(r: Row) -> list:
@@ -554,11 +574,30 @@ class MathEditor:
             return
         self._insert_box(Program("range" if name == "range3" else name, *[Row() for _ in range(rows)]), into=0)
 
+    # Boxes that typing "(" opens, so ")" closes them: a bracket or a call's
+    # argument list, and the blocks a call turns into as it is typed
+    # (if(, sqrt(, abs(, mat(, while(, sum(e,i,a,b ...).
+    CLOSED_BY_PAREN = (Paren, Program, Sqrt, Root, Abs, Matrix)
+
     def _close(self, kind) -> None:
-        """")" and "]" are ignored: SMath Cloud keeps the cursor inside the
-        bracket ((1+2)*3= typed straight through gives (1+2·3)=7); the right
-        arrow is what leaves a bracket."""
-        return
+        """")" moves the cursor out past the innermost bracket around it, so
+        typing carries on after it: (1+2)*3= is 9 and sin(1)+1= adds 1 to
+        the sine, as in SMath Studio desktop and Mathcad.  SMath Cloud
+        ignores ")" and keeps typing inside the bracket ((1+2)*3= gave
+        (1+2·3)=7, a silently wrong answer; the user, 2026-10-15: "Close
+        the bracket").  Exponents, fractions and subscripts on the way out
+        are left too.  With no bracket around the cursor ")" is ignored, as
+        before; "]" is always ignored (the right arrow leaves an index)."""
+        if kind is not Paren:
+            return
+        r = self.row
+        while r.parent is not None:
+            box = r.parent
+            prow = box.parent_row
+            if isinstance(box, self.CLOSED_BY_PAREN):
+                self.cursor = Cursor(prow, prow.items.index(box) + 1)
+                return
+            r = prow
 
     def operand_start(self, r: Row, p: int) -> int:
         """Index where the operand ending at position p starts."""
@@ -650,6 +689,11 @@ class MathEditor:
                 return None, None
             inner = items[-1].rows[0].items
             nargs = 1 + sum(1 for it in inner if it in (",", ";")) if inner else 1
+            if inner and not all(_is_parameter(p) for p in _split_args(inner)):
+                # max(1,2)= or f(2)=: a definition's parameters are names, so
+                # a call with a number (or any expression) in it can only be
+                # evaluated, whatever the name is
+                return None, None
             return word, nargs
         return None, None
 

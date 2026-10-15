@@ -30,16 +30,19 @@ def lookup(name: str, nargs: int):
 
 
 def has_overload(name: str, nargs: int) -> bool:
-    """Whether SMath lists name with this argument count (catalogue arities).
+    """Whether a built-in takes name with this argument count.
 
-    Decides whether "=" after name(args) evaluates or defines: SMath knows
-    max/min with one (matrix) argument only, so max(1,5,3)= becomes a
-    definition (observed).
+    Decides whether "=" after name(args) evaluates or defines.  SMath
+    Cloud's catalogue lists max/min with one (matrix) argument only and
+    turned max(1,5,3)= into a definition (observed); SMath Studio desktop
+    takes any number of arguments, and so does the engine, so the arities
+    the engine implements count as well (the user, 2026-10-15: max(1,2)=
+    gave "Syntax is incorrect.").
     """
     arities = {k for n, k, _, _ in FUNCTIONS if n == name}
-    if arities:
-        return nargs in arities or -1 in arities
-    return lookup(name, nargs) is not None or name in SPECIAL
+    if nargs in arities or -1 in arities or lookup(name, nargs) is not None:
+        return True
+    return not arities and name in SPECIAL
 
 
 def known(name: str) -> bool:
@@ -147,6 +150,7 @@ for _n, _r, _c, _dom in [
     if _n in ("sin", "cos"):
         _r = (lambda f: lambda x: _snap_zero(f(x)))(_r)
     fn(_n)(_no_log_zero(_cfun(_r, _c, _dom)) if _n in ("ln", "log10") else _cfun(_r, _c, _dom))
+fn("lg")(_TABLE[("log10", 1)])
 
 
 fn("cot")(_cfun(lambda x: 1 / math.tan(x), lambda z: 1 / cmath.tan(z)))
@@ -168,6 +172,11 @@ def _atan2(x, y):
     if a.dims != b.dims:
         raise err("units_mismatch")
     return Q(math.atan2(b.real, a.real))
+
+
+# atan2(x, y) is atan(x, y): the angle of the point (x, y), as in SMath
+# Studio desktop and Mathcad (atan2(1,1) = π/4); lg is the base 10 log
+fn("atan2", 2)(_atan2)
 
 
 @fn("sqrt")
@@ -462,6 +471,19 @@ def _min(*args):
 @fn("sum", 1)
 def _sum1(m):
     vals = _flat([m])
+    acc = vals[0]
+    for v in vals[1:]:
+        acc = add(acc, v)
+    return acc
+
+
+@fn("sum", -1)
+def _sum_values(*args):
+    """sum(1,2,3): the sum of the values; a vector or matrix among them
+    adds all its elements, as max and min take them."""
+    vals = _flat(args)
+    if not vals:
+        raise err("args_count")
     acc = vals[0]
     for v in vals[1:]:
         acc = add(acc, v)
@@ -946,7 +968,16 @@ def _iterate(ev, n: A.Call, ctx, combine, start):
 def _sum(ev, n, ctx):
     if len(n.args) == 1:
         return _sum1(ev.eval(n.args[0], ctx))
-    return _iterate(ev, n, ctx, add, Q(0.0))
+    if len(n.args) == 4 and isinstance(n.args[1], A.Var):
+        return _iterate(ev, n, ctx, add, Q(0.0))   # sum(e, i, a, b): Σ over i
+    # sum(1,2) or sum(1,2,3): the values added up, like max(1,2,3)
+    args = [ev.eval(a, ctx) for a in n.args]
+    try:
+        return _sum_values(*args)
+    except SMathError as e:
+        if e.node is None:
+            e.node = n
+        raise
 
 
 def _product(ev, n, ctx):
