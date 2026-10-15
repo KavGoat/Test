@@ -14,7 +14,8 @@ Beyond Excel:
   * 'kN on its own is that unit (SMath's way of writing one): =A1/'kN
   * a bare name that is no cell and no defined name is a variable from the
     document's equations, read where the sheet sits in reading order;
-    var(M20) reads a document variable whose name looks like a cell.
+    var(M20) reads a document variable whose name looks like a cell (or
+    one a cell's name hides); with no such variable it is Excel's VAR.
 """
 from __future__ import annotations
 
@@ -608,9 +609,9 @@ class _Parser:
                 (self.peek().kind == "ref" and isinstance(self.peek().ref, CellRef)
                  and self.peek().ref.sheet is None and "$" not in self.peek().text)
                 or (self.peek().kind == "name" and "!" not in self.peek().text)):
-            # var(M20): the document variable M20 (Excel's VAR of one value
-            # is always #DIV/0!, so nothing is lost); VAR(A1:A9) and
-            # VAR(1,2,3) are Excel's variance
+            # var(M20): the document variable M20 when the equations have
+            # one, else Excel's VAR of M20 (evaluate._doc_var; the user,
+            # 2026-10-15); VAR(A1:A9) and VAR(1,2,3) are Excel's variance
             inner = self.take()
             self.expect(")")
             self.names.add(inner.text)

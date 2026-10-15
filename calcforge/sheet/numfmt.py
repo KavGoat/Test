@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from functools import lru_cache
-from typing import Optional
+from typing import Callable, Optional
 
 from .dates import datetime_from_serial
 from .values import BLANK, Array, ErrorValue, Qty, default_unit, general_number, unit_parts
@@ -521,9 +521,57 @@ def _general(x: float, width: int = 11) -> str:
     return f"{mant}E{sign}{exp[1:].lstrip('0').rjust(2, '0')}"
 
 
-def format_number(x: float, code: Optional[str]) -> Shown:
+def _significant(text: str) -> int:
+    """How many significant digits a number's text shows."""
+    mantissa = text.split("E")[0]
+    digits = mantissa.replace("-", "").replace(".", "").lstrip("0")
+    return len(digits)
+
+
+def general_fit(x: float, fits: Callable[[str], bool]) -> str:
+    """Excel's General format in a column of a given width (QA, 2026-10-15):
+    the number as it is when it fits; else rounded to as many decimals as
+    fit (0.333333, 666666.7); in scientific form when that keeps more
+    digits or the whole part won't fit (5E+09, 1.23E-07). *fits(text)* says
+    whether a text fits, measured with the cell's own font. When nothing
+    fits the text returned doesn't fit either, and the cell shows ####."""
+    full = _general(x)
+    if fits(full) or x == 0 or not math.isfinite(x):
+        return full
+    sign = "-" if x < 0 else ""
+    ax = abs(x)
+    decimal = None
+    if ax < 1e11:
+        whole = sign + str(int(ax))
+        if fits(whole) or fits(sign + _round_half_up(ax, 0)):
+            for places in range(10, -1, -1):
+                s = _round_half_up(ax, places)
+                if "." in s:
+                    s = s.rstrip("0").rstrip(".")
+                if s.strip("0.") == "":
+                    break                   # rounded away to nothing
+                if fits(sign + s):
+                    decimal = sign + s
+                    break
+    scientific = None
+    for places in range(9, -1, -1):
+        mantissa, _, exponent = f"{x:.{places}E}".partition("E")
+        if "." in mantissa:
+            mantissa = mantissa.rstrip("0").rstrip(".")
+        text = f"{mantissa}E{exponent[0]}{exponent[1:].lstrip('0').rjust(2, '0')}"
+        if fits(text):
+            scientific = text
+            break
+    if decimal is not None and (scientific is None or
+                                _significant(decimal) >= _significant(scientific)):
+        return decimal
+    return scientific if scientific is not None else full
+
+
+def format_number(x: float, code: Optional[str],
+                  fit: Optional[Callable[[str], bool]] = None) -> Shown:
     if not code or code.lower() == "general":
-        return Shown(_general(x), None, True)
+        return Shown(general_fit(x, fit) if fit is not None else _general(x), None, True)
     if not math.isfinite(x):
         return Shown("#NUM!", None, True)
     sections = _parse(code)
@@ -561,13 +609,16 @@ def format_text(t: str, code: Optional[str]) -> Shown:
     return Shown("".join(out), text_section.color)
 
 
-def format_value(value, code: Optional[str] = None, unit: Optional[str] = None) -> Shown:
-    """How a cell shows its value with this number format (and unit)."""
+def format_value(value, code: Optional[str] = None, unit: Optional[str] = None,
+                 fit: Optional[Callable[[str], bool]] = None) -> Shown:
+    """How a cell shows its value with this number format (and unit). With
+    *fit* — whether a text fits the cell — a number in General is shortened
+    to fit, as Excel does (see general_fit); its unit is kept whole."""
     if value is BLANK:
         return Shown("")
     if isinstance(value, Array):
         value = value.get(0, 0) if value.height and value.width else BLANK
-        return format_value(value, code, unit)
+        return format_value(value, code, unit, fit)
     if isinstance(value, bool):
         return Shown("TRUE" if value else "FALSE")
     if isinstance(value, ErrorValue):
@@ -588,15 +639,13 @@ def format_value(value, code: Optional[str] = None, unit: Optional[str] = None) 
                 shown_unit = default_unit(value.dims)
                 factor, _d, offset = unit_parts(shown_unit) if shown_unit else (1.0, None, 0.0)
                 x = (value.si - offset) / factor
-        got = format_number(x, code)
-        if shown_unit:
-            # kN*m is written kN·m, as CalcForge's equations write it
-            got.text = f"{got.text} {shown_unit.replace('*', '·')}"
+        # kN*m is written kN·m, as CalcForge's equations write it
+        tail = f" {shown_unit.replace('*', '·')}" if shown_unit else ""
+        got = format_number(x, code, None if fit is None else (lambda t: fit(t + tail)))
+        got.text += tail
         return got
     if isinstance(value, (int, float)):
-        if unit and code is None:
-            pass
-        return format_number(float(value), code)
+        return format_number(float(value), code, fit)
     return Shown(str(value))
 
 

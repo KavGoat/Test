@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Optional
 
@@ -21,10 +21,27 @@ from calcforge.calc.engine.units import NODIM, UNITS, dims_add, dims_scale, dims
 # -- errors --------------------------------------------------------------------
 @dataclass(frozen=True)
 class ErrorValue:
+    """One of Excel's errors. ``reason`` says in plain words what went wrong
+    (shown when the cell is selected or hovered, as Excel's error tip); it
+    takes no part in comparing errors, so #DIV/0! is #DIV/0! whatever the
+    reason (QA, 2026-10-15)."""
+
     code: str
+    reason: str = field(default="", compare=False)
 
     def __str__(self) -> str:
         return self.code
+
+    def because(self, reason: str) -> "ErrorValue":
+        """This error with a reason (an error that has one keeps it)."""
+        if self.reason or not reason:
+            return self
+        return ErrorValue(self.code, reason)
+
+
+def failed(error: ErrorValue, reason: str) -> "SheetError":
+    """SheetError(error) with a reason: ``raise failed(DIV0, "...")``."""
+    return SheetError(error.because(reason))
 
 
 NULL = ErrorValue("#NULL!")
@@ -297,7 +314,7 @@ def to_number(v):
 
         got = number_from_text(v)
         if got is None:
-            raise SheetError(VALUE)
+            raise failed(VALUE, f"“{_short(v)}” is text, not a number")
         return got
     if isinstance(v, Array):
         return to_number(v.get(0, 0))
@@ -309,7 +326,7 @@ def to_float(v) -> float:
     n = to_number(v)
     if isinstance(n, Qty):
         if any(n.dims):
-            raise SheetError(UNITS_ERR)
+            raise failed(UNITS_ERR, f"a plain number is needed here, not one in {unit_name(n)}")
         return n.si
     return n
 
@@ -338,7 +355,7 @@ def to_bool(v) -> bool:
             return True
         if v.upper() == "FALSE":
             return False
-        raise SheetError(VALUE)
+        raise failed(VALUE, f"“{_short(v)}” is text, not TRUE or FALSE")
     if isinstance(v, Array):
         return to_bool(v.get(0, 0))
     raise SheetError(VALUE)
@@ -404,11 +421,34 @@ def _keep_unit(a, b, si, dims):
     return quantity(si, dims, unit if any(dims) or unit in ("%", "deg", "°") else None)
 
 
+def unit_name(n) -> str:
+    """How an error message names a number's unit: "kN", or "no unit"."""
+    if isinstance(n, Qty) and any(n.dims):
+        return n.unit or default_unit(n.dims) or "a unit"
+    return "no unit"
+
+
+def _short(text: str, most: int = 24) -> str:
+    return text if len(text) <= most else text[:most - 1] + "…"
+
+
+def units_clash(a, b, doing: str) -> SheetError:
+    """#UNITS! saying which units clashed: "kN and m can't be added"."""
+    ua, ub = unit_name(a), unit_name(b)
+    if ua == ub:                        # two different units spelt alike (custom ones)
+        return failed(UNITS_ERR, f"these units don't match, so they can't be {doing}")
+    if ub == "no unit":
+        return failed(UNITS_ERR, f"{ua} and a plain number can't be {doing}")
+    if ua == "no unit":
+        return failed(UNITS_ERR, f"a plain number and {ub} can't be {doing}")
+    return failed(UNITS_ERR, f"{ua} and {ub} can't be {doing}")
+
+
 def add(a, b):
     if type(a) is float and type(b) is float:
         return a + b
     if _dims(a) != _dims(b):
-        raise SheetError(UNITS_ERR)
+        raise units_clash(a, b, "added")
     return _keep_unit(a, b, _si(a) + _si(b), _dims(a))
 
 
@@ -416,7 +456,7 @@ def sub(a, b):
     if type(a) is float and type(b) is float:
         return a - b
     if _dims(a) != _dims(b):
-        raise SheetError(UNITS_ERR)
+        raise units_clash(a, b, "subtracted")
     return _keep_unit(a, b, _si(a) - _si(b), _dims(a))
 
 
@@ -548,30 +588,30 @@ def mul(a, b):
 def div(a, b):
     if type(a) is float and type(b) is float:
         if b == 0:
-            raise SheetError(DIV0)
+            raise failed(DIV0, "dividing by zero")
         return a / b
     if _si(b) == 0:
-        raise SheetError(DIV0)
+        raise failed(DIV0, "dividing by zero")
     return _product(_si(a) / _si(b), dims_sub(_dims(a), _dims(b)), _joined(a, b, "/"))
 
 
 def power(a, b):
     if isinstance(b, Qty) and any(b.dims):
-        raise SheetError(UNITS_ERR)
+        raise failed(UNITS_ERR, f"a power can't have a unit ({unit_name(b)})")
     p = _si(b)
     x = _si(a)
     if x == 0 and p < 0:
-        raise SheetError(DIV0)
+        raise failed(DIV0, "zero to a negative power divides by zero")
     if x == 0 and p == 0:
-        raise SheetError(NUM)
+        raise failed(NUM, "zero to the power zero has no value")
     try:
         if x < 0 and p != int(p):
-            raise SheetError(NUM)
+            raise failed(NUM, "a negative number to a fractional power has no real value")
         r = x ** p
     except OverflowError:
-        raise SheetError(NUM)
+        raise failed(NUM, "the result is too big")
     if isinstance(r, complex) or not math.isfinite(r):
-        raise SheetError(NUM)
+        raise failed(NUM, "the result is too big")
     if isinstance(a, Qty) and any(a.dims):
         unit = None
         if a.unit and re.fullmatch(r"[A-Za-zµμΩ]+", a.unit):

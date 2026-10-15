@@ -75,7 +75,24 @@ here is new.
   or `var(L.beam)` — one bare cell-like name or one bare name — is the
   document variable; `VAR(A1:A9)`, `VAR(1,2,3)` and `VAR($M$20)` are Excel's
   variance. Excel's VAR of a single value is always `#DIV/0!`, so nothing
-  Excel can do is lost.
+  Excel can do is lost. The user (2026-10-15): `var(X)` reads the equation
+  variable X when there is one — even when a cell is also named X —
+  otherwise it is Excel's VAR of X; a name that is neither is `#NAME?`.
+* **Errors explained** (QA, 2026-10-15). An error carries a reason
+  (`ErrorValue.reason`, not part of comparing it); selecting or hovering a
+  cell with an error says it in one line, following it back to the cell it
+  started in (`sheet/explain.py`): `#UNITS! — kN and m can't be added (A1 + A2)`.
+* **General fits its column** (QA, 2026-10-15). As Excel's General format: a
+  number is rounded to the column's width, or written 1.2E+09 when that is
+  shorter, measured with the cell's real font; `####` only when even that
+  won't fit, or for an explicit number format. The value and formula bar
+  keep every digit.
+* **A column dragged to nothing is hidden** (QA, 2026-10-15), keeping its
+  width for Unhide; dragged from just right of the double line it opens
+  again. Rows alike.
+* **Date results** (QA, 2026-10-15): a formula whose result is a date or a
+  time (`=DATE(…)`, `=TODAY()+7`, `=NOW()`, `=TIME(…)`) gives a General cell
+  a date or time format, as a typed date does.
 * **Writing units in formulas.** A unit follows a number: `=5 kN`,
   `=10 kN/m*B2`, `=3 m^2`. On its own a unit is written SMath's way with an
   apostrophe: `=A1/'kN`. A bare name is looked up as a defined name, then a

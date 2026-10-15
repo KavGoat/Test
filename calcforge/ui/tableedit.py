@@ -320,8 +320,25 @@ def _cursor_for(zone) -> Optional[QCursor]:
     return make() if make is not None else None
 
 
+def _edge_near(edges: list, at: float, tol: float) -> Optional[int]:
+    """The column (row) whose right (bottom) edge is near *at* in a
+    heading, or None. Where hidden columns make edges meet, Excel's rule:
+    just left of the double line is the column shown before it, just right
+    of it the hidden one, which dragging opens again (QA, 2026-10-15)."""
+    near = [k for k in range(1, len(edges)) if abs(at - edges[k]) <= tol]
+    if not near:
+        return None
+    first = near[0]
+    same = [k for k in near if edges[k] == edges[first]]
+    if len(same) > 1 and at > edges[first]:
+        return same[-1] - 1
+    return first - 1
+
+
 class TableEditing:
     """The open table, its selection, and what the pointer and keys do to it."""
+
+    hover_tip: Optional[str] = None     # the error tip of the cell under the pointer
 
     def __init__(self, view):
         self.view = view
@@ -566,7 +583,19 @@ class TableEditing:
         rule = validation.at(item.sheet, *self.active) if item.sheet is not None else None
         if rule is not None and rule.get("input"):
             self.view.statusMessage.emit(rule["input"])
+        # Excel's error tip: what went wrong in the cell, and where (QA, 2026-10-15)
+        why = self.error_text(item, *self.active)
+        if why:
+            self.view.statusMessage.emit(f"{col_letters(self.active[1])}{self.active[0] + 1}: {why}")
         self._scroll_to(self.active)
+
+    @staticmethod
+    def error_text(item, row: int, col: int) -> Optional[str]:
+        """One line saying why a cell shows an error (None if it doesn't)."""
+        if item is None or item.sheet is None:
+            return None
+        from ..sheet.explain import why
+        return why(item.sheet, row, col)
 
     def _scroll_to(self, cell) -> None:
         item = self._item
@@ -636,15 +665,15 @@ class TableEditing:
                 not (0 <= local.x() < w and 0 <= local.y() < h):
             return ("grow",)
         if -HEADING_H <= local.y() < 0 and 0 <= local.x() <= w + tol:
-            for c in range(1, len(xs)):
-                if abs(local.x() - xs[c]) <= tol:
-                    return ("col_edge", c - 1)
+            c = _edge_near(xs, local.x(), tol)
+            if c is not None:
+                return ("col_edge", c)
             if local.x() < w:
                 return ("col", item.cell_at(QPointF(local.x(), 0))[1])
         if -ROWNUM_W <= local.x() < 0 and 0 <= local.y() <= h + tol:
-            for r in range(1, len(ys)):
-                if abs(local.y() - ys[r]) <= tol:
-                    return ("row_edge", r - 1)
+            r = _edge_near(ys, local.y(), tol)
+            if r is not None:
+                return ("row_edge", r)
             if local.y() < h:
                 return ("row", item.cell_at(QPointF(0, local.y()))[0])
         if -ROWNUM_W <= local.x() < 0 and -HEADING_H <= local.y() < 0:
@@ -811,11 +840,16 @@ class TableEditing:
             self.select((0, 0), (rows - 1, cols - 1), (0, 0))
         elif kind == "col_edge":
             c = zone[1]
-            self.drag = ("col_size", c, scene_pos, item.sheet.width(c), self._chosen_cols(c))
+            chosen = self._chosen_cols(c)
+            # the widths they have now, kept for Unhide if dragged to nothing
+            before = {i: item.sheet.widths.get(i) for i in chosen}
+            self.drag = ("col_size", c, scene_pos, item.sheet.width(c), chosen, before)
             self.view.begin_snapshot(_frames(item))
         elif kind == "row_edge":
             r = zone[1]
-            self.drag = ("row_size", r, scene_pos, item.sheet.height(r), self._chosen_rows(r))
+            chosen = self._chosen_rows(r)
+            before = {i: item.sheet.heights.get(i) for i in chosen}
+            self.drag = ("row_size", r, scene_pos, item.sheet.height(r), chosen, before)
             self.view.begin_snapshot(_frames(item))
         elif kind == "fill":
             self.drag = ("fill", self.selection(), None, ctrl)
@@ -921,14 +955,13 @@ class TableEditing:
             moved = delta.x() if kind == "col_size" else delta.y()
             size = max(0.0, drag[3] + moved / scale)
             wb = item.sheet.workbook
-            if kind == "col_size":
-                wb.set_widths(item.sheet, drag[4], size)
-            else:
-                wb.set_heights(item.sheet, drag[4], size)
+            # dragged to nothing it is hidden, as in Excel (QA, 2026-10-15)
+            wb.drag_size(item.sheet, "col" if kind == "col_size" else "row", drag[4], size, drag[5])
             item.layout_changed()
             self._show_selection()
-            self.view.statusMessage.emit(f"{'Width' if kind == 'col_size' else 'Height'}: "
-                                         f"{size:.1f} pt ({round(size * 96 / 72)} px)")
+            what = "Width" if kind == "col_size" else "Height"
+            self.view.statusMessage.emit(f"{what}: {size:.1f} pt ({round(size * 96 / 72)} px)"
+                                         if size > 0 else f"{what}: 0 (hidden)")
         elif kind == "fill":
             src = drag[1]
             self.drag = ("fill", src, self._fill_target(src, cell), drag[3])
@@ -1134,10 +1167,15 @@ class TableEditing:
         if kind == "cell":
             cell = item.sheet.cells.get((zone[1], zone[2]))
             from PySide6.QtWidgets import QToolTip
+            why = self.error_text(item, zone[1], zone[2])
             if cell is not None and cell.comment:
-                QToolTip.showText(QCursor.pos(), cell.comment, self.view)
+                tip = cell.comment + ("\n\n" + why if why else "")
+                QToolTip.showText(QCursor.pos(), tip, self.view)
+            elif why:
+                QToolTip.showText(QCursor.pos(), why, self.view)     # Excel's error tip
             else:
                 QToolTip.hideText()
+            self.hover_tip = why
         cursor = _cursor_for(zone)
         if cursor is not None:
             self.view.viewport().setCursor(cursor)
