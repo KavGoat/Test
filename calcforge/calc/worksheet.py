@@ -295,16 +295,6 @@ class Worksheet:
                 changed |= _changed_names(old_vars, old_funcs, r.defined_vars, r.defined_funcs)
 
     def _evaluate(self, r: Region, commit: bool) -> None:
-        from .engine import sym
-        try:
-            self._evaluate_region(r, commit)
-        finally:
-            # The hook names what is defined above *this* region of *this*
-            # worksheet: left set, it leaked into the next evaluation made
-            # without a worksheet (and kept the worksheet alive).
-            sym.defined_above = lambda: set()
-
-    def _evaluate_region(self, r: Region, commit: bool) -> None:
         from .engine import files, sym
 
         # importData / exportData: relative names are relative to the worksheet's folder
