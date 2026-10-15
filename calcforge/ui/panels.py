@@ -49,9 +49,28 @@ def _line_style_icon(name: str, colour: str, width: float) -> QIcon:
     return drawn_icon(draw, 150, 34)
 
 
+#: Each pattern's swatch, drawn once for its ink. The Properties panel fills
+#: its pattern list again whenever the selection changes, and drawing every
+#: pattern for it was a twelfth of a second of each Ctrl+A and each click on
+#: a markup (QA, 2026-10-15). Kept with the pattern it was drawn from, so one
+#: of one's own changed is drawn again.
+_HATCH_ICONS: dict = {}
+
+
 def _hatch_icon(name: str, colour: str) -> QIcon:
-    from ..items.hatches import sample_icon
-    return sample_icon(name, visible_ink(colour), 150, 34)
+    from ..items.hatches import LIBRARY, key_for, sample_icon
+    from .icons import _scales
+    ink = visible_ink(colour)
+    pattern = LIBRARY.get(key_for(name))
+    key = (name, ink, tuple(_scales()))
+    kept = _HATCH_ICONS.get(key)
+    if kept is not None and kept[0] is pattern:
+        return kept[1]
+    if len(_HATCH_ICONS) > 512:
+        _HATCH_ICONS.clear()
+    made = sample_icon(name, ink, 150, 34)
+    _HATCH_ICONS[key] = (pattern, made)
+    return made
 
 
 def fill_hatch_combo(combo, colour: str, current: str = "") -> None:
@@ -903,6 +922,8 @@ class MarkupsPanel(QWidget):
         # straight back out and fight whatever set it.
         self._echoing = False
         self._items: dict = {}
+        #: what the list was last built from (rebuild)
+        self._shown_before = None
 
         self.totals = QLabel("")
         self.totals.setWordWrap(True)
@@ -943,8 +964,38 @@ class MarkupsPanel(QWidget):
                 found.append((index, item, self.row_for(index, item)))
         return found
 
+    def _what_is_shown(self, document, found) -> tuple:
+        """Everything the list's rows are made from, to tell whether
+        building them again would change them."""
+        return (self.filter.text().strip().lower(), self.group_by.currentData() or "Page",
+                tuple(sorted((column, tuple(sorted(allowed)))
+                             for column, allowed in self.column_filters.items())),
+                tuple(index for index, page in enumerate(document.pages)
+                      if page.frame is not None),
+                tuple((index, item.uid, item.locked, _icon_for(item), tuple(row))
+                      for index, item, row in found))
+
+    def refresh(self, document) -> None:
+        """The markups were edited: the list is built again only if that
+        changed a row of it. A nudge or a drag moves markups without changing
+        a word of their rows, and building four hundred rows again for it was
+        a tenth of a second of every press of an arrow (QA, 2026-10-15)."""
+        found = self.all_rows(document)
+        if self._what_is_shown(document, found) != self._shown_before:
+            self.rebuild(document)
+            return
+        # the same rows; only which markup each one is may have changed (an
+        # undo puts back markups made afresh from its snapshot)
+        self._items = {(index, item.uid): item for index, item, _row in found
+                       if (index, item.uid) in self._items}
+        self.totals.setText(self._totals_text(document))
+        self.follow_the_canvas()
+
     def rebuild(self, document) -> None:
         needle = self.filter.text().strip().lower()
+        grouping = self.group_by.currentData() or "Page"
+        found = self.all_rows(document)
+        self._shown_before = self._what_is_shown(document, found)
         self._echoing = True
         sorting = self.tree.isSortingEnabled()
         self.tree.setSortingEnabled(False)
@@ -952,7 +1003,6 @@ class MarkupsPanel(QWidget):
         self._items = {}
         rows = []
         empty = [""] * len(self.COLUMNS)
-        grouping = self.group_by.currentData() or "Page"
         column = self.COLUMNS.index(grouping) if grouping in self.COLUMNS else None
         groups: dict = {}
         order: list = []
@@ -960,7 +1010,7 @@ class MarkupsPanel(QWidget):
             for index, page in enumerate(document.pages):
                 if page.frame is not None:
                     order.append(f"Page {index + 1}")
-        for index, item, row in self.all_rows(document):
+        for index, item, row in found:
             if not self._shown(row, needle):
                 continue
             node = QTreeWidgetItem(row)
@@ -1118,7 +1168,10 @@ class MarkupsPanel(QWidget):
                     if not data:
                         continue
                     chosen = data[1] in wanted
-                    node.setSelected(chosen)
+                    if node.isSelected() != chosen:
+                        # only the ones that change: telling Qt again for
+                        # four hundred rows was a tenth of a second
+                        node.setSelected(chosen)
                     if chosen and first is None:
                         first = node
             if first is not None:

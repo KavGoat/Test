@@ -275,3 +275,64 @@ def test_a_markups_size_follows_it(window, qapp):
     box.style.width = 6.0
     box.update()
     assert box.boundingRect().width() > after.width()
+
+
+def test_four_hundred_picked_out_markups_nudge_at_once(window, qapp):
+    """QA, 2026-10-15: four hundred small markups picked out with Ctrl+A, and
+    one press of an arrow took five seconds. Each markup moved put the squares
+    round it right there and then, drawing every picked-out neighbour again,
+    handles and all — which the next markup moved did again. The squares are
+    put right once, after the lot, and never with a markup's handles in them:
+    what shows is the same, live or from the squares, picked out or let go."""
+    from PySide6.QtTest import QTest
+    from calcforge.items.shapes import RectItem
+
+    view = window.view
+    frame = view.scene().frames[0]
+    items = []
+    for i in range(400):
+        item = RectItem("rect", QRectF(0, 0, 20, 14))
+        frame.add_markup(item, QPointF(40 + (i % 20) * 26, 60 + (i // 20) * 20))
+        items.append(item)
+    view.set_zoom(1.0)
+    view.centerOn(frame.mapToScene(QPointF(300, 260)))
+    _settled(qapp, view, frame.layer, limit=15)
+    assert len(frame.layer.members) == 400
+    where_they_were = _image(view)
+    window.select_tool("select")
+    window.select_all()                      # what Ctrl+A does
+    qapp.processEvents()
+    assert all(item.isSelected() for item in items)
+    before = [QPointF(item.pos()) for item in items]
+
+    started = time.perf_counter()
+    QTest.keyClick(view, Qt.Key_Right)
+    qapp.processEvents()
+    view.viewport().grab()
+    took = time.perf_counter() - started
+    assert took < 1.5, f"one nudge of 400 markups took {took:.2f} s"
+    step = items[0].pos().x() - before[0].x()
+    assert step > 0
+    assert all(abs(item.pos().x() - was.x() - step) < 1e-6 and item.pos().y() == was.y()
+               for item, was in zip(items, before))
+
+    # straight after it, let go: drawn where they are now, and nothing left
+    # in the squares where they were
+    view.scene().clearSelection()
+    _pump(qapp, 0.02)
+    moved = _image(view)
+    assert _difference(where_they_were, moved) > 0.0005
+
+    # back in the squares while picked out, then let go: no handles were
+    # drawn into the squares, so none are left behind
+    window.select_all()
+    _settled(qapp, view, frame.layer, limit=15)
+    assert len(frame.layer.members) == 400
+    view.scene().clearSelection()
+    _pump(qapp, 0.05)
+    from_squares = _image(view)
+    assert _difference(moved, from_squares) < _close(view)
+    frame.layer.enabled = False
+    frame.layer.release_all()
+    _pump(qapp, 0.05)
+    assert _difference(from_squares, _image(view)) < _close(view)

@@ -421,10 +421,34 @@ def handle_zoom(painter: QPainter) -> float:
     return max(math.hypot(shape.m11(), shape.m12()), 0.01)
 
 
+#: The pens and brushes the handles are drawn with, by colour and zoom. Four
+#: hundred markups picked out are thousands of handles a frame, and making
+#: each one's pen and brush afresh was a good part of drawing it (QA,
+#: 2026-10-15). Shared: whoever is given one sets it, and never changes it.
+_HANDLE_TOOLS: dict = {}
+
+
+def _handle_tools(colour: QColor, darker: int, width: float) -> tuple:
+    """(pen, brush) for a handle filled with *colour*, edged darker."""
+    key = (colour.rgba(), darker, width)
+    found = _HANDLE_TOOLS.get(key)
+    if found is None:
+        if len(_HANDLE_TOOLS) > 256:
+            _HANDLE_TOOLS.clear()        # the zooms of a while ago
+        found = _HANDLE_TOOLS[key] = (QPen(colour.darker(darker), width), QBrush(colour))
+    return found
+
+
 def selection_pen(zoom: float) -> QPen:
-    pen = QPen(SELECT_BLUE)
-    pen.setWidthF(0.7 / zoom)
-    pen.setStyle(Qt.DashLine)
+    key = ("selection", zoom)
+    pen = _HANDLE_TOOLS.get(key)
+    if pen is None:
+        if len(_HANDLE_TOOLS) > 256:
+            _HANDLE_TOOLS.clear()
+        pen = QPen(SELECT_BLUE)
+        pen.setWidthF(0.7 / zoom)
+        pen.setStyle(Qt.DashLine)
+        _HANDLE_TOOLS[key] = pen
     return pen
 
 
@@ -432,8 +456,9 @@ def paint_control_point(painter: QPainter, point: QPointF, zoom: float,
                         colour: QColor = CONTROL_GOLD) -> None:
     """A control point: a gold dot, as Bluebeam's."""
     radius = (HANDLE_SCREEN_PX + 1.0) / zoom / 2
-    painter.setPen(QPen(colour.darker(160), 0.7 / zoom))
-    painter.setBrush(QBrush(colour))
+    pen, brush = _handle_tools(colour, 160, 0.7 / zoom)
+    painter.setPen(pen)
+    painter.setBrush(brush)
     painter.drawEllipse(point, radius, radius)
 
 
@@ -442,8 +467,9 @@ def paint_rotate_handle(painter: QPainter, point: QPointF, stalk: QPointF, zoom:
     painter.setPen(selection_pen(zoom))
     painter.drawLine(point, stalk)
     radius = (HANDLE_SCREEN_PX + 1.5) / zoom / 2
-    painter.setPen(QPen(ROTATE_BLUE.darker(150), 0.7 / zoom))
-    painter.setBrush(QBrush(ROTATE_BLUE))
+    pen, brush = _handle_tools(ROTATE_BLUE, 150, 0.7 / zoom)
+    painter.setPen(pen)
+    painter.setBrush(brush)
     painter.drawEllipse(point, radius, radius)
 ROTATE_OFFSET = 22.0
 
@@ -1035,8 +1061,9 @@ class MarkupItem(QGraphicsObject):
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(box)
         size = (HANDLE_SCREEN_PX + 1.5) / zoom
-        painter.setPen(QPen(SELECT_BLUE.darker(130), 0.6 / zoom))
-        painter.setBrush(QBrush(SELECT_BLUE))
+        pen, brush = _handle_tools(SELECT_BLUE, 130, 0.6 / zoom)
+        painter.setPen(pen)
+        painter.setBrush(brush)
         for point in self.scale_points().values():
             painter.drawRect(QRectF(point.x() - size / 2, point.y() - size / 2, size, size))
 
