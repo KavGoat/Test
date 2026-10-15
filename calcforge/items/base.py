@@ -407,6 +407,15 @@ def note_view_zoom(scene) -> None:
             QGraphicsObject.prepareGeometryChange(item)
 
 
+def covered_rect(item) -> QRectF:
+    """What a markup covers on its page, in its parent's coordinates — not
+    the room its selection handles take (an export, a picture of the
+    selection, a snapshot)."""
+    if hasattr(item, "bounds_without_chrome"):
+        return item.mapRectToParent(item.bounds_without_chrome())
+    return item.mapRectToParent(item.boundingRect())
+
+
 def handle_zoom(painter: QPainter) -> float:
     shape = painter.transform()
     return max(math.hypot(shape.m11(), shape.m12()), 0.01)
@@ -767,6 +776,10 @@ class MarkupItem(QGraphicsObject):
     #: parent class's): only the outermost adds the handles' room.
     _bounding_depth = 0
 
+    def chrome_room(self) -> float:
+        """The room its handles take at the current zoom, selected or not."""
+        return (2 * HANDLE_SCREEN_PX + 8.0) / max(_CHROME_ZOOM[0], 0.01) + 6.0
+
     def chrome_margin(self) -> float:
         """How far round itself a selected markup paints its handles.
 
@@ -777,7 +790,7 @@ class MarkupItem(QGraphicsObject):
         behind (the user, 2026-10-14)."""
         if not self.isSelected() or self.group:
             return 0.0
-        return (2 * HANDLE_SCREEN_PX + 8.0) / max(_CHROME_ZOOM[0], 0.01) + 6.0
+        return self.chrome_room()
 
     def _with_chrome(self, rect: QRectF) -> QRectF:
         if self._bounding_depth:
@@ -1279,7 +1292,9 @@ class MarkupItem(QGraphicsObject):
             # whether its handles show; the page draws those over its squares.
             frame = self.parentItem()
             if self in getattr(getattr(frame, "layer", None), "members", ()):
-                frame.update(self.mapRectToParent(self.boundingRect()))
+                room = self.chrome_room()      # its handles, come or gone
+                frame.update(self.mapRectToParent(self.bounds_without_chrome())
+                             .adjusted(-room, -room, room, room))
         elif change == QGraphicsItem.ItemParentChange:
             layer = self._layer()
             if layer is not None:

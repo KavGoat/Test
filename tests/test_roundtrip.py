@@ -15,6 +15,8 @@ Two promises, both checked through the real window:
 """
 from __future__ import annotations
 
+from calcforge.items.base import covered_rect
+
 import os
 
 import pymupdf
@@ -142,7 +144,8 @@ def the_second_page(window) -> dict:
     plot = window.view.calc.start_plot(second, QPointF(LEFT + 4, TOP + 4))
     typed(window, "sin(x)")
     press_key(window.view, Qt.Key_Escape)
-    made["plot"] = plot.sceneBoundingRect().translated(-second.scenePos())
+    # what each covers, not the room its selection handles take
+    made["plot"] = covered_rect(plot)
     window.take_snapshot(first, cell(0).united(cell(2)))
     window.go_to_page(1)
     window.paste_in_place()
@@ -152,7 +155,7 @@ def the_second_page(window) -> dict:
     if shot.parentItem() is not second:
         second.add_markup(shot)
     shot.setPos(QPointF(LEFT, 400))
-    made["snapshot"] = shot.sceneBoundingRect().translated(-second.scenePos())
+    made["snapshot"] = covered_rect(shot)
     return made
 
 

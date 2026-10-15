@@ -30,7 +30,7 @@ from ..io import export as export_io
 from ..io import pdfio
 from ..io import project as project_io
 from ..items.base import (DASH_ARRAYS, HATCH_PATTERNS, MarkupItem, Style, build_item,
-                          rename_groups)
+                          covered_rect, rename_groups)
 from ..items.contents import ContentsItem
 from ..items.measure import MeasureItem
 from ..items.media import ImageItem
@@ -6218,7 +6218,7 @@ class MainWindow(QMainWindow):
         frame, chosen = next(iter(frames.values()))
         box = QRectF()
         for item in chosen:
-            box = box.united(item.mapRectToParent(item.boundingRect()))
+            box = box.united(covered_rect(item))
         if box.isEmpty():
             return None
         scale = min(300 / 72.0, (16_000_000 / max(box.width() * box.height(), 1.0)) ** 0.5)
@@ -7065,7 +7065,7 @@ class MainWindow(QMainWindow):
             for frame, members in by_frame.items():
                 region = QRectF()
                 for item in members:
-                    box = item.mapRectToParent(item.boundingRect())
+                    box = covered_rect(item)
                     region = box if region.isNull() else region.united(box)
                 picture = frame.render_items_picture(members, region)
                 if picture.isNull():

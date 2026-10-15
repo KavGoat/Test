@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsScene, QG
 
 from ..core.document import MM_TO_PT, Document, Page
 from ..theme import CANVAS, LIGHT
-from ..items.base import MarkupItem, build_item
+from ..items.base import MarkupItem, build_item, covered_rect
 
 ROW_TOLERANCE = 9.0        # points; items this close vertically share a row
 
@@ -1197,8 +1197,7 @@ class PageFrame(QGraphicsObject):
             for item in theirs:
                 number = item.split_from if getattr(item, "split_theirs", False) \
                     else item.from_annotation
-                box = QRectF(*item.their_box) if item.their_box else \
-                    item.mapRectToParent(item.boundingRect())
+                box = QRectF(*item.their_box) if item.their_box else covered_rect(item)
                 known = self._annotation_boxes.get(number)
                 self._annotation_boxes[number] = box if known is None else known.united(box)
         for item in self.markups():

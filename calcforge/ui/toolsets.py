@@ -148,6 +148,10 @@ class ToolEntry:
                    data.get("mode", COPY), bool(data.get("scaled", False)),
                    float(data.get("mm_per_pt", 0.0) or 0.0))
 
+    @property
+    def type_name(self) -> str:
+        return str(self.payload.get("type", ""))
+
     def size_on(self, page) -> float:
         """How much bigger it comes down on *page*, scaled: 1 unless Scale is
         on and both its own page and this one have a drawing scale."""
@@ -170,10 +174,6 @@ def mm_per_pt(page) -> float:
 
 def _kept_from(item) -> float:
     return mm_per_pt(getattr(item.parentItem(), "page", None))
-
-    @property
-    def type_name(self) -> str:
-        return str(self.payload.get("type", ""))
 
 
 # Only a single markup can be kept "as properties": an image or a snapshot has

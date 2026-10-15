@@ -407,7 +407,8 @@ def markups_to_place(document, printed: list, carried=None) -> Appearances:
                 appearances.theirs.setdefault(index, []).append(
                     int(item.from_annotation))
                 continue
-            rect = item.mapRectToParent(item.boundingRect()).normalized()
+            from ..items.base import covered_rect
+            rect = covered_rect(item).normalized()      # not its handles' room
             rect = rect.adjusted(-MARGIN, -MARGIN, MARGIN, MARGIN)
             rect = _even_about_the_shape(item, rect)
             if rect.width() <= 0 or rect.height() <= 0:
