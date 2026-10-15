@@ -181,3 +181,49 @@ def test_the_result_unit_box_on_the_selected_cell(window):
     from calcforge.items.table import TableItem
     (table,) = [i for i in w.view.scene().items() if type(i) is TableItem]
     assert table.sheet.workbook.style_of(table.sheet, 0, 0).unit == "kN", "one undo step each"
+
+
+def test_a_hashes_cell_still_has_its_unit_box(window):
+    """A quantity too long for its cell shows #### (as Excel) — and SMath's
+    unit box after the hashes still takes the unit that makes it fit (the
+    user, 2026-10-15: "I can't change the unit on that one")."""
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+    from tests.test_tables import click
+    w = window
+    w.show()
+    w.view.set_zoom(2.0)
+    table = make_table(w)
+    wb = table.sheet.workbook
+    wb.set_input(table.sheet, 0, 0, "50000000 N")
+    tables = w.view.tables
+    tables.select((0, 0))
+    pump()
+    kind, rect = table.unit_box_rect(0, 0)
+    assert kind == "box", "#### keeps its unit box"
+    cell = table.cell_rect(0, 0)
+    assert cell.left() < rect.left() and rect.left() > cell.center().x(), "after the hashes"
+    image = w.view.viewport().grab().toImage()
+    spot = w.view.mapFromScene(table.mapToScene(rect.center()))
+    assert image.pixelColor(spot) == QColor("#000000")
+    w.view.centerOn(table.mapToScene(rect.center()))
+    pump()
+    click(w, table.mapToScene(rect.center()))
+    box = tables._result_unit
+    assert box is not None and box.isVisible()
+    box.setText("MN")
+    QApplication.sendEvent(box, QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
+    pump()
+    assert wb.style_of(table.sheet, 0, 0).unit == "MN"
+    kind, rect = table.unit_box_rect(0, 0)
+    assert kind == "unit", "it fits now: the unit itself is the box"
+    # still too long after a unit: the box after the hashes opens with the unit in it
+    wb.set_input(table.sheet, 0, 0, "123456789012345 N")
+    pump()
+    kind, rect = table.unit_box_rect(0, 0)
+    assert kind == "box"
+    w.view.centerOn(table.mapToScene(rect.center()))
+    pump()
+    click(w, table.mapToScene(rect.center()))
+    assert box.isVisible() and box.text() == "MN"
+    box.finish(False)

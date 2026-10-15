@@ -416,3 +416,64 @@ Calibrate, Link tool and a snapshot's Change Colors are built on, not beside.
 - **Edit ▸ Undo History** — newest first; choosing one undoes back to before it.
 - **File ▸ Open Recent, Close (Ctrl+W), Close All, Save All.**
 Tests: `tests/test_page_layouts.py`, `tests/test_view_workspace.py`.
+
+## 2026-10-15 (later) — big drawings, the title row, fields, errors, the sheet's rough edges
+
+**Colour change on a big drawing froze the app.** Color Processing read and
+rewrote a 21 MB page in about 8 s on the window's own thread, and again for
+every preview. The content scanner now skips everything that is not a colour
+or paint operator in one pass (operands read backwards, not re-matched), the
+rewritten streams are deflated at zlib level 1, and only forms the page
+actually draws are followed: about 0.9 s to list the colours and 1.15 s to
+process, with identical renders. The work runs in one helper process; the
+window keeps drawing (a progress note after half a second) and an overtaken
+preview is dropped. Right-clicking a page lists only that page's colours, and
+a colour picked in one row leaves the Source list of the others.
+`tests/test_color_processing_big.py`.
+
+**An equation dropped on a spreadsheet page couldn't be picked.** A drop on a
+sheet page sends equations and tables back where they came from; one already
+stranded there is moved to the nearest page that takes it when the document
+is opened or rebuilt. `test_sheet_pages.py`.
+
+**One row at the top.** The first menu is CalcForge, and the window draws no
+system title bar: the app's icon, the menus, the Markup | Calc switch, Search
+and the minimise / maximise / close buttons share one row. Dragging empty
+space on it moves the window (Windows still snaps it), a double-click
+maximises, the edges resize. macOS keeps its own menu bar and frame.
+
+**SMath errors.** `t:fc` with `fc` undefined now says "fc - not defined." as
+soon as it is committed (not while typing), and every equation's error is
+written in red under it whether or not it is selected (never printed).
+`tests/test_equation_errors.py`.
+
+**The wheel never changes a value** in the Properties panel or the Properties
+toolbar; it scrolls the panel. **Dark mode:** the line-style and hatch
+samples are drawn in the theme's ink when theirs would vanish.
+
+**Text boxes: bookmarks and fields.** Right-click ▸ Bookmark (or Properties ▸
+General ▸ Bookmark) gives the box a bookmark titled with its first line that
+follows it to whatever page it is moved to and goes when it is deleted.
+Right-click ▸ Insert Field puts in a variable from the equations (`{=L.beam}`,
+showing its value and unit and recalculating), the page number, page count,
+date, time or a document property — shown as codes while typing, values on
+screen, in print and in the saved PDF. `tests/test_text_fields.py`.
+
+**Spreadsheet usability.**
+- *Two horizontal scroll bars:* the sheet tabs sat on a row of their own
+  under the canvas's scroll bar; they now share the scroll bar's row, as
+  Excel's do.
+- *Surprise rows:* a page break added a page and removing it never took it
+  back, so every break left an extra page of rows behind; and on an empty
+  sheet a break cut off the rows after it. Now the page a break starts is
+  always there, removing the break takes back the page it made (pages added
+  by hand stay, markups go with their cells), each in one undo step.
+  `test_a_break_takes_back_the_page_it_made`.
+- *A #### cell's unit:* SMath's unit box now shows after the hashes, so the
+  unit that would make the value fit can be typed there (the formula bar's
+  unit box works as before). `test_a_hashes_cell_still_has_its_unit_box`.
+- *A name beside a function of the same name* (the user's question): as in
+  Excel, `SUM(` followed by a bracket is always the function and a bare `SUM`
+  is the defined name — or the equations' variable (`max` vs `MAX(1,2)`).
+  Names that read as cells are refused, now including Excel's R1C1 forms
+  (R1C1, RC, R2C, C3). `test_a_name_beside_a_function_of_the_same_name`.

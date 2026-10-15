@@ -3438,4 +3438,12 @@ class PropertiesPanel(QScrollArea):
             printable.toggled.connect(lambda on: self._apply(
                 lambda i: setattr(i, "printable", on), "Print flag"))
             boxes.append(printable)
+        if len(self._items) == 1 and hasattr(first, "auto_bookmark"):
+            # a text box as a bookmark, titled with its words, wherever it goes
+            mark = QCheckBox("Bookmark")
+            mark.setObjectName("markupBookmark")
+            mark.setToolTip("A bookmark titled with this text, that goes wherever the box goes")
+            mark.setChecked(bool(first.auto_bookmark))
+            mark.toggled.connect(lambda on: self.window.set_text_bookmark(first, on))
+            boxes.append(mark)
         form.addRow(_row(*boxes))

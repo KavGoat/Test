@@ -414,6 +414,9 @@ class _TextBase(MarkupItem):
         # same thing.
         self.written = text
         self.digits = 4
+        # A bookmark titled with these words, wherever the box is moved to
+        # (the user, 2026-10-15; kept in step by MainWindow.sync_text_bookmarks)
+        self.auto_bookmark = False
         self.doc.contentsChanged.connect(self._on_contents_changed)
 
     # -- content -----------------------------------------------------------
@@ -1183,7 +1186,9 @@ class _TextBase(MarkupItem):
         context.palette.setColor(QPalette.Text, self.style.text_qcolor())
         context.clip = QRectF(0, 0, rect.width() + 1, rect.height() + 1)
         painter.setPen(QPen(self.style.text_qcolor()))
-        self.doc.documentLayout().draw(painter, context)
+        # its fields — page, date, a variable — filled in (items/fields.py)
+        from .fields import shown_document
+        shown_document(self).documentLayout().draw(painter, context)
         painter.restore()
 
     # -- serialisation -----------------------------------------------------
@@ -1196,6 +1201,8 @@ class _TextBase(MarkupItem):
             "written": self.written,
             "digits": self.digits,
         })
+        if getattr(self, "auto_bookmark", False):
+            data["bookmark"] = True
         # Always, even when there are none. A call-out makes itself one leader
         # to start with, so a text box turned into a call-out — which is what
         # giving one a leader does — would keep that made-up leader as well as
@@ -1229,6 +1236,7 @@ class _TextBase(MarkupItem):
         else:
             self.doc.setPlainText(data.get("text", ""))
         self.digits = int(data.get("digits", 4))
+        self.auto_bookmark = bool(data.get("bookmark", False))
         self.written = data.get("written") or self.doc.toPlainText()
         self.apply_style()
 

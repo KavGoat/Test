@@ -20,7 +20,7 @@ def select(window, item):
 
 def test_the_menu_bar_is_revus_with_a_calculation_menu(window):
     titles = [a.text().replace("&", "") for a in window.menuBar().actions() if a.menu()]
-    assert titles == ["Revu", "File", "Edit", "View", "Document", "Batch", "Tools",
+    assert titles == ["CalcForge", "File", "Edit", "View", "Document", "Batch", "Tools",
                       "Calculation", "Window", "Help"]
     # nothing lost: every command that had a menu still has one
     in_menus = set()

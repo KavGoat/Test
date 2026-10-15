@@ -624,8 +624,8 @@ class TableItem(MarkupItem):
         """SMath's unit box after a quantity's result (the user's choice,
         2026-10-11): (kind, rect in this item) — "box", the black placeholder
         just after the text when no output unit is set, or "unit", the unit
-        part of the text when one is — or None when the cell holds no quantity
-        shown plainly (wrapped, turned or ####)."""
+        part of the text when one is, and the box after a #### too — or None
+        when the cell holds no quantity shown plainly (wrapped or turned)."""
         cell = self.sheet.cells.get((r, c)) if self.sheet is not None else None
         if cell is None or not isinstance(cell.value, Qty):
             return None
@@ -643,8 +643,14 @@ class TableItem(MarkupItem):
         indent = st.indent * 7.5
         inner = rect.adjusted(PAD + (indent if align == "left" else 0), 0,
                               -PAD - (indent if align == "right" else 0), 0)
-        if width > inner.width():
-            return None                                # shown as ####
+        hashes = width > inner.width()
+        if hashes:
+            # shown as ####: the box after the hashes all the same, so the
+            # unit that would make it fit can still be typed (the user,
+            # 2026-10-15); centred as the hashes are
+            n = max(1, int(inner.width() / max(metrics.horizontalAdvance("#"), 0.1)))
+            width = metrics.horizontalAdvance("#") * n
+            align = "center"
         x = inner.left() if align == "left" else (
             inner.right() - width if align == "right" else rect.center().x() - width / 2)
         v = {"top": Qt.AlignTop, "center": Qt.AlignVCenter}.get(st.v_align, Qt.AlignBottom)
@@ -655,7 +661,7 @@ class TableItem(MarkupItem):
         else:
             y = rect.bottom() - PAD / 2 - metrics.descent()
         px = metrics.height() / 1.15
-        if st.unit and text.endswith(st.unit):
+        if st.unit and text.endswith(st.unit) and not hashes:
             left = x + metrics.horizontalAdvance(text[:len(text) - len(st.unit)])
             return "unit", QRectF(left, y - metrics.ascent(), x + width - left,
                                   metrics.ascent() + metrics.descent())

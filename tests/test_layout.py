@@ -466,8 +466,8 @@ def test_preferences_and_shortcuts_live_under_the_revu_menu(window):
     """Bluebeam keeps Preferences and Keyboard Shortcuts in its Revu menu."""
     menus = {action.text().replace("&", ""): action.menu()
              for action in window.menuBar().actions()}
-    assert "Revu" in menus and "Settings" not in menus
-    labels = [action.text() for action in menus["Revu"].actions() if action.text()]
+    assert "CalcForge" in menus and "Revu" not in menus and "Settings" not in menus
+    labels = [action.text() for action in menus["CalcForge"].actions() if action.text()]
     assert labels == ["About CalcForge", "Preferences…", "Keyboard Shortcuts…", "Exit"]
     edit = [action.text() for action in menus["Edit"].actions()]
     help_labels = [action.text() for action in menus["Help"].actions()]

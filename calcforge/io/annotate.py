@@ -1117,7 +1117,9 @@ def _free_text(annotation, item, rect, place: "Placement") -> None:
         annotation["Shape"] = Name("Circle")
     written = ""
     try:
-        written = item.text()
+        # its fields filled in, as it is drawn (items/fields.py)
+        from ..items.fields import shown_text
+        written = shown_text(item) if hasattr(item, "doc") else item.text()
     except Exception:                                  # noqa: BLE001
         written = ""
     if written:
@@ -1195,6 +1197,8 @@ def _rich_text_of(item) -> tuple[str, str]:
     document = getattr(item, "doc", None)
     if document is None:
         return settings, ""
+    from ..items.fields import shown_document
+    document = shown_document(item)
     paragraphs = []
     block = document.begin()
     while block.isValid():

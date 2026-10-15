@@ -129,6 +129,11 @@ def paginate(sheet, setup, pages_wanted: int = 1) -> Paging:
     last_needed = data[2] if data is not None else 0
     if area:
         last_needed = max(last_needed, area[2])
+    elif breaks:
+        # the page a manual break starts is there even with nothing on it
+        # yet, as in Excel's Page Layout view: the rows after the break are
+        # somewhere to type, not cut off (the user, 2026-10-15)
+        last_needed = max(last_needed, max(breaks))
     first_row = area[0] if area else 0
 
     def slice_rows(scale: float, wanted: int) -> list:

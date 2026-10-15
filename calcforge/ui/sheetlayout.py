@@ -29,11 +29,65 @@ def change_options(window, item, label: str, **changes) -> None:
         return
     view = window.view
     run = getattr(item, "run_frames", None)
+    spare = _spare_pages(item) if run is not None else 0
     view.begin_snapshot(run() if run is not None else view.involved_frames(item))
     sheet.workbook.set_page_options(sheet, **changes)
     if run is not None:
         item.relayout()
+        if _fit_run(window, item, spare, label):
+            return
     view.commit_snapshot(label)
+
+
+def _spare_pages(item) -> int:
+    """Pages the run has beyond what its cells and breaks need — ones the
+    user added, kept whatever the layout does."""
+    from ..sheet.pagination import pages_needed
+    frames = item.run_frames()
+    if not frames:
+        return 0
+    return max(0, len(frames) - pages_needed(item.sheet, frames[0].page.setup))
+
+
+def _fit_run(window, item, spare: int, label: str) -> bool:
+    """The run's pages as many as its cells and breaks need, plus the ones
+    the user added: a break removed takes back the page it made (the user,
+    2026-10-15: "new surprise rows get added"), and a page added by hand
+    stays an empty page at the end. Only empty pages at the run's end go;
+    all in the same undo step as the change. True when pages changed."""
+    from ..items.sheetpage import SheetRunItem
+    from ..sheet.pagination import pages_needed
+    from . import sheetpages
+    frames = item.run_frames()
+    if not frames or not hasattr(window, "_structure_snapshot"):
+        return False
+    target = max(1, pages_needed(item.sheet, frames[0].page.setup) + spare)
+    going = []
+    for frame in reversed(frames[target:]):
+        if any(not isinstance(m, SheetRunItem) for m in frame.markups()):
+            break                               # something drawn on it: it stays
+        going.append(frame)
+    adding = max(0, target - len(frames))
+    if not going and not adding:
+        return False
+    view = window.view
+    before = window._structure_snapshot()
+    by_uid = {entry["uid"]: entry for entry in before["pages"]}
+    for frame, items in (view._snapshot or []):
+        entry = by_uid.get(frame.page.uid)
+        if entry is not None:
+            entry["items"] = items
+    view._snapshot = []
+    if adding:
+        sheetpages.add_run_pages(window, [(item, adding)])
+    else:
+        document = window.document
+        for frame in going:
+            document.remove_page(document.index_of(frame.page))
+        window.rebuild_scenes()
+    window.record_structure_change(before, label)
+    view.documentEdited.emit()
+    return True
 
 
 def parse_area(text: str) -> Optional[list]:

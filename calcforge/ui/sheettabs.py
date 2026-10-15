@@ -23,8 +23,11 @@ class SheetTabs(QWidget):
         self.setObjectName("sheetTabs")
         self.entries: list = []                 # (run uid, name)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 0, 4, 0)
+        layout.setContentsMargins(2, 0, 4, 0)
         layout.setSpacing(2)
+        # beside the scroll bar, at most half of it (the rest scrolls)
+        from PySide6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.add = QToolButton()
         self.add.setText("+")
         self.add.setToolTip("New sheet (a spreadsheet page at the end)")
@@ -78,6 +81,21 @@ class SheetTabs(QWidget):
                 self.bar.setTabToolTip(index, f"Spreadsheet {name}")
             self.bar.blockSignals(False)
         self.setVisible(bool(found))
+        # Excel's row: the tabs on the left of the horizontal scroll bar, one
+        # bar — the tabs on a row of their own under the canvas's scroll bar
+        # read as a second scroll bar (the user, 2026-10-15). The bar is kept
+        # showing while there are tabs, or they would go with it.
+        view = getattr(self.window, "view", None)
+        if view is not None:
+            view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn if found
+                                              else Qt.ScrollBarAsNeeded)
+            scroll = view.horizontalScrollBar()
+            name = "sheetRowScroll" if found else ""
+            if scroll.objectName() != name:
+                scroll.setObjectName(name)       # the row as tall as the tabs
+                scroll.style().unpolish(scroll)
+                scroll.style().polish(scroll)
+                scroll.updateGeometry()
         self.follow()
 
     def follow(self) -> None:

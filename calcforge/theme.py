@@ -251,6 +251,10 @@ QScrollBar::handle:horizontal {{
 }}
 QScrollBar::handle:horizontal:hover {{ background: {scroll_hover}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
+/* the canvas's scroll bar sharing its row with the sheet tabs (Excel's) */
+QScrollBar#sheetRowScroll:horizontal {{ height: 24px; }}
+QScrollBar#sheetRowScroll::handle:horizontal {{ margin: 6px 2px; }}
+#sheetTabs QTabBar::tab {{ padding: 3px 10px; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 
 QSplitter::handle {{ background: {chrome_edge}; }}

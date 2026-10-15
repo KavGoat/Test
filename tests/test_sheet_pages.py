@@ -335,6 +335,56 @@ def test_manual_breaks_and_a_dragged_automatic_break(w):
     assert options(run.sheet)["breaks"] == []
 
 
+def test_a_break_takes_back_the_page_it_made(w):
+    """No surprise rows (the user, 2026-10-15): a break puts the rows after
+    it on the next page — there even on an empty sheet — and removing it
+    takes back the page it added, in one undo step; a page the user added
+    stays."""
+    run = sheet_page(w)
+    assert len(w.document.pages) == 2
+    sheetlayout.insert_break(w, run, 10)
+    pump()
+    (run,) = runs(w)
+    assert run.paging.slices == [(0, 9), (10, 57)], "the rows after the break: the next page"
+    assert len(w.document.pages) == 3
+    sheetlayout.remove_break(w, run, 10)
+    pump()
+    (run,) = runs(w)
+    assert run.paging.slices == [(0, 47)] and len(w.document.pages) == 2
+    w.undo_stack.undo()
+    pump()
+    (run,) = runs(w)
+    assert options(run.sheet)["breaks"] == [10] and len(w.document.pages) == 3
+    w.undo_stack.redo()
+    pump()
+    assert len(w.document.pages) == 2
+    # one page added by hand: kept through a break and its removal
+    w.insert_sheet_page(1)
+    pump()
+    (run,) = runs(w)
+    sheetlayout.insert_break(w, run, 10)
+    pump()
+    (run,) = runs(w)
+    sheetlayout.remove_break(w, run, 10)
+    pump()
+    (run,) = runs(w)
+    assert run.paging.pages == 2 and len(w.document.pages) == 3
+    # a page with a markup on it is never taken
+    sheetlayout.insert_break(w, run, 60)
+    pump()
+    (run,) = runs(w)
+    frames = run.run_frames()
+    assert len(frames) == 4, "the break's page, then the empty one added by hand"
+    box = RectItem("rect", QRectF(50, 50, 40, 40))
+    frames[2].add_markup(box)
+    sheetlayout.remove_break(w, run, 60)
+    pump()
+    (run,) = runs(w)
+    frames = run.run_frames()
+    assert len(frames) == 2, "the markup went back up with its cells; no empty page left"
+    assert sum(isinstance(m, RectItem) for f in frames for m in f.markups()) == 1
+
+
 def test_page_layout_dialog_sets_the_options(w):
     run = sheet_page(w)
     w.interactive_prompts = False

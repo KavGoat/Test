@@ -1714,7 +1714,9 @@ def defined_name_problem(name: str) -> Optional[str]:
         return "A name can't be empty."
     if not _re.match(r"^[A-Za-z_\\\u00c0-\uffff][\w.\u00c0-\uffff]*$", name):
         return "A name starts with a letter or _ and has no spaces or symbols."
-    if is_cell_name(name) or name.upper() in ("R", "C", "TRUE", "FALSE"):
+    if is_cell_name(name) or name.upper() in ("TRUE", "FALSE") or \
+            _re.match(r"^(?:R\d*C\d*|R\d*|C\d*)$", name, _re.I):
+        # R1C1, RC, R2C, C3 … are cells in Excel's other way of writing them
         return f"{name} looks like a cell; choose another name."
     return None
 

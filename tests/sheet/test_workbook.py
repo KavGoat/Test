@@ -314,3 +314,26 @@ def test_a_big_sheet_edits_quickly(wb):
     put(wb, s, A10="1000")
     assert time.perf_counter() - start < 0.1
     assert get(s, "C10") == pytest.approx((1000 * 2 + 1) / 3)
+
+
+def test_a_name_beside_a_function_of_the_same_name(wb):
+    """Excel's rule (the user asked, 2026-10-15): followed by ( it is always
+    the function, on its own it is the name — a defined name or one of the
+    document's variables. Names that read as cells, A1 or R1C1, are refused."""
+    from calcforge.calc.engine.units import Quantity
+
+    s = wb.add_sheet()
+    for name in ("SUM", "PI", "max"):
+        wb.define_name(name, "5")
+    put(wb, s, A1="=SUM(1,2)", A2="=SUM+1", A3="=PI()", A4="=PI", A5="=MAX(1,7)*max")
+    assert get(s, "A1") == 3 and get(s, "A2") == 6 and get(s, "A4") == 5
+    assert text(s, "A3") == "3.141592654" and get(s, "A5") == 35
+    for bad in ("A1", "R1C1", "RC", "R2C", "rc3", "R", "C", "C12", "TRUE"):
+        with pytest.raises(ValueError):
+            wb.define_name(bad, "1")
+    wb.define_name("RCX", "1")                  # not a cell either way
+    other = Workbook()
+    t = other.add_sheet()
+    other.outside = lambda _sheet, name: {"sin": Quantity(9.0, (0,) * 11)}[name]
+    put(other, t, A1="=sin", A2="=SIN(0)")
+    assert get(t, "A1") == 9 and get(t, "A2") == 0

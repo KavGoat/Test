@@ -294,6 +294,8 @@ class SplitDocumentWindow(QSplitter):
                 dock.hide()
             pane.statusBar().hide()
             pane.menuBar().setNativeMenuBar(False)
+            if getattr(pane, "window_buttons", None) is not None:
+                pane.window_buttons.hide()        # the split window has its own frame
             pane.setParent(self, Qt.Widget)
             self.addWidget(pane)
             # Window shortcuts would be ambiguous between the two editors.
@@ -309,6 +311,11 @@ class SplitDocumentWindow(QSplitter):
         for offset, pane in enumerate(self.panes):
             pane._split_host = None
             pane.setParent(None, Qt.Window)
+            from . import titlebar
+            if titlebar.OWN_TITLE_BAR:
+                pane.setWindowFlag(Qt.FramelessWindowHint, True)
+            if getattr(pane, "window_buttons", None) is not None:
+                pane.window_buttons.show()
             state, status_visible = pane._before_split
             pane.restoreState(state)
             pane.statusBar().setVisible(status_visible)
@@ -520,6 +527,8 @@ class MainWindow(QMainWindow):
         self._build_docks()
         self._build_menus()
         self._build_status()
+        from . import titlebar
+        titlebar.install(self)                    # one row: icon, menus, window buttons
         self._connect()
         self.apply_shortcuts()
         from . import preferences as _prefs
@@ -615,7 +624,8 @@ class MainWindow(QMainWindow):
         canvas_layout.setSpacing(0)
         canvas_layout.addWidget(self.view, 1)
         self.sheet_tabs = SheetTabs(self)
-        canvas_layout.addWidget(self.sheet_tabs)
+        # Excel's place for them: left of the horizontal scroll bar, one row
+        self.view.addScrollBarWidget(self.sheet_tabs, Qt.AlignLeft)
         self.bottom_split.addWidget(canvas)
         self.bottom_split.setCollapsible(0, False)
         self.bottom_split.splitterMoved.connect(self._markups_list_moved)
@@ -1752,8 +1762,8 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
         self._build_search()
 
-        revu_menu = bar.addMenu("&Revu")
-        revu_menu.setObjectName("menuRevu")
+        revu_menu = bar.addMenu("CalcFo&rge")
+        revu_menu.setObjectName("menuApp")
         for action in (self.act_about, None, self.act_preferences, self.act_shortcuts,
                        None, self.act_quit):
             revu_menu.addSeparator() if action is None else revu_menu.addAction(action)
@@ -2786,6 +2796,12 @@ class MainWindow(QMainWindow):
         if answer == QMessageBox.Save:
             return self.save_document()
         return True
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange:
+            from . import titlebar
+            titlebar.window_state_changed(self)
 
     def keyPressEvent(self, event) -> None:
         """Escape works wherever the keyboard happens to be.
@@ -7169,6 +7185,7 @@ class MainWindow(QMainWindow):
         if timer is not None:
             timer.stop()
         self.markups_panel.rebuild(self.document)
+        self.sync_text_bookmarks()
         self.bookmarks_panel.rebuild(self.document)
         self.variables_panel.watch(self.document)
         self.sheet_tabs.refresh()
@@ -7176,6 +7193,104 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # bookmarks
     # ==================================================================
+    # -- text boxes as bookmarks, fields in text boxes (the user, 2026-10-15) --
+    def _text_box_menu(self, menu, item) -> None:
+        mark = menu.addAction("Bookmark")
+        mark.setCheckable(True)
+        mark.setChecked(bool(getattr(item, "auto_bookmark", False)))
+        mark.setToolTip("A bookmark titled with this text, that goes wherever the box goes")
+        mark.toggled.connect(lambda on: self.set_text_bookmark(item, on))
+        fields = menu.addMenu("Insert Field")
+        fields.setObjectName("menuInsertField")
+        variables = fields.addMenu("Variable")
+        names = self.variable_names()
+        for name in names[:60]:
+            variables.addAction(name, lambda n=name: self.insert_text_field(item, "{=" + n + "}"))
+        if not names:
+            nothing = variables.addAction("No variables yet")
+            nothing.setEnabled(False)
+        fields.addSeparator()
+        from .dialogs import FIELD_CHOICES
+        for label, token in FIELD_CHOICES:
+            fields.addAction(label, lambda t=token: self.insert_text_field(item, t))
+
+    def variable_names(self) -> list:
+        from .variablespanel import variable_rows
+        seen: list = []
+        try:
+            rows = variable_rows(self.document)
+        except Exception:  # noqa: BLE001
+            return []
+        for row in rows:
+            if row.value != "function" and row.name not in seen:
+                seen.append(row.name)
+        return seen
+
+    def insert_text_field(self, item, token: str) -> None:
+        """A field at the caret of a box being typed in, or at the end of one
+        that is not; one undo step."""
+        from PySide6.QtGui import QTextCursor
+        editor = getattr(item, "_editor", None)
+        if getattr(item, "_editing", False) and editor is not None:
+            editor.textCursor().insertText(token)
+            return
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        cursor = QTextCursor(item.doc)
+        cursor.movePosition(QTextCursor.End)
+        text = item.doc.toPlainText()
+        cursor.insertText(("" if not text or text.endswith((" ", "\n")) else " ") + token)
+        item.written = item.doc.toPlainText()
+        item.touch()
+        if hasattr(item, "apply_style"):
+            item.apply_style()
+        item.update()
+        self.view.commit_snapshot("Insert field")
+
+    def set_text_bookmark(self, item, on: bool) -> None:
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        item.auto_bookmark = bool(on)
+        item.touch()
+        self.view.commit_snapshot("Bookmark" if on else "Remove bookmark")
+        self.sync_text_bookmarks()
+        self.bookmarks_panel.rebuild(self.document)
+
+    def sync_text_bookmarks(self) -> bool:
+        """Each text box marked as a bookmark has one: its words for a title,
+        its page — whichever it has been moved to — and its place on it. A
+        box deleted takes its bookmark with it. True if anything changed."""
+        from ..core.document import Bookmark
+        from ..items.fields import shown_text
+        from ..items.text import _TextBase
+        if self.scene is None:
+            return False
+        boxes = {}
+        for frame in self.scene.frames:
+            for item in frame.markups():
+                if isinstance(item, _TextBase) and getattr(item, "auto_bookmark", False):
+                    boxes[item.uid] = (item, frame)
+        changed = False
+        kept = []
+        for mark in self.document.bookmarks:
+            if mark.markup and mark.markup not in boxes:
+                changed = True                       # its box has gone
+                continue
+            kept.append(mark)
+        by_box = {mark.markup: mark for mark in kept if mark.markup}
+        for uid, (item, frame) in boxes.items():
+            words = shown_text(item).strip().splitlines()
+            title = (words[0].strip() if words else "")[:80] or "Text"
+            place = (title, frame.page.uid, round(float(item.pos().y()), 2))
+            mark = by_box.get(uid)
+            if mark is None:
+                kept.append(Bookmark(*place, markup=uid))
+                changed = True
+            elif (mark.title, mark.page_uid, round(mark.y, 2)) != place:
+                mark.title, mark.page_uid, mark.y = place
+                changed = True
+        if changed:
+            self.document.bookmarks = kept
+        return changed
+
     def add_bookmark_here(self) -> None:
         """Bookmark the page and place the reader is looking at."""
         # Ctrl+B belongs to the words wherever there are words: a run selected
@@ -8298,6 +8413,7 @@ class MainWindow(QMainWindow):
                 menu.addAction("Edit Link…", lambda: self.edit_link(item))
             if isinstance(item, _TextBase):
                 menu.addAction("Edit Text", lambda: self.view.begin_item_edit(item))
+                self._text_box_menu(menu, item)
             several = [m for m in self.scene.selectedItems()
                        if isinstance(m, MarkupItem) and getattr(m, "style", None) is not None]
             if len(several) > 1:

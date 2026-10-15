@@ -259,6 +259,7 @@ class Bookmark:
     page_uid: str
     y: float = 0.0
     level: int = 0
+    markup: str = ""            # a text box's uid: it is that box's bookmark
 
     def to_dict(self) -> dict:
         return asdict(self)
