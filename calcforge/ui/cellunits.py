@@ -33,6 +33,67 @@ _IN_FORMULA = re.compile(
     rf"(?:(?<![\w.$]){_NUMBER}\s*|')({_UNIT_CHARS}(?:\s*[*/·^]\s*(?:{_UNIT_CHARS}|-?[\d.]+))*)")
 
 
+# What an engineer calls a quantity of each dimension (m, kg, s, A, K... as
+# calc/engine/unitdata.py BASE orders them), for saying why an output unit
+# was refused.
+_KINDS = {
+    (1,): "a length", (2,): "an area", (3,): "a volume", (4,): "a second moment of area",
+    (0, 1): "a mass", (0, 0, 1): "a time", (0, 0, 0, 1): "a current",
+    (0, 0, 0, 0, 1): "a temperature", (0, 0, -1): "a frequency",
+    (1, 1, -2): "a force", (2, 1, -2): "a moment", (-1, 1, -2): "a pressure",
+    (0, 1, -2): "a force per length", (-2, 1, -2): "a weight per volume",
+    (2, 1, -3): "a power", (1, 0, -1): "a speed", (1, 0, -2): "an acceleration",
+    (-3, 1): "a density", (-1, 1): "a mass per length", (3, 0, -1): "a flow rate",
+}
+
+
+def _kind(dims) -> str:
+    dims = tuple(dims)
+    while dims and dims[-1] == 0:
+        dims = dims[:-1]
+    return _KINDS.get(dims, "")
+
+
+def output_unit_refusal(text: str, value) -> Optional[str]:
+    """Why *text* can't be the unit a cell holding *value* is shown in, or
+    None when it can (the user, 2026-10-15: kN on a cell holding 12.5 kN·m
+    was kept without a word, and showed up later on a force typed there)."""
+    from ..sheet.numfmt import format_value, unit_display
+    from ..sheet.values import Qty, UnitTextError, unit_parts
+    try:
+        _f, dims, _o = unit_parts(text)
+    except UnitTextError:
+        # Nm: two units written together, which is no unit; say how to write it
+        for k in range(1, len(text)):
+            a, b = text[:k], text[k:]
+            try:
+                unit_parts(a)
+                unit_parts(b)
+            except UnitTextError:
+                continue
+            return (f"“{text}” is not a unit — for {a} times {b} write {a}*{b} "
+                    f"(shown {a}·{b})")
+        return f"“{text}” is not a unit"
+    if not isinstance(value, Qty) or tuple(dims) == tuple(value.dims):
+        return None
+    mine = unit_display(text)
+    what = (_kind(dims) or "another kind of quantity") if any(dims) else "a plain number"
+    held = (_kind(value.dims) or "a quantity") if any(value.dims) else "a plain number"
+    shown = format_value(value).unit
+    if shown:
+        held += f" ({unit_display(shown)})"
+    return f"{mine} is {what}; this cell holds {held}"
+
+
+def say_refusal(view, why: str, box=None) -> None:
+    """An output unit refused: why, on the status bar — and under the box it
+    was typed in, where the eye is (QA saw a refusal go by unsaid)."""
+    view.statusMessage.emit(why)
+    if box is not None:
+        from PySide6.QtWidgets import QToolTip
+        QToolTip.showText(box.mapToGlobal(QPoint(0, box.height())), why, view)
+
+
 def _is_entry(text: str) -> bool:
     return not text.startswith("=") and not text.startswith("'")
 
@@ -412,13 +473,13 @@ class ResultUnit(QLineEdit):
         item = tables.item
         if item is None or item.uid != uid:
             return
-        from ..sheet.values import UnitTextError, unit_parts
         st = item.sheet.workbook.style_of(item.sheet, *cell)
         if text:
-            try:
-                unit_parts(text)
-            except UnitTextError:
-                tables.view.statusMessage.emit(f"“{text}” is not a unit")
+            # a unit of another kind than the value is refused, and why is
+            # said, as is why a non-unit was (the user, 2026-10-15)
+            why = output_unit_refusal(text, item.sheet.workbook.value(item.sheet, *cell))
+            if why is not None:
+                say_refusal(tables.view, why, self)
                 return
         if (st.unit or "") == text:
             return

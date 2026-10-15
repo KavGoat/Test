@@ -12,7 +12,6 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QComboBox, QFontComboBox, QLabel, QMenu, QToolButton)
 
 from ..sheet.numfmt import is_date_format
-from ..sheet.values import UnitTextError, unit_parts
 from .widgets import ColorButton
 
 NUMBER_FORMATS = [("General", None), ("Number", "0.00"), ("Currency", "$#,##0.00"),
@@ -230,15 +229,41 @@ class TableControls:
         if self._syncing:
             return
         text = self.unit.text().strip()
-        if text:
-            try:
-                unit_parts(text)
-            except UnitTextError:
-                self.window.view.statusMessage.emit(f"“{text}” is not a unit")
-                return
         st = self._style()
+        if text:
+            # as the unit box on the cell: a unit of another kind than the
+            # selected cells' values is refused, and why is said (the user,
+            # 2026-10-15); the box goes back to the unit they have
+            why = self._unit_refusal(text)
+            if why is not None:
+                from .cellunits import say_refusal
+                say_refusal(self.window.view, why, self.unit)
+                self._syncing = True
+                try:
+                    self.unit.setText((st.unit or "") if st is not None else "")
+                finally:
+                    self._syncing = False
+                return
         if st is not None and (st.unit or "") != text:
             self._set(unit=text or None)
+
+    def _unit_refusal(self, text: str):
+        """Why *text* can't be the output unit of the selected cells (the
+        first quantity of another kind among them), or None."""
+        from .cellunits import output_unit_refusal
+        why = output_unit_refusal(text, None)
+        if why is not None:
+            return why                     # not a unit at all
+        tables = self._tables()
+        if not tables.is_open():
+            return None
+        sheet = tables.item.sheet
+        t, l, b, r = tables.selection()
+        for row, col in sheet.positions_in(t, l, b, r):
+            why = output_unit_refusal(text, sheet.workbook.value(sheet, row, col))
+            if why is not None:
+                return why
+        return None
 
     def _painter(self, on: bool) -> None:
         tables = self._tables()

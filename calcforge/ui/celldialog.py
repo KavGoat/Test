@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
 
 from ..sheet.numfmt import format_value
 from ..sheet.style import Border
-from ..sheet.values import UnitTextError, unit_parts
 
 CATEGORIES = ["General", "Number", "Currency", "Accounting", "Date", "Time", "Percentage",
               "Fraction", "Scientific", "Text", "Custom"]
@@ -207,12 +206,16 @@ class FormatCellsDialog(QDialog):
 
     def _update_sample(self) -> None:
         unit = self.unit.text().strip() or None
+        self.unit.setStyleSheet("")
+        self.unit.setToolTip("")
         if unit:
-            try:
-                unit_parts(unit)
-                self.unit.setStyleSheet("")
-            except UnitTextError:
+            # red, with why, for a non-unit or one of another kind than the
+            # cell's value, as the unit boxes refuse them (the user, 2026-10-15)
+            from .cellunits import output_unit_refusal
+            why = output_unit_refusal(unit, self.value)
+            if why is not None:
                 self.unit.setStyleSheet("color:#c92a2a")
+                self.unit.setToolTip(why)
                 unit = None
         code = self.custom.text() or None
         try:
@@ -350,9 +353,8 @@ class FormatCellsDialog(QDialog):
         st = self.start
         unit = self.unit.text().strip() or None
         if unit:
-            try:
-                unit_parts(unit)
-            except UnitTextError:
+            from .cellunits import output_unit_refusal
+            if output_unit_refusal(unit, self.value) is not None:
                 unit = st.unit
         code = self.custom.text().strip() or "General"
         wanted = {

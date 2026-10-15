@@ -262,9 +262,45 @@ def default_unit(dims: tuple) -> str:
     kg/m...), as text; "" when there is none."""
     if not any(dims):
         return ""
-    from calcforge.calc.engine.display import _unit_for, unit_text
+    from calcforge.calc.engine.display import _unit_for
 
-    return unit_text(_unit_for(tuple(dims))).replace(" ", "·")
+    return _written(_unit_for(tuple(dims)))
+
+
+def equation_unit(dims: tuple, magnitude: float, engineering: bool = True) -> str:
+    """The unit an equation shows a result of this size in: SMath's unit
+    for the dimension with CalcForge's engineering prefix (35000 J is
+    35 kN·m, 5000 Pa is 5 kPa), as the result of M= or s= shows it; ""
+    when there is none."""
+    if not any(dims):
+        return ""
+    from calcforge.calc.engine.display import _unit_for, engineering_unit
+
+    unit = _unit_for(tuple(dims))
+    if engineering:
+        unit, _ = engineering_unit(unit, abs(magnitude))
+    return _written(unit)
+
+
+def _written(u) -> str:
+    """A display unit (calc/engine/display.py's DUnit) as a cell writes it:
+    kN·m, kN/m^2, N/(m·s), s^-1. Each part of a denominator goes inside
+    one bracket; written with spaces, as the equations' plain text has it
+    (kg/m s), it would read back as kg/m times s."""
+    if u is None:
+        return ""
+
+    def part(name, p):
+        return name if p == 1 else f"{name}^{p:g}"
+
+    num = [part(n, p) for n, p in u.num]
+    den = [part(n, p) for n, p in u.den]
+    if not num:
+        return "·".join(part(n, -p) for n, p in u.den)
+    text = "·".join(num)
+    if den:
+        text += "/" + (den[0] if len(den) == 1 else "(" + "·".join(den) + ")")
+    return text
 
 
 def with_unit(x: float, unit: str):
