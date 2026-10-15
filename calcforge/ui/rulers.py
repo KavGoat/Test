@@ -35,8 +35,10 @@ def _theme() -> dict:
     app = QApplication.instance()
     dark = app is not None and app.palette().window().color().lightness() < 128
     if dark:
-        return {"bg": "#232427", "ink": "#c7cbd1", "page": "#3a3d42", "edge": "#45474b",
-                "selected": "#2f5d8a"}
+        # Revu's dark rulers (the user's Revu, 2026-10-15): the raised grey
+        # of its headers, white figures, its deep blue for the selection
+        return {"bg": "#3e3e3e", "ink": "#e6e6e6", "page": "#4e4e4e", "edge": "#1c1c1c",
+                "selected": "#175884"}
     return {"bg": "#f3f4f6", "ink": "#3b3f45", "page": "#ffffff", "edge": "#c3c7cc",
             "selected": "#bcd7f5"}
 
@@ -206,7 +208,12 @@ class Rulers:
         self.refresh()
 
     def refresh(self) -> None:
-        if self.on:
+        from shiboken6 import isValid
+        if self.on and isValid(self.corner):
+            # the corner too: the theme may have changed since it was placed
+            ground = f"background: {_theme()['bg']};"
+            if self.corner.styleSheet() != ground:
+                self.corner.setStyleSheet(ground)
             self.top.update()
             self.left.update()
 

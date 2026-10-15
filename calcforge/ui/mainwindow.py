@@ -1353,6 +1353,11 @@ class MainWindow(QMainWindow):
         self.default_button.clicked.connect(self.set_selected_as_default)
         self._default_action = style_bar.addWidget(self.default_button)
         self.style_bar = style_bar
+        # Revu's numbers sit just after their arrows (the arrows are drawn
+        # before the number on a toolbar: theme.py)
+        from PySide6.QtWidgets import QAbstractSpinBox
+        for spin in style_bar.findChildren(QAbstractSpinBox):
+            spin.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         # a table's own controls, on the same bar while it is open
         from .tablebar import TableControls
         self.table_controls = TableControls(self)
@@ -8232,6 +8237,9 @@ class MainWindow(QMainWindow):
             self.scene.set_canvas_colour(CANVAS[theme])
         self.refresh_icons()
         self._refresh_all_scenes()
+        rulers = getattr(self.view, "rulers", None)
+        if rulers is not None:
+            rulers.refresh()                 # their ground and corner follow the theme
         self.status_hint.setText("Dark theme" if dark else "Light theme")
 
     def _refresh_all_scenes(self) -> None:

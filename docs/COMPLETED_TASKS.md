@@ -508,3 +508,25 @@ whole group however it was picked.
 
 **Dark mode:** the line-style and hatch lists, open and closed, on the
 Properties toolbar and in the Properties panel, checked on screen.
+
+**Revu's look, from the user's own Revu** (their 2026-10-15 screenshots; the
+user: the colours, the Markup | Calc switch, the toolbars and the panels
+didn't look like Bluebeam). The dark theme had copied the Revu 21 manual's
+near-black (#1e2022, a black menu bar); the user's Revu is a softer
+charcoal, measured from their screenshots and now ours: bars and panels
+#2e2e2e, menus, list headers and rulers #3e3e3e, the open document's tab
+#4e4e4e, input outlines #565656, a picked tool, row, menu entry or rail
+button filled with Revu's deep blue #175884, its bright blue #0083db for
+focus, light-grey scroll handles, and a grey desk behind the page (#424242,
+not near-black). Toolbar tools show as picked by that blue fill, not an
+underline; tabs are flat blocks with the open one lighter; panel titles are
+Revu's bold white; icons are white line work with an amber accent (the PDF
+icons are no longer red). Markup | Calc is two flat square buttons like
+Revu's own toggles instead of a bright pill. On the Properties toolbar the
+spin arrows sit before the number and drop-downs carry Revu's thin chevron.
+The rulers' corner follows a theme change (it stayed dark in light mode).
+
+**Right-click a row ▸ Insert Page Break "deleted all the rows after"** (the
+user's answer): on a sheet with one page the break cut the run off at the
+break, so the rows after it were nowhere. The page a break starts is now
+always there, and removing the break takes it back (above).

@@ -23,9 +23,9 @@ NOTE_RULE = "#8a6d0b"
 MARKER = "#c2255c"
 FAINT = "#9aa3ad"
 
-_THEME_INK = {"light": "#2c3340", "dark": "#c7cedb"}
-_THEME_ACCENT = {"light": "#1971c2", "dark": "#57a5ec"}
-_THEME_WARM = {"light": "#e8590c", "dark": "#f0854a"}
+_THEME_INK = {"light": "#2c3340", "dark": "#f2f2f2"}
+_THEME_ACCENT = {"light": "#1971c2", "dark": "#3fa2e6"}
+_THEME_WARM = {"light": "#e8590c", "dark": "#f2a93b"}
 _THEME_DANGER = {"light": "#c92a2a", "dark": "#ff8787"}
 _THEME_NOTE = {"light": "#ffe066", "dark": "#ffd43b"}
 _THEME_NOTE_EDGE = {"light": "#b8860b", "dark": "#e8b923"}
@@ -581,9 +581,10 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         for offset in range(4):
             painter.drawLine(QPointF(8, 7 + offset * 3.2), QPointF(16, 7 + offset * 3.2))
     elif name == "pdf":
-        _pen(painter, DANGER, 1.4)
+        # as Revu's line icons: the sheet in the icons' ink, its word in the warm accent
+        _pen(painter, INK, 1.4)
         painter.drawRect(QRectF(5, 3, 14, 18))
-        _glyph(painter, "PDF", DANGER, 6, True, QRectF(5, 8, 14, 10))
+        _glyph(painter, "PDF", WARM, 6, True, QRectF(5, 8, 14, 10))
     elif name == "print":
         _pen(painter, INK, 1.4)
         painter.drawRect(QRectF(4, 9, 16, 7))

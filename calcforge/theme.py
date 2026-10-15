@@ -35,30 +35,41 @@ _LIGHT_TOKENS = {
     "scroll_hover": "#a9abad",
     "menu": "#ffffff",
     "menubar": "#f0f0f0",
+    "raised": "#e6e6e6",
+    "tab_on": "#ffffff",
+    "picked": "#cce4f7",
+    "picked_ink": "#1e2022",
 }
 
 _DARK_TOKENS = {
-    # Bluebeam Revu 21's dark look, from its manual's screenshots: one
-    # charcoal (#1e2022) for bars, panels and fields, fields outlined in
-    # grey, menus a shade lighter with a blue-grey hover, Revu's blue
-    "chrome": "#1e2022",
-    "chrome_edge": "#3c3e40",
-    "surface": "#1e2022",
-    "field": "#1e2022",
-    "field_edge": "#5a5c5e",
-    "row_alt": "#232527",
+    # Bluebeam Revu's dark look as the user's own Revu shows it (their
+    # screenshots, 2026-10-15): charcoal bars and panels (#2e2e2e), menus,
+    # list headers and rulers a step lighter (#3e3e3e), the open document's
+    # tab lighter again (#4e4e4e), dark rules between bands, fields outlined
+    # in grey, a picked tool or row filled with Revu's deep blue (#175884)
+    # and its bright blue (#0083db) for focus and lines
+    "chrome": "#2e2e2e",
+    "chrome_edge": "#1c1c1c",
+    "surface": "#2e2e2e",
+    "field": "#2e2e2e",
+    "field_edge": "#565656",
+    "row_alt": "#333333",
+    "raised": "#3e3e3e",
+    "tab_on": "#4e4e4e",
     "ink": "#ffffff",
-    "ink_soft": "#c9cacb",
-    "ink_faint": "#8a8c8e",
-    "accent": "#1e77bf",
-    "accent_soft": "#244053",
-    "accent_edge": "#1e77bf",
-    "accent_deep": "#0f527e",
+    "ink_soft": "#d9d9d9",
+    "ink_faint": "#8a8a8a",
+    "accent": "#0083db",
+    "accent_soft": "#454545",
+    "accent_edge": "#0083db",
+    "accent_deep": "#175884",
+    "picked": "#175884",
+    "picked_ink": "#ffffff",
     "danger": "#e5726a",
-    "scroll": "#3c3e40",
-    "scroll_hover": "#5a5c5e",
-    "menu": "#2d2f31",
-    "menubar": "#000000",
+    "scroll": "#858585",
+    "scroll_hover": "#a6a6a6",
+    "menu": "#3e3e3e",
+    "menubar": "#2e2e2e",
 }
 
 TEMPLATE = """
@@ -77,23 +88,17 @@ QToolBar QToolButton {{
 }}
 QToolBar QToolButton:hover {{ background: {accent_soft}; }}
 QToolBar QToolButton:pressed {{ background: {accent_deep}; }}
-QToolBar QToolButton:checked {{
-    background: {accent_soft}; border-bottom: 2px solid {accent};
-}}
+QToolBar QToolButton:checked {{ background: {picked}; color: {picked_ink}; }}
 QToolBar QToolButton::menu-indicator {{ width: 0; }}
-/* Markup | Calc: one pill, the mode on filled with the accent */
+/* Markup | Calc: two plain buttons as Revu's own toggles (the status bar's
+   page modes): flat, square, the one on filled with Revu's deep blue */
 QWidget#modeSwitch QToolButton {{
-    border: 1px solid {chrome_edge}; border-radius: 0; margin: 0;
-    padding: 4px 12px; font-weight: 600; background: {surface};
+    border: 1px solid {field_edge}; border-radius: 0; margin: 0;
+    padding: 3px 12px; background: transparent; color: {ink_soft};
 }}
-QWidget#modeSwitch QToolButton#modeMarkup {{
-    border-top-left-radius: 11px; border-bottom-left-radius: 11px; border-right: 0;
-}}
-QWidget#modeSwitch QToolButton#modeCalc {{
-    border-top-right-radius: 11px; border-bottom-right-radius: 11px;
-}}
+QWidget#modeSwitch QToolButton#modeMarkup {{ border-right: 0; }}
 QWidget#modeSwitch QToolButton:checked {{
-    background: {accent}; color: white; border-color: {accent};
+    background: {picked}; color: {picked_ink}; border-color: {field_edge};
 }}
 QWidget#modeSwitch QToolButton:hover:!checked {{ background: {accent_soft}; }}
 QToolBar QLabel {{ color: {ink_soft}; padding: 0 3px 0 6px; }}
@@ -118,7 +123,7 @@ QListWidget#completionList {{
 QListWidget#completionList::item {{ padding: 2px 8px; border-radius: 2px; }}
 QListWidget#completionList::item:selected {{ background: {accent}; color: white; }}
 QMenu::item {{ padding: 6px 26px 6px 24px; border-radius: 3px; }}
-QMenu::item:selected {{ background: {accent_soft}; }}
+QMenu::item:selected {{ background: {picked}; color: {picked_ink}; }}
 QMenu::item:disabled {{ color: {ink_faint}; }}
 QMenu::separator {{ height: 1px; background: {chrome_edge}; margin: 5px 8px; }}
 
@@ -129,13 +134,13 @@ QDockWidget > QWidget {{ background: {surface}; }}
     background: {chrome}; border-bottom: 1px solid {chrome_edge};
 }}
 #dockTitle {{
-    color: {ink_soft}; font-weight: 600; letter-spacing: 0.3px;
+    color: {ink}; font-weight: 600; font-size: 14px;
 }}
 #dockButton {{
     border: 0; border-radius: 3px; padding: 2px; margin: 0;
 }}
 #dockButton:hover {{ background: {accent_soft}; }}
-#dockButton:checked {{ background: {accent_deep}; }}
+#dockButton:checked {{ background: {picked}; }}
 
 /* The rails of panel icons down either edge of the canvas. */
 #panelRail {{
@@ -146,7 +151,7 @@ QDockWidget > QWidget {{ background: {surface}; }}
     border: 0; border-radius: 4px; padding: 3px; margin: 0;
 }}
 #railButton:hover {{ background: {accent_soft}; }}
-#railButton:checked {{ background: {accent_deep}; }}
+#railButton:checked {{ background: {picked}; }}
 
 QGroupBox {{
     border: 1px solid {chrome_edge}; border-radius: 4px; margin-top: 10px;
@@ -167,7 +172,7 @@ QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus,
 QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {accent}; }}
 QLineEdit:disabled, QComboBox:disabled {{ color: {ink_faint}; }}
 QComboBox::drop-down {{ border: 0; width: 18px; }}
-QComboBox::down-arrow {{ image: url("{arrow_down}"); width: 9px; height: 9px; }}
+QComboBox::down-arrow {{ image: url("{arrow_vee}"); width: 10px; height: 10px; }}
 
 /* A styled spin box loses the platform's arrows, so they are drawn here. */
 QSpinBox, QDoubleSpinBox {{ padding-right: 18px; }}
@@ -191,6 +196,16 @@ QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
     image: url("{arrow_down}"); width: 9px; height: 9px;
 }}
+/* on Revu's Properties toolbar the arrows sit before the number */
+QToolBar QSpinBox, QToolBar QDoubleSpinBox {{ padding-right: 5px; padding-left: 3px; }}
+QToolBar QSpinBox::up-button, QToolBar QDoubleSpinBox::up-button {{
+    subcontrol-position: top left; border-left: 0; border-right: 1px solid {field_edge};
+    border-top-right-radius: 0; border-top-left-radius: 3px;
+}}
+QToolBar QSpinBox::down-button, QToolBar QDoubleSpinBox::down-button {{
+    subcontrol-position: bottom left; border-left: 0; border-right: 1px solid {field_edge};
+    border-bottom-right-radius: 0; border-bottom-left-radius: 3px;
+}}
 QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled,
 QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled {{
     image: none;
@@ -212,22 +227,22 @@ QTreeWidget, QTableWidget, QListWidget, QTreeView, QTableView {{
 }}
 QTreeWidget::item, QTableWidget::item, QListWidget::item {{ padding: 3px 2px; }}
 QTreeWidget::item:selected, QTableWidget::item:selected,
-QListWidget::item:selected {{ background: {accent_soft}; color: {ink}; }}
+QListWidget::item:selected {{ background: {picked}; color: {picked_ink}; }}
 QHeaderView::section {{
-    background: {chrome}; border: 0; border-right: 1px solid {chrome_edge};
+    background: {raised}; border: 0; border-right: 1px solid {field_edge};
     border-bottom: 1px solid {chrome_edge}; padding: 5px 7px;
-    font-weight: 600; color: {ink_soft};
+    font-weight: 600; color: {ink};
 }}
 
-/* --- tabs: an underline, not a folder tab -------------------------------- */
+/* --- tabs: Revu's — flat, the open one a lighter block ------------------- */
 QTabWidget::pane {{ border: 0; border-top: 1px solid {chrome_edge}; }}
 QTabBar {{ qproperty-drawBase: 0; }}
 QTabBar::tab {{
-    background: transparent; border: 0; border-bottom: 2px solid transparent;
-    padding: 6px 14px; color: {ink_soft};
+    background: {chrome}; border: 0; border-right: 1px solid {chrome_edge};
+    padding: 7px 14px; color: {ink_soft};
 }}
-QTabBar::tab:hover {{ color: {ink}; }}
-QTabBar::tab:selected {{ color: {ink}; border-bottom: 2px solid {accent}; }}
+QTabBar::tab:hover {{ color: {ink}; background: {accent_soft}; }}
+QTabBar::tab:selected {{ color: {ink}; background: {tab_on}; }}
 QTabBar::close-button {{
     image: url({arrow_close}); subcontrol-position: right; border-radius: 2px;
     margin: 2px;
@@ -338,6 +353,11 @@ def _arrow_files(ink: str, name: str) -> dict:
                          f'viewBox="0 0 12 12"><polyline points="{points}" fill="none" '
                          f'stroke="{ink}" stroke-width="1.4" stroke-linecap="round" '
                          'stroke-linejoin="round"/></svg>')
+    # a drop-down's arrow: Revu's thin chevron, not a filled triangle
+    drawings["vee"] = ('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" '
+                       f'viewBox="0 0 10 10"><polyline points="1.5,3.5 5,7 8.5,3.5" '
+                       f'fill="none" stroke="{ink}" stroke-width="1.2" '
+                       'stroke-linecap="round" stroke-linejoin="round"/></svg>')
     # a tab's close cross, Bluebeam's plain ×
     drawings["close"] = ('<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" '
                          f'viewBox="0 0 12 12"><path d="M3 3 L9 9 M9 3 L3 9" fill="none" '
@@ -371,7 +391,9 @@ DARK_STYLESHEET = TEMPLATE.format(**_DARK_TOKENS,
 
 # The desk the paper lies on, per theme.  Dark enough that a white sheet has an
 # unmistakable edge, neutral enough that it never competes with a markup.
-CANVAS = {LIGHT: "#6e747d", DARK: "#141619"}
+# Dark: Revu's grey desk, a step lighter than its bars (the user's Revu,
+# 2026-10-15), not the near-black it was.
+CANVAS = {LIGHT: "#6e747d", DARK: "#424242"}
 
 
 def stylesheet(theme: str) -> str:
