@@ -138,3 +138,19 @@ def window(qapp):
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     gc.collect()
     qapp.processEvents()
+
+
+@pytest.fixture(autouse=True)
+def fresh_symbolic_hook():
+    """No test inherits the last worksheet's "defined above" names.
+
+    A worksheet points the symbolic engine at the names defined above the
+    region it evaluates, and leaves it pointing there (the symbolic answer
+    is formed after the evaluation returns). A pure-engine test run after a
+    window test that defined ``a`` then saw ``a`` as defined.
+    """
+    from calcforge.calc.engine import sym
+
+    sym.defined_above = lambda: set()
+    yield
+    sym.defined_above = lambda: set()
