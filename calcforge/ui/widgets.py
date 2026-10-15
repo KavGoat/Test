@@ -114,6 +114,10 @@ def keep_the_wheel_with_the_scroller(application) -> None:
     application.installEventFilter(application._wheel_filter)
 
 
+#: The object names of the places where the wheel never changes a value.
+PROPERTIES = ("propertiesPanel", "toolbar_style")
+
+
 class WheelBelongsToTheScroller(QObject):
     """Stop a dropdown or a spinner eating the wheel while a panel is scrolled.
 
@@ -129,13 +133,26 @@ class WheelBelongsToTheScroller(QObject):
 
     WATCHED = (QComboBox, QAbstractSpinBox, QSlider)
 
+    @staticmethod
+    def _in_properties(widget) -> bool:
+        parent = widget.parentWidget()
+        while parent is not None:
+            if parent.objectName() in PROPERTIES or type(parent).__name__ == "PropertiesPanel":
+                return True
+            parent = parent.parentWidget()
+        return False
+
     def eventFilter(self, watched, event):
         if event.type() != QEvent.Wheel or not isinstance(watched, self.WATCHED):
             return False
         # A dropdown never changes under the wheel, focused or not: turning
         # the wheel over one cycled through its values without being asked.
         # Its open list still scrolls, since that is a different widget.
-        if not isinstance(watched, QComboBox) and watched.hasFocus():
+        # In the Properties panel and on the Properties toolbar not even a
+        # clicked-into box takes it: a size, a rotation or an opacity changed
+        # as the panel was scrolled past (the user, 2026-10-15)
+        if not isinstance(watched, QComboBox) and watched.hasFocus() \
+                and not self._in_properties(watched):
             return False                  # a clicked-into number box keeps it
         # Hand it on to whatever is scrolling underneath.
         parent = watched.parentWidget()

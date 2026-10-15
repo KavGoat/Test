@@ -2517,6 +2517,8 @@ class MainWindow(QMainWindow):
         sheetpages.settle(self)
         # Pages moved, added or deleted: equations are evaluated in page
         # order, so the document's worksheet re-keys them (decision 9).
+        from .view import rescue_stranded
+        rescue_stranded(self.scene)
         from ..calc.docsheet import sheet_for
         sheet_for(self.document).pages_changed()
         self.current_index = max(0, min(self.current_index, len(self.document.pages) - 1))

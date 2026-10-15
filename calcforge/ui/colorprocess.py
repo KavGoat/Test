@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSlider,
                                QSpinBox, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from ..io import colorproc
+from ..io import colorjobs, colorproc
 from ..io.colorproc import (BLACK_WHITE, COLORIZE, GRAYSCALE, LSH, MASK, MODIFY, NAMES,
                             Process)
 
@@ -49,8 +49,9 @@ class _ColourButton(QToolButton):
     Source Color, the colours found in the drawing (*found*)."""
 
     def __init__(self, colour: Optional[str], changed, allow_none: bool = False,
-                 found: Optional[list] = None):
+                 found: Optional[list] = None, taken=None):
         super().__init__()
+        self.taken = taken              # the Source Colors other rows have chosen
         self.colour = colour
         self.changed = changed
         self.allow_none = allow_none
@@ -74,7 +75,10 @@ class _ColourButton(QToolButton):
     def _pick(self):
         from .colorpicker import choose, choose_found
         if self.found is not None:
-            got = choose_found(self, self.found, self.colour)
+            # a colour already a Source Color in another row is not offered again
+            taken = set(self.taken()) if self.taken is not None else set()
+            offered = [c for c in self.found if c.lower() not in taken]
+            got = choose_found(self, offered, self.colour)
         else:
             got = choose(self, self.colour, self.allow_none)
         if got is None or not shiboken6.isValid(self):
@@ -308,6 +312,8 @@ class ColorProcessingDialog(QDialog):
     def add_pair(self, source: Optional[str] = None, target: Optional[str] = "#ff0000") -> None:
         r = len(self.pairs)
         src = _ColourButton(source, self._changed, found=list(self.colours))
+        src.taken = lambda me=src: [s.colour.lower() for _h, s, _t in self.pairs
+                                    if s is not me and s.colour]
         src.setToolTip("Source Color: click for the colours in the drawing")
         to = _ColourButton(target, self._changed, allow_none=True)
         self.pairs_grid.addWidget(src, r, 1)
@@ -374,6 +380,21 @@ class ColorProcessingDialog(QDialog):
 
     def _preview(self):
         proc = self.process()
+        if hasattr(self.previewer, "submit"):
+            # worked out by the helper; a later change overtakes it
+            self._asked = getattr(self, "_asked", 0) + 1
+            asked, future = self._asked, self.previewer.submit(proc)
+            self._show(self.previewer.before, None)
+
+            def look():
+                if not shiboken6.isValid(self) or asked != self._asked:
+                    return
+                if not future.done():
+                    QTimer.singleShot(40, look)
+                    return
+                self._show(*self.previewer.finish(future))
+            look()
+            return
         if self.previewer is not None:
             got = self.previewer(proc)
             if got is None:
@@ -385,6 +406,9 @@ class ColorProcessingDialog(QDialog):
                 else colorproc.process_qimage(self.picture, proc)
         else:
             return
+        self._show(before, after)
+
+    def _show(self, before, after):
         for label, image in ((self.before, before), (self.after, after)):
             if image is None or image.isNull():
                 label.clear()
@@ -403,19 +427,6 @@ class ColorProcessingDialog(QDialog):
 
 
 # -- doing it ------------------------------------------------------------------------------------
-def _render(data: bytes, index: int, size: int = 200) -> QImage:
-    import pymupdf
-    doc = pymupdf.open(stream=data, filetype="pdf")
-    try:
-        page = doc[index]
-        zoom = size / max(page.rect.width, page.rect.height, 1.0)
-        pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
-        return QImage(pix.samples, pix.width, pix.height, pix.stride,
-                      QImage.Format_RGB888).copy()
-    finally:
-        doc.close()
-
-
 def _one_page(data: bytes, index: int) -> bytes:
     import pymupdf
     source = pymupdf.open(stream=data, filetype="pdf")
@@ -428,21 +439,37 @@ def _one_page(data: bytes, index: int) -> bytes:
         source.close()
 
 
+def _image(raw) -> QImage:
+    width, height, stride, samples = raw
+    return QImage(samples, width, height, stride, QImage.Format_RGB888).copy()
+
+
+class _PagePreview:
+    """Before and after of a PDF page, the after worked out by the helper
+    process (io/colorjobs.py) so the dialog never stops answering."""
+
+    def __init__(self, single: bytes):
+        self.single = single
+        self.before = _image(colorjobs.render(single, 0))
+
+    def submit(self, proc):
+        return colorjobs.submit(colorjobs.preview, self.single, proc)
+
+    def finish(self, future):
+        try:
+            return self.before, _image(colorjobs.result(future, colorjobs.preview,
+                                                        self.single))
+        except Exception:  # noqa: BLE001
+            return self.before, self.before
+
+
 def page_previewer(window, page):
     """Before and after of a page, for the dialog's Preview."""
     document = window.document
     if page.pdf_key and page.pdf_page_index is not None:
         data = document.asset(page.pdf_key)
         if data:
-            single = _one_page(data, int(page.pdf_page_index))
-            before = _render(single, 0)
-
-            def preview(proc):
-                try:
-                    return before, _render(colorproc.process_pdf(single, [0], proc), 0)
-                except Exception:  # noqa: BLE001
-                    return before, before
-            return preview
+            return _PagePreview(_one_page(data, int(page.pdf_page_index)))
     image = window._background_image(page)
     if image is None:
         return None
@@ -468,7 +495,9 @@ def apply_to_pages(window, indexes: list, proc: Process) -> int:
         data = document.asset(key)
         if not data:
             continue
-        done = colorproc.process_pdf(data, sorted({int(p.pdf_page_index) for p in pages}), proc)
+        wanted = sorted({int(p.pdf_page_index) for p in pages})
+        done = colorjobs.wait(colorjobs.submit(colorjobs.process, data, wanted, proc), window,
+                              "Changing the colours…", colorjobs.process, data, wanted, proc)
         new_keys[key] = document.add_asset(done, "pdf")
     new_backgrounds = {}
     for page in rasters:
@@ -506,6 +535,24 @@ def apply_to_pages(window, indexes: list, proc: Process) -> int:
     return len(changed)
 
 
+#: The colours each page's drawing sets, kept: read once, the list opens at once.
+_COLOURS: dict = {}
+
+
+def page_colours(window, page) -> list:
+    """The colours this page's own drawing sets (not another page's)."""
+    key = (page.pdf_key, int(page.pdf_page_index))
+    if key not in _COLOURS:
+        data = window.document.asset(page.pdf_key)
+        index = int(page.pdf_page_index)
+        _COLOURS[key] = colorjobs.wait(colorjobs.submit(colorjobs.colours, data, index), window,
+                                       "Reading the page's colours…", colorjobs.colours, data,
+                                       index)
+        if len(_COLOURS) > 64:
+            _COLOURS.pop(next(iter(_COLOURS)))
+    return list(_COLOURS[key])
+
+
 def color_processing(window, index: Optional[int] = None) -> Optional[ColorProcessingDialog]:
     """Document ▸ Color Processing (Bluebeam's), from the page in view."""
     from .dialogs import QMessageBox
@@ -518,9 +565,8 @@ def color_processing(window, index: Optional[int] = None) -> Optional[ColorProce
         return None
     colours = ["#000000"]
     if page.pdf_key and page.pdf_page_index is not None:
-        data = window.document.asset(page.pdf_key)
         try:
-            colours = colorproc.colours_in_pdf(data, int(page.pdf_page_index)) or colours
+            colours = page_colours(window, page) or colours
         except Exception:  # noqa: BLE001
             pass
     listed = window.pages_panel.list

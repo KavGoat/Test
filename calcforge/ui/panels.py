@@ -25,7 +25,7 @@ from ..items.snapshot import SnapshotItem
 from ..items.measure import CountItem, MeasureItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.text import STAMP_PRESETS, CalloutItem, NoteItem, StampItem, TextItem
-from .icons import drawn_icon, icon
+from .icons import drawn_icon, icon, visible_ink
 from .stylecaps import CLOUD, CORNER
 from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
                         WIDTH, common_capabilities)
@@ -34,6 +34,7 @@ from .widgets import (ColorButton, UnitCombo, arrow_combo,
 
 
 def _line_style_icon(name: str, colour: str, width: float) -> QIcon:
+    colour = visible_ink(colour)
     def draw(painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
         pen = QPen(QColor(colour or "#111318"))
@@ -50,7 +51,7 @@ def _line_style_icon(name: str, colour: str, width: float) -> QIcon:
 
 def _hatch_icon(name: str, colour: str) -> QIcon:
     from ..items.hatches import sample_icon
-    return sample_icon(name, colour, 150, 34)
+    return sample_icon(name, visible_ink(colour), 150, 34)
 
 
 def fill_hatch_combo(combo, colour: str, current: str = "") -> None:

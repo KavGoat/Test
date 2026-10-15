@@ -283,10 +283,41 @@ class CalcItem(MarkupItem):
 
     def boundingRect(self) -> QRectF:
         if self._view is None:
-            return self.local_rect().adjusted(-2, -2, 2, 2)
-        r = self._view.boundingRect()
-        return QRectF(r.x() * PT_PER_PX, r.y() * PT_PER_PX,
-                      r.width() * PT_PER_PX, r.height() * PT_PER_PX).adjusted(-2, -2, 2, 2)
+            box = self.local_rect().adjusted(-2, -2, 2, 2)
+        else:
+            r = self._view.boundingRect()
+            box = QRectF(r.x() * PT_PER_PX, r.y() * PT_PER_PX,
+                         r.width() * PT_PER_PX, r.height() * PT_PER_PX).adjusted(-2, -2, 2, 2)
+        note = self._error_note_rect()
+        return box.united(note) if note is not None else box
+
+    #: The error said under an equation that is not being edited.
+    ERROR_INK = QColor("#d00000")
+
+    def _error_message(self) -> str:
+        region = getattr(self, "region", None)
+        if region is None or getattr(region, "pending", False) or self.focused:
+            return ""                     # being edited: SMath's own tip says it
+        error = getattr(region, "error", None) or getattr(self._view, "_plot_error", None)
+        return getattr(error, "message", "") or ""
+
+    def _error_note_font(self):
+        from PySide6.QtGui import QFont
+        font = QFont("Arial")
+        font.setPixelSize(11)
+        return font
+
+    def _error_note_rect(self):
+        """Where the error is written: just under the equation, in red,
+        whether it is selected or not (the user, 2026-10-15). On screen only."""
+        message = self._error_message()
+        if not message:
+            return None
+        from PySide6.QtGui import QFontMetricsF
+        metrics = QFontMetricsF(self._error_note_font())
+        box = self.local_rect()
+        width = (metrics.horizontalAdvance(message) + 4) * PT_PER_PX
+        return QRectF(box.left(), box.bottom() + 1.5, width, (metrics.height() + 2) * PT_PER_PX)
 
     def shape(self):
         from PySide6.QtGui import QPainterPath
@@ -343,6 +374,16 @@ class CalcItem(MarkupItem):
             self._view.selected_region = False
         if printing:
             return
+        note = self._error_note_rect()
+        if note is not None:
+            painter.save()
+            painter.translate(note.topLeft())
+            painter.scale(PT_PER_PX, PT_PER_PX)
+            painter.setFont(self._error_note_font())
+            painter.setPen(self.ERROR_INK)
+            painter.drawText(QRectF(2, 0, note.width() / PT_PER_PX, note.height() / PT_PER_PX),
+                             Qt.AlignLeft | Qt.AlignVCenter, self._error_message())
+            painter.restore()
         region = getattr(self, "region", None)
         if region is not None and region.is_global:
             # made global (calc sections): a bar down its left edge, on screen

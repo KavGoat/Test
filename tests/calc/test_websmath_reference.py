@@ -41,6 +41,9 @@ SCALE = 4.0
 DELIBERATE = {
     "matrix_eval.left": {"text": "a*a=", "shown": "25", "error": None},
     "home_end.esc": {"text": "a+b+c", "pending": False},
+    # a definition naming something not defined says so once it is left, as
+    # SMath Studio does (WebSMath says nothing; the user, 2026-10-15)
+    "def_edit_unit.d": {"error": "M - not defined."},
 }
 # Drawn differently on purpose (same facts): the caret on an empty slot
 # stands clear of the placeholder square instead of cutting through it

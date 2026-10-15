@@ -5354,6 +5354,18 @@ def test_the_wheel_over_a_dropdown_scrolls_the_panel(window):
     spin = QSpinBox()
     spin.hasFocus = lambda: True
     assert kept.eventFilter(spin, wheel) is False
+    # ...except in the Properties panel and on the Properties toolbar, where
+    # a size or a rotation changed as the panel was scrolled past (the user,
+    # 2026-10-15): there not even a clicked-into box takes the wheel
+    from PySide6.QtWidgets import QAbstractSpinBox
+    for owner in (window.properties_panel, window.style_bar):
+        boxes = owner.findChildren(QAbstractSpinBox)
+        assert boxes, owner.objectName()
+        box = boxes[0]
+        box.hasFocus = lambda: True
+        value = box.value()
+        assert kept.eventFilter(box, wheel) is True
+        assert box.value() == value
 
 
 # ---------------------------------------------------------------------------

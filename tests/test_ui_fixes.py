@@ -422,3 +422,31 @@ def test_line_and_hatch_pickers_show_only_their_sample(window):
         assert combo.toolTip() == combo.currentText()
         image = combo.grab().toImage()
         assert not image.isNull()
+
+
+def test_dark_mode_properties_panel_hatch_and_line_lists_can_be_seen(window):
+    """The user, 2026-10-15: in dark mode the Properties panel's hatch list
+    was drawn in the markup's black hatch colour on a dark list — invisible."""
+    from PySide6.QtCore import QPointF, QRectF
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QComboBox
+    from calcforge.items.shapes import RectItem
+    window.toggle_theme(True)
+    try:
+        box = RectItem("rect", QRectF(0, 0, 120, 60))
+        box.style.hatch_color = "#000000"
+        box.style.stroke = "#000000"
+        window.scene.frames[0].add_markup(box, QPointF(80, 80))
+        window.scene.clearSelection()
+        box.setSelected(True)
+        window.refresh_selection()
+        for name in ("hatchPattern", "lineStyle"):
+            combo = window.properties_panel.findChild(QComboBox, name)
+            assert combo is not None, name
+            image = combo.itemIcon(1).pixmap(150, 34).toImage()
+            lightest = max(QColor.fromRgba(image.pixel(x, y)).lightness()
+                           for x in range(image.width()) for y in range(image.height())
+                           if QColor.fromRgba(image.pixel(x, y)).alpha() > 40)
+            assert lightest > 150, (name, lightest)
+    finally:
+        window.toggle_theme(False)

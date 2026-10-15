@@ -824,3 +824,27 @@ def test_zooming_a_sheet_never_jumps_and_glides_on_its_pictures(w, monkeypatch):
     assert not w.view._zoom_settled.isActive()
     vp.repaint()
     assert drawn, "once it stops, the pictures are drawn again sharp"
+
+
+def test_an_equation_dragged_onto_a_sheet_page_goes_back_and_can_be_picked(w):
+    """The user, 2026-10-15: an equation moved by accident onto a spreadsheet
+    could not be selected again. Refused, it now goes back where it came from;
+    and one a file has left hanging over the cells is put back on its page."""
+    from tests.test_calc_panels import an_equation
+    from calcforge.ui.view import rescue_stranded
+    item = an_equation(w, "a:=2")
+    w.toggle_calc_mode(False)
+    run = sheet_page(w)
+    first = w.document.pages[0].frame
+    start = QPointF(item.pos())
+    over = cell_scene(run, "C4")
+    item.setPos(first.mapFromScene(over))                  # dragged over the cells
+    w.view.settle_pages([item], {id(item): start})
+    assert item.parentItem() is first and item.pos() == start
+    # one left stranded by an earlier version: put back at the next rebuild
+    item.setPos(first.mapFromScene(over))
+    assert rescue_stranded(w.scene) == 1
+    assert first.page_rect().contains(item.mapRectToParent(item.boundingRect()).center())
+    w.view.scene().clearSelection()
+    click(w, item.sceneBoundingRect().center())
+    assert item.isSelected() or w.view.calc.item is item

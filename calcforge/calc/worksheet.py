@@ -311,6 +311,7 @@ class Worksheet:
             self.index.global_keys.discard(old)
         ctx = self._context_before(r)
         self.evaluator.start_clock()
+        self._committing = commit
         try:
             self._run(r, ctx, record=True)
         except RecursionError:
@@ -433,6 +434,9 @@ class Worksheet:
         try:
             if isinstance(node, A.Define):
                 self.evaluator.define(node, ctx)
+                if record and isinstance(node.target, A.Var) and getattr(self, "_committing", True):
+                    # once left: half-typed ("2·M" on the way to MPa) it is no error yet
+                    self._say_what_is_not_defined(node, ctx)
                 if r.editor.evaluate and isinstance(node.target, A.Var) and r.optimization != "none":
                     # x := expression = value: SMath Studio desktop defines
                     # and shows the value in one region
@@ -470,6 +474,15 @@ class Worksheet:
             # names reached while evaluating (a symbolic definition's names, a
             # called function's outside names) are dependencies too
             r.uses = r.uses | reads
+
+    def _say_what_is_not_defined(self, node, ctx: Context) -> None:
+        """t:=fc with no fc defined: kept to be worked out later (a name
+        defined further down still counts, as before), but said at once — as
+        SMath Studio does, with fc in red and "fc - not defined." under it.
+        It used to say nothing until t= was asked for (the user, 2026-10-15)."""
+        from .engine.evaluator import Lazy
+        if isinstance(ctx.vars.get(node.target.name), Lazy):
+            self.evaluator.eval(node.value, ctx)       # raises "fc - not defined."
 
     def _run_plot(self, r: Region, ctx: Context) -> None:
         r.curves = []

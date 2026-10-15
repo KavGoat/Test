@@ -62,6 +62,21 @@ def icon_theme() -> str:
     return _theme
 
 
+def visible_ink(colour: str) -> str:
+    """*colour* for a sample in a list — or the theme's ink when it would
+    vanish into the list's background: a black hatch or line drawn on dark
+    mode's dark grey could not be seen (the user, 2026-10-15)."""
+    shade = QColor(colour or "")
+    if not shade.isValid():
+        return _THEME_INK[_theme]
+    lightness = shade.lightness()
+    if _theme == "dark" and lightness < 110:
+        return _THEME_INK["dark"]
+    if _theme == "light" and lightness > 215:
+        return _THEME_INK["light"]
+    return colour
+
+
 def _scales() -> list:
     """The pixel ratios to draw an icon at: 1, and every screen's own."""
     from PySide6.QtGui import QGuiApplication

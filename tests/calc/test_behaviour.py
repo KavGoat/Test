@@ -60,9 +60,15 @@ def test_cursor_stays_left_after_equals():
 
 
 def test_symbolic_definition_is_allowed():
+    """a:=b with no b yet is kept, to be worked out later, but says so at
+    once, as SMath Studio does (the user, 2026-10-15: "t=fc throws no error
+    until there's an equals after fc too")."""
     ws, (a, b) = sheet("a=b", "a=")
-    assert a.editor.root.text() == "a≔b" and error(a) is None
+    assert a.editor.root.text() == "a≔b" and error(a) == "b - not defined."
     assert error(b) == "b - not defined."
+    # still symbolic: a b defined before a is used gives a its value
+    ws, (a, c, d) = sheet("a=b", "b=3", "a=")
+    assert error(a) == "b - not defined." and error(d) is None
 
 
 def test_use_above_definition_is_an_error():

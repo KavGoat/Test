@@ -447,6 +447,44 @@ def _resize_by(item, factor: float) -> None:
         item.setTransform(QTransform.fromScale(factor, factor) * item.transform())
     item.update()
 
+def keep_on_its_page(item) -> bool:
+    """An equation or table that has ended up off its own page and over a
+    spreadsheet page, moved back onto its page. True if it was moved."""
+    frame = item.parentItem()
+    page_rect = getattr(frame, "page_rect", None)
+    if page_rect is None:
+        return False
+    area = page_rect()
+    box = item.mapRectToParent(item.boundingRect())
+    if area.contains(box.center()):
+        return False
+    dx = min(max(box.left(), area.left()), area.right() - min(box.width(), area.width())) - box.left()
+    dy = min(max(box.top(), area.top()), area.bottom() - min(box.height(), area.height())) - box.top()
+    item.setPos(item.pos() + QPointF(dx, dy))
+    return True
+
+
+def rescue_stranded(scene) -> int:
+    """Equations and tables a file has left hanging over a spreadsheet page
+    (an earlier version let a refused move stay where it was dropped), put
+    back on their own pages, where they can be clicked again."""
+    sheets = [f.mapRectToScene(f.page_rect()) for f in getattr(scene, "frames", [])
+              if getattr(f.page, "sheet", None) is not None]
+    if not sheets:
+        return 0
+    moved = 0
+    for frame in scene.frames:
+        if getattr(frame.page, "sheet", None) is not None:
+            continue
+        for item in frame.childItems():
+            if not getattr(item, "IS_CALC", False) or getattr(item, "SHEET_PAGE_OK", False):
+                continue
+            box = item.sceneBoundingRect()
+            if any(area.intersects(box) for area in sheets) and keep_on_its_page(item):
+                moved += 1
+    return moved
+
+
 class PageView(QGraphicsView):
     """Displays one :class:`~calcforge.ui.scene.PageScene` and edits it."""
 
@@ -2175,7 +2213,7 @@ class PageView(QGraphicsView):
             if page is not None:
                 refresh(page=page)
 
-    def settle_pages(self, items: list) -> None:
+    def settle_pages(self, items: list, origins: Optional[dict] = None) -> None:
         """Hand each dragged markup to the page it was dropped on.
 
         On a canvas that scrolls through the whole document, dragging a markup
@@ -2191,8 +2229,16 @@ class PageView(QGraphicsView):
                 continue
             if getattr(item, "IS_CALC", False) and not getattr(item, "SHEET_PAGE_OK", False) \
                     and getattr(frame.page, "sheet", None) is not None:
-                # equations and tables do not go on spreadsheet pages
+                # equations and tables do not go on spreadsheet pages — and one
+                # refused goes back where it came from: left where it was let
+                # go, it hung over the cells, still its old page's, and the
+                # cells took every click meant for it (the user, 2026-10-15)
                 self.statusMessage.emit("Equations and tables don't go on spreadsheet pages")
+                back = (origins or {}).get(id(item))
+                if back is not None:
+                    item.setPos(back)
+                else:
+                    keep_on_its_page(item)
                 continue
             position = item.scenePos()
             item.setParentItem(frame)
@@ -3097,7 +3143,8 @@ class PageView(QGraphicsView):
             said = keep_blocks_whole(self.scene(), self._move_items)
             if said:
                 self.statusMessage.emit(said)
-            self.settle_pages([item for item, _ in self._move_items])
+            self.settle_pages([item for item, _ in self._move_items],
+                              {id(item): QPointF(origin) for item, origin in self._move_items})
             self.rescale_where_they_landed([item for item, _ in self._move_items])
             self.commit_snapshot("Copy markup" if self._copied else "Move markup")
             self._copy_on_move = False
@@ -5220,7 +5267,7 @@ class PageView(QGraphicsView):
                 said = keep_blocks_whole(self.scene(), origins)
                 if said:
                     self.statusMessage.emit(said)
-                self.settle_pages(items)
+                self.settle_pages(items, {id(item): origin for item, origin in origins})
                 self.commit_snapshot("Nudge markup")
                 box = items[0].sceneBoundingRect()
                 for item in items[1:]:

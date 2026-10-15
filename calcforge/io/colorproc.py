@@ -288,7 +288,128 @@ def _fmt(v: float) -> bytes:
     return (text or "0").encode()
 
 
-def rewrite_stream(data: bytes, spaces: dict, fn, seen: Optional[set] = None) -> bytes:
+# -- the fast scan ---------------------------------------------------------------------------
+# A large drawing's content stream runs to tens of megabytes; read a byte at a
+# time it took minutes, and the window froze (the user, 2026-10-15: "colour
+# change on a really big PDF ... froze ... crashed the whole app"). Only the
+# colour and painting operators matter here, so one compiled expression skips
+# everything else — numbers, names, strings, arrays, dictionaries and every
+# other operator — in a single C-speed match, and Python sees only those.
+_REGULAR = rb"[^\s\x00()<>\[\]{}/%]"
+_COLOUR_OPS = (b"q", b"Q", b"cs", b"CS", b"g", b"G", b"rg", b"RG", b"k", b"K", b"sc", b"SC",
+               b"scn", b"SCN", b"BI")
+_PAINT_OPS = (b"f", b"F", b"f*", b"S", b"s", b"B", b"B*", b"b", b"b*")
+_WORD = re.compile(_REGULAR + rb"+")
+
+
+def _skipper(stops):
+    return re.compile(
+        rb"(?:[\s\x00]+"                                    # white space
+        rb"|%[^\r\n]*"                                      # a comment
+        rb"|\((?:[^()\\]|\\.)*\)"                          # a string with no ( ) inside it
+        rb"|<<|>>|<[0-9A-Fa-f\s]*>"                          # dictionaries, hex strings
+        rb"|[\[\]{}]"                                        # arrays
+        rb"|/" + _REGULAR + rb"*"                            # a name
+        rb"|(?!(?:" + b"|".join(re.escape(w) for w in sorted(stops, key=len, reverse=True))
+        + rb")(?!" + _REGULAR + rb"))" + _REGULAR + rb"+"    # any other word: numbers, operators
+        rb")+", re.S)
+
+
+#: Stops at the colour operators only — and at painting too, for when a
+#: colour is being taken away and what it paints has to go with it.
+_SKIP_COLOUR = _skipper(_COLOUR_OPS)
+_SKIP_ALL = _skipper(_COLOUR_OPS + _PAINT_OPS)
+_NEEDS_OPERANDS = frozenset(_COLOUR_OPS) - {b"q", b"Q", b"BI"}
+_NUMBER_ONLY = re.compile(rb"[+-]?(?:\d+\.?\d*|\.\d+)\Z")
+_WHITE = frozenset(b" \t\r\n\x0c\x00")
+_DELIMS = frozenset(b"()<>[]{}/%")
+
+
+def _operands(data: bytes, start: int, floor: int, most: int = 6) -> list:
+    """(start, end, kind, value) of the numbers and names right before
+    *start* — read backwards, as many as a colour can have."""
+    out = []
+    j = start
+    while len(out) < most:
+        while j > floor and data[j - 1] in _WHITE:
+            j -= 1
+        k = j
+        while k > floor and data[k - 1] not in _WHITE and data[k - 1] not in _DELIMS:
+            k -= 1
+        if k == j:
+            break
+        if k > floor and data[k - 1] == 0x2F:             # "/": a name
+            out.append((k - 1, j, "name", data[k:j]))
+            j = k - 1
+            continue
+        token = data[k:j]
+        if not _NUMBER_ONLY.match(token):
+            break
+        out.append((k, j, "num", float(token)))
+        j = k
+    out.reverse()
+    return out
+
+
+def _string_end(data: bytes, i: int) -> int:
+    """Where a string with ( ) inside it ends."""
+    depth, j, n = 1, i + 1, len(data)
+    while j < n and depth:
+        ch = data[j]
+        if ch == 0x5C:                                    # backslash
+            j += 2
+            continue
+        if ch == 0x28:
+            depth += 1
+        elif ch == 0x29:
+            depth -= 1
+        j += 1
+    return j
+
+
+def _inline_image_end(data: bytes, j: int) -> int:
+    n = len(data)
+    k = data.find(b"ID", j)
+    end = n if k < 0 else k + 2
+    while k >= 0:
+        e = data.find(b"EI", end)
+        if e < 0:
+            return n
+        before, after = data[e - 1:e], data[e + 2:e + 3]
+        white = (b" ", b"\t", b"\r", b"\n", b"\x0c", b"\x00")
+        if before in white and (after == b"" or after in white):
+            return e + 2
+        end = e + 2
+    return end
+
+
+def _operators(data: bytes, paint: bool = True):
+    """(start, end, operator, operands) for each colour operator — and each
+    painting one, with *paint*."""
+    i, n, floor = 0, len(data), 0
+    skip, word = (_SKIP_ALL if paint else _SKIP_COLOUR).match, _WORD.match
+    while i < n:
+        m = skip(data, i)
+        if m is not None and m.end() > i:
+            i = m.end()
+            continue
+        if data[i] == 0x28:                               # "(": a string with ( ) inside
+            i = floor = _string_end(data, i)
+            continue
+        w = word(data, i)
+        if w is None:
+            i += 1                                        # a stray delimiter
+            continue
+        op, end = w.group(), w.end()
+        if op == b"BI":
+            i = floor = _inline_image_end(data, end)
+            continue
+        yield i, end, op, _operands(data, i, floor) if op in _NEEDS_OPERANDS else ()
+        i = floor = end
+
+
+def rewrite_stream(data: bytes, spaces: dict, fn, seen: Optional[set] = None,
+                   paint: bool = True) -> bytes:
     """A content stream with every colour it sets put through *fn*.
 
     Everything else is kept byte for byte. *spaces* maps a resource colour
@@ -298,7 +419,6 @@ def rewrite_stream(data: bytes, spaces: dict, fn, seen: Optional[set] = None) ->
     """
     out = []
     last = 0
-    operands: list = []
     # a stream starts in DeviceGray (PDF's initial colour space)
     state = {"fill": 1, "stroke": 1, "fill_none": False, "stroke_none": False}
     stack = []
@@ -318,11 +438,7 @@ def rewrite_stream(data: bytes, spaces: dict, fn, seen: Optional[set] = None) ->
         out.append(text)
         last = end
 
-    for start, end, kind, value in _tokens(data):
-        if kind != "op":
-            operands.append((start, end, kind, value))
-            continue
-        op = value
+    for start, end, op, operands in _operators(data, paint):
         if op == b"q":
             stack.append(dict(state))
         elif op == b"Q":
@@ -378,7 +494,6 @@ def rewrite_stream(data: bytes, spaces: dict, fn, seen: Optional[set] = None) ->
             else:
                 new = (b"h " if closes else b"") + (b"f*" if op.endswith(b"*") else b"f")
             replace(start, end, new)
-        operands = []
     out.append(data[last:])
     return b"".join(out)
 
@@ -421,6 +536,15 @@ def _page_streams(doc, page):
     return xrefs, b"\n".join(doc.xref_stream(x) or b"" for x in xrefs)
 
 
+def _put_stream(doc, xref: int, data: bytes) -> None:
+    """A stream rewritten, compressed quickly: MuPDF's own compression of a
+    large drawing's content took four seconds of the five Modify Colors took."""
+    import zlib
+    doc.update_stream(xref, zlib.compress(data, 1), compress=False)
+    doc.xref_set_key(xref, "Filter", "/FlateDecode")
+    doc.xref_set_key(xref, "DecodeParms", "null")
+
+
 def process_pdf(data: bytes, indexes, proc: Process) -> bytes:
     """The PDF with the pages *indexes* (0-based) processed; the others as
     they were. A new file — the old one is left for undo."""
@@ -428,6 +552,8 @@ def process_pdf(data: bytes, indexes, proc: Process) -> bytes:
     doc = pymupdf.open(stream=data, filetype="pdf")
     try:
         fn = colour_function(proc)
+        # painting needs reading only when a colour is taken away altogether
+        removes = proc.kind == MODIFY and any(b is None for _a, b in proc.pairs)
         done_forms: set = set()
         done_images: set = set()
         for index in indexes:
@@ -437,12 +563,11 @@ def process_pdf(data: bytes, indexes, proc: Process) -> bytes:
                 xrefs, content = _page_streams(doc, page)
                 if xrefs:
                     # the page starts in black: said, so black can be changed too
-                    new = rewrite_stream(b"0 g 0 G\n" + content, page_spaces, fn)
-                    doc.update_stream(xrefs[0], new)
+                    new = rewrite_stream(b"0 g 0 G\n" + content, page_spaces, fn, paint=removes)
+                    _put_stream(doc, xrefs[0], new)
                     for x in xrefs[1:]:
                         doc.update_stream(x, b"")
-                for form in page.get_xobjects():
-                    xref = form[0]
+                for xref in _forms_drawn(doc, page.xref, content, page.xref, set()):
                     if xref in done_forms:
                         continue
                     done_forms.add(xref)
@@ -450,7 +575,8 @@ def process_pdf(data: bytes, indexes, proc: Process) -> bytes:
                     spaces.update(_colour_spaces(doc, xref))
                     stream = doc.xref_stream(xref)
                     if stream:
-                        doc.update_stream(xref, rewrite_stream(stream, spaces, fn))
+                        _put_stream(doc, xref, rewrite_stream(stream, spaces, fn,
+                                                              paint=removes))
             if proc.acts_on_images():
                 for image in page.get_images(full=True):
                     xref, smask = image[0], image[1]
@@ -491,9 +617,58 @@ def _process_image(doc, page, xref: int, smask: int, proc: Process) -> None:
     page.replace_image(xref, pixmap=new)
 
 
+_DO = re.compile(rb"/(" + _REGULAR + rb"+)[\s\x00]*Do(?!" + _REGULAR + rb")")
+
+
+def _forms_drawn(doc, owner: int, stream: bytes, fallback: int, seen: set) -> list:
+    """(xref, owner) of each form *stream* draws with Do — its own, from its
+    owner's resources (a form without any uses the page's) — and the forms
+    those draw. Only these: a page's resources are often shared by every page
+    of a set, and listing all of them gave other pages' colours."""
+    out = []
+    for name in dict.fromkeys(m.group(1) for m in _DO.finditer(stream)):
+        key = name.decode("latin-1")
+        found = None
+        for holder in (owner, fallback):
+            try:
+                kind, value = doc.xref_get_key(holder, f"Resources/XObject/{key}")
+            except Exception:  # noqa: BLE001
+                continue
+            if kind == "xref":
+                found = int(value.split()[0])
+                break
+        if found is None or found in seen:
+            continue
+        seen.add(found)
+        try:
+            if doc.xref_get_key(found, "Subtype")[1] != "/Form":
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        out.append(found)
+        inner = doc.xref_stream(found) or b""
+        has_own = doc.xref_get_key(found, "Resources")[0] != "null"
+        out.extend(_forms_drawn(doc, found if has_own else fallback, inner, fallback, seen))
+    return out
+
+
+_FIRST_COLOUR = re.compile(rb"(?<!" + _REGULAR + rb")(?:g|G|rg|RG|k|K|sc|SC|scn|SCN|cs|CS)"
+                           rb"(?!" + _REGULAR + rb")")
+_FIRST_DRAWING = re.compile(rb"(?<!" + _REGULAR + rb")(?:S|s|f\*?|F|B\*?|b\*?|Tj|TJ|'|\"|sh)"
+                            rb"(?!" + _REGULAR + rb")")
+
+
+def _draws_before_colour(content: bytes) -> bool:
+    drawing = _FIRST_DRAWING.search(content)
+    if drawing is None:
+        return False
+    colour = _FIRST_COLOUR.search(content, 0, drawing.start())
+    return colour is None
+
+
 def colours_in_pdf(data: bytes, index: int) -> list:
-    """The colours a page's own content sets, most used first — Modify
-    Colors' Source Color list ("only colors present in the PDF")."""
+    """The colours a page's own content sets, and the forms it draws —
+    Modify Colors' Source Color list ("only colors present in the PDF")."""
     import pymupdf
     seen: set = set()
     doc = pymupdf.open(stream=data, filetype="pdf")
@@ -501,11 +676,19 @@ def colours_in_pdf(data: bytes, index: int) -> list:
         page = doc[index]
         spaces = _colour_spaces(doc, page.xref)
         _xrefs, content = _page_streams(doc, page)
-        rewrite_stream(b"0 g 0 G\n" + content, spaces, lambda c: c, seen)
-        for form in page.get_xobjects():
-            stream = doc.xref_stream(form[0])
+        # black is listed only when something is drawn in it before any
+        # colour is set: the starting colour is black, and unused it is no
+        # colour of this page's
+        prefix = b"0 g 0 G\n" if _draws_before_colour(content) else b""
+        rewrite_stream(prefix + content, spaces, lambda c: c, seen, paint=False)
+        for form in _forms_drawn(doc, page.xref, content, page.xref, set()):
+            stream = doc.xref_stream(form)
             if stream:
-                rewrite_stream(stream, {**spaces, **_colour_spaces(doc, form[0])}, lambda c: c, seen)
+                if _draws_before_colour(stream) and not prefix and \
+                        _FIRST_COLOUR.search(content) is None:
+                    seen.add("#000000")           # drawn in the black it starts with
+                rewrite_stream(stream, {**spaces, **_colour_spaces(doc, form)}, lambda c: c, seen,
+                               paint=False)
     finally:
         doc.close()
     return sorted(seen)
