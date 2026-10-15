@@ -1071,7 +1071,8 @@ class MainWindow(QMainWindow):
                       "of it — it can no longer be moved or edited")
         # Revu's keys for Flatten… and Unflatten (QA, 2026-10-15)
         self._act("flatten_document", "Flatten…", self.flatten_document, "Ctrl+Shift+M",
-                  tip="Choose which content classes to flatten on every page")
+                  tip="Flatten Markups: choose the types, which markups and pages, "
+                      "and whether Unflatten can bring them back")
         self._act("recover_flattened", "Unflatten", self.recover_flattened, "Ctrl+Shift+U",
                   tip="Restore source items retained by recoverable flattening")
         self._act("preferences", "Preferences…", self.edit_preferences, "Ctrl+,",
@@ -3629,9 +3630,28 @@ class MainWindow(QMainWindow):
                 page.setup = PageSetup.from_dict(setup.to_dict())
         self._structural_change("Page setup", mutate, preserve_view=True)
 
-    def set_page_scale(self, scale: PageScale) -> None:
-        """Give the current page this scale, units and decimal places."""
-        self.current_page().scale = scale
+    def set_page_scale(self, scale: PageScale, pages: Optional[list] = None) -> None:
+        """Give the current page — or each of *pages*, by index — this scale,
+        units and precision (Set Scale's Pages; the user, 2026-10-15)."""
+        if pages is None:
+            self.current_page().scale = scale
+        else:
+            here = self.current_page()
+            for index in pages:
+                if not 0 <= index < len(self.document.pages):
+                    continue
+                page = self.document.pages[index]
+                page.scale = PageScale.from_dict(scale.to_dict())
+                if page is not here:
+                    self.refresh_page_measurements(page)
+            # each page's caption carries its scale; the pages picked in
+            # Thumbnails stay picked
+            picked = self.selected_pages()
+            self.pages_panel.rebuild(self.document, self.current_index)
+            listed = self.pages_panel.list
+            for row in picked:
+                if 0 <= row < listed.count():
+                    listed.item(row).setSelected(True)
         self.apply_scale_change()
 
     def insert_pdf(self, index: Optional[int] = None, before: bool = False) -> None:
@@ -4153,35 +4173,44 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # scale
     # ==================================================================
+    def scale_dialog(self, measured_pt: Optional[float] = None) -> "dialogs.ScaleDialog":
+        """Revu's Set Scale for the page in view; not yet shown.
+
+        After Calibrate's two points (*measured_pt*), it comes back as it was
+        left, with the measured length on the left of the scale.
+        """
+        state = getattr(self, "_scale_dialog_state", None) if measured_pt else None
+        self._scale_dialog_state = None
+        picked = self.selected_pages()
+        return dialogs.ScaleDialog(
+            self.current_page().scale, measured_pt, self,
+            count=len(self.document.pages), current=self.current_index,
+            selected=picked if len(picked) > 1 else [], state=state)
+
     def calibrate_scale(self, measured_pt: Optional[float] = None) -> None:
-        """Set the page scale, from a drawn distance or straight from a ratio."""
-        if measured_pt is not None:
-            dialog = dialogs.CalibrationLengthDialog(measured_pt, self)
-            if dialog.exec() != dialogs.QDialog.Accepted:
-                return
-            length = dialog.length_text()
-            if length is None:
-                return
-            old = self.current_page().scale
-            scale = PageScale.from_calibration(
-                measured_pt, length, display_unit=old.display_unit)
-            scale.area_unit = old.area_unit
-            scale.precision = old.precision
-            self.current_page().scale = scale
-            self.apply_scale_change()
-            return
-        dialog = dialogs.ScaleDialog(self.current_page().scale, measured_pt, self)
+        """Set Scale (the user, 2026-10-15): a preset, a custom scale, or —
+        after Calibrate's two points — the length they measure."""
+        dialog = self.scale_dialog(measured_pt)
         answer = dialog.exec()
         if answer == dialogs.ScaleDialog.PICK:
+            # Calibrate: two clicks, then this dialog again as it was left
+            self._scale_dialog_state = dialog.state()
             self.start_calibrating()
             return
         if answer != dialogs.QDialog.Accepted:
             return
+        self.finish_scale(dialog)
+
+    def finish_scale(self, dialog) -> bool:
+        """Apply Scale: *dialog*'s scale on the pages it chose."""
         scale = dialog.result_scale()
         if scale is None:
-            return
-        self.current_page().scale = scale
-        self.apply_scale_change()
+            return False
+        pages = dialog.page_indexes() if hasattr(dialog, "page_indexes") else None
+        if not pages:
+            return False
+        self.set_page_scale(scale, pages)
+        return True
 
     def calibrate_dialog(self) -> None:
         self.calibrate_scale(None)
@@ -7570,66 +7599,97 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(f"{brought} markup(s) brought back")
 
     def flatten_selection(self) -> None:
-        """Make selected items part of the page, using the recovery preference."""
+        """Right-click ▸ Flatten: the selected markups, at once, with Revu's
+        default settings — recoverable with Unflatten. The choices are in
+        Document ▸ Flatten Markups (the user, 2026-10-15)."""
         # Equations are already written into the page on every save
         # (decision 3); flattening one would only stop it calculating.
         items = [i for i in self.selected_items() if isinstance(i, MarkupItem)
                  and not getattr(i, "IS_CALC", False)]
         if not items:
             return
-        from . import preferences
-
-        recoverable = preferences.current().recover_flattened
-        if self.interactive_prompts and QMessageBox.question(
-                self, "Flatten",
-                f"Flatten {len(items)} markup(s) into the page?\n\n"
-                "They become part of the drawing: no longer movable, editable "
-                "or selectable. " + (
-                    "Recover can restore their source data."
-                    if recoverable else
-                    "Recovery data is disabled; saving discards their editable source.")) \
-                != QMessageBox.Yes:
-            return
-        self._flatten_items(items, recoverable)
-
+        self._flatten_items(items, True)
 
     @staticmethod
-    def _flatten_class(item) -> str:
-        """Which of the flatten dialog's classes *item* belongs to.
+    def _flatten_type(item) -> str:
+        """The markup's type as Flatten Markups' Type list names it: Cloud,
+        Length, Text box — what it is, never the label somebody gave it."""
+        from ..items.measure import CountItem, MEASURE_NAMES, MeasureItem
 
-        Three, because they are flattened for different reasons. Words are
-        flattened so nobody can retype them; a measurement is flattened so the
-        number cannot drift off the scale it was taken at; everything else is
-        flattened to make it part of the drawing.
-        """
-        from ..items.measure import CountItem, MeasureItem
-        from ..items.text import _TextBase, FlagItem, NoteItem, StampItem
+        kind_name = getattr(item, "NAME_FOR_KIND", None)
+        if kind_name:
+            return kind_name
+        if isinstance(item, CountItem):
+            return "Count"
+        if isinstance(item, MeasureItem):
+            return MEASURE_NAMES.get(item.kind, "Measurement")
+        return getattr(item, "NAME", "Markup")
 
-        if isinstance(item, (_TextBase, NoteItem, StampItem, FlagItem)):
-            return "text"
-        if isinstance(item, (MeasureItem, CountItem)):
-            return "measurements"
-        return "markups"
+    def _flattenable(self) -> list:
+        """(page index, markup) for every markup Flatten Markups could take."""
+        return [(index, item) for index, page in enumerate(self.document.pages)
+                if page.frame is not None
+                for item in page.frame.markups()
+                if not item.flattened
+                and not item.from_drawing
+                and not getattr(item, "IS_CALC", False)]
 
-    def flatten_document(self) -> None:
-        """Choose content classes and flatten matching items on every page."""
+    def flatten_dialog(self) -> "dialogs.FlattenDialog":
+        """Revu's Flatten Markups, filled from this document; not yet shown."""
         from . import preferences
 
-        recoverable = preferences.current().recover_flattened
-        dialog = dialogs.FlattenDialog(recoverable, self)
+        selected = [i for i in self.selected_items() if isinstance(i, MarkupItem)
+                    and not getattr(i, "IS_CALC", False) and not i.flattened]
+        types = sorted({self._flatten_type(item) for _index, item in self._flattenable()},
+                       key=str.lower)
+        picked = self.selected_pages()
+        dialog = dialogs.FlattenDialog(
+            types, self, selected_markups=len(selected),
+            recoverable=preferences.current().recover_flattened,
+            count=len(self.document.pages), current=self.current_index,
+            selected_pages=picked if len(picked) > 1 else [])
+        dialog.markups_selected = selected      # as they were when it opened
+        return dialog
+
+    def flatten_document(self) -> None:
+        """Document ▸ Flatten Markups: Revu's dialog, then the flattening."""
+        dialog = self.flatten_dialog()
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
-        chosen = dialog.chosen()
-        items = [item for page in self.document.pages if page.frame is not None
-                 for item in page.frame.markups()
-                 if not item.flattened
-                 and not item.from_drawing
-                 and not getattr(item, "IS_CALC", False)
-                 and self._flatten_class(item) in chosen]
+        self.finish_flatten(dialog)
+
+    def finish_flatten(self, dialog) -> int:
+        """Flatten what *dialog* chose; how many markups that was."""
+        from . import preferences
+
+        # Allow Markup Recovery is remembered for next time, as Revu does.
+        recoverable = dialog.recoverable()
+        prefs = preferences.current()
+        if prefs.recover_flattened != recoverable:
+            prefs.recover_flattened = recoverable
+            preferences.save(prefs)
+        pages = set(dialog.page_indexes() or [])
+        types = dialog.chosen_types()
+        scope = dialog.scope()
+        chosen = getattr(dialog, "markups_selected", [])
+        panel = self.markups_panel
+        needle = panel.filter.text().strip().lower()
+        items = []
+        for index, item in self._flattenable():
+            if index not in pages or self._flatten_type(item) not in types:
+                continue
+            if scope == dialog.SELECTED_MARKUPS and not any(item is c for c in chosen):
+                continue
+            # Exclude Filtered Markups: what the Markups list's filter hides
+            if scope == dialog.EXCLUDE_FILTERED and \
+                    not panel._shown(panel.row_for(index, item), needle):
+                continue
+            items.append(item)
         if not items:
             self.status_hint.setText("Nothing matched those flatten choices")
-            return
+            return 0
         self._flatten_items(items, recoverable)
+        return len(items)
 
     def _flatten_items(self, items: list[MarkupItem], recoverable: bool) -> None:
         """Flatten *items*, either retaining source or baking visual records."""
@@ -7679,7 +7739,7 @@ class MainWindow(QMainWindow):
                     detach(member)
                 frame.add_markup(baked, region.topLeft())
         self.view.commit_snapshot("Flatten")
-        suffix = " · Recover can restore them" if recoverable else " · source discarded"
+        suffix = " · Unflatten can restore them" if recoverable else " · source discarded"
         self.status_hint.setText(f"{len(items)} item(s) flattened{suffix}")
         self.refresh_selection()
 

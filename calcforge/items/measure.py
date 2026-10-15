@@ -486,7 +486,14 @@ class MeasureItem(MarkupItem):
         except Exception:
             quantity = None
         self.value = quantity
-        measured = format_quantity(quantity, digits, "fixed") if quantity is not None else ""
+        if quantity is None:
+            measured = ""
+        elif kind == "length" and hasattr(scale, "format_length"):
+            # a length is written to the scale's Precision, which may be a
+            # fraction (Revu's Set Scale; the user, 2026-10-15)
+            measured = scale.format_length(quantity, digits)
+        else:
+            measured = format_quantity(quantity, digits, "fixed")
         self.measured_text = measured
         named = f"{self.variable} = {measured}" if self.variable and measured else measured
         self.value_text = self.custom_label or named

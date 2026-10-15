@@ -291,6 +291,19 @@ QCheckBox::indicator:checked, QAbstractItemView::indicator:checked {{
     background: {accent}; border-color: {accent}; image: url("{arrow_tick}");
 }}
 QCheckBox::indicator:disabled {{ border-color: {chrome_edge}; background: {surface}; }}
+/* and a round one for a choice of one: unticked radios were near invisible
+   in dark mode (Set Scale's Preset | Custom; QA, 2026-10-15) */
+QRadioButton::indicator {{
+    width: 13px; height: 13px; border-radius: 7px;
+    border: 1px solid {ink_soft}; background: {field};
+}}
+QRadioButton::indicator:hover {{ border-color: {accent}; }}
+QRadioButton::indicator:checked {{
+    border-color: {accent};
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 {accent}, stop:0.5 {accent}, stop:0.56 {field}, stop:1 {field});
+}}
+QRadioButton::indicator:disabled {{ border-color: {chrome_edge}; background: {surface}; }}
 QToolTip {{
     background: {ink}; color: {field}; border: 0; padding: 6px 8px;
     border-radius: 3px;

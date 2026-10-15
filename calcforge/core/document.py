@@ -35,6 +35,41 @@ PAGE_SIZES: dict[str, tuple[float, float]] = {
 PORTRAIT = "portrait"
 LANDSCAPE = "landscape"
 
+# The units the paper side of a scale is measured in, as points: Revu's
+# "1 mm = 50 mm" has the drawing's length on the left.
+PAPER_UNITS: dict[str, float] = {"mm": MM_TO_PT, "cm": 10 * MM_TO_PT,
+                                 "in": IN_TO_PT, "pt": 1.0}
+
+
+def fraction_text(quantity, denominator: int) -> str:
+    """*quantity* to the nearest 1/*denominator*: 12'-3 3/16" for feet,
+    3 3/16" for inches, 4 1/2 yd otherwise; "" when it cannot be read."""
+    from fractions import Fraction
+
+    try:
+        unit = str(quantity.units)
+        amount = float(quantity.to("in").magnitude) if unit == "ft" \
+            else float(quantity.magnitude)
+    except Exception:                                  # noqa: BLE001
+        return ""
+    sign = "-" if amount < 0 else ""
+    steps = round(abs(amount) * denominator)
+
+    def whole_and_part(count: int) -> str:
+        whole, part = divmod(count, denominator)
+        if not part:
+            return f"{whole}"
+        part = Fraction(part, denominator)
+        return (f"{whole} {part.numerator}/{part.denominator}" if whole
+                else f"{part.numerator}/{part.denominator}")
+
+    if unit == "ft":
+        feet, rest = divmod(steps, 12 * denominator)
+        return f"{sign}{feet}'-{whole_and_part(rest)}\""
+    if unit == "in":
+        return f"{sign}{whole_and_part(steps)}\""
+    return f"{sign}{whole_and_part(steps)} {unit}"
+
 
 @dataclass
 class PageSetup:
@@ -118,6 +153,10 @@ class PageScale:
     # the same scale both ways; a sheet stretched to 1:100 across and 1:50
     # down is 0.5. ``length_per_pt`` is always the across (X) scale.
     y_factor: float = 1.0
+    # Revu's Precision as a fraction: 16 writes lengths to the nearest 1/16
+    # (feet as 12'-3 3/16"); 0 is decimals, *precision* places of them. Set
+    # from the Set Scale dialog's Precision box (the user, 2026-10-15).
+    fraction: int = 0
 
     def __post_init__(self):
         if self.length_per_pt is None:
@@ -171,8 +210,35 @@ class PageScale:
         scale.length_per_pt = per_pt
         return scale
 
+    @classmethod
+    def from_equation(cls, page_length: float, page_unit: str, real_length: float,
+                      real_unit: str, label: str = "") -> "PageScale":
+        """Revu's Custom scale: *page_length* *page_unit* on the paper is
+        *real_length* *real_unit* in the world — 1 mm = 50 mm, 1/4 in = 1 ft.
+
+        The paper side is one of PAPER_UNITS; the real side any length unit.
+        """
+        points = page_length * PAPER_UNITS[page_unit]
+        scale = cls(label=label or f"{page_length:g} {page_unit} = {real_length:g} {real_unit}",
+                    display_unit=real_unit, calibrated=True)
+        scale.length_per_pt = Q_(real_length / points, real_unit)
+        return scale
+
     def length(self, points: float):
         return self.length_per_pt * points
+
+    def format_length(self, quantity, digits: Optional[int] = None) -> str:
+        """A length as a measurement writes it: to *precision* decimals, or to
+        the nearest fraction (feet as Revu's 12'-3 3/16") when the scale's
+        Precision is a fraction."""
+        if quantity is None:
+            return ""
+        if self.fraction and self.is_calibrated():
+            text = fraction_text(quantity, self.fraction)
+            if text:
+                return text
+        return format_quantity(quantity, max(self.precision if digits is None else digits, 0),
+                               "fixed")
 
     def area(self, square_points: float):
         """An area measured on the page, at both scales."""
@@ -192,6 +258,7 @@ class PageScale:
             "area_unit": self.area_unit,
             "calibrated": self.calibrated,
             "y_factor": self.y_factor,
+            "fraction": self.fraction,
         }
 
     @classmethod
@@ -206,6 +273,10 @@ class PageScale:
                     area_unit=data.get("area_unit", "m^2"),
                     calibrated=bool(data.get("calibrated", label != "1:1")),
                     y_factor=float(data.get("y_factor", 1.0) or 1.0))
+        try:                            # files from before Revu's fractions have none
+            scale.fraction = max(int(data.get("fraction", 0) or 0), 0)
+        except (TypeError, ValueError):
+            scale.fraction = 0
         try:
             scale.length_per_pt = Q_(float(data["magnitude"]), data["units"])
         except Exception:
