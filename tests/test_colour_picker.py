@@ -177,12 +177,14 @@ def test_the_eyedropper_reaches_every_screen_and_a_scaled_one(qapp):
     assert pick.ending and left.result == right.result == "#c03020"
 
 
-def test_the_picker_swatches_are_drawn_at_the_screens_own_pixels(qapp):
+def test_the_picker_swatches_are_drawn_at_the_screens_own_pixels(qapp, monkeypatch):
     """Blurry next to Revu's (the user, 2026-10-15): a swatch made at 100 %
-    and stretched to a 125 % or 150 % display. Asked for at a scale, it is
-    drawn at that many pixels, its edge a single sharp pixel."""
+    and stretched to a 125 % or 150 % display. Drawn for each screen's own
+    ratio, it is that many pixels, its edge a single sharp pixel."""
     from PySide6.QtCore import QSize
+    from calcforge.ui import icons
     from calcforge.ui.colorpicker import swatch_icon
+    monkeypatch.setattr(icons, "_scales", lambda: [1.0, 1.25, 1.5, 2.0])   # four screens
     for scale in (1.0, 1.25, 1.5, 2.0):
         pixmap = swatch_icon("#ff0000", 16).pixmap(QSize(16, 16), scale)
         assert pixmap.width() == round(16 * scale), scale

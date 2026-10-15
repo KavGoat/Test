@@ -4,8 +4,8 @@ from __future__ import annotations
 import math
 from functools import lru_cache
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import (QBrush, QColor, QFont, QIcon, QIconEngine, QPainter,
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import (QBrush, QColor, QFont, QIcon, QPainter,
                            QPainterPath, QPen, QPixmap, QPolygonF)
 
 # Icons are drawn, not loaded, so they take the colour of whichever theme is
@@ -62,71 +62,45 @@ def icon_theme() -> str:
     return _theme
 
 
-class _Drawn(QIconEngine):
-    """An icon drawn for the size and pixel ratio the screen asks for.
+def _scales() -> list:
+    """The pixel ratios to draw an icon at: 1, and every screen's own."""
+    from PySide6.QtGui import QGuiApplication
+    ratios = {1.0}
+    if QGuiApplication.instance() is not None:
+        for screen in QGuiApplication.screens():
+            ratios.add(round(float(screen.devicePixelRatio()), 3))
+    return sorted(ratios)
+
+
+def _render(draw, width: int, height: int, scale: float) -> QPixmap:
+    made = QPixmap(max(1, round(width * scale)), max(1, round(height * scale)))
+    made.fill(Qt.transparent)
+    painter = QPainter(made)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setRenderHint(QPainter.TextAntialiasing, True)
+    painter.scale(made.width() / width, made.height() / height)
+    painter.setBrush(Qt.NoBrush)
+    draw(painter)
+    painter.end()
+    made.setDevicePixelRatio(made.width() / width)
+    return made
+
+
+def drawn_icon(draw, width: int, height: int = 0) -> QIcon:
+    """An icon from *draw(painter)* on a *width* × *height* canvas, drawn at
+    each screen's own pixel ratio.
 
     A picture made once at 100 % and stretched to a Windows display at 125 %
     or 150 % comes out soft (the user, 2026-10-15: the colour picker "looks
     blurry compared to Bluebeam"); drawn again at the screen's own pixels, an
-    edge lands on a pixel and stays sharp, as Revu's do.
-
-    *draw(painter)* draws on a *width* × *height* canvas; the engine scales it."""
-
-    def __init__(self, draw, width: int, height: int):
-        super().__init__()
-        self.draw, self.width, self.height = draw, width, height
-        self.made: dict = {}
-
-    def clone(self):
-        return _Drawn(self.draw, self.width, self.height)
-
-    def actualSize(self, size, mode, state):
-        # as a picture of that size would answer: never bigger than asked
-        own = QSize(self.width, self.height)
-        if own.width() <= size.width() and own.height() <= size.height():
-            return own
-        return own.scaled(size, Qt.KeepAspectRatio)
-
-    def scaledPixmap(self, size, mode, state, scale):
-        logical = self.actualSize(size, mode, state)
-        scale = float(scale or 1.0)
-        key = (logical.width(), logical.height(), round(scale, 3), mode == QIcon.Disabled)
-        made = self.made.get(key)
-        if made is None:
-            made = QPixmap(max(1, round(logical.width() * scale)),
-                           max(1, round(logical.height() * scale)))
-            made.fill(Qt.transparent)
-            painter = QPainter(made)
-            painter.setRenderHint(QPainter.Antialiasing, True)
-            painter.setRenderHint(QPainter.TextAntialiasing, True)
-            painter.scale(made.width() / self.width, made.height() / self.height)
-            painter.setBrush(Qt.NoBrush)
-            self.draw(painter)
-            painter.end()
-            made.setDevicePixelRatio(made.width() / max(1, logical.width()))
-            if mode == QIcon.Disabled:
-                from PySide6.QtWidgets import QApplication, QStyleOption
-                style = QApplication.style() if QApplication.instance() else None
-                if style is not None:
-                    ratio = made.devicePixelRatio()
-                    made = style.generatedIconPixmap(QIcon.Disabled, made, QStyleOption())
-                    made.setDevicePixelRatio(ratio)
-            self.made[key] = made
-        return made
-
-    def pixmap(self, size, mode, state):
-        return self.scaledPixmap(size, mode, state, 1.0)
-
-    def paint(self, painter, rect, mode, state):
-        device = painter.device()
-        ratio = device.devicePixelRatioF() if device is not None else 1.0
-        painter.drawPixmap(rect, self.scaledPixmap(rect.size(), mode, state, ratio))
-
-
-def drawn_icon(draw, width: int, height: int = 0) -> QIcon:
-    """An icon from *draw(painter)* on a *width* × *height* canvas, kept sharp
-    at any display scale."""
-    return QIcon(_Drawn(draw, width, height or width))
+    edge lands on a pixel and stays sharp, as Revu's do. The pictures are
+    made here and now — an icon that drew itself when asked was asked again
+    while Python was shutting down."""
+    height = height or width
+    made = QIcon()
+    for scale in _scales():
+        made.addPixmap(_render(draw, width, height, scale))
+    return made
 
 
 def _pen(painter: QPainter, colour: str, width: float = 1.6,
@@ -764,18 +738,11 @@ def cursor_pixmap(name: str, size: int = 24) -> QPixmap:
 
 @lru_cache(maxsize=256)
 def icon(name: str, size: int = 24) -> QIcon:
-    """Return a cached icon, drawn sharp at whatever scale it is shown at, in
-    the theme it was asked for in."""
-    theme = _theme
-
+    """Return a cached icon; drawn once per name and size, sharp at every
+    screen's pixel ratio."""
     def draw(painter: QPainter) -> None:
-        now = _theme
-        _apply_inks(theme)
-        try:
-            painter.scale(size / 24.0, size / 24.0)
-            _draw(name, painter)
-        finally:
-            _apply_inks(now)
+        painter.scale(size / 24.0, size / 24.0)
+        _draw(name, painter)
     return drawn_icon(draw, size)
 
 
