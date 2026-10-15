@@ -106,10 +106,20 @@ def test_empty_placeholder_error():
 
 
 def test_function_call_equals_on_unknown_overload_defines():
-    ws, (a, b) = sheet("log(100=", "max(1,5,3=")
+    """With names for arguments, "=" after an arity SMath does not know
+    defines that overload (observed: log(a)= gives log(a):=)."""
+    ws, (a,) = sheet("log(a=")
     assert a.editor.root.text().endswith("≔")
-    assert error(a) == "Syntax is incorrect."
-    assert error(b) == "Syntax is incorrect."
+
+
+def test_function_call_with_numbers_always_evaluates():
+    """SMath Cloud turned log(100)= and max(1,5,3)= into definitions with
+    "Syntax is incorrect."; a definition's parameters are names, so a call
+    with numbers in it is evaluated (the user, 2026-10-15), and max takes
+    any number of arguments, as in SMath Studio desktop."""
+    ws, (a, b) = sheet("log(100=", "max(1,5,3=")
+    assert a.editor.root.text() == "log(100)=" and error(a) == "Incorrect number of arguments."
+    assert b.editor.root.text() == "max(1,5,3)=" and result(b) == "5"
 
 
 def test_undefined_function_message():
@@ -166,9 +176,11 @@ def test_exponent_keeps_typing_until_right_arrow():
     assert result(b) == "5"
 
 
-def test_close_bracket_is_ignored_right_arrow_leaves():
+def test_close_bracket_closes_it_as_the_right_arrow_does():
+    """SMath Cloud ignores ")" ((1+2)*3= gave 7); here ")" leaves the
+    bracket, as in SMath Studio desktop (the user, 2026-10-15)."""
     ws, (a, b) = sheet("(1+2)*3=", ["(", "1", "+", "2", "RIGHT", "*", "3", "="])
-    assert result(a) == "7"
+    assert result(a) == "9"
     assert result(b) == "9"
 
 
