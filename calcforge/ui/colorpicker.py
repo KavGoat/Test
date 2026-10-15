@@ -21,8 +21,8 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QEventLoop, QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import (QColor, QCursor, QGuiApplication, QIcon, QPainter, QPainterPath,
-                           QPen, QPixmap)
+from PySide6.QtGui import (QColor, QCursor, QGuiApplication, QIcon, QLinearGradient, QPainter,
+                           QPainterPath, QPen, QPixmap)
 from PySide6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout,
                                QToolButton, QVBoxLayout, QWidget)
 
@@ -72,44 +72,50 @@ def remember(colour: str) -> None:
 
 
 def swatch_icon(colour: str, size: int = 16) -> QIcon:
-    """A square of *colour*; "" draws Revu's No Color (white, a red slash)."""
-    pixmap = QPixmap(size, size)
-    pixmap.fill(QColor(colour) if colour else QColor("#ffffff"))
-    painter = QPainter(pixmap)
-    if not colour:
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setPen(QPen(QColor("#e03030"), max(1.5, size / 10)))
-        painter.drawLine(QPointF(2, size - 2), QPointF(size - 2, 2))
-    painter.setPen(QPen(QColor(0, 0, 0, 90), 1))
-    painter.drawRect(0, 0, size - 1, size - 1)
-    painter.end()
-    return QIcon(pixmap)
+    """A square of *colour*; "" draws Revu's No Color (white, a red slash).
+    Drawn at the screen's own pixels, so its edges stay sharp when Windows
+    scales the display."""
+    from .icons import drawn_icon
+
+    def draw(painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.fillRect(QRectF(0, 0, size, size), QColor(colour) if colour else QColor("#ffffff"))
+        if not colour:
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setPen(QPen(QColor("#e03030"), max(1.5, size / 10)))
+            painter.drawLine(QPointF(2, size - 2), QPointF(size - 2, 2))
+            painter.setRenderHint(QPainter.Antialiasing, False)
+        edge = QPen(QColor(0, 0, 0, 90))
+        edge.setCosmetic(True)                  # one screen pixel, at any scale
+        edge.setWidth(0)
+        painter.setPen(edge)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(QRectF(0, 0, size, size).adjusted(0, 0, -size / painter.device().width(),
+                                                           -size / painter.device().height()))
+    return drawn_icon(draw, size)
 
 
 def eyedropper_icon(colour: str = "#d9dbde", size: int = 18) -> QIcon:
     """A pipette, drawn: its bulb at the top right, its tip at the bottom left."""
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    s = size / 18.0
-    painter.scale(s, s)
-    ink = QColor(colour)
-    painter.setPen(QPen(ink, 1.3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-    painter.setBrush(Qt.NoBrush)
-    tube = QPainterPath()
-    tube.moveTo(2.5, 15.5)
-    tube.lineTo(3.0, 13.0)
-    tube.lineTo(10.0, 6.0)
-    tube.lineTo(12.0, 8.0)
-    tube.lineTo(5.0, 15.0)
-    tube.closeSubpath()
-    painter.drawPath(tube)
-    painter.setBrush(ink)
-    painter.drawRoundedRect(QRectF(10.6, 2.2, 5.0, 5.0), 2.0, 2.0)
-    painter.drawLine(QPointF(9.0, 5.0), QPointF(13.0, 9.0))
-    painter.end()
-    return QIcon(pixmap)
+    from .icons import drawn_icon
+
+    def draw(painter: QPainter) -> None:
+        painter.scale(size / 18.0, size / 18.0)
+        ink = QColor(colour)
+        painter.setPen(QPen(ink, 1.3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.setBrush(Qt.NoBrush)
+        tube = QPainterPath()
+        tube.moveTo(2.5, 15.5)
+        tube.lineTo(3.0, 13.0)
+        tube.lineTo(10.0, 6.0)
+        tube.lineTo(12.0, 8.0)
+        tube.lineTo(5.0, 15.0)
+        tube.closeSubpath()
+        painter.drawPath(tube)
+        painter.setBrush(ink)
+        painter.drawRoundedRect(QRectF(10.6, 2.2, 5.0, 5.0), 2.0, 2.0)
+        painter.drawLine(QPointF(9.0, 5.0), QPointF(13.0, 9.0))
+    return drawn_icon(draw, size)
 
 
 class ColourPopup(QFrame):
@@ -295,11 +301,9 @@ class _Spectrum(QWidget):
         self.setCursor(Qt.CrossCursor)
         self.hue = max(0, colour.hsvHue())
         self.sat, self.val = colour.hsvSaturation(), colour.value()
-        self._cache = None
 
     def set_hue(self, hue: int) -> None:
         self.hue = hue
-        self._cache = None
         self.update()
         self.changed.emit(self.colour())
 
@@ -307,24 +311,24 @@ class _Spectrum(QWidget):
         if colour.hsvHue() >= 0:
             self.hue = colour.hsvHue()
         self.sat, self.val = colour.hsvSaturation(), colour.value()
-        self._cache = None
         self.update()
 
     def colour(self) -> QColor:
         return QColor.fromHsv(self.hue, self.sat, self.val)
 
     def paintEvent(self, _event) -> None:
-        from PySide6.QtGui import QImage
-        if self._cache is None:
-            w, h = self.width(), self.height()
-            image = QImage(w, h, QImage.Format_RGB32)
-            for y in range(h):
-                v = 255 - int(255 * y / (h - 1))
-                for x in range(w):
-                    image.setPixelColor(x, y, QColor.fromHsv(self.hue, int(255 * x / (w - 1)), v))
-            self._cache = image
+        # two gradients, drawn by the painter at the screen's own pixels: white
+        # to the hue across, then clear to black down
         painter = QPainter(self)
-        painter.drawImage(0, 0, self._cache)
+        area = QRectF(self.rect())
+        across = QLinearGradient(area.topLeft(), area.topRight())
+        across.setColorAt(0.0, QColor("#ffffff"))
+        across.setColorAt(1.0, QColor.fromHsv(self.hue, 255, 255))
+        painter.fillRect(area, across)
+        down = QLinearGradient(area.topLeft(), area.bottomLeft())
+        down.setColorAt(0.0, QColor(0, 0, 0, 0))
+        down.setColorAt(1.0, QColor(0, 0, 0, 255))
+        painter.fillRect(area, down)
         x = self.sat * (self.width() - 1) / 255.0
         y = (255 - self.val) * (self.height() - 1) / 255.0
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -358,9 +362,10 @@ class _HueStrip(QWidget):
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         h = self.height()
-        for y in range(h):
-            painter.setPen(QColor.fromHsv(int(359 * y / (h - 1)), 255, 255))
-            painter.drawLine(0, y, self.width(), y)
+        hues = QLinearGradient(QPointF(0, 0), QPointF(0, h))
+        for step in range(7):
+            hues.setColorAt(step / 6.0, QColor.fromHsv(min(359, step * 60), 255, 255))
+        painter.fillRect(self.rect(), hues)
         y = self.hue * (h - 1) / 359.0
         painter.setPen(QPen(QColor("#ffffff"), 2))
         painter.drawRect(QRectF(0.5, y - 2, self.width() - 1, 4))
@@ -476,10 +481,31 @@ class QLabelSwatch(QWidget):
         painter.end()
 
 
+class _Pick:
+    """One eyedropper across every screen: a held-still picture on each, the
+    pointer followed from one to the next, and the first click ends them all."""
+
+    def __init__(self):
+        self.loop = QEventLoop()
+        self.droppers: list = []
+        self.result: Optional[str] = None
+        self.ending = False
+
+    def finish(self, result: Optional[str]) -> None:
+        if self.ending:
+            return
+        self.ending = True
+        self.result = result
+        for dropper in self.droppers:
+            dropper.result = result
+            dropper.close()
+        self.loop.quit()
+
+
 class _Dropper(QWidget):
     """The screen, held still, with a loupe; a click takes its colour."""
 
-    def __init__(self, shot: QPixmap, geometry: QRect):
+    def __init__(self, shot: QPixmap, geometry: QRect, pick: Optional[_Pick] = None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         # Above everything, a modal dialog included: Color Processing is one,
         # and under it the screen held still took no clicks, so its loop
@@ -487,13 +513,18 @@ class _Dropper(QWidget):
         self.setWindowModality(Qt.ApplicationModal)
         self.shot = shot.toImage()
         self.pixmap = shot
-        self.ratio = shot.devicePixelRatio() or 1.0
+        # the picture's pixels to one of the screen's points, worked out from
+        # the two sizes: a grab does not always say (Windows at 125 %, 150 %),
+        # and a ratio taken as 1 there picked the colour beside the pointer
+        self.ratio = (shot.width() / geometry.width() if geometry.width() > 0
+                      else shot.devicePixelRatio() or 1.0)
         self.setGeometry(geometry)
         self.setCursor(Qt.CrossCursor)
         self.setMouseTracking(True)
         self.result: Optional[str] = None
-        self.at = self.mapFromGlobal(QCursor.pos())
-        self.loop = QEventLoop()
+        self.pick = pick
+        self.at: Optional[QPoint] = self.mapFromGlobal(QCursor.pos())
+        self.loop = pick.loop if pick is not None else QEventLoop()
 
     def colour_at(self, point: QPoint) -> QColor:
         x = int(point.x() * self.ratio)
@@ -506,6 +537,9 @@ class _Dropper(QWidget):
         painter = QPainter(self)
         painter.drawPixmap(self.rect(), self.pixmap)
         at = self.at
+        if at is None or not self.rect().contains(at):
+            painter.end()                   # the pointer is on another screen
+            return
         colour = self.colour_at(at)
         # the loupe: 11 x 11 pixels at 10 x, beside the pointer
         size = 110
@@ -529,56 +563,94 @@ class _Dropper(QWidget):
         painter.drawText(label.adjusted(22, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, colour.name().upper())
         painter.end()
 
+    def _under(self, event):
+        """The dropper the pointer is over and the point on it: with the
+        mouse held by one of them, a move or click over another screen still
+        comes here, in this one's terms."""
+        if self.pick is not None:
+            where = event.globalPosition().toPoint()
+            for dropper in self.pick.droppers:
+                if dropper.geometry().contains(where):
+                    return dropper, where - dropper.geometry().topLeft()
+        return self, event.position().toPoint()
+
     def mouseMoveEvent(self, event) -> None:
-        self.at = event.position().toPoint()
-        self.update()
+        under, at = self._under(event)
+        for dropper in (self.pick.droppers if self.pick is not None else [self]):
+            dropper.at = at if dropper is under else None
+            dropper.update()
 
     def mousePressEvent(self, event) -> None:
+        result = None
         if event.button() == Qt.LeftButton:
-            self.result = self.colour_at(event.position().toPoint()).name()
-        self.close()
+            under, at = self._under(event)
+            result = under.colour_at(at).name()
+        self._end(result)
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Escape:
-            self.close()
+            self._end(None)
         elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
-            self.result = self.colour_at(self.at).name()
+            under = next((d for d in (self.pick.droppers if self.pick is not None else [self])
+                          if d.at is not None), self)
+            self._end(under.colour_at(under.at or QPoint()).name())
+
+    def _end(self, result: Optional[str]) -> None:
+        if self.pick is not None:
+            self.pick.finish(result)
+        else:
+            self.result = result
             self.close()
 
     def closeEvent(self, event) -> None:
         super().closeEvent(event)
-        self.loop.quit()
+        if self.pick is not None:
+            self.pick.finish(self.pick.result)      # one gone (Alt+Tab...) ends them all
+        else:
+            self.loop.quit()
 
 
 def pick_from_screen() -> Optional[str]:
-    """The eyedropper: a colour from anywhere on the screen, or None."""
+    """The eyedropper: a colour from anywhere on any screen — the taskbar,
+    another program, a second monitor — or None."""
     if ANSWERS:
         return ANSWERS.pop(0)
-    screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
-    if screen is None:
+    pointer = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+    if pointer is None:
         return None
-    shot = screen.grabWindow(0)
-    if shot.isNull() or _blank(shot):
-        # Some systems will not hand over the screen (Wayland, a locked-down
-        # desktop): the application's own windows, where they are, then —
-        # every colour in the drawing at least.
-        shot = _our_windows(screen)
-        if shot is None:
-            return None
-    dropper = _Dropper(shot, screen.geometry())
-    dropper.show()
-    dropper.raise_()
-    dropper.activateWindow()
-    dropper.grabKeyboard()
-    dropper.grabMouse()
+    # the screen under the pointer last, so it is the one on top that holds
+    # the mouse and keyboard
+    screens = [s for s in QGuiApplication.screens() if s is not pointer] + [pointer]
+    pick = _Pick()
+    for screen in screens:
+        shot = screen.grabWindow(0)
+        if shot.isNull() or _blank(shot):
+            # Some systems will not hand over the screen (Wayland, a locked-down
+            # desktop): the application's own windows, where they are, then —
+            # every colour in the drawing at least.
+            shot = _our_windows(screen)
+            if shot is None:
+                continue
+        pick.droppers.append(_Dropper(shot, screen.geometry(), pick))
+    if not pick.droppers:
+        return None
+    for dropper in pick.droppers:
+        dropper.show()
+        dropper.raise_()
+    holder = pick.droppers[-1]
+    holder.activateWindow()
+    holder.grabKeyboard()
+    holder.grabMouse()
     try:
-        dropper.loop.exec()
+        if not pick.ending:
+            pick.loop.exec()
     finally:
-        dropper.releaseMouse()
-        dropper.releaseKeyboard()
-    result = dropper.result
-    dropper.deleteLater()
-    return result
+        holder.releaseMouse()
+        holder.releaseKeyboard()
+        for dropper in pick.droppers:
+            dropper.close()
+            dropper.deleteLater()
+    return pick.result
 
 
 def _blank(shot: QPixmap) -> bool:

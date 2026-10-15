@@ -8,7 +8,7 @@ along with a layout that is remembered between sessions.
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap, QColor, QPolygonF
+from PySide6.QtGui import QIcon, QPainter, QPen, QColor, QPolygonF
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtWidgets import (QDockWidget, QHBoxLayout, QLabel, QSizePolicy,
                                QToolButton, QWidget)
@@ -21,43 +21,40 @@ COLLAPSED_KEY = "panels/collapsed"
 
 def _icon(name: str, size: int = 14) -> QIcon:
     """Small monochrome glyphs for the title-bar buttons, in the theme's ink."""
-    from .icons import INK
+    from .icons import INK, drawn_icon
 
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    painter.scale(size / 14.0, size / 14.0)
-    pen = QPen(QColor(INK))
-    pen.setWidthF(1.3)
-    pen.setCapStyle(Qt.RoundCap)
-    painter.setPen(pen)
-    if name == "pin":
-        painter.setBrush(QColor(INK))
-        painter.drawPolygon(QPolygonF([QPointF(5, 2), QPointF(9, 2), QPointF(8.2, 6),
-                                       QPointF(10, 8), QPointF(4, 8), QPointF(5.8, 6)]))
-        painter.drawLine(QPointF(7, 8), QPointF(7, 12))
-    elif name == "unpinned":
-        painter.setBrush(Qt.NoBrush)
-        painter.drawPolygon(QPolygonF([QPointF(5, 2), QPointF(9, 2), QPointF(8.2, 6),
-                                       QPointF(10, 8), QPointF(4, 8), QPointF(5.8, 6)]))
-        painter.drawLine(QPointF(7, 8), QPointF(7, 12))
-    elif name == "collapse":
-        painter.drawPolyline(QPolygonF([QPointF(4, 8.5), QPointF(7, 5.5),
-                                        QPointF(10, 8.5)]))
-    elif name == "expand":
-        painter.drawPolyline(QPolygonF([QPointF(4, 5.5), QPointF(7, 8.5),
-                                        QPointF(10, 5.5)]))
-    elif name == "float":
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(QRectF(2.5, 4.5, 7, 7))
-        painter.drawPolyline(QPolygonF([QPointF(5.5, 2.5), QPointF(11.5, 2.5),
-                                        QPointF(11.5, 8.5)]))
-    else:                                   # close
-        painter.drawLine(QPointF(3.5, 3.5), QPointF(10.5, 10.5))
-        painter.drawLine(QPointF(10.5, 3.5), QPointF(3.5, 10.5))
-    painter.end()
-    return QIcon(pixmap)
+    def draw(painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.scale(size / 14.0, size / 14.0)
+        pen = QPen(QColor(INK))
+        pen.setWidthF(1.3)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        if name == "pin":
+            painter.setBrush(QColor(INK))
+            painter.drawPolygon(QPolygonF([QPointF(5, 2), QPointF(9, 2), QPointF(8.2, 6),
+                                           QPointF(10, 8), QPointF(4, 8), QPointF(5.8, 6)]))
+            painter.drawLine(QPointF(7, 8), QPointF(7, 12))
+        elif name == "unpinned":
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPolygon(QPolygonF([QPointF(5, 2), QPointF(9, 2), QPointF(8.2, 6),
+                                           QPointF(10, 8), QPointF(4, 8), QPointF(5.8, 6)]))
+            painter.drawLine(QPointF(7, 8), QPointF(7, 12))
+        elif name == "collapse":
+            painter.drawPolyline(QPolygonF([QPointF(4, 8.5), QPointF(7, 5.5),
+                                            QPointF(10, 8.5)]))
+        elif name == "expand":
+            painter.drawPolyline(QPolygonF([QPointF(4, 5.5), QPointF(7, 8.5),
+                                            QPointF(10, 5.5)]))
+        elif name == "float":
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(QRectF(2.5, 4.5, 7, 7))
+            painter.drawPolyline(QPolygonF([QPointF(5.5, 2.5), QPointF(11.5, 2.5),
+                                            QPointF(11.5, 8.5)]))
+        else:                                   # close
+            painter.drawLine(QPointF(3.5, 3.5), QPointF(10.5, 10.5))
+            painter.drawLine(QPointF(10.5, 3.5), QPointF(3.5, 10.5))
+    return drawn_icon(draw, size, size)
 
 
 class DockTitleBar(QWidget):

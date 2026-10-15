@@ -25,7 +25,7 @@ from ..items.snapshot import SnapshotItem
 from ..items.measure import CountItem, MeasureItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.text import STAMP_PRESETS, CalloutItem, NoteItem, StampItem, TextItem
-from .icons import icon
+from .icons import drawn_icon, icon
 from .stylecaps import CLOUD, CORNER
 from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
                         WIDTH, common_capabilities)
@@ -34,21 +34,18 @@ from .widgets import (ColorButton, UnitCombo, arrow_combo,
 
 
 def _line_style_icon(name: str, colour: str, width: float) -> QIcon:
-    pixmap = QPixmap(150, 34)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    pen = QPen(QColor(colour or "#111318"))
-    pen.setWidthF(max(2.0, min(float(width) * 1.5, 6.0)))
-    dashes = DASH_ARRAYS.get(name, [])
-    if dashes:
-        pen.setStyle(Qt.CustomDashLine)
-        pen.setDashPattern(dashes)
-        pen.setCapStyle(Qt.FlatCap)
-    painter.setPen(pen)
-    painter.drawLine(4, 17, 146, 17)
-    painter.end()
-    return QIcon(pixmap)
+    def draw(painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(QColor(colour or "#111318"))
+        pen.setWidthF(max(2.0, min(float(width) * 1.5, 6.0)))
+        dashes = DASH_ARRAYS.get(name, [])
+        if dashes:
+            pen.setStyle(Qt.CustomDashLine)
+            pen.setDashPattern(dashes)
+            pen.setCapStyle(Qt.FlatCap)
+        painter.setPen(pen)
+        painter.drawLine(4, 17, 146, 17)
+    return drawn_icon(draw, 150, 34)
 
 
 def _hatch_icon(name: str, colour: str) -> QIcon:
@@ -1237,9 +1234,9 @@ class MarkupsPanel(QWidget):
 
 
 def _swatch(colour: str) -> QIcon:
-    pixmap = QPixmap(12, 12)
-    pixmap.fill(QColor(colour))
-    return QIcon(pixmap)
+    def draw(painter: QPainter) -> None:
+        painter.fillRect(QRectF(0, 0, 12, 12), QColor(colour))
+    return drawn_icon(draw, 12, 12)
 
 
 def _icon_for(item) -> str:

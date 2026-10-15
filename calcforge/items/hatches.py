@@ -527,15 +527,13 @@ _SPECIALS = {
 
 def sample_icon(name: str, colour: str, width: int = 76, height: int = 22):
     """A swatch of the pattern, for the pattern lists."""
-    from PySide6.QtGui import QIcon, QPixmap
-    pixmap = QPixmap(width, height)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    ink = QColor(colour or "#748096")
-    painter.setPen(QPen(ink.darker(135), 1))
-    painter.drawRect(3, 3, width - 7, height - 7)
-    region = QPainterPath()
-    region.addRect(3, 3, width - 7, height - 7)
-    paint(painter, region, name, 0.8, ink)
-    painter.end()
-    return QIcon(pixmap)
+    from ..ui.icons import drawn_icon
+
+    def draw(painter: QPainter) -> None:
+        ink = QColor(colour or "#748096")
+        painter.setPen(QPen(ink.darker(135), 1))
+        painter.drawRect(3, 3, width - 7, height - 7)
+        region = QPainterPath()
+        region.addRect(3, 3, width - 7, height - 7)
+        paint(painter, region, name, 0.8, ink)
+    return drawn_icon(draw, width, height)

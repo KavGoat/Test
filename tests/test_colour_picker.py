@@ -146,3 +146,48 @@ def test_a_colour_button_gone_while_its_picker_was_open_is_left_alone(window, mo
         return "#00ff00"
     monkeypatch.setattr(colorpicker, "choose", chose)
     button._pick()                       # no RuntimeError, no crash
+
+
+def _filled(width, height, colour):
+    shot = QPixmap(width, height)
+    shot.fill(QColor(colour))
+    return shot
+
+
+def test_the_eyedropper_reaches_every_screen_and_a_scaled_one(qapp):
+    """Revu's eyedropper takes a colour anywhere: the taskbar, another
+    program, a second monitor (the user, 2026-10-15). One held-still picture
+    per screen; the mouse is held by one, and a click over the other screen
+    takes that screen's colour. A grab twice the size of its screen (a
+    scaled display) is read at its own pixels."""
+    from calcforge.ui.colorpicker import _Pick
+    pick = _Pick()
+    left = _Dropper(_filled(80, 60, "#204060"), QRect(0, 0, 40, 30), pick)   # 200 %
+    right = _Dropper(_filled(40, 30, "#c03020"), QRect(40, 0, 40, 30), pick)
+    pick.droppers[:] = [left, right]
+    assert left.ratio == 2.0 and right.ratio == 1.0
+    over_right = QMouseEvent(QMouseEvent.MouseMove, QPointF(50, 10), QPointF(50, 10),
+                             Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+    left.mouseMoveEvent(over_right)
+    assert left.at is None and right.at == QPoint(10, 10), "the loupe follows to the other screen"
+    click = QMouseEvent(QMouseEvent.MouseButtonPress, QPointF(50, 10), QPointF(50, 10),
+                        Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    left.mousePressEvent(click)
+    assert pick.result == "#c03020"
+    assert pick.ending and left.result == right.result == "#c03020"
+
+
+def test_the_picker_swatches_are_drawn_at_the_screens_own_pixels(qapp):
+    """Blurry next to Revu's (the user, 2026-10-15): a swatch made at 100 %
+    and stretched to a 125 % or 150 % display. Asked for at a scale, it is
+    drawn at that many pixels, its edge a single sharp pixel."""
+    from PySide6.QtCore import QSize
+    from calcforge.ui.colorpicker import swatch_icon
+    for scale in (1.0, 1.25, 1.5, 2.0):
+        pixmap = swatch_icon("#ff0000", 16).pixmap(QSize(16, 16), scale)
+        assert pixmap.width() == round(16 * scale), scale
+        image = pixmap.toImage()
+        middle = image.pixelColor(pixmap.width() // 2, pixmap.height() // 2)
+        assert middle.name() == "#ff0000"
+        inside = image.pixelColor(1, pixmap.height() // 2)
+        assert inside.name() == "#ff0000", f"the edge is one pixel at {scale}, not smeared"

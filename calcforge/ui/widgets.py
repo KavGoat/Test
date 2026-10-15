@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import shiboken6
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPen
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (QAbstractScrollArea, QLayout, QAbstractSpinBox, QComboBox,
                                QHBoxLayout, QSlider,
                                QToolButton, QWidget, QDoubleSpinBox)
 
-from .icons import colour_icon
+from .icons import colour_icon, drawn_icon
 
 
 def arrow_combo() -> QComboBox:
@@ -19,20 +19,17 @@ def arrow_combo() -> QComboBox:
     combo = QComboBox()
     combo.setIconSize(QSize(42, 20))
     for kind in ARROW_HEADS:
-        pixmap = QPixmap(42, 20)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        colour = combo.palette().text().color()
-        pen = QPen(colour, 1.3)
-        pen.setJoinStyle(Qt.MiterJoin)
-        pen.setMiterLimit(8)
-        painter.setPen(pen)
-        painter.drawLine(QPointF(3, 10), QPointF(31, 10))
-        painter.setBrush(colour if kind in FILLED_HEADS else Qt.NoBrush)
-        painter.drawPath(arrow_path(QPointF(31, 10), 0, 11, kind))
-        painter.end()
-        combo.addItem(QIcon(pixmap), ARROW_NAMES.get(kind, kind), kind)
+        def draw(painter: QPainter, kind=kind) -> None:
+            painter.setRenderHint(QPainter.Antialiasing)
+            colour = combo.palette().text().color()
+            pen = QPen(colour, 1.3)
+            pen.setJoinStyle(Qt.MiterJoin)
+            pen.setMiterLimit(8)
+            painter.setPen(pen)
+            painter.drawLine(QPointF(3, 10), QPointF(31, 10))
+            painter.setBrush(colour if kind in FILLED_HEADS else Qt.NoBrush)
+            painter.drawPath(arrow_path(QPointF(31, 10), 0, 11, kind))
+        combo.addItem(drawn_icon(draw, 42, 20), ARROW_NAMES.get(kind, kind), kind)
     return combo
 
 
@@ -78,15 +75,12 @@ class ColorButton(QToolButton):
 
     def _refresh(self) -> None:
         if not self._colour:
-            pixmap = QPixmap(18, 18)
-            pixmap.fill(Qt.transparent)
-            painter = QPainter(pixmap)
-            painter.setPen(QColor(160, 165, 175))
-            painter.drawRect(1, 1, 15, 15)
-            painter.setPen(QColor(200, 60, 60))
-            painter.drawLine(2, 15, 15, 2)
-            painter.end()
-            self.setIcon(QIcon(pixmap))
+            def draw(painter: QPainter) -> None:
+                painter.setPen(QColor(160, 165, 175))
+                painter.drawRect(1, 1, 15, 15)
+                painter.setPen(QColor(200, 60, 60))
+                painter.drawLine(2, 15, 15, 2)
+            self.setIcon(drawn_icon(draw, 18, 18))
         else:
             self.setIcon(colour_icon(self._colour))
 

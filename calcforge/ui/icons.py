@@ -4,9 +4,9 @@ from __future__ import annotations
 import math
 from functools import lru_cache
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (QBrush, QColor, QFont, QIcon, QPainter, QPainterPath,
-                           QPen, QPixmap, QPolygonF)
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import (QBrush, QColor, QFont, QIcon, QIconEngine, QPainter,
+                           QPainterPath, QPen, QPixmap, QPolygonF)
 
 # Icons are drawn, not loaded, so they take the colour of whichever theme is
 # on. Dark ink on a dark toolbar is an empty toolbar.
@@ -38,6 +38,12 @@ _theme = "light"
 
 def set_icon_theme(theme: str) -> None:
     """Re-tint every icon for *theme*, and forget the ones already drawn."""
+    _apply_inks(theme)
+    icon.cache_clear()
+    app_icon.cache_clear()
+
+
+def _apply_inks(theme: str) -> None:
     global INK, ACCENT, WARM, DANGER, NOTE, NOTE_EDGE, NOTE_RULE, MARKER, FAINT
     global _theme
     _theme = "dark" if theme == "dark" else "light"
@@ -50,12 +56,77 @@ def set_icon_theme(theme: str) -> None:
     NOTE_RULE = _THEME_NOTE_RULE[_theme]
     MARKER = _THEME_MARKER[_theme]
     FAINT = _THEME_FAINT[_theme]
-    icon.cache_clear()
-    app_icon.cache_clear()
 
 
 def icon_theme() -> str:
     return _theme
+
+
+class _Drawn(QIconEngine):
+    """An icon drawn for the size and pixel ratio the screen asks for.
+
+    A picture made once at 100 % and stretched to a Windows display at 125 %
+    or 150 % comes out soft (the user, 2026-10-15: the colour picker "looks
+    blurry compared to Bluebeam"); drawn again at the screen's own pixels, an
+    edge lands on a pixel and stays sharp, as Revu's do.
+
+    *draw(painter)* draws on a *width* × *height* canvas; the engine scales it."""
+
+    def __init__(self, draw, width: int, height: int):
+        super().__init__()
+        self.draw, self.width, self.height = draw, width, height
+        self.made: dict = {}
+
+    def clone(self):
+        return _Drawn(self.draw, self.width, self.height)
+
+    def actualSize(self, size, mode, state):
+        # as a picture of that size would answer: never bigger than asked
+        own = QSize(self.width, self.height)
+        if own.width() <= size.width() and own.height() <= size.height():
+            return own
+        return own.scaled(size, Qt.KeepAspectRatio)
+
+    def scaledPixmap(self, size, mode, state, scale):
+        logical = self.actualSize(size, mode, state)
+        scale = float(scale or 1.0)
+        key = (logical.width(), logical.height(), round(scale, 3), mode == QIcon.Disabled)
+        made = self.made.get(key)
+        if made is None:
+            made = QPixmap(max(1, round(logical.width() * scale)),
+                           max(1, round(logical.height() * scale)))
+            made.fill(Qt.transparent)
+            painter = QPainter(made)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setRenderHint(QPainter.TextAntialiasing, True)
+            painter.scale(made.width() / self.width, made.height() / self.height)
+            painter.setBrush(Qt.NoBrush)
+            self.draw(painter)
+            painter.end()
+            made.setDevicePixelRatio(made.width() / max(1, logical.width()))
+            if mode == QIcon.Disabled:
+                from PySide6.QtWidgets import QApplication, QStyleOption
+                style = QApplication.style() if QApplication.instance() else None
+                if style is not None:
+                    ratio = made.devicePixelRatio()
+                    made = style.generatedIconPixmap(QIcon.Disabled, made, QStyleOption())
+                    made.setDevicePixelRatio(ratio)
+            self.made[key] = made
+        return made
+
+    def pixmap(self, size, mode, state):
+        return self.scaledPixmap(size, mode, state, 1.0)
+
+    def paint(self, painter, rect, mode, state):
+        device = painter.device()
+        ratio = device.devicePixelRatioF() if device is not None else 1.0
+        painter.drawPixmap(rect, self.scaledPixmap(rect.size(), mode, state, ratio))
+
+
+def drawn_icon(draw, width: int, height: int = 0) -> QIcon:
+    """An icon from *draw(painter)* on a *width* × *height* canvas, kept sharp
+    at any display scale."""
+    return QIcon(_Drawn(draw, width, height or width))
 
 
 def _pen(painter: QPainter, colour: str, width: float = 1.6,
@@ -693,30 +764,28 @@ def cursor_pixmap(name: str, size: int = 24) -> QPixmap:
 
 @lru_cache(maxsize=256)
 def icon(name: str, size: int = 24) -> QIcon:
-    """Return a cached icon; drawn once per name and size."""
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    painter.setRenderHint(QPainter.TextAntialiasing, True)
-    painter.scale(size / 24.0, size / 24.0)
-    painter.setBrush(Qt.NoBrush)
-    _draw(name, painter)
-    painter.end()
-    return QIcon(pixmap)
+    """Return a cached icon, drawn sharp at whatever scale it is shown at, in
+    the theme it was asked for in."""
+    theme = _theme
+
+    def draw(painter: QPainter) -> None:
+        now = _theme
+        _apply_inks(theme)
+        try:
+            painter.scale(size / 24.0, size / 24.0)
+            _draw(name, painter)
+        finally:
+            _apply_inks(now)
+    return drawn_icon(draw, size)
 
 
 @lru_cache(maxsize=64)
 def colour_icon(colour: str, size: int = 20) -> QIcon:
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    painter.setPen(QPen(QColor(120, 128, 140), 1))
-    painter.setBrush(QBrush(QColor(colour)))
-    painter.drawRoundedRect(QRectF(2, 2, size - 4, size - 4), 3, 3)
-    painter.end()
-    return QIcon(pixmap)
+    def draw(painter: QPainter) -> None:
+        painter.setPen(QPen(QColor(120, 128, 140), 1))
+        painter.setBrush(QBrush(QColor(colour)))
+        painter.drawRoundedRect(QRectF(2.5, 2.5, size - 5, size - 5), 3, 3)
+    return drawn_icon(draw, size)
 
 
 @lru_cache(maxsize=8)
