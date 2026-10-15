@@ -28,7 +28,8 @@ from ..sheet.pagination import HEADING_W as PRINT_HEADING_W
 from ..sheet.pagination import options, paginate
 from ..sheet.refs import col_letters
 from .base import register_item
-from .table import (EXCEL_GREEN, HEADING_BG, HEADING_H, HEADING_ON, ROWNUM_W, TableItem)
+from .table import (EXCEL_GREEN, HEADING_BG, HEADING_H, HEADING_ON, ROWNUM_W, TableItem,
+                    hidden_mark)
 
 BREAK_BLUE = QColor("#2f6fd6")
 SCRATCH = QColor("#ececec")
@@ -586,9 +587,11 @@ class SheetRunItem(TableItem):
         grid = QPen(QColor("#bdbdbd"), 0)
         grid.setCosmetic(True)
         painter.setBrush(Qt.NoBrush)
+        marks = []          # hidden columns and rows: drawn over their neighbours
         for c in range(cols):
             cell = QRectF(xs[c], -HEADING_H, xs[c + 1] - xs[c], HEADING_H)
             if cell.width() <= 0:
+                marks.append((cell, "col"))       # Excel's double line
                 continue
             on = sel is not None and sel[1] <= c <= sel[3]
             painter.fillRect(cell, HEADING_ON if on else HEADING_BG)
@@ -599,6 +602,7 @@ class SheetRunItem(TableItem):
         for r in range(r0, r1 + 1):
             cell = QRectF(-ROWNUM_W, ys[r], ROWNUM_W, ys[r + 1] - ys[r])
             if cell.height() <= 0:
+                marks.append((cell, "row"))
                 continue
             on = sel is not None and sel[0] <= r <= sel[2]
             painter.fillRect(cell, HEADING_ON if on else HEADING_BG)
@@ -606,6 +610,8 @@ class SheetRunItem(TableItem):
             painter.drawRect(cell)
             painter.setPen(EXCEL_GREEN if on else QColor("#444444"))
             painter.drawText(cell, Qt.AlignCenter, str(r + 1))
+        for cell, axis in marks:
+            hidden_mark(painter, cell, axis)
         corner = QRectF(-ROWNUM_W, -HEADING_H, ROWNUM_W, HEADING_H)
         painter.fillRect(corner, HEADING_BG)
         painter.setPen(grid)

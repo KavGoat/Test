@@ -24,10 +24,11 @@ from calcforge.calc.engine.units import NODIM, dims_scale
 
 from . import formula as F
 from .dates import date_from_serial, serial_from_date, serial_from_datetime
+from .explain import MEANING
 from .evaluate import (MISSING, Ctx, Function, RefValue, _broadcast, compare_values, deref, ev, scalar)
 from .refs import MAX_COLS, MAX_ROWS, CellRef, parse_range, quote_sheet
 from .values import (BLANK, CALC, DIV0, ERROR_NUMBERS, NA, NAME, NUM, REF, UNITS_ERR, VALUE, Array,
-                     ErrorValue, Qty, SheetError, add, default_unit, div, general_number, is_number,
+                     ErrorValue, Qty, SheetError, failed, unit_name, units_clash, add, default_unit, div, general_number, is_number,
                      magnitude, map_shown, mul, power, quantity, scaled, to_bool, to_float, to_int,
                      to_number, to_text, unit_parts, UnitTextError)
 
@@ -57,15 +58,33 @@ def _many(n):
 
 
 def call(n: F.Call, ctx: Ctx):
+    got = _call(n, ctx)
+    if isinstance(got, ErrorValue) and not got.reason:
+        # an error the function made itself (one passed on from a cell it
+        # read keeps that cell's reason)
+        got = ErrorValue(got.code, f"{n.name}: {MEANING.get(got.code, 'it gives ' + got.code)}")
+    return got
+
+
+def _call(n: F.Call, ctx: Ctx):
     spec = FUNCTIONS.get(n.name)
     if spec is None:
         fun = _lambda_named(n.name, ctx)
         if fun is not None:
             return fun.call([ev(a, ctx) for a in n.args], ctx)
-        return NAME
+        from .evaluate import not_known
+
+        return NAME.because(not_known(n.name))
     count = len(n.args)
     if count < spec.least or count > _many(spec.most):
-        return VALUE
+        if spec.most == spec.least:
+            wanted = f"{spec.least}"
+        elif spec.most is None:
+            wanted = f"at least {spec.least}"
+        else:
+            wanted = f"{spec.least} to {spec.most}"
+        return VALUE.because(f"{n.name} takes {wanted} argument{'' if wanted == '1' else 's'}, "
+                             f"not {count}")
     if spec.lazy:
         try:
             return spec.fn(ctx, n.args)
@@ -218,8 +237,9 @@ def unify(nums):
         d = n.dims if isinstance(n, Qty) else NODIM
         if dims is None:
             dims = d
+            first = n
         elif d != dims:
-            raise SheetError(UNITS_ERR)
+            raise units_clash(first, n, "used together")
         if unit is None and isinstance(n, Qty):
             unit = n.unit
         out.append(n.si if isinstance(n, Qty) else float(n))
@@ -504,7 +524,8 @@ def _angle(f):
         v = num(x)
         if isinstance(v, Qty):
             if any(v.dims):
-                raise SheetError(UNITS_ERR)
+                raise failed(UNITS_ERR, f"an angle is wanted (a plain number, or in deg), "
+                                        f"not a number in {unit_name(v)}")
             v = v.si
         return float(f(v))
     return g
@@ -2949,7 +2970,7 @@ def VALUEIN(x, unit):
     factor, dims, offset = unit_parts(u)
     vd = v.dims if isinstance(v, Qty) else NODIM
     if tuple(vd) != tuple(dims):
-        return UNITS_ERR
+        return UNITS_ERR.because(f"{unit_name(v)} can't be given in {u}")
     return (magnitude(v) - offset) / factor
 
 
@@ -2963,7 +2984,7 @@ def CONVERT(x, a, b=MISSING):
         factor, dims, _offset = unit_parts(u)
         vd = v.dims if isinstance(v, Qty) else NODIM
         if tuple(vd) != tuple(dims):
-            return UNITS_ERR
+            return UNITS_ERR.because(f"{unit_name(v)} can't be given in {u}")
         return Qty(magnitude(v), tuple(dims), u)
     v = real(x)
     from .morefunctions import excel_convert

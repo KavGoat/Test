@@ -50,18 +50,18 @@ def test_a_block_result_spills_down_and_across():
 def test_something_in_the_way_is_spill_error_until_it_goes():
     wb, s = fresh()
     put(wb, s, B2="x", A1="=SEQUENCE(3,2)")
-    assert get(s, "A1") is SPILL
+    assert get(s, "A1") == SPILL
     assert get(s, "A2") is None
     put(wb, s, B2="")
     assert get(s, "A1") == 1 and get(s, "B2") == 4
     # typing over a spilled cell blocks it again
     put(wb, s, A3="here")
-    assert get(s, "A1") is SPILL and get(s, "A3") == "here"
+    assert get(s, "A1") == SPILL and get(s, "A3") == "here"
     assert get(s, "B1") is None
     # two blocks may not overlap
     put(wb, s, A3="", D1="=SEQUENCE(2)", D2="")
     put(wb, s, C2="=SEQUENCE(1,3)")
-    assert get(s, "C2") is SPILL and get(s, "D2") == 2
+    assert get(s, "C2") == SPILL and get(s, "D2") == 2
 
 
 def test_the_spill_operator_reads_the_whole_block():
@@ -73,7 +73,7 @@ def test_the_spill_operator_reads_the_whole_block():
     put(wb, s, E1="=SORT(A1#,,-1)")
     assert [get(s, f"E{i}") for i in range(1, 7)] == [6, 5, 4, 3, 2, 1]
     put(wb, s, B9="7", C3="=B9#")
-    assert get(s, "C3") is REF
+    assert get(s, "C3") == REF
 
 
 def test_filter_unique_sort_spill_and_follow_their_data():
@@ -147,10 +147,10 @@ def test_structured_references_read_a_tables_columns_by_heading():
     assert get(s, "A1") == 80 and get(t, "D3") == 125
     # outside the table, this row means nothing
     put(wb, s, B1="=Loads[@Span]")
-    assert get(s, "B1") is VALUE
+    assert get(s, "B1") == VALUE
     # a heading that isn't there, a totals row it hasn't got
     put(wb, s, B2="=SUM(Loads[Weight])", B3="=SUM(Loads[#Totals])")
-    assert get(s, "B2") is REF and get(s, "B3") is REF
+    assert get(s, "B2") == REF and get(s, "B3") == REF
 
 
 def test_structured_references_grow_with_the_table_and_follow_renames():

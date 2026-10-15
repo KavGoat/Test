@@ -4,6 +4,54 @@ Kept by the lead agent (docs/AGENT_PROMPT.md §5). One line per finding, newest
 round at the top. Status: open · fixing (who) · merged · pushed · decision
 (waiting on the user) · not a bug.
 
+## Round 4 — right-click menus, placement and grouping (lead as bug tester, 2026-10-15)
+
+Every right-click menu was dumped from the real window (empty page in both modes,
+rectangle, line, several markups, thumbnail, document tab, table cell open and
+closed, sheet cell, row and column headings, sheet tab, equation in both modes).
+
+- 4.1 **Insert Page Break.** The command itself works: a break at A10 gives pages
+  of rows 1–9 and 10+, and one undo removes it. Two real faults:
+  - A right-click outside the selection didn't move the active cell (Excel does),
+    so the break landed at the old cell. Fixed in eab8413.
+  - The command is buried under Page Layout ▸ while Insert ▸ holds Rows and
+    Columns. Move it to Insert ▸ Page Break and Delete ▸ Page Break.
+  Status: fixing.
+- 4.2 **Charts sit outside Insert.** "Insert Chart ▸" is a top-level item. Move it
+  into Insert ▸ Chart ▸.
+- 4.3 **Lower-case submenu items.** Insert ▸ "Rows above", "Rows below", "Columns to
+  the left", "Columns to the right". Use Title Case: Rows Above, Rows Below,
+  Columns Left, Columns Right.
+- 4.4 **Headings show the whole cell menu.** The row and column heading menus are
+  copies of the cell menu (45+ items). Excel's heading menu is short: Cut, Copy,
+  Paste, Paste Special, Insert, Delete, Clear Contents, Format Cells,
+  Row Height…/Column Width…, Hide, Unhide, and Insert Page Break before this
+  row/column.
+- 4.5 **Closed table offers outline commands.** A closed table, as a markup,
+  offers "This outline ▸ Round corner / Arc side / Insert break", Convert to
+  Polygon and Exact Size. These make no sense for a table, and there is no
+  "Edit Table". A line also offers Round corner and Arc side.
+- 4.6 **Doubled separators.** The equation menu has two in a row, and so does the
+  thumbnail menu after Move Down.
+- 4.7 **Thumbnail menu out of order.** Delete Page sits last, after "Make This
+  Page's Markups Editable", with no separator (the user: "weirdly categorised").
+  Use Revu's order, with Delete Pages… in the insert/extract group (audit A1).
+- 4.8 **Thin document-tab menu.** It holds only "Open tab / Open window / Split
+  view", in lower case. Revu's tab menu has Close, Close All, Close Others, Save,
+  Save As…, Split Vertical/Horizontal and New Window.
+- 4.9 **Thin sheet-tab menu.** It holds only "Go to / Rename… / New sheet". Excel
+  also has Insert, Delete, Move or Copy… (duplicate), Tab Colour, Hide/Unhide.
+  Use Title Case.
+- 4.10 **Calc mode's empty-page menu is Markup mode's.** Nothing for equations:
+  no Insert ▸ Equation here, Text region, Calculation block, Section break or
+  Plot.
+- 4.11 **Inconsistent "Insert Here ▸" names.** Its entries mix case ("Text box",
+  Callout, Note). Use "Text Box".
+- 4.12 **Markup menu order differs from Revu (audit C1/C2).** Cut, Copy, Paste
+  and Delete should come first, and "This outline" → "Control Point". Arrange →
+  Order, Align → Alignment, Flatten Selection → Flatten, Multiply Ctrl+M (in
+  Markup mode).
+
 ## Round 3 — Revu parity audit, 2026-10-15
 
 The full report is docs/qa/revu_audit.md (groups A–N). It finds mostly misplaced,

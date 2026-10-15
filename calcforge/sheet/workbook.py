@@ -595,6 +595,13 @@ class Workbook:
                 style = self.styles.add(replace(self.styles.get(style), number_format=fmt))
         if text.startswith("=") and len(text) > 1:
             text = "=" + _tidy_formula(text[1:])
+            # Excel: a formula whose result is a date (=DATE(2026,10,15),
+            # =TODAY()+7) gives a General cell a date format, as a typed
+            # date does (QA, 2026-10-15)
+            if self.styles.get(style).number_format in (None, "General"):
+                fmt = formula_format(text[1:], row, col, self.day_first)
+                if fmt:
+                    style = self.styles.add(replace(self.styles.get(style), number_format=fmt))
         with self.transaction("Typing"):
             self._set_state(sheet, row, col, (text, style, comment))
 
@@ -982,7 +989,7 @@ class Workbook:
             if cell.parsed is None and cell.problem is None:
                 self._learn(sheet, key[1], key[2], cell)
             if cell.parsed is None:
-                value = NAME if cell.problem else BLANK
+                value = NAME.because(cell.problem) if cell.problem else BLANK
                 reads = set()
             else:
                 value, reads = evaluate_cell(self, sheet, key[1], key[2], cell.parsed.tree)
@@ -1325,6 +1332,30 @@ class Workbook:
                 (target.add if hidden else target.discard)(i)
         self._layout_change(sheet, change)
 
+    def drag_size(self, sheet: Sheet, axis: str, indexes, size: float, before: dict) -> None:
+        """A column (row) heading's edge dragged to *size*, as Excel does it:
+        dragged to nothing the column is hidden, keeping the width it had
+        before the drag (*before*: index -> its own width or None) for
+        Unhide; dragged open again it shows at the new width. Before, a
+        column dragged to 0 was a 0-wide ghost that Unhide didn't know
+        (QA, 2026-10-15)."""
+        sizes = sheet.heights if axis == "row" else sheet.widths
+        hidden = sheet.hidden_rows if axis == "row" else sheet.hidden_cols
+
+        def change():
+            for i in indexes:
+                if size <= 0:
+                    hidden.add(i)
+                    old = before.get(i)
+                    if old is None or old <= 0:
+                        sizes.pop(i, None)
+                    else:
+                        sizes[i] = old
+                else:
+                    hidden.discard(i)
+                    sizes[i] = float(size)
+        self._layout_change(sheet, change)
+
     def merge(self, sheet: Sheet, top: int, left: int, bottom: int, right: int,
               across: bool = False) -> None:
         """Merge cells (Excel keeps only the top-left value); across=True
@@ -1633,7 +1664,45 @@ def _same(a, b) -> bool:
         return False
     if isinstance(a, float):
         return a == b or (a != a and b != b)
+    if isinstance(a, ErrorValue):
+        return a == b and a.reason == b.reason      # a new reason is told too
     return a == b
+
+
+# functions whose result is a date or a time, and the format they give a
+# General cell (Excel's; the date as a typed one is shown)
+_DATE_RESULT = {"DATE", "DATEVALUE", "TODAY", "EDATE", "EOMONTH", "WORKDAY", "WORKDAY.INTL"}
+_TIME_RESULT = {"TIME", "TIMEVALUE"}
+
+
+def formula_format(text: str, row: int = 0, col: int = 0, day_first: bool = True) -> Optional[str]:
+    """The number format a formula's result implies, as Excel gives one to a
+    General cell: a date for =DATE(...), =TODAY(), =TODAY()+7; a date and
+    time for =NOW(); a time for =TIME(...). None otherwise (and for a date
+    minus a date, a number of days)."""
+    try:
+        tree = F.parse(text, row, col).tree
+    except F.FormulaError:
+        return None
+    date = "d/mm/yyyy" if day_first else "m/d/yyyy"
+
+    def kind(n) -> Optional[str]:
+        if type(n) is F.Call:
+            if n.name in _DATE_RESULT:
+                return date
+            if n.name == "NOW":
+                return date + " h:mm"
+            if n.name in _TIME_RESULT:
+                return "h:mm AM/PM"
+            return None
+        if type(n) is F.Binary and n.op in "+-":
+            a, b = kind(n.left), kind(n.right)
+            if a and b:
+                return None if n.op == "-" else a
+            return a or (b if n.op == "+" else None)
+        return None
+
+    return kind(tree)
 
 
 def _tidy_formula(text: str) -> str:

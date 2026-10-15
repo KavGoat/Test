@@ -607,6 +607,9 @@ class TableItem(MarkupItem):
             m = covered.get((r, c))
             if m is not None and (r, c) != (m[0], m[1]):
                 continue
+            cell_box = self.cell_rect(r, c)
+            if cell_box.width() <= 0 or cell_box.height() <= 0:
+                continue                # hidden: its text isn't drawn (QA, 2026-10-15)
             self._paint_text(painter, r, c, cell, rows, cols, covered)
         # borders
         painter.setRenderHint(QPainter.Antialiasing, False)
@@ -682,6 +685,10 @@ class TableItem(MarkupItem):
             painter.restore()
             return
         width = line.width
+        if numeric and width > inner.width() and not st.shrink:
+            text = self._fitted(value, st, metrics, inner.width())
+            line = Drawn(text, shown.unit, font, metrics)
+            width = line.width
         if numeric and width > inner.width() and not st.shrink:
             # Excel: a number that doesn't fit shows ####
             n = max(1, int(inner.width() / max(metrics.horizontalAdvance("#"), 0.1)))
@@ -804,6 +811,10 @@ class TableItem(MarkupItem):
         indent = st.indent * 7.5
         inner = rect.adjusted(PAD + (indent if align == "left" else 0), 0,
                               -PAD - (indent if align == "right" else 0), 0)
+        if width > inner.width():
+            text = self._fitted(cell.value, st, metrics, inner.width())
+            line = Drawn(text, shown.unit, cell_font(st), metrics)
+            width = line.width
         hashes = width > inner.width()
         if hashes:
             # shown as ####: the box after the hashes all the same, so the
@@ -826,6 +837,24 @@ class TableItem(MarkupItem):
         w, h = px * 0.376, px * 0.526
         middle = y - metrics.xHeight() * 0.5
         return "box", QRectF(x + width + px * 0.225 + 1.0, middle - h / 2, w, h)
+
+    @staticmethod
+    def _fitted(value, st: Style, metrics: QFontMetricsF, room: float) -> str:
+        """A number too wide for its cell as Excel's General shows it: fewer
+        decimals, or 5E+09, so it fits (an explicit number format is kept,
+        and shows ####). Measured with the cell's own font — on Linux
+        Calibri falls back to the wider DejaVu Sans (QA, 2026-10-15). As in
+        Excel each character of the number takes at least a digit's width
+        (a default column shows 0.333333, not 0.3333333); a unit after it
+        takes its own width."""
+        digit = metrics.horizontalAdvance("0")
+
+        def width(text: str) -> float:
+            number, space, unit = text.partition(" ")
+            return sum(max(metrics.horizontalAdvance(ch), digit) for ch in number) + \
+                (metrics.horizontalAdvance(space + unit) if space else 0.0)
+        return format_value(value, st.number_format, st.unit,
+                            fit=lambda t: width(t) <= room).text
 
     def _paint_turned(self, painter, rect, line: "Drawn", st, v, colour) -> None:
         painter.save()
@@ -1009,8 +1038,12 @@ class TableItem(MarkupItem):
         grid = QPen(QColor("#bdbdbd"), 0)
         grid.setCosmetic(True)
         painter.setBrush(Qt.NoBrush)
+        marks = []          # hidden columns and rows: drawn over their neighbours
         for c in range(cols):
             cell = QRectF(xs[c], -HEADING_H, xs[c + 1] - xs[c], HEADING_H)
+            if cell.width() <= 0:
+                marks.append((cell, "col"))       # Excel's double line
+                continue
             on = sel is not None and sel[1] <= c <= sel[3]
             painter.fillRect(cell, HEADING_ON if on else HEADING_BG)
             painter.setPen(grid)
@@ -1019,12 +1052,17 @@ class TableItem(MarkupItem):
             painter.drawText(cell, Qt.AlignCenter, col_letters(c))
         for r in range(rows):
             cell = QRectF(-ROWNUM_W, ys[r], ROWNUM_W, ys[r + 1] - ys[r])
+            if cell.height() <= 0:
+                marks.append((cell, "row"))
+                continue
             on = sel is not None and sel[0] <= r <= sel[2]
             painter.fillRect(cell, HEADING_ON if on else HEADING_BG)
             painter.setPen(grid)
             painter.drawRect(cell)
             painter.setPen(EXCEL_GREEN if on else QColor("#444444"))
             painter.drawText(cell, Qt.AlignCenter, str(r + 1))
+        for cell, axis in marks:
+            hidden_mark(painter, cell, axis)
         corner = QRectF(-ROWNUM_W, -HEADING_H, ROWNUM_W, HEADING_H)
         painter.fillRect(corner, HEADING_BG)
         painter.setPen(grid)
@@ -1038,6 +1076,8 @@ class TableItem(MarkupItem):
         rows, cols = self.size
         bottom, right = min(bottom, rows - 1), min(right, cols - 1)
         box = self.block_rect(top, left, bottom, right)
+        if box.width() <= 0 or box.height() <= 0:
+            return                      # all hidden: nothing to show (Excel)
         painter.setRenderHint(QPainter.Antialiasing, False)
         path = QPainterPath()
         path.addRect(box)
@@ -1100,6 +1140,22 @@ class TableItem(MarkupItem):
 
     def display_name(self) -> str:
         return self.label or self.name
+
+
+def hidden_mark(painter: QPainter, cell: QRectF, axis: str) -> None:
+    """Excel's double line in the headings where a column (row) is hidden."""
+    pen = QPen(QColor("#7a7a7a"), 0)
+    pen.setCosmetic(True)
+    painter.save()
+    painter.setPen(pen)
+    for d in (-0.9, 0.9):
+        if axis == "col":
+            x = cell.left() + d
+            painter.drawLine(QPointF(x, cell.top()), QPointF(x, cell.bottom()))
+        else:
+            y = cell.top() + d
+            painter.drawLine(QPointF(cell.left(), y), QPointF(cell.right(), y))
+    painter.restore()
 
 
 def _count_fitting(length: float, size, current: int, default: float) -> int:

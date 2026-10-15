@@ -13,11 +13,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 from . import formula as F
-from .refs import MAX_COLS, MAX_ROWS, is_cell_name
-from .values import (BLANK, CALC, ERRORS, NA, NAME, NUM, REF, UNITS_ERR, VALUE, Array,
-                     ErrorValue, Qty, SheetError, add, div, mul, neg, power, sub,
-                     equation_unit, is_unit_text, to_number, to_text, unit_parts, with_unit,
-                     UnitTextError)
+from .refs import MAX_COLS, MAX_ROWS, col_letters, is_cell_name, parse_cell, quote_sheet
+from .values import (BLANK, CALC, DIV0, ERRORS, NA, NAME, NUM, REF, UNITS_ERR, VALUE, Array,
+                     ErrorValue, Qty, SheetError, add, div, equation_unit, failed,
+                     general_number, mul, neg, power, sub, units_clash, is_unit_text,
+                     to_number, to_text, unit_parts, with_unit, UnitTextError)
 
 
 @dataclass(frozen=True)
@@ -100,9 +100,9 @@ def evaluate_cell(wb, sheet, row: int, col: int, tree):
     except SheetError as e:
         value = e.error
     except RecursionError:
-        value = NUM
+        value = NUM.because("the formula goes round too many times (nested too deep)")
     except (OverflowError, ZeroDivisionError):
-        value = NUM
+        value = NUM.because("a number got too big to work with")
     return value, ctx.reads
 
 
@@ -114,7 +114,8 @@ def result(v):
     """What a cell shows for a formula's result: a reference shows what is
     in it (an empty cell as 0), a 1×1 array its one value."""
     if isinstance(v, Function):
-        return CALC                    # =LAMBDA(x, x) left uncalled (Excel)
+        # =LAMBDA(x, x) left uncalled (Excel)
+        return CALC.because("a LAMBDA is a function: call it with its values, LAMBDA(x, x*2)(3)")
     if isinstance(v, RefValue):
         if v.single:
             v = v.value_at(0, 0)
@@ -130,7 +131,7 @@ def result(v):
     if isinstance(v, int) and not isinstance(v, bool):
         return float(v)
     if isinstance(v, float) and not math.isfinite(v):
-        return NUM
+        return NUM.because("the result is too big to be a number")
     return v
 
 
@@ -188,11 +189,7 @@ def ev(n, ctx: Ctx):
     if t is F.Name:
         return _name(n, ctx)
     if t is F.DocVar:
-        if not is_cell_name(n.name) and ctx.wb.find_name(n.name, ctx.sheet) is not None:
-            from .functions import call
-
-            return call(F.Call("VAR", (F.Name(n.name),)), ctx)   # VAR(named block)
-        return _outside(n.name, ctx)
+        return _doc_var(n, ctx)
     if t is F.Apply:
         from .functions import apply
         return apply(n, ctx)
@@ -201,7 +198,7 @@ def ev(n, ctx: Ctx):
     if t is F.Structured:
         return structured(n, ctx)
     if t is F.BadRef:
-        return REF
+        return REF.because("the formula reads cells that were deleted (#REF! is in the formula)")
     if t is F.ArrayLit:
         return Array(tuple(tuple(ev(x, ctx) for x in row) for row in n.rows))
     if t is F.Missing:
@@ -219,7 +216,7 @@ def _intersect(v, ctx):
             return v.value_at(ctx.row - v.top, 0)
         if v.height == 1 and v.left <= ctx.col <= v.right:
             return v.value_at(0, ctx.col - v.left)
-        return VALUE
+        return VALUE.because("@ found no cell of the block in this formula's row or column")
     if isinstance(v, Array):
         return v.get(0, 0)
     return v
@@ -239,7 +236,7 @@ def _unit(text: str, custom: bool = True):
     try:
         factor, dims, _offset = unit_parts(text, custom=custom)
     except UnitTextError:
-        raise SheetError(NAME)
+        raise failed(NAME, f"'{text}' isn't a unit")
     if not any(dims):
         return factor
     return Qty(factor, dims, text)
@@ -250,7 +247,7 @@ def _sheet_of(name: Optional[str], ctx: Ctx):
         return ctx.sheet
     sheet = ctx.wb.sheet(name)
     if sheet is None:
-        raise SheetError(REF)
+        raise failed(REF, f"there's no sheet or table called '{name}'")
     return sheet
 
 
@@ -261,7 +258,8 @@ def reach(ctx: Ctx, ref: RefValue) -> RefValue:
     allowed = ctx.wb.reach
     if allowed is not None and ref.sheet is not ctx.sheet and \
             not allowed(ctx.sheet, ref.sheet, (ref.top, ref.left, ref.bottom, ref.right)):
-        raise SheetError(REF)
+        raise failed(REF, f"{ref.sheet.name} is in an earlier calc section: make its cells "
+                          "global (right-click, Make Global) to read them here")
     return ref
 
 
@@ -269,7 +267,7 @@ def _ref(n: F.Ref, ctx: Ctx) -> RefValue:
     sheet = _sheet_of(n.sheet, ctx)
     row, col = n.at(ctx.row, ctx.col)
     if not (0 <= row < MAX_ROWS and 0 <= col < MAX_COLS):
-        raise SheetError(REF)
+        raise failed(REF, "the reference falls off the edge of the sheet")
     return reach(ctx, RefValue(sheet, row, col, row, col))
 
 
@@ -280,7 +278,7 @@ def _area(n: F.Area, ctx: Ctx) -> RefValue:
     top, bottom = min(r1, r2), max(r1, r2)
     left, right = min(c1, c2), max(c1, c2)
     if top < 0 or left < 0 or bottom >= MAX_ROWS or right >= MAX_COLS:
-        raise SheetError(REF)
+        raise failed(REF, "the block falls off the edge of the sheet")
     return reach(ctx, RefValue(sheet, top, left, bottom, right))
 
 
@@ -295,13 +293,15 @@ def _spill_ref(n: F.SpillRef, ctx: Ctx) -> RefValue:
     cell = sheet.cells.get((row, col))
     if cell is not None and cell.is_formula and (row, col) not in sheet.wanted:
         return RefValue(sheet, row, col, row, col)
-    raise SheetError(REF)
+    raise failed(REF, f"{col_letters(col)}{row + 1}# reads the block a formula there spills, "
+                      "and none spills there")
 
 
 def table_for(n: F.Structured, ctx: Ctx):
     sheet = ctx.sheet if n.table is None else ctx.wb.sheet(n.table)
     if sheet is None or sheet.kind != "table" or not sheet.size:
-        raise SheetError(REF)
+        raise failed(REF, f"there's no table called '{n.table}'" if n.table else
+                     "a [column] reference without a table's name works only inside a table")
     return sheet
 
 
@@ -331,14 +331,16 @@ def structured(n: F.Structured, ctx: Ctx) -> RefValue:
         a = heading_col(sheet, n.first)
         b = heading_col(sheet, n.last) if n.last is not None else a
         if a is None or b is None:
-            raise SheetError(REF)
+            missing = n.first if a is None else n.last
+            raise failed(REF, f"{sheet.name} has no column headed '{missing}'")
         left, right = min(a, b), max(a, b)
     specials = set(n.specials) or {"#Data"}
     if "#Totals" in specials:
-        raise SheetError(REF)                    # a table here has no totals row
+        raise failed(REF, f"{sheet.name} has no totals row")     # a table here has none
     if "@" in specials:
         if ctx.sheet is not sheet or not 1 <= ctx.row < rows:
-            raise SheetError(VALUE)
+            raise failed(VALUE, "[@...] means this row of the table, so it works only in the "
+                                "table's own rows")
         top = bottom = ctx.row
     elif "#All" in specials or {"#Headers", "#Data"} <= specials:
         top, bottom = 0, rows - 1
@@ -347,7 +349,7 @@ def structured(n: F.Structured, ctx: Ctx) -> RefValue:
     else:
         top, bottom = 1, rows - 1
         if bottom < top:
-            raise SheetError(REF)
+            raise failed(REF, f"{sheet.name} has only its heading row, no data")
     return reach(ctx, RefValue(sheet, top, left, bottom, right))
 
 
@@ -362,15 +364,15 @@ def _name(n: F.Name, ctx: Ctx):
 
         sheet = ctx.wb.sheet(unquote_sheet(n.sheet))
         if sheet is None:
-            raise SheetError(REF)
+            raise failed(REF, f"there's no sheet or table called '{unquote_sheet(n.sheet)}'")
     dn = ctx.wb.find_name(n.name, sheet)
     if dn is not None:
         if ctx.depth > 40:
-            raise SheetError(NUM)
+            raise failed(NUM, f"the name '{n.name}' refers to itself, round and round")
         try:
             parsed = F.parse(dn.refers_to, 0, 0)
         except F.FormulaError:
-            return NAME
+            return NAME.because(f"the defined name '{n.name}' is a formula that can't be read")
         home = ctx.wb.sheet_by_id(dn.sheet) if dn.sheet else ctx.sheet
         inner = Ctx(ctx.wb, home, 0, 0)
         inner.reads = ctx.reads
@@ -380,13 +382,19 @@ def _name(n: F.Name, ctx: Ctx):
         try:
             return _outside(n.name, ctx)
         except SheetError as e:
-            if e.error is not NAME:
+            if e.error != NAME:
                 raise
         try:
             return _unit(n.name, custom=False)
         except SheetError:
             pass
-    return NAME
+        return NAME.because(not_known(n.name))
+    return NAME.because(f"'{n.name}' isn't a defined name on {n.sheet}")
+
+
+def not_known(name: str) -> str:
+    """Why a name gives #NAME? (QA, 2026-10-15: errors say what went wrong)."""
+    return f"'{name}' isn't a function, a defined name or a variable from the equations"
 
 
 def _outside(name: str, ctx: Ctx):
@@ -394,12 +402,41 @@ def _outside(name: str, ctx: Ctx):
     ctx.reads.add(name.lower())
     ask = ctx.wb.outside
     if ask is None:
-        raise SheetError(NAME)
+        raise failed(NAME, f"'{name}' isn't a variable from the equations")
     try:
         value = ask(ctx.sheet, name)
     except KeyError:
-        raise SheetError(NAME)
+        raise failed(NAME, f"'{name}' isn't a variable from the equations before this sheet")
     return from_engine(value)
+
+
+def _doc_var(n: F.DocVar, ctx: Ctx):
+    """var(X): the equations' variable X when there is one; otherwise it is
+    Excel's VAR (variance) of the cell or defined name X, so =VAR(A1:A5)
+    and =VAR(Loads) still work as in Excel; a name that is neither is
+    #NAME? (the user, 2026-10-15). Before, a cell named F made var(F) the
+    variance of one cell, #DIV/0!, though the equations define F."""
+    try:
+        return _outside(n.name, ctx)
+    except SheetError as e:
+        if e.error != NAME:
+            raise
+    from .functions import call
+
+    cell = parse_cell(n.name) if is_cell_name(n.name) else None
+    if cell is not None:
+        arg = F.Ref(cell.row, cell.col, True, True, None)
+    elif ctx.wb.find_name(n.name, ctx.sheet) is not None:
+        arg = F.Name(n.name)
+    else:
+        return NAME.because(f"var({n.name}): '{n.name}' isn't a variable from the equations "
+                            "before this sheet, nor a cell or a defined name")
+    got = call(F.Call("VAR", (arg,)), ctx)
+    if isinstance(got, ErrorValue) and got.code == DIV0.code:
+        return ErrorValue(got.code, f"var({n.name}): there's no variable '{n.name}' in the "
+                                    f"equations before this sheet, so this is Excel's VAR "
+                                    f"(variance) of {n.name}, which needs two numbers or more")
+    return got
 
 
 def from_engine(value, engineering: bool = True):
@@ -469,7 +506,8 @@ def _binary(n: F.Binary, ctx: Ctx):
     if op == ":":
         a, b = ev(n.left, ctx), ev(n.right, ctx)
         if not isinstance(a, RefValue) or not isinstance(b, RefValue) or a.sheet is not b.sheet:
-            return VALUE if not isinstance(a, ErrorValue) else a
+            return VALUE.because("a : needs a cell on each side, on the same sheet") \
+                if not isinstance(a, ErrorValue) else a
         return RefValue(a.sheet, min(a.top, b.top), min(a.left, b.left),
                         max(a.bottom, b.bottom), max(a.right, b.right))
     # 5 °C: a number written in a unit that has an offset
@@ -478,12 +516,62 @@ def _binary(n: F.Binary, ctx: Ctx):
         try:
             return with_unit(n.left.value, n.right.text)
         except UnitTextError:
-            return NAME
+            return NAME.because(f"'{n.right.text}' isn't a unit")
     a = deref(ev(n.left, ctx))
     b = deref(ev(n.right, ctx))
     if isinstance(a, Array) or isinstance(b, Array):
         return _broadcast(a, b, lambda x, y: _scalar_op(op, x, y))
-    return _scalar_op(op, a, b)
+    got = _scalar_op(op, a, b)
+    if isinstance(got, ErrorValue) and got is not a and got is not b:
+        return _located(got, n, b, ctx)
+    return got
+
+
+def _located(error: ErrorValue, n: F.Binary, b, ctx: Ctx) -> ErrorValue:
+    """An error an operator made, saying where: "kN and m can't be added
+    (A1 + A2)", "dividing by zero (B4 is 0)" (QA, 2026-10-15)."""
+    left, right = operand_text(n.left, ctx), operand_text(n.right, ctx)
+    if error.code == DIV0.code and n.op == "/" and type(n.right) is F.Ref:
+        where = f"{right} is empty" if b is BLANK else f"{right} is 0"
+    elif left is None and right is None:
+        return error
+    else:
+        where = f"{left or '...'} {n.op} {right or '...'}"
+    reason = error.reason or "this can't be worked out"
+    return ErrorValue(error.code, f"{reason} ({where})")
+
+
+def operand_text(node, ctx: Ctx) -> Optional[str]:
+    """How a message names part of a formula: A1, Loads!B2, Span, 5 kN;
+    None for anything longer."""
+    t = type(node)
+    if t is F.Ref:
+        row, col = node.at(ctx.row, ctx.col)
+        if not (0 <= row < MAX_ROWS and 0 <= col < MAX_COLS):
+            return None
+        return (quote_sheet(node.sheet) + "!" if node.sheet else "") + f"{col_letters(col)}{row + 1}"
+    if t is F.Area:
+        r1, c1 = node.first.at(ctx.row, ctx.col)
+        r2, c2 = node.last.at(ctx.row, ctx.col)
+        if min(r1, r2, c1, c2) < 0:
+            return None
+        return (quote_sheet(node.sheet) + "!" if node.sheet else "") + \
+            f"{col_letters(c1)}{r1 + 1}:{col_letters(c2)}{r2 + 1}"
+    if t is F.Name:
+        return node.name if node.sheet is None else f"{node.sheet}!{node.name}"
+    if t is F.DocVar:
+        return f"var({node.name})"
+    if t is F.Num:
+        return general_number(node.value)
+    if t is F.Unit:
+        return "'" + node.text
+    if t is F.Binary and node.op == "*" and type(node.left) is F.Num and type(node.right) is F.Unit:
+        return f"{general_number(node.left.value)} {node.right.text}"
+    if t is F.Str:
+        return '"' + node.value + '"' if len(node.value) <= 20 else None
+    if t is F.Call:
+        return f"{node.name}(...)"
+    return None
 
 
 def _scalar_op(op: str, a, b):
@@ -505,7 +593,7 @@ def _scalar_op(op: str, a, b):
     except SheetError as e:
         return e.error
     except OverflowError:
-        return NUM
+        return NUM.because("the result is too big")
 
 
 def _rank(v) -> int:
@@ -541,7 +629,7 @@ def compare_values(a, b) -> int:
             if dx != dy and not ((dx is None and xs == 0) or (dy is None and ys == 0)) \
                     and not (dx is not None and not any(dx) and dy is None) \
                     and not (dy is not None and not any(dy) and dx is None):
-                raise SheetError(UNITS_ERR)
+                raise units_clash(x, y, "compared")
             x, y = xs, ys
         else:
             x, y = float(x), float(y)
