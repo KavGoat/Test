@@ -216,7 +216,7 @@ def test_a_snapshots_colours_can_be_changed(window):
     svg = drawing.svg.lower()
     assert "#000000" in svg and "#0a0a0a" in svg and "#c92a2a" in svg
     assert colorproc.process_items(source, colorproc.Process(
-        colorproc.MODIFY, pairs=[("#000000", "#1971c2")], tolerance=16)) >= 1
+        colorproc.MODIFY, pairs=[("#000000", "#1971c2"), ("#0a0a0a", "#1971c2")])) >= 1
     picture = snapshot.redraw_from(source)
     assert not picture.isNull(), "still a recording, so still sharp at any size"
     kept = snapshot.source_items[0]["svg"].lower()

@@ -300,3 +300,73 @@ Differences that remain, and why:
   `test_dragging_round_markups_paints_them_all_in_one_step`.
 
 Full suite: 1012 passed.
+
+## 2026-10-14 — Bluebeam Revu's interface, and 138 PDFs in and out
+
+**Opened elsewhere, opened here.** 88 marked-up PDFs from pdf.js's test
+corpus (every annotation kind: ink, free text, stamps, file attachments,
+form fields, quad-point text markups, rotated annotations) were drawn by
+CalcForge and by MuPDF, PDFium and Poppler at 144 dpi and compared pixel
+by pixel (ink within one pixel and 60 levels). 102 of 113 pages agreed with
+a reference within 2 % of their ink; the rest were inspected by eye:
+- **An ink note in several strokes printed as straight segments** instead of
+  the file's own curves (rotated_ink.pdf). On screen the page drew the file's
+  own; in print the strokes drew themselves. Print now does as the screen
+  does while every stroke is untouched; a save still writes the strokes.
+  `test_a_three_stroke_ink_note_prints_as_its_file_draws_it`.
+- The rest are anti-aliasing of large text and hairlines, a strike-out with no
+  appearance drawn thinner by MuPDF and CalcForge than by PDFium, and a page
+  Poppler sizes differently — the references disagree with each other there
+  by as much.
+
+**Made here, opened elsewhere.** 50 documents (every drawing tool with
+random colours, widths, dashes, fills, hatches, line ends and cloud sizes;
+1–3 pages; equations; tables; sheet pages; viewports; turned pages) were
+saved, drawn by the three readers and reopened here:
+- **A turned page's markups and tables moved on reopening** (36 of 86 pages).
+  Rotate Page turned each markup about its corner; a reopened one turns
+  about its centre. Markups now turn about their centre and their centre is
+  carried by the page's turn; equations and tables keep WebSMath's corner
+  and are reopened about it. A turned rectangle converted to a polygon
+  jumped the same way. After: 0 of 86 pages change across a save and reopen.
+  `test_rotated_save.py` (7 tests).
+- Every page agrees with MuPDF, PDFium and Poppler; the 10 over 2 % are a
+  dash pattern's starting phase and hairline anti-aliasing (MuPDF snaps
+  0.5 pt verticals to whole pixels).
+
+**A renderer outliving the application.** Three PDF renderers whose window
+had been killed mid-page kept a core and a half busy for 37 minutes. A
+renderer now ends with its parent (the kernel's parent-death signal on
+Linux, and a watcher everywhere). `test_a_renderer_dies_with_the_application_even_mid_page`
+fails without it.
+
+**Revu's interface.** Menu bar (Revu … Help with a Calculation menu), Revu 21
+palettes with Dark first, the Properties panel's sections and Title Case
+names, cloud Size and Invert as the PDF's /BE intensity, Revu's ten line
+ends, the scale box with proportional corners, gold control points and
+the curled rotation cursor, Symbol/Detail views, **Manage Tool
+Sets** (show, hide, order, rename, remove), **Hatch Patterns** (import an
+AutoCAD/Revu .pat, write one, remove one's own), the status bar's snaps and
+page navigation, and Title Case on the Thumbnails page menu.
+`test_revu_ui.py`, `test_cloud_size.py`.
+
+**Follow-ups the same day (the user, 2026-10-14):**
+- **Pieces of the selection box and rotation handle left behind on moving a
+  markup.** Handles are drawn a fixed number of pixels across, so zoomed out
+  they reached past the markup's own rectangle, which is all Qt repaints.
+  A selected markup now counts its handles' room at the current zoom (and
+  align and redaction still measure the markup alone). Checked for every
+  markup kind at five zooms: `test_selection_chrome.py`.
+- **The eyedropper hung or crashed the application.** Over a modal dialog
+  (Color Processing) its held-still screen took no clicks; it is now
+  application-modal. Where the system refuses a screen grab, the
+  application's own windows are shown instead. A colour button deleted while
+  its picker was open is left alone. `test_colour_picker.py`.
+- **Modify Colors has no tolerance**: a colour of the line work is changed
+  exactly (each one its own row); Mask Images keeps its tolerance.
+- **Recent Tools removed** (not wanted).
+- **Tool Chest:** Symbol, List and Detail views per set; every set as wide as
+  the panel and every tool shown (a set of seven showed three, with a gap
+  down the right); Revu's tool menu — Drawing Mode / Properties Mode,
+  **Scale** (a tool keeps its real size on a page of another drawing
+  scale), Move Up / Move Down, Copy and Paste.

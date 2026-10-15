@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+import shiboken6
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGridLayout,
@@ -76,7 +77,7 @@ class _ColourButton(QToolButton):
             got = choose_found(self, self.found, self.colour)
         else:
             got = choose(self, self.colour, self.allow_none)
-        if got is None:
+        if got is None or not shiboken6.isValid(self):
             return
         self.set(got or None)
 
@@ -206,8 +207,10 @@ class ColorProcessingDialog(QDialog):
         outer = QHBoxLayout(page)
         outer.setContentsMargins(0, 0, 0, 0)
         if key == MODIFY:
-            # Revu: Source Color and To columns at the left, Tolerance at the
-            # top right, Add New and Remove at the bottom right
+            # Revu: Source Color and To columns at the left, Add New and
+            # Remove at the bottom right. No tolerance: a colour of the line
+            # work is changed exactly, each one its own row (the user,
+            # 2026-10-14); Mask Images has one, for a picture's near colours.
             left = QVBoxLayout()
             self.pairs_grid = QGridLayout()
             self.pairs_grid.setHorizontalSpacing(8)
@@ -219,23 +222,7 @@ class ColorProcessingDialog(QDialog):
             left.addStretch(1)
             outer.addLayout(left)
             outer.addStretch(1)
-            self.tolerance_on = QCheckBox("Tolerance")
-            self.tolerance_on.setToolTip("Change colours close to the Source Color as well")
-            self.tolerance = QSpinBox()
-            self.tolerance.setRange(0, 100)
-            self.tolerance.setSuffix(" %")
-            self.tolerance.setValue(10)
-            self.tolerance.setFixedWidth(84)
-            self.tolerance.setEnabled(False)
-            self.tolerance_on.toggled.connect(self.tolerance.setEnabled)
-            self.tolerance_on.toggled.connect(self._changed)
-            self.tolerance.valueChanged.connect(self._changed)
             right = QVBoxLayout()
-            tol = QHBoxLayout()
-            tol.addWidget(self.tolerance_on)
-            tol.addWidget(self.tolerance)
-            tol.addStretch(1)
-            right.addLayout(tol)
             right.addStretch(1)
             buttons = QHBoxLayout()
             self.add_new = QPushButton("Add New")
@@ -352,7 +339,6 @@ class ColorProcessingDialog(QDialog):
         proc = Process(kind, images=self.images.isChecked())
         if kind == MODIFY:
             proc.pairs = [(src.colour, to.colour) for _h, src, to in self.pairs if src.colour]
-            proc.tolerance = self.tolerance.value() if self.tolerance_on.isChecked() else 0
         elif kind == COLORIZE:
             proc.select, proc.to, proc.scale = self.select.colour, self.to.colour, self.scale.isChecked()
         elif kind == LSH:

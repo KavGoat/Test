@@ -46,7 +46,6 @@ different:
 
 | # | Bluebeam feature | What it does |
 | --- | --- | --- |
-| D1 | Recent Tools | Tool chest section with the last tools and styles used |
 | D2 | Zoom (marquee) tool and Magnifier | Drag a box to zoom to it; a loupe panel |
 | D3 | Profiles | Save and switch whole workspace layouts (panels, toolbars) |
 | D4 | Tool chest Properties / Drawing mode | A tool either keeps its stored look or takes the current toolbar look |

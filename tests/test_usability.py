@@ -618,7 +618,8 @@ def test_every_label_the_user_reads_is_one_or_two_words(window, qapp):
                  "Send to Back", "Bring to Front", "Snap to Grid", "Snap to Content",
                  "Snap to Markup", "Align to Markups", "Align to Content",
                  "Rotate Counterclockwise", "Headers && Footers", "Apply to Pages",
-                 "Set as Default", "Convert to Polygon", "Import Tool Set")
+                 "Set as Default", "Convert to Polygon", "Import Tool Set",
+                 "Manage Tool Sets")
     long = [entry for entry in long if not any(name in entry for name in bluebeams)]
     assert not long, "labels of more than two words:\n" + "\n".join(sorted(set(long)))
 
@@ -2471,9 +2472,15 @@ def test_changing_a_pages_colours_changes_its_line_work_too(window):
         line.from_drawing = True
         lines.append(line)
 
+    # exactly: black, and not the near-black beside it (no tolerance, the
+    # user 2026-10-14); a row of its own for that
     changed = colorproc.process_items(lines, colorproc.Process(
-        colorproc.MODIFY, pairs=[("#000000", "#1971c2")], tolerance=16))
-    assert changed == 2, "the two near-black lines, and not the red one"
+        colorproc.MODIFY, pairs=[("#000000", "#1971c2")]))
+    assert changed == 1
+    assert [i.style.stroke for i in lines] == ["#1971c2", "#0a0a0a", "#c92a2a"]
+    changed = colorproc.process_items(lines, colorproc.Process(
+        colorproc.MODIFY, pairs=[("#0a0a0a", "#1971c2")]))
+    assert changed == 1, "the near-black line, and not the red one"
     assert [i.style.stroke for i in lines] == ["#1971c2", "#1971c2", "#c92a2a"]
 
     colorproc.process_items(lines, colorproc.Process(colorproc.COLORIZE, select="#2f9e44",

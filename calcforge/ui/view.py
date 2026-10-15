@@ -433,6 +433,20 @@ class _Glide(QObject):
         if not self.axes and self.zooming is None:
             self.timer.stop()
 
+
+def _resize_by(item, factor: float) -> None:
+    """A markup put down from a scaled tool, made *factor* times its size
+    about its own origin: a measurement by its points, so what it measures
+    stays what it is; anything else by its transform, as a group is resized."""
+    if isinstance(item, MeasureItem):
+        item.prepareGeometryChange()
+        item.points = [QPointF(p.x() * factor, p.y() * factor) for p in item.points]
+        frame = item.parentItem()
+        item.refresh(page=getattr(frame, "page", None))
+    else:
+        item.setTransform(QTransform.fromScale(factor, factor) * item.transform())
+    item.update()
+
 class PageView(QGraphicsView):
     """Displays one :class:`~calcforge.ui.scene.PageScene` and edits it."""
 
@@ -938,6 +952,8 @@ class PageView(QGraphicsView):
         always was and the scrollbars pointing the way they scroll.
         """
         self.setTransform(QTransform().scale(self._zoom, self._zoom))
+        from ..items.base import note_view_zoom
+        note_view_zoom(self.scene())       # the selection's handles changed size
 
     # -- turning the page on screen ----------------------------------------
     def view_turn(self) -> int:
@@ -2221,7 +2237,6 @@ class PageView(QGraphicsView):
             self.begin_snapshot()
             item = self.create_item(tool, point)
             if item is not None:
-                self.window.remember_recent(item)
                 self.commit_snapshot(f"Add {tool.label.lower()}")
             self.finish_tool()
             event.accept()
@@ -3318,8 +3333,9 @@ class PageView(QGraphicsView):
             return [dict(part) for part in entry.payload.get("items", [])]
         return [dict(entry.payload)]
 
-    def pending_extent(self) -> QRectF:
-        """The complete bounds of the exact markup or group being held."""
+    def pending_extent(self, factor: float = 1.0) -> QRectF:
+        """The complete bounds of the exact markup or group being held — at
+        *factor* times its size, for a tool scaled to the page it lands on."""
         boxes = QRectF()
         for data in self.pending_payloads():
             item = build_item(data)
@@ -3332,6 +3348,9 @@ class PageView(QGraphicsView):
                 box = QRectF(float(data.get("x", 0.0)),
                              float(data.get("y", 0.0)), width, height)
             boxes = box if boxes.isNull() else boxes.united(box)
+        if factor != 1.0:
+            boxes = QRectF(boxes.x() * factor, boxes.y() * factor,
+                           boxes.width() * factor, boxes.height() * factor)
         return boxes
 
     def place_pending_stamp(self, scene_pos: QPointF) -> bool:
@@ -3346,7 +3365,8 @@ class PageView(QGraphicsView):
         if not payloads:
             self._pending_stamp = None
             return False
-        origin = self._pending_origin(frame, scene_pos)
+        factor = entry.size_on(frame.page)          # Revu's Scale
+        origin = self._pending_origin(frame, scene_pos, factor)
         # Fresh names for every group in the tool, keeping the arrangement it
         # was kept in: a tool made of a group inside a group comes down as
         # one, and putting the same tool down twice gives two of them rather
@@ -3374,9 +3394,11 @@ class PageView(QGraphicsView):
                 continue
             if hasattr(item, "load_from_document"):
                 item.load_from_document(self.document())
-            item.setPos(origin + QPointF(float(data.get("x", 0.0)),
-                                         float(data.get("y", 0.0))))
+            item.setPos(origin + QPointF(float(data.get("x", 0.0)) * factor,
+                                         float(data.get("y", 0.0)) * factor))
             frame.add_markup(item)
+            if factor != 1.0:
+                _resize_by(item, factor)
             item.setSelected(True)
             placed.append(item)
         self._onto_the_calc_grid(placed)
@@ -3409,10 +3431,10 @@ class PageView(QGraphicsView):
             from ..calc.docsheet import sheet_for
             sheet_for(self.document()).settle()
 
-    def _pending_origin(self, frame, scene_pos: QPointF) -> QPointF:
+    def _pending_origin(self, frame, scene_pos: QPointF, factor: float = 1.0) -> QPointF:
         """Offset an exact tool-set item from its bottom-left pointer anchor."""
         local = frame.mapFromScene(self.snap_scene(scene_pos, frame))
-        extent = self.pending_extent()
+        extent = self.pending_extent(factor)
         return QPointF(local.x() - extent.left(), local.y() - extent.bottom())
 
     def _prepare_draft(self, item: MarkupItem) -> None:
@@ -3479,7 +3501,6 @@ class PageView(QGraphicsView):
         self.scene().clearSelection()
         item.setSelected(True)
         self.selectionChanged.emit()
-        self.window.remember_recent(item)
         self.commit_snapshot(f"Add {tool.label.lower()}")
         self.finish_tool()
         self.begin_item_edit(item)
@@ -3637,7 +3658,6 @@ class PageView(QGraphicsView):
         if isinstance(draft, MeasureItem):
             if draft.kind != DIMENSION:
                 note_scale = True
-        self.window.remember_recent(draft)
         self.commit_snapshot(f"Add {tool.label.lower()}")
 
         if isinstance(draft, MeasureItem) and draft.kind == DIMENSION \
@@ -3709,7 +3729,6 @@ class PageView(QGraphicsView):
         draft.refresh(page=self.page())
         self.scene().clearSelection()
         draft.setSelected(True)
-        self.window.remember_recent(draft)
         self.commit_snapshot(f"Add {tool.label.lower()}")
         self.selectionChanged.emit()
         self.finish_tool()
@@ -3743,7 +3762,6 @@ class PageView(QGraphicsView):
         target.update()
         self.scene().clearSelection()
         target.setSelected(True)
-        self.window.remember_recent(target)
         self.commit_snapshot(f"Add {tool.label.lower()}")
         self.selectionChanged.emit()
         # A measurement says what is left; a plain shape has no total to say.

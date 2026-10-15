@@ -481,6 +481,10 @@ class _Dropper(QWidget):
 
     def __init__(self, shot: QPixmap, geometry: QRect):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        # Above everything, a modal dialog included: Color Processing is one,
+        # and under it the screen held still took no clicks, so its loop
+        # never ended and the application hung (the user, 2026-10-14).
+        self.setWindowModality(Qt.ApplicationModal)
         self.shot = shot.toImage()
         self.pixmap = shot
         self.ratio = shot.devicePixelRatio() or 1.0
@@ -554,18 +558,59 @@ def pick_from_screen() -> Optional[str]:
     if screen is None:
         return None
     shot = screen.grabWindow(0)
-    if shot.isNull():
-        return None
+    if shot.isNull() or _blank(shot):
+        # Some systems will not hand over the screen (Wayland, a locked-down
+        # desktop): the application's own windows, where they are, then —
+        # every colour in the drawing at least.
+        shot = _our_windows(screen)
+        if shot is None:
+            return None
     dropper = _Dropper(shot, screen.geometry())
     dropper.show()
     dropper.raise_()
     dropper.activateWindow()
     dropper.grabKeyboard()
-    dropper.loop.exec()
-    dropper.releaseKeyboard()
+    dropper.grabMouse()
+    try:
+        dropper.loop.exec()
+    finally:
+        dropper.releaseMouse()
+        dropper.releaseKeyboard()
     result = dropper.result
     dropper.deleteLater()
     return result
+
+
+def _blank(shot: QPixmap) -> bool:
+    """A grab the system refused comes back one flat colour."""
+    image = shot.toImage().scaled(16, 16)
+    first = image.pixel(0, 0)
+    return all(image.pixel(x, y) == first for x in range(16) for y in range(16))
+
+
+def _our_windows(screen) -> Optional[QPixmap]:
+    """The screen as far as this application can see it: its own visible
+    windows drawn where they stand, on black."""
+    from PySide6.QtWidgets import QApplication
+    area = screen.geometry()
+    canvas = QPixmap(area.size())
+    canvas.fill(Qt.black)
+    painter = QPainter(canvas)
+    drawn = False
+    for window in QApplication.topLevelWidgets():
+        if not window.isVisible() or isinstance(window, _Dropper):
+            continue
+        frame = window.frameGeometry()
+        if not frame.intersects(area):
+            continue
+        picture = window.grab()
+        if picture.isNull():
+            continue
+        top_left = window.mapToGlobal(QPoint(0, 0)) - area.topLeft()
+        painter.drawPixmap(top_left, picture)
+        drawn = True
+    painter.end()
+    return canvas if drawn else None
 
 
 class FoundPopup(QFrame):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 
+import shiboken6
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPen
 from PySide6.QtWidgets import (QAbstractScrollArea, QLayout, QAbstractSpinBox, QComboBox,
@@ -63,8 +64,8 @@ class ColorButton(QToolButton):
         """Revu's colour picker under the swatch (ui/colorpicker.py)."""
         from .colorpicker import choose
         got = choose(self, self._colour, self.allow_none)
-        if got is None:
-            return
+        if got is None or not shiboken6.isValid(self):
+            return                 # left, or this button went while it was open
         self.set_color(got)
         self.colorChanged.emit(self._colour)
 

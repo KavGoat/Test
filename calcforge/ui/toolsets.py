@@ -27,8 +27,6 @@ from ..settings import app_settings
 DEFAULTS_KEY = "markups/defaults"
 TOOLSETS_KEY = "toolsets/sets"
 MY_TOOLS = "My Tools"
-RECENT_TOOLS = "Recent Tools"   # Bluebeam's: the markups last drawn, newest first
-MAX_RECENTS = 10
 
 COPY = "copy"                # put back exactly what was added
 PROPERTIES = "properties"    # draw a new one wearing its properties
@@ -129,14 +127,49 @@ class ToolEntry:
     label: str
     payload: dict = field(default_factory=dict)
     mode: str = COPY
+    # Revu's Scale: a tool put down exactly (Drawing Mode) keeps its real
+    # size from one drawing scale to another — a 1 m desk kept off a 1:100
+    # plan comes down twice the size on a 1:50 one. What a point measured
+    # where it was kept, in mm; 0 when that page had no scale.
+    scaled: bool = False
+    mm_per_pt: float = 0.0
 
     def to_dict(self) -> dict:
-        return {"label": self.label, "payload": self.payload, "mode": self.mode}
+        data = {"label": self.label, "payload": self.payload, "mode": self.mode}
+        if self.scaled:
+            data["scaled"] = True
+        if self.mm_per_pt:
+            data["mm_per_pt"] = self.mm_per_pt
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "ToolEntry":
         return cls(str(data.get("label", "Tool")), dict(data.get("payload", {})),
-                   data.get("mode", COPY))
+                   data.get("mode", COPY), bool(data.get("scaled", False)),
+                   float(data.get("mm_per_pt", 0.0) or 0.0))
+
+    def size_on(self, page) -> float:
+        """How much bigger it comes down on *page*, scaled: 1 unless Scale is
+        on and both its own page and this one have a drawing scale."""
+        if not self.scaled or self.mode != COPY or not self.mm_per_pt:
+            return 1.0
+        here = mm_per_pt(page)
+        return self.mm_per_pt / here if here else 1.0
+
+
+def mm_per_pt(page) -> float:
+    """What one point on *page* measures, in mm — 0 if it has no scale."""
+    scale = getattr(page, "scale", None)
+    if scale is None or not getattr(scale, "calibrated", False):
+        return 0.0
+    try:
+        return float(scale.length_per_pt.to("mm").magnitude)
+    except Exception:  # noqa: BLE001 - a unit that will not convert: no scale
+        return 0.0
+
+
+def _kept_from(item) -> float:
+    return mm_per_pt(getattr(item.parentItem(), "page", None))
 
     @property
     def type_name(self) -> str:
@@ -185,32 +218,8 @@ def load_toolsets() -> list:
         sets = []
     if not any(group.name == MY_TOOLS for group in sets):
         sets.insert(0, ToolSet(MY_TOOLS))
-    sets.sort(key=lambda group: 0 if group.name == MY_TOOLS
-              else (1 if group.name == RECENT_TOOLS else 2))
+    sets.sort(key=lambda group: group.name != MY_TOOLS)
     return sets
-
-
-def remember_recent(item) -> bool:
-    """Bluebeam's Recent Tools: the markup just drawn, its look kept as a
-    tool at the top of the set (one of each look), at most ten. True when
-    the set changed."""
-    entry = entry_for(item, PROPERTIES if can_be_properties(item.serialize()) else COPY)
-    if entry.mode != PROPERTIES:
-        return False                     # only looks to draw again, not contents
-    sets = load_toolsets()
-    recent = next((g for g in sets if g.name == RECENT_TOOLS), None)
-    if recent is None:
-        recent = ToolSet(RECENT_TOOLS)
-        sets.insert(1, recent)
-
-    def same(a, b) -> bool:
-        keep = ("type", "kind", "style", "cloud_size", "cloud_invert")
-        return all(a.payload.get(k) == b.payload.get(k) for k in keep)
-    recent.entries = [e for e in recent.entries if not same(e, entry)]
-    recent.entries.insert(0, entry)
-    del recent.entries[MAX_RECENTS:]
-    save_toolsets(sets)
-    return True
 
 
 def save_toolsets(sets: list) -> None:
@@ -229,7 +238,7 @@ def entry_for(item, mode: str = COPY, label: str = "") -> ToolEntry:
         kind = getattr(item, "kind", "") or getattr(item, "shape_kind", "")
         if kind:
             payload.setdefault("kind", kind)
-    return ToolEntry(label or describe(item), payload, mode)
+    return ToolEntry(label or describe(item), payload, mode, mm_per_pt=_kept_from(item))
 
 
 def entry_for_many(items: list, label: str = "") -> ToolEntry:
@@ -251,7 +260,7 @@ def entry_for_many(items: list, label: str = "") -> ToolEntry:
         parts.append(data)
     payload = {"type": GROUP, "items": parts}
     name = label or f"Group of {len(items)}"
-    return ToolEntry(name, payload, COPY)
+    return ToolEntry(name, payload, COPY, mm_per_pt=_kept_from(items[0]))
 
 
 GROUP = "__group__"     # what a multi-markup entry's payload calls itself

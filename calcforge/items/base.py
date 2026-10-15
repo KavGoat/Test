@@ -385,6 +385,28 @@ CONTROL_GOLD = QColor("#d1b53a")
 ROTATE_BLUE = QColor("#3987c2")
 
 
+#: The smallest zoom any view is showing the pages at (ui/view.py keeps it):
+#: handles are drawn a fixed number of pixels across, so the further out the
+#: view, the more of the page they cover.
+_CHROME_ZOOM = [1.0]
+
+
+def note_view_zoom(scene) -> None:
+    """A view of *scene* zoomed: the selected markups' handles change size,
+    and with them the room each markup says it paints in."""
+    if scene is None:
+        return
+    zooms = [max(math.hypot(view.transform().m11(), view.transform().m12()), 0.01)
+             for view in scene.views()]
+    zoom = min(zooms) if zooms else 1.0
+    if abs(zoom - _CHROME_ZOOM[0]) < 1e-9:
+        return
+    _CHROME_ZOOM[0] = zoom
+    for item in scene.selectedItems():
+        if isinstance(item, MarkupItem):
+            QGraphicsObject.prepareGeometryChange(item)
+
+
 def handle_zoom(painter: QPainter) -> float:
     shape = painter.transform()
     return max(math.hypot(shape.m11(), shape.m12()), 0.01)
@@ -571,14 +593,19 @@ class MarkupItem(QGraphicsObject):
                 baked = self._baked_rect
                 if baked is not None:
                     return baked
-                if not (self.still_theirs or self.split_theirs):
-                    return _own(self)
-                known = self._bounds
-                if known is None:
-                    known = _own(self)
-                    if self.parentItem() is not None:
-                        self._bounds = known
-                return known
+                self._bounding_depth += 1
+                try:
+                    if not (self.still_theirs or self.split_theirs):
+                        found = _own(self)
+                    else:
+                        found = self._bounds
+                        if found is None:
+                            found = _own(self)
+                            if self.parentItem() is not None:
+                                self._bounds = found
+                finally:
+                    self._bounding_depth -= 1
+                return self._with_chrome(found)
             boundingRect._answers_baked = True
             boundingRect.__doc__ = own.__doc__
             cls.boundingRect = boundingRect
@@ -728,13 +755,41 @@ class MarkupItem(QGraphicsObject):
         if self._baked_rect is not None:
             return self._baked_rect
         if not (self.still_theirs or self.split_theirs):
-            return self._bounds_now()
+            return self._with_chrome(self._bounds_now())
         known = self._bounds
         if known is None:
             known = self._bounds_now()
             if self.parentItem() is not None:
                 self._bounds = known
-        return known
+        return self._with_chrome(known)
+
+    #: How deep in a chain of boundingRect calls (a subclass's asking its
+    #: parent class's): only the outermost adds the handles' room.
+    _bounding_depth = 0
+
+    def chrome_margin(self) -> float:
+        """How far round itself a selected markup paints its handles.
+
+        The handles are a fixed number of pixels across at any zoom, so in
+        the page's units they grow as the view zooms out. Left out of the
+        markup's own rectangle, Qt never repaints where they were, and moving
+        the markup left pieces of its selection box and its rotation handle
+        behind (the user, 2026-10-14)."""
+        if not self.isSelected() or self.group:
+            return 0.0
+        return (2 * HANDLE_SCREEN_PX + 8.0) / max(_CHROME_ZOOM[0], 0.01) + 6.0
+
+    def _with_chrome(self, rect: QRectF) -> QRectF:
+        if self._bounding_depth:
+            return rect                      # a subclass asked: it adds it
+        margin = self.chrome_margin()
+        return rect.adjusted(-margin, -margin, margin, margin) if margin else rect
+
+    def bounds_without_chrome(self) -> QRectF:
+        """The markup's rectangle without its handles' room: what it covers."""
+        rect = self.boundingRect()
+        margin = self.chrome_margin()
+        return rect.adjusted(margin, margin, -margin, -margin) if margin else rect
 
     def _bounds_now(self) -> QRectF:
         margin = self.style.width + HANDLE_SIZE + 4
@@ -1215,6 +1270,10 @@ class MarkupItem(QGraphicsObject):
         """
         if change in _CHANGES_THAT_SHOW:
             self._changing()
+        elif change == QGraphicsItem.ItemSelectedChange:
+            # picked out or let go: its handles' room comes or goes (not a
+            # change to its drawing, so the page's squares keep it)
+            QGraphicsObject.prepareGeometryChange(self)
         elif change == QGraphicsItem.ItemSelectedHasChanged:
             # Picking a markup out changes nothing about its drawing, only
             # whether its handles show; the page draws those over its squares.

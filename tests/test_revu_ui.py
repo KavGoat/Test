@@ -116,26 +116,6 @@ def test_the_scale_box_scales_in_proportion_and_shift_frees_it(window):
     assert line.scale_points() == {}
 
 
-def test_drawing_a_markup_puts_its_look_in_recent_tools(window):
-    """Bluebeam's Recent Tools: what was just drawn, newest first, one of each look."""
-    from calcforge.ui import toolsets
-    from tests.test_usability import drag, markups
-    window.select_tool("rect")
-    drag(window.view, 100, 100, 200, 160)
-    window.select_tool("cloud")
-    drag(window.view, 250, 100, 350, 160)
-    sets = toolsets.load_toolsets()
-    assert [g.name for g in sets][:2] == [toolsets.MY_TOOLS, toolsets.RECENT_TOOLS]
-    recent = sets[1].entries
-    assert [e.payload.get("kind") for e in recent[:2]] == ["cloud", "rect"]
-    assert all(e.mode == toolsets.PROPERTIES for e in recent)
-    window.select_tool("rect")
-    drag(window.view, 100, 300, 200, 360)                 # the same look again
-    recent = toolsets.load_toolsets()[1].entries
-    assert [e.payload.get("kind") for e in recent[:2]] == ["rect", "cloud"]
-    assert len(markups(window)) == 3
-
-
 def test_manage_tool_sets_shows_hides_orders_and_renames(window):
     """Revu's Manage Tool Sets, and the Tool Chest menu's tick per set."""
     from PySide6.QtCore import Qt
@@ -225,3 +205,115 @@ def test_hatch_patterns_import_a_pat_file_and_are_kept(window, tmp_path):
     for key in list(hatches.CUSTOM):
         hatches.remove_pattern(key)
     hatches.save_custom()
+
+
+def _a_chest(window):
+    from calcforge.ui import toolsets
+    frame = window.document.pages[0].frame
+    sets = toolsets.load_toolsets()
+    steel = toolsets.ToolSet("Steel")
+    for i in range(7):
+        box = RectItem("rect", QRectF(0, 0, 80, 40))
+        frame.add_markup(box, QPointF(50, 50))
+        sets[0].entries.append(toolsets.entry_for(box, toolsets.COPY, f"Box {i + 1}"))
+    for i in range(3):
+        line = PolyItem("line", [QPointF(0, 0), QPointF(60, 20)])
+        frame.add_markup(line, QPointF(50, 200))
+        steel.entries.append(toolsets.entry_for(line, toolsets.COPY, f"Beam {i + 1}"))
+    toolsets.save_toolsets(sets + [steel])
+    panel = window.toolsets_panel
+    panel.rebuild()
+    return panel
+
+
+def test_the_tool_chest_fills_its_panel_and_shows_every_tool(window):
+    """Symbol view: as wide as the panel, as many rows as its tools need
+    (a set of seven showed three, with a gap down the right, 2026-10-14)."""
+    window.show()
+    window.show_panel("dock_toolsets", True)
+    panel = _a_chest(window)
+    pump()
+    tree = panel.tree
+    assert tree.columnWidth(0) == tree.viewport().width()
+    for name in ("My Tools", "Steel"):
+        bar = panel.headers[name]
+        grid = bar.grid
+        per_row = max(1, (grid.width() - 2 * grid.frameWidth() - 2) // grid.cell())
+        rows = -(-grid.count() // per_row)
+        assert grid.height() >= rows * grid.cell()
+        assert tree.visualItemRect(panel.header_for(name)).height() >= bar.bar.height() + grid.height()
+        assert bar.width() == tree.viewport().width()
+
+
+def test_a_tool_set_has_revus_symbol_list_and_detail_views(window):
+    from calcforge.ui import panels
+    panel = _a_chest(window)
+    header = panel.header_for("Steel")
+    assert all(header.child(i).isHidden() for i in range(header.childCount()))
+    panel.select_set("Steel")
+    menu = panel.build_set_menu()
+    names = [a.text() for a in menu.actions()][:3]
+    assert names == ["Symbol", "List", "Detail"]
+    next(a for a in menu.actions() if a.text() == "List").trigger()
+    header = panel.header_for("Steel")
+    assert not any(header.child(i).isHidden() for i in range(header.childCount()))
+    assert header.child(0).data(0, panel.VIEW_ROLE) == panels.LIST
+    assert panel.headers["Steel"].grid is None
+    panel.set_view("Steel", panels.DETAIL)
+    row = panel.header_for("Steel").child(0)
+    assert row.data(0, panel.DESC_ROLE) == "Line · Drawing Mode"
+    # kept for the next time the chest is opened
+    again = panels.ToolSetsPanel(window)
+    assert again.view_of("Steel") == panels.DETAIL and again.view_of("My Tools") == panels.SYMBOL
+
+
+def test_a_tool_has_revus_modes_scale_order_and_copy(window):
+    from calcforge.ui import toolsets
+    panel = _a_chest(window)
+    panel.select_entry(toolsets.MY_TOOLS, 1)
+    labels = [a.text() for a in panel.build_menu().actions()]
+    for wanted in ("Use Tool", "Drawing Mode", "Properties Mode", "Scale", "Move Up",
+                   "Move Down", "Copy", "Paste", "Rename…", "Remove"):
+        assert wanted in labels, wanted
+    menu = panel.build_menu()
+    drawing = next(a for a in menu.actions() if a.text() == "Drawing Mode")
+    assert drawing.isChecked()
+    next(a for a in menu.actions() if a.text() == "Properties Mode").trigger()
+    assert panel.current_entry().mode == toolsets.PROPERTIES
+    scale = next(a for a in panel.build_menu().actions() if a.text() == "Scale")
+    assert not scale.isEnabled(), "a tool drawn fresh has nothing to scale"
+    panel.set_mode(toolsets.COPY)
+    panel.move_entry(-1)
+    assert [e.label for e in toolsets.load_toolsets()[0].entries][:2] == ["Box 2", "Box 1"]
+    panel.copy_entry()
+    panel.select_set("Steel")
+    panel.paste_entry()
+    assert [e.label for e in next(g for g in toolsets.load_toolsets()
+                                  if g.name == "Steel").entries][-1] == "Box 2"
+
+
+def test_a_scaled_tool_keeps_its_real_size_on_a_page_of_another_scale(window):
+    """Revu's Scale: kept off a 1:100 page, put down on a 1:50 one, twice
+    the size on the paper — the same size in the world."""
+    from calcforge.core.document import PageScale
+    from calcforge.ui import toolsets
+    window.add_page()
+    first, second = window.document.pages[0], window.document.pages[1]
+    first.scale = PageScale.from_ratio(100)
+    second.scale = PageScale.from_ratio(50)
+    box = RectItem("rect", QRectF(0, 0, 100, 40))
+    first.frame.add_markup(box, QPointF(100, 100))
+    entry = toolsets.entry_for(box, toolsets.COPY, "Desk")
+    assert entry.mm_per_pt == pytest.approx(100 * 25.4 / 72, rel=1e-6)
+    assert entry.size_on(second) == 1.0, "Scale off: as kept"
+    entry.scaled = True
+    assert entry.size_on(second) == pytest.approx(2.0)
+    assert toolsets.ToolEntry.from_dict(entry.to_dict()).scaled
+    view = window.view
+    view.set_pending_stamp(entry)
+    before = set(second.frame.markups())
+    view.place_pending_stamp(second.frame.mapToScene(QPointF(300, 400)))
+    (placed,) = [i for i in second.frame.markups() if i not in before]
+    size = placed.mapRectToParent(placed.local_rect())
+    assert size.width() == pytest.approx(200, abs=0.5)
+    assert size.height() == pytest.approx(80, abs=0.5)

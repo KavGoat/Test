@@ -10,8 +10,8 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QInputDia
 
 from . import toolsets
 
-#: The sets that are always there and always at the top, in this order.
-FIXED = (toolsets.MY_TOOLS, toolsets.RECENT_TOOLS)
+#: The set that is always there and always at the top.
+FIXED = (toolsets.MY_TOOLS,)
 
 
 class ManageToolSetsDialog(QDialog):

@@ -5895,13 +5895,6 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # tool sets
     # ==================================================================
-    def remember_recent(self, item) -> None:
-        """A markup just drawn goes to the top of Bluebeam's Recent Tools."""
-        if item is None or getattr(item, "IS_CALC", False):
-            return
-        if toolsets.remember_recent(item):
-            self.toolsets_panel.rebuild()
-
     def add_to_toolset(self, item=None, into: str = "", ask: bool = True) -> None:
         """Keep a markup — or the selection — in a tool set to use again."""
         items = [item] if item is not None else [
@@ -6427,7 +6420,7 @@ class MainWindow(QMainWindow):
         items = [i for i in self.selected_items() if self.view.editable(i)]
         if len(items) < 2:
             return
-        rects = {item: item.sceneBoundingRect() for item in items}
+        rects = {item: item.mapRectToScene(item.bounds_without_chrome()) for item in items}
         union = QRectF()
         for rect in rects.values():
             union = rect if union.isNull() else union.united(rect)
@@ -8071,7 +8064,9 @@ class MainWindow(QMainWindow):
             by_page.setdefault(index, []).append((page, item))
         for index, entries in by_page.items():
             page = entries[0][0]
-            boxes = [item.sceneBoundingRect() for _page, item in entries]
+            boxes = [item.mapRectToScene(item.bounds_without_chrome()) if hasattr(
+                item, "bounds_without_chrome") else item.sceneBoundingRect()
+                for _page, item in entries]
             self._burn_into_background(page, boxes)
             removed += self._flatten_redactions(page, [item for _page, item in entries], boxes)
         self.document.modified = True

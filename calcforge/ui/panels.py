@@ -3,16 +3,16 @@ from __future__ import annotations
 
 import csv
 
-from PySide6.QtCore import (QByteArray, QEvent, QMimeData, QPoint, QPointF, QRectF, QSize,
+from PySide6.QtCore import (QByteArray, QEvent, QMimeData, QPoint, QPointF, QRect, QRectF, QSize,
                             QTimer, Qt, Signal)
-from PySide6.QtGui import (QColor, QDrag, QFont, QFontInfo, QIcon, QKeySequence,
+from PySide6.QtGui import (QColor, QDrag, QFont, QFontInfo, QFontMetrics, QIcon, QKeySequence,
                            QPainter, QPen, QPixmap)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
                                QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QListView, QListWidget,
                                QListWidgetItem, QMenu, QPlainTextEdit, QPushButton,
-                               QScrollArea, QSpinBox, QLayout,
+                               QScrollArea, QSpinBox, QLayout, QStyledItemDelegate,
                                QToolButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
@@ -1355,6 +1355,104 @@ class BookmarksPanel(QWidget):
         self.window.insert_contents_block()
 
 
+#: Revu's ways of showing a tool set: pictures in a grid, one line each, or
+#: a picture with its name and what it is.
+SYMBOL, LIST, DETAIL = "symbol", "list", "detail"
+VIEW_NAMES = {SYMBOL: "Symbol", LIST: "List", DETAIL: "Detail"}
+
+
+def _kind_name(payload: dict) -> str:
+    """What a kept tool is, in the words the tool bar uses."""
+    from . import toolsets
+    from .tools import TOOLS
+    if payload.get("type") == toolsets.GROUP:
+        return f"Group of {len(payload.get('items', []))}"
+    kind = str(payload.get("kind") or payload.get("type") or "")
+    tool = next((t for t in TOOLS if t.key == kind), None)
+    return tool.label if tool is not None else kind.replace("_", " ").title()
+
+
+class _ToolRowDelegate(QStyledItemDelegate):
+    """A tool's row in List view (a small picture and its name) and in Detail
+    view (its picture, its name and, under it, what it is and how it comes
+    down). Set headers are drawn by their own bar."""
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        self.panel = panel
+
+    def _mode(self, index):
+        return index.data(ToolSetsPanel.VIEW_ROLE)
+
+    def sizeHint(self, option, index):
+        mode = self._mode(index)
+        if mode == LIST:
+            return QSize(option.rect.width(), 24)
+        if mode == DETAIL:
+            return QSize(option.rect.width(), max(self.panel.tool_size + 10, 40))
+        return super().sizeHint(option, index)
+
+    def paint(self, painter, option, index):
+        mode = self._mode(index)
+        if index.data(ToolSetsPanel.ENTRY_ROLE) == -1:
+            return                        # a set's row: its own bar draws it
+        if mode not in (LIST, DETAIL):
+            super().paint(painter, option, index)
+            return
+        from PySide6.QtWidgets import QStyle
+        painter.save()
+        rect = option.rect
+        palette = option.palette
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(rect, palette.highlight())
+            ink = palette.highlightedText().color()
+        else:
+            if option.state & QStyle.State_MouseOver:
+                painter.fillRect(rect, palette.alternateBase())
+            ink = palette.text().color()
+        side = 18 if mode == LIST else self.panel.tool_size
+        picture = index.data(Qt.DecorationRole)
+        box = QRect(rect.left() + 6, rect.top() + (rect.height() - side) // 2, side, side)
+        # on Revu's light tile, as in Symbol view: line work drawn in dark
+        # colours is lost on the dark panel otherwise
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#e4e5e6"))
+        painter.drawRoundedRect(QRectF(box.adjusted(-2, -2, 2, 2)), 3, 3)
+        if isinstance(picture, QIcon):
+            picture.paint(painter, box)
+        text_left = box.right() + 8
+        label = str(index.data(ToolSetsPanel.LABEL_ROLE) or index.data(Qt.DisplayRole) or "")
+        font = QFont(option.font)
+        painter.setPen(ink)
+        if mode == LIST:
+            painter.setFont(font)
+            painter.drawText(QRect(text_left, rect.top(), rect.right() - text_left - 4,
+                                   rect.height()), Qt.AlignVCenter | Qt.AlignLeft,
+                             option.fontMetrics.elidedText(label, Qt.ElideRight,
+                                                           rect.right() - text_left - 4))
+        else:
+            half = rect.height() // 2
+            font.setBold(True)
+            painter.setFont(font)
+            width = rect.right() - text_left - 4
+            painter.drawText(QRect(text_left, rect.top() + 2, width, half - 2),
+                             Qt.AlignBottom | Qt.AlignLeft,
+                             QFontMetrics(font).elidedText(label, Qt.ElideRight, width))
+            small = QFont(option.font)
+            small.setPointSizeF(max(option.font.pointSizeF() - 1.0, 6.0))
+            painter.setFont(small)
+            faded = QColor(ink)
+            faded.setAlphaF(0.65)
+            painter.setPen(faded)
+            painter.drawText(QRect(text_left, rect.top() + half + 1, width, half - 3),
+                             Qt.AlignTop | Qt.AlignLeft,
+                             QFontMetrics(small).elidedText(
+                                 str(index.data(ToolSetsPanel.DESC_ROLE) or ""),
+                                 Qt.ElideRight, width))
+        painter.restore()
+
+
 class _ToolGrid(QListWidget):
     """A tool set's tools as Bluebeam's Symbol view shows them: a grid of
     pictures, the first nine of My Tools numbered for their keys."""
@@ -1389,12 +1487,31 @@ class _ToolGrid(QListWidget):
             self.panel.select_set(self.group_name)
         self.panel.build_menu().exec(self.viewport().mapToGlobal(point))
 
-    def fit(self, width: int) -> None:
-        """Tall enough for every row of tools, no taller."""
-        size = self.iconSize().width() + 8
-        per_row = max(1, (max(width, size) - 4) // (size + 2 * self.spacing()))
+    def cell(self) -> int:
+        return self.iconSize().width() + 10
+
+    def fit(self, width: int) -> bool:
+        """Tall enough for every row of tools at *width*, no taller. Whether
+        the height changed."""
+        cell = self.cell()
+        self.setGridSize(QSize(cell, cell))
+        inner = max(width - 2 * self.frameWidth() - 2, cell)
+        per_row = max(1, inner // cell)
         rows = max(1, -(-self.count() // per_row)) if self.count() else 1
-        self.setFixedHeight(rows * (size + 2 * self.spacing()) + 4)
+        height = rows * cell + 2 * self.frameWidth() + 4
+        if height == self.height() and self.minimumHeight() == height:
+            return False
+        self.setFixedHeight(height)
+        return True
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # laid out at its real width: as many rows as that needs (sized to a
+        # guess before the panel had its width, a set of seven showed three)
+        if event.size().width() != event.oldSize().width() and self.fit(event.size().width()):
+            header = self.parentWidget()
+            if isinstance(header, _SetHeader):
+                QTimer.singleShot(0, header.sync)
 
 
 class _SetHeader(QWidget):
@@ -1410,7 +1527,7 @@ class _SetHeader(QWidget):
         column = QVBoxLayout(self)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
-        bar = QWidget()
+        bar = self.bar = QWidget()
         bar.setObjectName("toolSetBar")
         line = QHBoxLayout(bar)
         line.setContentsMargins(4, 2, 2, 2)
@@ -1451,13 +1568,20 @@ class _SetHeader(QWidget):
         self.sync()
 
     def sync(self) -> None:
+        import shiboken6
+        if not (shiboken6.isValid(self) and shiboken6.isValid(self.item)):
+            return                    # the chest was rebuilt in the meantime
         open_ = self.item.isExpanded()
         self.chevron.setArrowType(Qt.DownArrow if open_ else Qt.RightArrow)
+        height = self.bar.sizeHint().height()
         if self.grid is not None:
-            self.grid.setVisible(open_ and self.grid.count() > 0)
-            self.grid.fit(self.panel.tree.viewport().width() - 8)
-        self.adjustSize()
-        self.item.setSizeHint(0, QSize(10, self.sizeHint().height()))
+            shown = open_ and self.grid.count() > 0
+            self.grid.setVisible(shown)
+            self.grid.fit(self.panel.tree.viewport().width())
+            if shown:
+                height += self.grid.height()
+        if self.item.sizeHint(0).height() != height:
+            self.item.setSizeHint(0, QSize(10, height))
 
     def _toggle(self) -> None:
         self.item.setExpanded(not self.item.isExpanded())
@@ -1504,6 +1628,9 @@ class ToolSetsPanel(QWidget):
 
     SET_ROLE = Qt.UserRole + 1          # which set a row belongs to
     ENTRY_ROLE = Qt.UserRole + 2        # which tool within it, or -1 for the set
+    VIEW_ROLE = Qt.UserRole + 3         # the set's view: List or Detail rows
+    LABEL_ROLE = Qt.UserRole + 4        # the tool's name, as the row shows it
+    DESC_ROLE = Qt.UserRole + 5         # what it is and how it comes down
 
     def __init__(self, window):
         super().__init__()
@@ -1515,7 +1642,14 @@ class ToolSetsPanel(QWidget):
         from ..settings import app_settings
         # Bluebeam's tool size slider, and which sets are in Detail view
         self.tool_size = int(app_settings().value("toolchest/size", 32) or 32)
-        self.detail_sets = set(app_settings().value("toolchest/detail", []) or [])
+        import json
+        try:
+            self.views = dict(json.loads(app_settings().value("toolchest/views", "") or "{}"))
+        except (ValueError, TypeError):
+            self.views = {}
+        for name in app_settings().value("toolchest/detail", []) or []:
+            self.views.setdefault(name, DETAIL)         # kept from before List
+        self.clipboard = None                           # a tool copied, to paste
 
         # Bluebeam's "Tool Chest ▾": the sets, and making or bringing in one
         self.chest_button = QToolButton()
@@ -1542,6 +1676,15 @@ class ToolSetsPanel(QWidget):
         self.tree.itemDoubleClicked.connect(lambda *_: self.use_selected())
         self.tree.currentItemChanged.connect(lambda *_: self.refresh_buttons())
         self.tree.model().rowsMoved.connect(self._rows_moved)
+        # the sets as wide as the panel, however wide it is made (a gap down
+        # the right of every set, 2026-10-14)
+        # (set by hand on every resize: a hidden header does not stretch its
+        # one column again once a scroll bar has come and gone)
+        self.tree.header().setStretchLastSection(False)
+        self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.tree.setMouseTracking(True)
+        self.tree.setItemDelegate(_ToolRowDelegate(self))
+        self.tree.viewport().installEventFilter(self)
         layout.addWidget(self.tree, 1)
 
         self.hint = QLabel("")
@@ -1586,9 +1729,12 @@ class ToolSetsPanel(QWidget):
             self.tree.addTopLevelItem(header)
             self._fill(header, group)
             header.setExpanded(group.name not in rolled)
-            symbols = group.name not in self.detail_sets
+            view = self.view_of(group.name)
+            symbols = view == SYMBOL
             for index in range(header.childCount()):
-                header.child(index).setHidden(symbols)    # Symbol view: the grid instead
+                child = header.child(index)
+                child.setHidden(symbols)                  # Symbol view: the grid instead
+                child.setData(0, self.VIEW_ROLE, view)
             bar = _SetHeader(self, header, group, symbols)
             self.tree.setItemWidget(header, 0, bar)
             self.headers[group.name] = bar
@@ -1600,6 +1746,7 @@ class ToolSetsPanel(QWidget):
             self._watching_expansion = True
         if wanted:
             self.show_set(wanted)
+        self.fit_width()
         self.refresh_buttons()
 
     def _fill(self, header, group) -> None:
@@ -1611,6 +1758,10 @@ class ToolSetsPanel(QWidget):
             mode_tag = "  · Property" if entry.mode == toolsets.PROPERTIES else ""
             row = QTreeWidgetItem([f"{prefix}{entry.label}{mode_tag}"])
             row.setIcon(0, QIcon(entry_thumbnail(entry)))
+            row.setData(0, self.LABEL_ROLE, f"{prefix}{entry.label}")
+            how = ("Properties Mode" if entry.mode == toolsets.PROPERTIES
+                   else "Drawing Mode" + (" · Scale" if entry.scaled else ""))
+            row.setData(0, self.DESC_ROLE, f"{_kind_name(entry.payload)} · {how}")
             row.setData(0, self.SET_ROLE, group.name)
             row.setData(0, self.ENTRY_ROLE, position)
             row.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled)
@@ -1724,6 +1875,56 @@ class ToolSetsPanel(QWidget):
         self._store()
         self.select_entry(group.name, index)
 
+    def set_mode(self, mode: str) -> None:
+        """Revu's Drawing Mode (put down exactly) or Properties Mode (draw
+        a fresh one with its look)."""
+        from . import toolsets
+        entry, group = self.current_entry(), self.current_set()
+        if entry is None or entry.mode == mode:
+            return
+        if mode == toolsets.PROPERTIES and not toolsets.can_be_properties(entry.payload):
+            return
+        entry.mode = mode
+        index = group.entries.index(entry)
+        self._store()
+        self.select_entry(group.name, index)
+
+    def toggle_scale(self) -> None:
+        entry, group = self.current_entry(), self.current_set()
+        if entry is None:
+            return
+        entry.scaled = not entry.scaled
+        index = group.entries.index(entry)
+        self._store()
+        self.select_entry(group.name, index)
+
+    def move_entry(self, step: int) -> None:
+        entry, group = self.current_entry(), self.current_set()
+        if entry is None:
+            return
+        index = group.entries.index(entry)
+        target = index + step
+        if not 0 <= target < len(group.entries):
+            return
+        group.entries[index], group.entries[target] = group.entries[target], group.entries[index]
+        self._store()
+        self.select_entry(group.name, target)
+
+    def copy_entry(self) -> None:
+        from copy import deepcopy
+        entry = self.current_entry()
+        if entry is not None:
+            self.clipboard = deepcopy(entry)
+
+    def paste_entry(self) -> None:
+        from copy import deepcopy
+        group = self.current_set()
+        if group is None or self.clipboard is None:
+            return
+        group.entries.append(deepcopy(self.clipboard))
+        self._store()
+        self.select_entry(group.name, len(group.entries) - 1)
+
     def rename_entry(self) -> None:
         entry = self.current_entry()
         group = self.current_set()
@@ -1811,27 +2012,47 @@ class ToolSetsPanel(QWidget):
         app_settings().setValue("toolchest/size", self.tool_size)
         self.rebuild()
 
-    def set_detail(self, name: str, detail: bool) -> None:
-        """Bluebeam's Symbol or Detail view for one set."""
+    def view_of(self, name: str) -> str:
+        return self.views.get(name, SYMBOL)
+
+    def set_view(self, name: str, view: str) -> None:
+        """Revu's Symbol, List or Detail view for one set."""
+        import json
         from ..settings import app_settings
-        if detail:
-            self.detail_sets.add(name)
+        if view == SYMBOL:
+            self.views.pop(name, None)
         else:
-            self.detail_sets.discard(name)
-        app_settings().setValue("toolchest/detail", sorted(self.detail_sets))
+            self.views[name] = view
+        app_settings().setValue("toolchest/views", json.dumps(self.views))
+        app_settings().remove("toolchest/detail")
         self.rebuild(keep=name)
 
+    def set_detail(self, name: str, detail: bool) -> None:
+        self.set_view(name, DETAIL if detail else SYMBOL)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.tree.viewport() and event.type() == QEvent.Resize:
+            self.fit_width()
+        return super().eventFilter(watched, event)
+
+    def fit_width(self) -> None:
+        """Every set as wide as the panel, and each grid as tall as its tools."""
+        width = self.tree.viewport().width()
+        if self.tree.columnWidth(0) != width:
+            self.tree.setColumnWidth(0, width)
+        for bar in getattr(self, "headers", {}).values():
+            bar.sync()
+
     def build_set_menu(self) -> QMenu:
-        """A set's gear: Symbol or Detail, and what the right-click offers."""
+        """A set's gear: Symbol, List or Detail, and what the right-click offers."""
         menu = QMenu(self)
         group = self.current_set()
         if group is not None:
-            symbol = menu.addAction("Symbol", lambda n=group.name: self.set_detail(n, False))
-            symbol.setCheckable(True)
-            symbol.setChecked(group.name not in self.detail_sets)
-            detail = menu.addAction("Detail", lambda n=group.name: self.set_detail(n, True))
-            detail.setCheckable(True)
-            detail.setChecked(group.name in self.detail_sets)
+            for view in (SYMBOL, LIST, DETAIL):
+                shown = menu.addAction(VIEW_NAMES[view],
+                                       lambda _c=False, n=group.name, v=view: self.set_view(n, v))
+                shown.setCheckable(True)
+                shown.setChecked(self.view_of(group.name) == view)
             menu.addSeparator()
         for action in self.build_menu().actions():
             action.setParent(menu)
@@ -1886,17 +2107,43 @@ class ToolSetsPanel(QWidget):
         group = self.current_set()
         if entry is not None:
             menu.addAction("Use Tool", self.use_selected)
-            draw = menu.addAction("Properties Mode", self.toggle_mode)
+            menu.addSeparator()
+            # Revu's two modes, one ticked
+            exact = menu.addAction("Drawing Mode", lambda: self.set_mode(toolsets.COPY))
+            exact.setCheckable(True)
+            exact.setChecked(entry.mode == toolsets.COPY)
+            exact.setToolTip("Put the markup down exactly as it was kept")
+            draw = menu.addAction("Properties Mode", lambda: self.set_mode(toolsets.PROPERTIES))
             draw.setCheckable(True)
             draw.setChecked(entry.mode == toolsets.PROPERTIES)
             draw.setEnabled(toolsets.can_be_properties(entry.payload))
             draw.setToolTip("Draw a fresh markup using this stored style")
             if not draw.isEnabled():
                 draw.setToolTip("This one only makes sense put back as it was")
+            scale = menu.addAction("Scale", self.toggle_scale)
+            scale.setCheckable(True)
+            scale.setChecked(entry.scaled)
+            scale.setEnabled(entry.mode == toolsets.COPY and bool(entry.mm_per_pt))
+            scale.setToolTip("Keep its real size on a page of another scale"
+                             if scale.isEnabled() else
+                             "Kept from a page with no scale, or drawn fresh: "
+                             "nothing to scale it from")
+            menu.addSeparator()
+            group_entries = group.entries if group is not None else []
+            index = group_entries.index(entry) if entry in group_entries else -1
+            up = menu.addAction("Move Up", lambda: self.move_entry(-1))
+            up.setEnabled(index > 0)
+            down = menu.addAction("Move Down", lambda: self.move_entry(1))
+            down.setEnabled(0 <= index < len(group_entries) - 1)
+            menu.addAction("Copy", self.copy_entry)
+            menu.addSeparator()
             menu.addAction("Rename…", self.rename_entry)
             menu.addAction("Remove", self.remove_entry)
             menu.addSeparator()
         if group is not None:
+            paste = menu.addAction("Paste", self.paste_entry)
+            paste.setEnabled(self.clipboard is not None)
+            paste.setToolTip(f"Put the copied tool in “{group.name}”")
             add = menu.addAction("Add Selection", self.add_selection)
             add.setToolTip(f"Keep what is selected on the page in “{group.name}”")
             rename = menu.addAction("Rename Tool Set…", self.rename_set)

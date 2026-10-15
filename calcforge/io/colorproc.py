@@ -3,7 +3,7 @@ itself, on a snapshot's drawing and on a photo.
 
 Six process types, as Bluebeam has them:
 
-* Modify Colors — each source colour (within a tolerance) becomes another,
+* Modify Colors — each source colour, exactly, becomes another,
   or no colour at all; vector content only, the current page only;
 * Colorize — every colour onto one scale, the darkest to the Select colour,
   the lightest to the To colour (with Scale Color cleared, all onto the
@@ -31,6 +31,9 @@ MODIFY, COLORIZE, GRAYSCALE, BLACK_WHITE, LSH, MASK = (
 NAMES = {MODIFY: "Modify Colors", COLORIZE: "Colorize", GRAYSCALE: "Grayscale",
          BLACK_WHITE: "Black and White", LSH: "Luminosity, Saturation, and Hue",
          MASK: "Mask Images"}
+#: Modify Colors changes a colour exactly — the same to the nearest of 255
+#: steps, which is as far as "#rrggbb" can say it — and nothing near it.
+EXACT = 0.5 / 255 + 1e-6
 WHITE_LEVEL = 0.98          # this light or lighter is the paper, and stays white
 
 RGB = tuple   # (r, g, b), each 0..1
@@ -40,7 +43,7 @@ RGB = tuple   # (r, g, b), each 0..1
 class Process:
     kind: str = MODIFY
     pairs: list = field(default_factory=lambda: [("#000000", "#ff0000")])  # (from, to or None)
-    tolerance: int = 0                   # percent
+    tolerance: int = 0                   # percent, Mask Images only
     select: str = "#000000"              # Colorize: the darkest go to this
     to: str = "#ffffff"                  # and the lightest to this
     scale: bool = True                   # cleared: everything onto Select
@@ -75,7 +78,7 @@ def colour_function(proc: Process) -> Callable[[RGB], Optional[RGB]]:
     """What a vector colour becomes: a colour, or None for no colour."""
     if proc.kind == MODIFY:
         pairs = [(_rgb(a), None if b is None else _rgb(b)) for a, b in proc.pairs]
-        tol = max(0.0, proc.tolerance) / 100.0 + 1e-6
+        tol = EXACT
 
         def modify(rgb):
             for source, target in pairs:
@@ -124,7 +127,7 @@ def process_pixels(rgba, proc: Process):
     if proc.kind == MODIFY:
         new = rgb.copy()
         alpha = out[..., 3].copy()
-        tol = max(0.0, proc.tolerance) / 100.0 + 1e-6
+        tol = EXACT
         done = np.zeros(luma.shape, bool)
         for source, target in proc.pairs:
             near = (np.abs(rgb - np.array(_rgb(source), dtype=np.float32)).max(axis=2) <= tol) & ~done

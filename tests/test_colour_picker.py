@@ -95,3 +95,54 @@ def test_every_colour_button_uses_it(window):
     from calcforge.ui import calcmenu, celldialog, cfmanager, condformat, panels
     for module in (calcmenu, celldialog, cfmanager, condformat, panels):
         assert "QColorDialog.getColor" not in inspect.getsource(module), module.__name__
+
+
+def test_the_eyedropper_works_over_a_modal_dialog_and_from_our_own_windows(window, monkeypatch):
+    """Opened from Color Processing (a modal dialog), the held-still screen
+    still takes the click — under the dialog it took none, and the
+    application hung (the user, 2026-10-14). Where the system will not hand
+    over the screen, it is the application's own windows that are shown."""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtGui import QScreen
+    from PySide6.QtWidgets import QApplication, QDialog, QLabel, QVBoxLayout
+    from calcforge.ui.colorpicker import pick_from_screen
+    monkeypatch.setattr(QScreen, "grabWindow", lambda *a, **k: QPixmap())   # refused
+    dialog = QDialog(window)
+    dialog.setModal(True)
+    patch = QLabel()
+    patch.setFixedSize(60, 40)
+    patch.setStyleSheet("background: #3a9b4f;")
+    QVBoxLayout(dialog).addWidget(patch)
+    dialog.show()
+    QApplication.processEvents()
+    seen = {}
+
+    def click():
+        dropper = next(w for w in QApplication.topLevelWidgets()
+                       if isinstance(w, _Dropper) and w.isVisible())
+        seen["modal"] = dropper.windowModality()
+        where = dropper.mapFromGlobal(patch.mapToGlobal(QPoint(30, 20)))
+        QApplication.sendEvent(dropper, QMouseEvent(
+            QMouseEvent.MouseButtonPress, QPointF(where), QPointF(where),
+            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    colorpicker.ANSWERS[:] = []
+    QTimer.singleShot(50, click)
+    QTimer.singleShot(3000, lambda: [w.close() for w in QApplication.topLevelWidgets()
+                                     if isinstance(w, _Dropper)])      # never hang
+    got = pick_from_screen()
+    dialog.close()
+    assert seen.get("modal") == Qt.ApplicationModal
+    assert got == "#3a9b4f"
+
+
+def test_a_colour_button_gone_while_its_picker_was_open_is_left_alone(window, monkeypatch):
+    from calcforge.ui import widgets
+    button = widgets.ColorButton("#ff0000")
+
+    def chose(anchor, *_a, **_k):
+        anchor.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        return "#00ff00"
+    monkeypatch.setattr(colorpicker, "choose", chose)
+    button._pick()                       # no RuntimeError, no crash
