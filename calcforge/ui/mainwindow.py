@@ -2359,12 +2359,22 @@ class MainWindow(QMainWindow):
         if target is self or not 0 <= index < len(self._open_documents):
             return
         state = dict(self._state_for_tab(index))
-        destination = target.open_in_new_tab()
-        target._open_documents[destination] = state
-        target._adopt_document_state(state)
-        target.document_tabs.setTabText(destination, target._tab_title(state["document"]))
-        if before >= 0:
-            target.document_tabs.moveTab(destination, before)
+        # A document the target already shows is not opened a second time:
+        # its tab comes forward (as when Revu's split panes swap a file).
+        showing = next((i for i, held in enumerate(target._open_documents)
+                        if held["document"] is state["document"]), -1)
+        if showing < 0 and not target._open_documents and target.document is state["document"]:
+            showing = 0
+        if showing >= 0:
+            if target._open_documents:
+                target.switch_to_document(showing)
+        else:
+            destination = target.open_in_new_tab()
+            target._open_documents[destination] = state
+            target._adopt_document_state(state)
+            target.document_tabs.setTabText(destination, target._tab_title(state["document"]))
+            if before >= 0:
+                target.document_tabs.moveTab(destination, before)
         self.close_document_tab(index, moving=True)
         if all(held["undo_stack"] is not state["undo_stack"] for held in self._open_documents):
             state["undo_stack"].setParent(target)
@@ -2449,9 +2459,9 @@ class MainWindow(QMainWindow):
                 self.switch_to_document(previous)
                 return
             self.switch_to_document(previous)
-        if len(self._open_documents) == 1 and host is not None and not moving:
-            # The pane's last tab going is the split going: the other pane
-            # carries on as an ordinary window.
+        if len(self._open_documents) == 1 and host is not None:
+            # The pane's last tab going (closed, or dragged away) is the split
+            # going: the other pane carries on as an ordinary window.
             other = next((pane for pane in host.panes if pane is not self), None)
             if other is not None:
                 host.unsplit(other, carry_over=False)
