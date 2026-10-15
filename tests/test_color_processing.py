@@ -263,3 +263,47 @@ def test_a_new_canvas_has_the_desk_of_the_theme_in_use(window, monkeypatch):
     monkeypatch.setattr(app, "current_theme", lambda: DARK)
     scene = DocumentScene(window.document)
     assert scene.backgroundBrush().color().name() == CANVAS[DARK]
+
+
+def test_page_colour_change_is_the_drawings_and_a_group_is_how_markups_change(window, tmp_path):
+    """The user (2026-10-15): colour change works on the PDF's line work only
+    — flattened content — never on markups; the one time markups change
+    colour is Change Colors on a group (or several picked together)."""
+    from PySide6.QtCore import QPointF, QRectF
+    from calcforge.io import pdfio
+    from calcforge.io.colorproc import MODIFY
+    from calcforge.items.shapes import RectItem
+    from calcforge.ui import colorprocess
+    from calcforge.ui.changecolors import ChangeColorsDialog
+    path = tmp_path / "set.pdf"
+    path.write_bytes(a_page())
+    pdfio.import_pages(window.document, str(path), [0], at=0)
+    window.rebuild_scenes()
+    window.interactive_prompts = False
+    frame = window.document.pages[0].frame
+    a, b = RectItem("rect", QRectF(0, 0, 30, 20)), RectItem("rect", QRectF(0, 0, 30, 20))
+    a.style.stroke = b.style.stroke = "#ff0000"
+    frame.add_markup(a, QPointF(20, 20))
+    frame.add_markup(b, QPointF(60, 20))
+    window.color_processing(0)
+    dialog = window._last_color_dialog
+    assert dialog.kind.currentData() == MODIFY
+    dialog.pairs[0][1].set("#ff0000")
+    dialog.pairs[0][2].set("#00ff00")
+    assert colorprocess.finish_pages(window, dialog) == 1
+    assert colour_at(window.document.asset(window.document.pages[0].pdf_key), *RED) == (0, 255, 0)
+    assert a.style.stroke == b.style.stroke == "#ff0000", "markups keep their colours"
+    # grouped: picking one picks the group, and Change Colors is offered
+    a.setSelected(True)
+    b.setSelected(True)
+    window.group_selection()
+    window.scene.clearSelection()
+    a.setSelected(True)
+    window.view.scene().selectionChanged.emit()
+    menu = window.build_context_menu(a, a.sceneBoundingRect().center())
+    assert "Change Colors…" in [x.text() for x in menu.actions()]
+    changer = ChangeColorsDialog(window, [a, b])
+    changer.set_source("#ff0000")
+    changer.set_destination("#0000ff")
+    assert changer.apply() == 2
+    assert a.style.stroke == b.style.stroke == "#0000ff"

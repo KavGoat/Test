@@ -1777,6 +1777,14 @@ class MainWindow(QMainWindow):
         for action in (None, self.act_close_tab, self.act_close_all, None,
                        self.act_save, self.act_save_as, self.act_save_all, None):
             file_menu.addSeparator() if action is None else file_menu.addAction(action)
+        # what comes in from elsewhere, beside what goes out — an Excel
+        # workbook was only under Document ▸ Insert, which nobody looks in
+        # for it (the user, 2026-10-15: "you somehow removed import excel")
+        import_menu = file_menu.addMenu("Import")
+        import_menu.setObjectName("menuImport")
+        for action in (self.act_insert_workbook, self.act_insert_pdf,
+                       self.act_insert_image_page, self.act_import_toolset):
+            import_menu.addAction(action)
         export_menu = file_menu.addMenu("Export")
         for action in (self.act_export_pdf, self.act_export_png, self.act_export_markups):
             export_menu.addAction(action)
@@ -4644,11 +4652,23 @@ class MainWindow(QMainWindow):
             self.status_hint.setText("Image cropped — Undo brings the rest back")
         return done
 
+    def colour_changeable(self, item=None) -> list:
+        """The markups Change Colors works on: those picked out together, and
+        the whole group of a grouped one however it was picked (the user,
+        2026-10-15: a group — or several — is the one time markups change
+        colour together; a page's colour change never touches them)."""
+        found = [m for m in self.scene.selectedItems()
+                 if isinstance(m, MarkupItem) and getattr(m, "style", None) is not None]
+        for one in list(found) + ([item] if item is not None else []):
+            if isinstance(one, MarkupItem) and getattr(one, "group", ""):
+                for member in self.view.group_of(one):
+                    if member not in found and getattr(member, "style", None) is not None:
+                        found.append(member)
+        return found
+
     def change_multiple_colors(self, items=None) -> int:
         from .changecolors import change_multiple_colors
-        items = items if items is not None else [
-            m for m in self.scene.selectedItems()
-            if isinstance(m, MarkupItem) and getattr(m, "style", None) is not None]
+        items = items if items is not None else self.colour_changeable()
         return change_multiple_colors(self, items) if items else 0
 
     def _fill_undo_history(self) -> None:
@@ -8414,8 +8434,7 @@ class MainWindow(QMainWindow):
             if isinstance(item, _TextBase):
                 menu.addAction("Edit Text", lambda: self.view.begin_item_edit(item))
                 self._text_box_menu(menu, item)
-            several = [m for m in self.scene.selectedItems()
-                       if isinstance(m, MarkupItem) and getattr(m, "style", None) is not None]
+            several = self.colour_changeable(item)
             if len(several) > 1:
                 # Revu's Change Multiple Colors: one colour of the selection
                 # becomes another

@@ -39,6 +39,22 @@ def test_the_menu_bar_is_revus_with_a_calculation_menu(window):
                  "act_add_sheet_page", "act_import_toolset", "act_name_tags", "act_find_tool"):
         assert getattr(window, name) in in_menus, name
     assert window.act_header_footer.text() == "Headers && Footers…"
+    # every command the window has is somewhere to be found (the user,
+    # 2026-10-15: "make sure you didn't delete anything"); the Markup | Calc
+    # switch is its own button on the menu row
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QToolBar
+    for bar in window.findChildren(QToolBar):
+        in_menus.update(bar.actions())
+    lost = [name for name, value in vars(window).items()
+            if name.startswith("act_") and isinstance(value, QAction)
+            and value not in in_menus and name != "act_calc_mode"]
+    assert lost == []
+    # Excel and the other imports beside Export, where they are looked for
+    (file_menu,) = [a.menu() for a in window.menuBar().actions() if a.text() == "&File"]
+    (imports,) = [a.menu() for a in file_menu.actions() if a.text() == "Import"]
+    assert window.act_insert_workbook in imports.actions()
+    assert window.act_insert_pdf in imports.actions()
 
 
 def test_properties_panel_has_revus_sections_and_names(window):

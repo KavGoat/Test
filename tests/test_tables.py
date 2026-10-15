@@ -492,8 +492,13 @@ def test_dragging_the_selection_border_moves_cells(w):
     tabs = w.view.tables
     tabs.select((0, 0))
     box = table.block_rect(0, 0, 0, 0)
-    start = table.mapToScene(QPointF(box.right(), box.center().y() - 2))
-    end = table.mapToScene(table.cell_rect(0, 2).center() + QPointF(box.width() / 2, 0))
+    # grabbed on its border just inside A1, let go at the same spot two
+    # columns over (in C1) — clear of the edges, so screen rounding can't
+    # move either point into the next cell
+    inset = 1.5 / w.view.transform().m11()
+    start = table.mapToScene(QPointF(box.right() - inset, box.center().y() - 2))
+    over = table.cell_rect(0, 2).left() - table.cell_rect(0, 0).left()
+    end = start + QPointF(over, 0)
     drag(w.view, start.x(), start.y(), end.x(), end.y())
     pump()
     assert typed(table, "A1") == "" and typed(table, "A2") == "=C1*2" and value(table, "A2") == 14

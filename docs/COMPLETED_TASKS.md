@@ -477,3 +477,34 @@ screen, in print and in the saved PDF. `tests/test_text_fields.py`.
   is the defined name — or the equations' variable (`max` vs `MAX(1,2)`).
   Names that read as cells are refused, now including Excel's R1C1 forms
   (R1C1, RC, R2C, C3). `test_a_name_beside_a_function_of_the_same_name`.
+
+## 2026-10-15 (evening) — nothing lost, Import where it's looked for, colour change rules
+
+**Nothing was deleted.** Every command of every version of the window was
+checked against today's: the 136 commands ever defined, the menus and
+toolbars before the Revu menu bar (25d0f71) and now, and the right-click
+menus of a shape, a text box and a page. Everything the user had before is
+still there — renamed to Revu's words (Insert Excel… is Excel Workbook…,
+Insert PDF… is Pages from Document…, Export markups… is Markups Summary…,
+Order is Arrange, Multiple… is Multiply…, Recover is Unflatten) or moved to
+Revu's menu (Page → Document, Insert → Tools, Settings → CalcForge). The ten
+commands no longer defined went with the user's own instructions (the
+calculations taken out on 2026-09-07, review replies withdrawn, Recalculate
+replaced by the Calculation toolbar). The only module deleted is the old
+recolour.py, replaced by Color Processing as asked.
+`test_the_menu_bar_is_revus_with_a_calculation_menu` now fails if any
+command of the window is in no menu or toolbar.
+
+**File ▸ Import** — Excel Workbook…, Pages from Document…, Image Page… and
+Import Tool Set…, beside Export: the Excel import was only under Document ▸
+Insert, where nobody looks for it.
+
+**Colour change: the drawing's, and a group's.** A page's Color Processing
+changes the PDF's own line work (flattened content) and never a markup;
+markups change colour together only through Change Colors on a group or on
+several picked together. A grouped markup now offers Change Colors for its
+whole group however it was picked.
+`test_page_colour_change_is_the_drawings_and_a_group_is_how_markups_change`.
+
+**Dark mode:** the line-style and hatch lists, open and closed, on the
+Properties toolbar and in the Properties panel, checked on screen.
