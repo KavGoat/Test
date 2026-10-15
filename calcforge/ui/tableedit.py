@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QLineEdit, QMe
 
 from ..items.base import MarkupItem
 from .cellunits import UnitText
-from ..items.table import (HEADING_H, ROWNUM_W, TableItem, THIN, cell_font)
+from ..items.table import (HEADING_H, ROWNUM_W, TableItem, THIN, cell_font, shown_width)
 from ..sheet import clip
 from ..sheet import formula as F
 from ..sheet.refs import CellRef, area_text, col_letters, parse_range
@@ -1428,7 +1428,6 @@ class TableEditing:
         """Excel's feel: a number typed into a column whose width was never
         set widens it to fit, rather than showing ####. (A column sized by
         hand keeps its width, and shows ####.)"""
-        from PySide6.QtGui import QFontMetricsF
         from ..sheet.numfmt import format_value
         from ..sheet.values import Qty
 
@@ -1444,8 +1443,8 @@ class TableEditing:
         st = wb.styles.get(cell.style)
         if st.wrap or st.shrink or st.rotation:
             return
-        text = format_value(value, st.number_format, st.unit).text
-        need = QFontMetricsF(cell_font(st)).horizontalAdvance(text) + 2 * 2.0 + 2
+        # as drawn: a unit's raised powers are narrower than "^2"
+        need = shown_width(format_value(value, st.number_format, st.unit), st) + 2 * 2.0 + 2
         if need > sheet.width(col):
             wb.set_widths(sheet, [col], need)
 
@@ -2050,10 +2049,14 @@ class TableEditing:
                 if sheet.merge_at(r, c):
                     continue
                 st = wb.styles.get(cell.style)
-                text = format_value(cell.value, st.number_format, st.unit).text
+                shown = format_value(cell.value, st.number_format, st.unit)
+                text = shown.text
                 metrics = QFontMetricsF(cell_font(st))
                 if axis == "col":
-                    best = max(best, metrics.horizontalAdvance(text) + 2 * 2.0 + 1)
+                    # as drawn: a quantity's unit with its powers raised
+                    width = shown_width(shown, st) if shown.unit and "\n" not in text \
+                        else metrics.horizontalAdvance(text)
+                    best = max(best, width + 2 * 2.0 + 1)
                 else:
                     lines = text.count("\n") + 1
                     best = max(best, metrics.height() * lines + 2)

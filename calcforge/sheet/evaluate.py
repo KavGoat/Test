@@ -16,7 +16,8 @@ from . import formula as F
 from .refs import MAX_COLS, MAX_ROWS, is_cell_name
 from .values import (BLANK, CALC, ERRORS, NA, NAME, NUM, REF, UNITS_ERR, VALUE, Array,
                      ErrorValue, Qty, SheetError, add, div, mul, neg, power, sub,
-                     is_unit_text, to_number, to_text, unit_parts, with_unit, UnitTextError)
+                     equation_unit, is_unit_text, to_number, to_text, unit_parts, with_unit,
+                     UnitTextError)
 
 
 @dataclass(frozen=True)
@@ -401,8 +402,14 @@ def _outside(name: str, ctx: Ctx):
     return from_engine(value)
 
 
-def from_engine(value):
-    """A value from the equations as a cell value."""
+def from_engine(value, engineering: bool = True):
+    """A value from the equations as a cell value.
+
+    A quantity keeps the unit the equations show it in (35 kN·m, 5 kPa —
+    what M= and s= show), not base SI units (35000 J, 5000 Pa): a cell
+    reading =M shows what the equation shows, and =F*2 goes on in kN as a
+    typed 10 kN*2 does (the user, 2026-10-15). *engineering* is the
+    worksheet's engineering-units setting, which picks the prefix."""
     from calcforge.calc.engine.units import Quantity
     from calcforge.calc.engine.values import Matrix, String
 
@@ -413,14 +420,18 @@ def from_engine(value):
                 return NUM
             v = v.real
         if any(value.dims):
-            return Qty(float(v), tuple(value.dims), None)
+            v = float(v)
+            if not math.isfinite(v):
+                return Qty(v, tuple(value.dims), None)
+            return Qty(v, tuple(value.dims),
+                       equation_unit(tuple(value.dims), v, engineering) or None)
         return float(v)
     if isinstance(value, String):
         return value.text
     if isinstance(value, Matrix):
         rows = []
         for i in range(value.nrows):
-            rows.append(tuple(from_engine(value.get(i, j)) for j in range(value.ncols)))
+            rows.append(tuple(from_engine(value.get(i, j), engineering) for j in range(value.ncols)))
         return Array(tuple(rows))
     if isinstance(value, (float, int, str, bool, Qty, ErrorValue, Array)):
         return value

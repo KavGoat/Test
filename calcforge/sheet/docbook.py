@@ -217,7 +217,10 @@ class DocumentBook:
 
         if not isinstance(value, (Quantity, Matrix, String)):
             raise KeyError(name)
-        return value
+        # in the unit the equations show it in (35 kN·m, not 35000 J), with
+        # this worksheet's engineering-units setting (the user, 2026-10-15)
+        fmt = getattr(ws, "format", None)
+        return from_engine(value, bool(getattr(fmt, "engineering", True)))
 
     # -- the equations reading tables --------------------------------------------------------------
     def _hook_equations(self) -> None:

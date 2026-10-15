@@ -38,6 +38,65 @@ class Shown:
     text: str
     color: Optional[str] = None
     number: bool = False            # right-aligned under General alignment
+    # the unit at the end of text ("kN·m" of "35 kN·m"), drawn as an
+    # equation draws it (unit_runs); None when the value has no unit
+    unit: Optional[str] = None
+
+
+# -- a unit drawn as the equations draw it ------------------------------------------------
+_RUN_TOKEN = re.compile(
+    r"(\^\s*\(?\s*[-−]?\s*[0-9.]+\s*\)?|[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+)"     # a power: ^2, ^-1, ^(-1), ²
+    r"|([A-Za-zµμΩ°%'_](?:(?![⁰¹²³⁴⁵⁶⁷⁸⁹])[\wµμΩ°%'])*)"     # a unit's name
+    r"|([*·⋅])|([/()])|(\s+)|(.)")
+_FROM_SUPERSCRIPT = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123456789−")
+
+
+def unit_runs(unit: str) -> list:
+    """A unit as the equations draw it: [(text, raised)], the powers raised
+    and the products joined by a dot — "kN*m^2" is [("kN·m", False),
+    ("2", True)], "m^-1" is [("m", False), ("−1", True)]. Display only:
+    what is stored, copied and written to Excel stays as typed (the user,
+    2026-10-15)."""
+    out: list = []
+
+    def put(text, raised):
+        if out and out[-1][1] == raised:
+            out[-1] = (out[-1][0] + text, raised)
+        else:
+            out.append((text, raised))
+
+    last = None                     # kind of the token before: "name", "power", ")"
+    for m in _RUN_TOKEN.finditer(unit.strip()):
+        power, name, times, other, space, rest = m.groups()
+        if power is not None:
+            p = power.translate(_FROM_SUPERSCRIPT).lstrip("^")
+            p = re.sub(r"[\s()]", "", p).replace("-", "−")
+            put(p, True)
+            last = "power"
+        elif name is not None:
+            if last in ("name", "power", ")") and m.start() and unit.strip()[m.start() - 1].isspace():
+                put("·", False)     # "kg m" is a product: kg·m
+            put(name.replace("'", ""), False)
+            last = "name"
+        elif times is not None:
+            put("·", False)
+            last = None
+        elif other is not None:
+            put(other, False)
+            last = ")" if other == ")" else None
+        elif space is not None:
+            continue
+        else:
+            put(rest, False)
+            last = None
+    return out
+
+
+def unit_display(unit: str) -> str:
+    """A unit as plain text the way it is drawn, with superscript digits
+    (kN/m², m⁻¹): for messages that name a unit."""
+    sup = str.maketrans("0123456789−-.", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁻·")
+    return "".join(t.translate(sup) if raised else t for t, raised in unit_runs(unit))
 
 
 # -- splitting a format into sections and tokens -----------------------------------------------
@@ -591,7 +650,8 @@ def format_value(value, code: Optional[str] = None, unit: Optional[str] = None) 
         got = format_number(x, code)
         if shown_unit:
             # kN*m is written kN·m, as CalcForge's equations write it
-            got.text = f"{got.text} {shown_unit.replace('*', '·')}"
+            got.unit = shown_unit.replace('*', '·')
+            got.text = f"{got.text} {got.unit}"
         return got
     if isinstance(value, (int, float)):
         if unit and code is None:

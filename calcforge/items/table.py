@@ -92,6 +92,125 @@ def border_pen(b: Border) -> QPen:
     return pen
 
 
+# A unit's power beside it, as the equations set it (calc/ui/layout.py): four
+# fifths of the size, lifted by about half the capitals' height.
+SUP_SIZE = 0.8
+SUP_RISE = 0.55
+_SUP_FONTS: dict = {}
+_FONT_METRICS: dict = {}
+
+
+def _font_metrics(font: QFont) -> QFontMetricsF:
+    key = font.key()
+    got = _FONT_METRICS.get(key)
+    if got is None:
+        got = _FONT_METRICS[key] = QFontMetricsF(font)
+    return got
+
+
+def _sup_font(font: QFont) -> QFont:
+    key = font.key()
+    got = _SUP_FONTS.get(key)
+    if got is None:
+        got = QFont(font)
+        got.setPixelSize(max(1, int(round(font.pixelSize() * SUP_SIZE))))
+        _SUP_FONTS[key] = got
+    return got
+
+
+class Drawn:
+    """A cell's shown value as it is drawn: the number in the cell's ink,
+    then its unit as an equation draws it — SMath's unit blue, its powers
+    raised and smaller, products with a dot (kN·m, kN/m², m⁻¹) — once the
+    entry is made (the user, 2026-10-15). Everything that measures the
+    text (####, shrink to fit, the unit box) measures this, so it agrees
+    with what is on the cell; printing and export draw the same."""
+
+    __slots__ = ("runs", "font", "metrics", "width", "unit_left")
+
+    def __init__(self, text: str, unit: Optional[str], font: QFont,
+                 metrics: Optional[QFontMetricsF] = None, runs: Optional[list] = None):
+        self.font = font
+        self.metrics = metrics or _font_metrics(font)
+        if runs is None:
+            if unit and text.endswith(unit):
+                from ..sheet.numfmt import unit_runs
+                runs = [(text[:len(text) - len(unit)], "")]
+                runs += [(t, "sup" if raised else "unit") for t, raised in unit_runs(unit)]
+            else:
+                runs = [(text, "")]
+        self.runs = runs
+        width = 0.0
+        self.unit_left = None
+        for t, kind in runs:
+            if kind and self.unit_left is None:
+                self.unit_left = width
+            width += self._advance(t, kind)
+        self.width = width
+
+    def _advance(self, t: str, kind: str) -> float:
+        if kind == "sup":
+            return _font_metrics(_sup_font(self.font)).horizontalAdvance(t)
+        return self.metrics.horizontalAdvance(t)
+
+    @property
+    def rise(self) -> float:
+        return self.metrics.capHeight() * SUP_RISE
+
+    @property
+    def ascent(self) -> float:
+        a = self.metrics.ascent()
+        if any(kind == "sup" for _t, kind in self.runs):
+            a = max(a, self.rise + _font_metrics(_sup_font(self.font)).ascent())
+        return a
+
+    @property
+    def descent(self) -> float:
+        return self.metrics.descent()
+
+    @property
+    def plain(self) -> bool:
+        return len(self.runs) == 1 and not self.runs[0][1]
+
+    def repeated(self, n: int) -> "Drawn":
+        return Drawn("", None, self.font, self.metrics, self.runs * max(1, n))
+
+    def draw(self, painter: QPainter, x: float, y: float, ink: QColor) -> None:
+        """At baseline *y* from *x*, the number in *ink*."""
+        if self.plain:
+            painter.drawText(QPointF(x, y), self.runs[0][0])
+            return
+        from ..ui.cellunits import UNIT_BLUE
+        font = self.font
+        for t, kind in self.runs:
+            if not t:
+                continue
+            if kind == "sup":
+                painter.setFont(_sup_font(font))
+                painter.setPen(UNIT_BLUE)
+                painter.drawText(QPointF(x, y - self.rise), t)
+            else:
+                painter.setFont(font)
+                painter.setPen(UNIT_BLUE if kind else ink)
+                painter.drawText(QPointF(x, y), t)
+            x += self._advance(t, kind)
+        painter.setFont(font)
+        painter.setPen(ink)
+
+
+def drawn_value(shown, st: Style, font: Optional[QFont] = None) -> Drawn:
+    """*shown* (format_value's) as the cell with style *st* draws it."""
+    if font is None:
+        return Drawn(shown.text, shown.unit, cell_font(st), _metrics(st))
+    return Drawn(shown.text, shown.unit, font)
+
+
+def shown_width(shown, st: Style) -> float:
+    """How wide a cell's shown value is drawn (AutoFit, a column widened
+    for a number typed in)."""
+    return drawn_value(shown, st).width
+
+
 @register_item
 class TableItem(MarkupItem):
     """A table: cells with Excel's formulas, formats and units."""
@@ -547,29 +666,36 @@ class TableItem(MarkupItem):
         painter.setFont(font)
         painter.setPen(colour)
         v = {"top": Qt.AlignTop, "center": Qt.AlignVCenter}.get(st.v_align, Qt.AlignBottom)
+        line = Drawn(text, shown.unit, font, metrics)
         if st.rotation:
-            self._paint_turned(painter, rect, text, st, v)
+            self._paint_turned(painter, rect, line, st, v, colour)
             return
         if st.wrap:
             h = {"left": Qt.AlignLeft, "center": Qt.AlignHCenter, "right": Qt.AlignRight,
                  "justify": Qt.AlignJustify}.get(align, Qt.AlignLeft)
             painter.save()
             painter.setClipRect(rect)
-            painter.drawText(inner, h | v | Qt.TextWordWrap, text)
+            if line.plain:
+                painter.drawText(inner, h | v | Qt.TextWordWrap, text)
+            else:
+                self._paint_wrapped(painter, rect, inner, line, align, v, colour)
             painter.restore()
             return
-        width = metrics.horizontalAdvance(text)
+        width = line.width
         if numeric and width > inner.width() and not st.shrink:
             # Excel: a number that doesn't fit shows ####
             n = max(1, int(inner.width() / max(metrics.horizontalAdvance("#"), 0.1)))
-            text, width, align = "#" * n, metrics.horizontalAdvance("#") * n, "center"
+            line, align = Drawn("#" * n, None, font, metrics), "center"
+            width = line.width
         if st.shrink and width > inner.width() and width > 0:
             font.setPixelSize(max(1, int(font.pixelSize() * inner.width() / width)))
             painter.setFont(font)
-            metrics = QFontMetricsF(font)
-            width = metrics.horizontalAdvance(text)
+            line = Drawn(text, shown.unit, font)
+            metrics = line.metrics
+            width = line.width
         if align == "fill" and width > 0:
-            text = text * max(1, int(inner.width() / width))
+            line = line.repeated(int(inner.width() / width))
+            width = line.width
             align = "left"
         clip = QRectF(rect)
         if not numeric and width > inner.width():
@@ -605,27 +731,61 @@ class TableItem(MarkupItem):
             x = inner.right() - width
         else:
             x = rect.center().x() - width / 2
-        if v == Qt.AlignTop:
-            y = rect.top() + PAD / 2 + metrics.ascent()
-        elif v == Qt.AlignVCenter:
-            y = rect.center().y() + (metrics.ascent() - metrics.descent()) / 2
-        else:
-            y = rect.bottom() - PAD / 2 - metrics.descent()
+        y = self._baseline(rect, v, metrics)
         if x >= clip.left() and x + width <= clip.right() and \
-                y - metrics.ascent() >= clip.top() and y + metrics.descent() <= clip.bottom():
-            painter.drawText(QPointF(x, y), text)       # well inside its cell: no clip needed
+                y - line.ascent >= clip.top() and y + line.descent <= clip.bottom():
+            line.draw(painter, x, y, colour)       # well inside its cell: no clip needed
             return
         painter.save()
         painter.setClipRect(clip)
-        painter.drawText(QPointF(x, y), text)
+        line.draw(painter, x, y, colour)
         painter.restore()
+
+    @staticmethod
+    def _baseline(rect: QRectF, v, metrics: QFontMetricsF) -> float:
+        """Where a line of the cell's text sits, for its vertical alignment."""
+        if v == Qt.AlignTop:
+            return rect.top() + PAD / 2 + metrics.ascent()
+        if v == Qt.AlignVCenter:
+            return rect.center().y() + (metrics.ascent() - metrics.descent()) / 2
+        return rect.bottom() - PAD / 2 - metrics.descent()
+
+    def _paint_wrapped(self, painter, rect, inner, line: "Drawn", align, v, colour) -> None:
+        """Wrapped text holding a quantity: on one line when it fits, else
+        the number on one line and its unit under it (where Qt's word wrap
+        broke "3 kN/m^2"), each line drawn as an unwrapped one is."""
+        metrics = line.metrics
+        if line.width <= inner.width():
+            lines = [line]
+        else:
+            number = line.runs[0][0].rstrip()
+            lines = [Drawn(number, None, line.font, metrics),
+                     Drawn("", None, line.font, metrics, line.runs[1:])]
+        step = metrics.lineSpacing()
+        block = step * (len(lines) - 1)
+        if v == Qt.AlignTop:
+            y = rect.top() + PAD / 2 + metrics.ascent()
+        elif v == Qt.AlignVCenter:
+            y = rect.center().y() + (metrics.ascent() - metrics.descent()) / 2 - block / 2
+        else:
+            y = rect.bottom() - PAD / 2 - metrics.descent() - block
+        for one in lines:
+            if align == "right":
+                x = inner.right() - one.width
+            elif align == "center":
+                x = inner.center().x() - one.width / 2
+            else:
+                x = inner.left()
+            one.draw(painter, x, y, colour)
+            y += step
 
     def unit_box_rect(self, r: int, c: int) -> Optional[tuple]:
         """SMath's unit box after a quantity's result (the user's choice,
         2026-10-11): (kind, rect in this item) — "box", the black placeholder
         just after the text when no output unit is set, or "unit", the unit
         part of the text when one is, and the box after a #### too — or None
-        when the cell holds no quantity shown plainly (wrapped or turned)."""
+        when the cell holds no quantity shown plainly (wrapped or turned).
+        Measured as the value is drawn: the blue unit with its raised powers."""
         cell = self.sheet.cells.get((r, c)) if self.sheet is not None else None
         if cell is None or not isinstance(cell.value, Qty):
             return None
@@ -638,7 +798,8 @@ class TableItem(MarkupItem):
             return None
         rect = self.cell_rect(r, c)
         metrics = _metrics(st)
-        width = metrics.horizontalAdvance(text)
+        line = Drawn(text, shown.unit, cell_font(st), metrics)
+        width = line.width
         align = st.h_align if st.h_align not in ("general", "fill", "centerAcross") else "right"
         indent = st.indent * 7.5
         inner = rect.adjusted(PAD + (indent if align == "left" else 0), 0,
@@ -654,31 +815,31 @@ class TableItem(MarkupItem):
         x = inner.left() if align == "left" else (
             inner.right() - width if align == "right" else rect.center().x() - width / 2)
         v = {"top": Qt.AlignTop, "center": Qt.AlignVCenter}.get(st.v_align, Qt.AlignBottom)
-        if v == Qt.AlignTop:
-            y = rect.top() + PAD / 2 + metrics.ascent()
-        elif v == Qt.AlignVCenter:
-            y = rect.center().y() + (metrics.ascent() - metrics.descent()) / 2
-        else:
-            y = rect.bottom() - PAD / 2 - metrics.descent()
+        y = self._baseline(rect, v, metrics)
         px = metrics.height() / 1.15
-        if st.unit and text.endswith(st.unit) and not hashes:
-            left = x + metrics.horizontalAdvance(text[:len(text) - len(st.unit)])
-            return "unit", QRectF(left, y - metrics.ascent(), x + width - left,
-                                  metrics.ascent() + metrics.descent())
+        if st.unit and line.unit_left is not None and not hashes:
+            left = x + line.unit_left
+            return "unit", QRectF(left, y - line.ascent, x + width - left,
+                                  line.ascent + line.descent)
         # the box of SMath's "H" glyph (5 x 7 px at 10 pt, 3 px left
         # bearing), centred on the middle of the text's x-height
         w, h = px * 0.376, px * 0.526
         middle = y - metrics.xHeight() * 0.5
         return "box", QRectF(x + width + px * 0.225 + 1.0, middle - h / 2, w, h)
 
-    def _paint_turned(self, painter, rect, text, st, v) -> None:
+    def _paint_turned(self, painter, rect, line: "Drawn", st, v, colour) -> None:
         painter.save()
         painter.setClipRect(rect)
         painter.translate(rect.center())
         angle = 90 if st.rotation == 255 else st.rotation
         painter.rotate(-angle)
-        span = max(rect.width(), rect.height()) * 2
-        painter.drawText(QRectF(-span / 2, -span / 2, span, span), Qt.AlignCenter, text)
+        if line.plain:
+            span = max(rect.width(), rect.height()) * 2
+            painter.drawText(QRectF(-span / 2, -span / 2, span, span), Qt.AlignCenter, line.runs[0][0])
+        else:
+            # centred on the cell's middle, where Qt's AlignCenter puts plain text
+            metrics = line.metrics
+            line.draw(painter, -line.width / 2, (metrics.ascent() - metrics.descent()) / 2, colour)
         painter.restore()
 
     def _empty(self, r, c) -> bool:
