@@ -64,8 +64,9 @@ TOOLS: list[Tool] = [
          "drawing itself, lines and all, so it stays sharp at any size",
          factory=_rect("marquee")),
     # H belongs to Highlight, as it does in Bluebeam. Panning is the space
-    # bar, the middle button, or this button.
-    Tool("pan", "Pan", "pan", NONE, "Navigate", "", "Drag to move around the page"),
+    # bar, the middle button, this button, or Shift+V — Revu's key for Pan
+    # (QA, 2026-10-15).
+    Tool("pan", "Pan", "pan", NONE, "Navigate", "Shift+V", "Drag to move around the page"),
 
     Tool("pen", "Pen", "pen", FREE, "Draw", "Alt+P", "Freehand ink", factory=_poly("ink")),
     Tool("highlighter", "Highlight", "highlighter", FREE, "Draw", "H",

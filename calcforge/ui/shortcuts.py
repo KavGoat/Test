@@ -242,6 +242,10 @@ DEFAULT_BINDINGS: list[Binding] = [
     Binding("insert.calc_text", "Start Calculation text", '"', INSERT, "SMath", "calc_text", CALC),
     Binding("insert.plot", "Insert plot", "@", INSERT, "SMath", "plot", CALC),
 ] + _smath_bindings() + _tool_bindings() + [
+    # Revu's key for Select is V. Escape still puts the tool down too, so V
+    # is a second binding rather than a change to the Select tool's own
+    # (QA, 2026-10-15). Markup mode only: in Calc mode V starts an equation.
+    Binding("tool.select_v", "Select (Revu's key)", "V", TOOL, "Navigate", "select", MARKUP),
     Binding("command.fit_page", "Fit page", "Ctrl+0", COMMAND, "View", "fit_page"),
     Binding("command.fit_width", "Fit width", "Ctrl+1", COMMAND, "View", "fit_width"),
     Binding("command.renumber_counts", "Renumber counts", "", COMMAND, "Markup",

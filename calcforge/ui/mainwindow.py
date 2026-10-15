@@ -496,6 +496,7 @@ class MainWindow(QMainWindow):
         self.shortcuts = ShortcutManager(self)
         # Which binding each action carries, so a rebinding can find it again.
         self.action_ids: dict[str, str] = {}
+        self.second_key_ids: dict[str, str] = {}
         # Drawing a rectangle on a scaled page, or a dimension, asks a question.
         # Automated runs turn that off and set the values directly.
         self.interactive_prompts = True
@@ -1019,7 +1020,9 @@ class MainWindow(QMainWindow):
                   self.toggle_pdf_alignment_snap, "", checkable=True,
                   tip="Line a new markup up level with, or directly under, a "
                       "corner or line end in the PDF drawing itself")
-        self._act("dark", "Dark Mode", self.toggle_theme, "", checkable=True)
+        # Revu's key for Dark Mode (QA, 2026-10-15). Inside an equation
+        # Ctrl+3 is still SMath's ≠: there SMath's keys win, as with Ctrl+0.
+        self._act("dark", "Dark Mode", self.toggle_theme, "Ctrl+3", checkable=True)
         self._act("margins", "Show Margins", self.toggle_margins, "", checkable=True)
         self.act_margins.setChecked(True)
         self._act("name_tags", "Name Tags", self.toggle_name_tags, "", checkable=True,
@@ -1040,7 +1043,9 @@ class MainWindow(QMainWindow):
 
         self._act("shortcuts", "Keyboard Shortcuts…", self.show_shortcuts, "F1",
                   tip="Every shortcut, and the keys you want them on")
-        self._act("find_text", "Find…", self.find_in_document, "Ctrl+F",
+        # Revu calls it Search, on its Edit menu and its page menu, and it
+        # opens the panel of the same name (QA, 2026-10-15).
+        self._act("find_text", "Search", self.find_in_document, "Ctrl+F",
                   tip="Find words in the drawing and in the markups, on every "
                       "page, and replace them in the markups")
         self._act("find_tool", "Find Tools + Commands", self.find_a_tool, "Shift+F1",
@@ -1064,9 +1069,10 @@ class MainWindow(QMainWindow):
         self._act("flatten", "Flatten Selection", self.flatten_selection,
                   tip="Make it part of the drawing rather than a markup on top "
                       "of it — it can no longer be moved or edited")
-        self._act("flatten_document", "Flatten…", self.flatten_document,
+        # Revu's keys for Flatten… and Unflatten (QA, 2026-10-15)
+        self._act("flatten_document", "Flatten…", self.flatten_document, "Ctrl+Shift+M",
                   tip="Choose which content classes to flatten on every page")
-        self._act("recover_flattened", "Unflatten", self.recover_flattened,
+        self._act("recover_flattened", "Unflatten", self.recover_flattened, "Ctrl+Shift+U",
                   tip="Restore source items retained by recoverable flattening")
         self._act("preferences", "Preferences…", self.edit_preferences, "Ctrl+,",
                   tip="How the wheel behaves, how blocks start, spell checking")
@@ -1083,6 +1089,38 @@ class MainWindow(QMainWindow):
                       "colorize, grayscale, black and white, luminosity/saturation/hue, mask images")
         self._act("record_slowdowns", "Record Slow-Downs", self.record_slowdowns, checkable=True,
                   tip="Note what the window was doing whenever it stalled, in a file to send back")
+        for key, revu in self.REVU_SECOND_KEYS.items():
+            self._second_key(key, revu)
+
+    # Revu's keys for commands that already had one of ours. Both work: ours
+    # are kept so nobody's fingers are broken, and Revu's goes first so the
+    # menus show the key a Revu user expects (QA, 2026-10-15). Ctrl+Left and
+    # Ctrl+Right are the page keys on Revu's own page menu; Ctrl+Y is Revu's
+    # (and Windows') Redo, which Linux spells Ctrl+Shift+Z.
+    REVU_SECOND_KEYS = {
+        "next_page": "Ctrl+Right", "prev_page": "Ctrl+Left",
+        "redo": "Ctrl+Y", "lock": "Ctrl+Shift+L",
+    }
+
+    def _second_key(self, key: str, default: str) -> None:
+        """Give act_<key> a second key, in the shortcut list under its own
+        name so it can be seen and changed like any other."""
+        action = getattr(self, f"act_{key}")
+        action_id = f"command.{key}.also"
+        self.shortcuts.register(action_id, f"{action.text().rstrip('…')} (Revu's key)",
+                                default, _SHORTCUT_GROUPS.get(key, "Document"))
+        self.second_key_ids[key] = action_id
+        action.setShortcuts(self._keys_for(key, self.shortcuts.sequence(self.action_ids[key])))
+
+    def _keys_for(self, key: str, sequence: str) -> list:
+        """The keys act_<key> answers to: its second (Revu's) key first, then
+        its own."""
+        keys = []
+        second = self.second_key_ids.get(key)
+        for text in (self.shortcuts.sequence(second) if second else "", sequence):
+            if text and QKeySequence(text) not in keys:
+                keys.append(QKeySequence(text))
+        return keys
 
     def _add_toolbar(self, bar) -> None:
         """Toolbars go on any edge, and remember where they were put."""
@@ -4426,7 +4464,13 @@ class MainWindow(QMainWindow):
             action.setShortcut(QKeySequence(sequence) if len(sequence) > 1
                                else QKeySequence())
             tool = TOOL_MAP[tool_key]
-            hint = f"  ({sequence})" if sequence else ""
+            # Select answers to Escape and to Revu's V; the tooltip says both.
+            spoken = [sequence] + [
+                self.shortcuts.sequence(b.action_id) for b in self.shortcuts.bindings()
+                if b.kind == TOOL and b.payload == tool_key
+                and b.action_id != f"tool.{tool_key}"]
+            spoken = ", ".join(text for text in spoken if text)
+            hint = f"  ({spoken})" if spoken else ""
             action.setToolTip(f"{tool.label}{hint}"
                               + (f"\n{tool.hint}" if tool.hint else ""))
         for method, attribute in self.COMMAND_ACTIONS.items():
@@ -4444,8 +4488,7 @@ class MainWindow(QMainWindow):
             current = action.shortcut().toString()
             if current in self.RESERVED_FOR_TEXT:
                 continue
-            action.setShortcut(QKeySequence(sequence) if sequence
-                               else QKeySequence())
+            action.setShortcuts(self._keys_for(key, sequence))
         for action_id, action in getattr(self, "symbol_actions", {}).items():
             action.setShortcut(QKeySequence(self.shortcuts.sequence(action_id)))
 
@@ -8538,9 +8581,22 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             menu.addAction("Properties", self.show_properties_panel)
         else:
+            # Revu's page menu: Paste; Add Note, Add Bookmark, Add Flag; Next
+            # and Previous Page; Select All; Print… and Search. Our own
+            # entries stay, in among them (QA, 2026-10-15).
             menu.addAction(self.act_paste)
             menu.addAction(self.act_paste_in_place)
             menu.addAction(self.act_paste_here)
+            menu.addAction(icon(TOOL_MAP["note"].icon), "Add Note",
+                           lambda _c=False, p=scene_pos: self._insert_at("note", p))
+            menu.addAction(self.act_bookmark)
+            menu.addAction(icon(TOOL_MAP["flag"].icon), "Add Flag",
+                           lambda _c=False, p=scene_pos: self._insert_at("flag", p))
+            menu.addSeparator()
+            menu.addAction(self.act_next_page)
+            menu.addAction(self.act_prev_page)
+            menu.addSeparator()
+            menu.addAction(self.act_select_all)
             menu.addSeparator()
             insert = menu.addMenu("Insert Here")
             for key in ("text", "callout", "note", "stamp", "image"):
@@ -8560,7 +8616,9 @@ class MainWindow(QMainWindow):
                                    lambda: self.edit_viewport(page, viewport))
                     menu.addAction("Delete Viewport",
                                    lambda: self.delete_viewport(page, viewport))
-            menu.addAction(self.act_select_all)
+            menu.addSeparator()
+            menu.addAction(self.act_print)
+            menu.addAction(self.act_find_text)
         return menu
 
     def _insert_at(self, key: str, scene_point: QPointF) -> None:

@@ -31,6 +31,7 @@ from ..items.shapes import PolyItem, RectItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
 from . import preferences
 from .commands import PageEditCommand
+from .shortcuts import TOOL
 from .tools import (ANCHOR, CLICK, CLOUD, CLOUDY, ERASE, FREE, NONE, POLY,
                     SNAPSHOT,
                     TOOL_MAP, Tool)
@@ -5205,6 +5206,20 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
+        # Revu's V puts a drawing tool down, as Escape does: it is how a Revu
+        # hand gets back to Select, so it works with a tool held and nothing
+        # half drawn. The other letter keys still only pick a tool from
+        # Select or Pan (QA, 2026-10-15).
+        if (self._mode == "idle" and self.tool_key not in ("select", "pan")
+                and not self.calc.calc_mode()):
+            binding = self.window.shortcuts.match_typed(event.text(), modifiers,
+                                                        self.calc.mode)
+            if binding is not None and binding.kind == TOOL \
+                    and binding.payload == "select":
+                self.window.select_tool("select")
+                event.accept()
+                return
+
         # A bare keystroke on the canvas only does something if it is bound:
         # '"' starts typing a text box; tool keys pick their tool.
         if self.idle_on_canvas():
@@ -5327,10 +5342,15 @@ class PageView(QGraphicsView):
             self.verticalScrollBar().value() + int(delta.y() * self._zoom))
 
     def navigation_key(self, event: QKeyEvent) -> bool:
-        """Page Up/Down, Home and End, as every document reader binds them.
+        """Page Up/Down, Home and End.
 
-        Ctrl makes Page Up/Down jump a whole page rather than a screenful, and
-        Ctrl+Home and Ctrl+End go to the ends of the document.
+        Ctrl makes Page Up/Down jump a whole page rather than a screenful.
+        Home and End are Revu's: the first page and the last page. They used
+        to go to the top and bottom of the page in view, and the page they
+        picked was worked out from a scroll position that did not allow for
+        the margin around the pages — at Fit Page, Home went forward to page
+        two (QA, 2026-10-15). Ctrl+Home and Ctrl+End still go to the very
+        ends of the document.
         """
         key = event.key()
         control = bool(event.modifiers() & Qt.ControlModifier)
@@ -5344,20 +5364,40 @@ class PageView(QGraphicsView):
             bar.setValue(bar.value() - screen)
             event.accept()
             return True
-        if key == Qt.Key_Home:
-            bar.setValue(bar.minimum() if control
-                         else int(self._page_top_value(self.visible_page_index())))
-            event.accept()
-            return True
-        if key == Qt.Key_End:
+        if key in (Qt.Key_Home, Qt.Key_End):
+            scene = self.scene()
+            last = len(scene.frames) - 1 if scene is not None and scene.frames else 0
+            index = 0 if key == Qt.Key_Home else last
+            self.turn_to_page(index)
             if control:
-                bar.setValue(bar.maximum())
-            else:
-                bar.setValue(int(self._page_top_value(self.visible_page_index())
-                                 + self.page_height_in_view()) - screen)
+                bar.setValue(bar.minimum() if key == Qt.Key_Home else bar.maximum())
+                self.settle_on_page(index)
             event.accept()
             return True
         return False
+
+    def turn_to_page(self, index: int) -> None:
+        """Go to the top of page *index*, the page box following.
+
+        The window's go_to_page does nothing for the page that is already
+        current, but Home pressed half-way down page one still has to bring
+        the top of page one back.
+        """
+        window = self.window
+        if index != window.current_index:
+            window.go_to_page(index)
+        else:
+            self.go_to_page_top(index)
+        self.settle_on_page(index)
+
+    def settle_on_page(self, index: int) -> None:
+        """Make *index* the current page whatever the scroll left in the
+        middle of the window — zoomed out, the middle of the window can be on
+        a later page than the one just gone to."""
+        window = self.window
+        self._shown_page = index
+        if window.current_index != index:
+            window.follow_scrolled_page(index)
 
     def _page_top_value(self, index: int) -> float:
         scene = self.scene()
@@ -5367,11 +5407,6 @@ class PageView(QGraphicsView):
         frame = scene.frames[index]
         top = frame.mapRectToScene(frame.page_rect()).top()
         return (top - scene.sceneRect().top()) * self._zoom
-
-    def page_height_in_view(self) -> float:
-        frame = self.frame()
-        return frame.page.height_pt * self._zoom if frame is not None else 0.0
-
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Control:
