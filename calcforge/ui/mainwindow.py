@@ -175,6 +175,21 @@ class _SizeFollower(QObject):
         self._callback()
 
 
+class _DoubleClickToggle(QObject):
+    """Calls *callback* when the watched widget is double-clicked."""
+
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self._callback = callback
+
+    def eventFilter(self, watched, event) -> bool:
+        if (event.type() == QEvent.MouseButtonDblClick
+                and event.button() == Qt.LeftButton):
+            self._callback()
+            return True
+        return False
+
+
 class DetachableTabBar(QTabBar):
     """A document tab bar that reports a drag released outside itself."""
 
@@ -1475,6 +1490,11 @@ class MainWindow(QMainWindow):
         self.bottom_split.setCollapsible(1, True)
         self._markups_height = 220
         self.bottom_split.setSizes([1, 0])
+        # Double-clicking the list's handle bar hides it, or brings it back
+        # at the height it had (as Revu's Markups List does).
+        self._markups_handle_toggle = _DoubleClickToggle(
+            lambda: self.show_markups_list(not self.markups_list_open()), self)
+        self.bottom_split.handle(1).installEventFilter(self._markups_handle_toggle)
         self.toolsets_panel = ToolSetsPanel(self)
         self.dock_toolsets = self._dock("Tool Chest", self.toolsets_panel,
                                         Qt.BottomDockWidgetArea, "dock_toolsets")
