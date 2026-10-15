@@ -1278,6 +1278,17 @@ class PreferencesDialog(QDialog):
         form.addRow("", self.recover_flattened)
         layout.addWidget(canvas)
 
+        markup = QGroupBox("Markup")
+        form = QFormLayout(markup)
+        self.style_keys = QCheckBox("Number keys pick markup styles")
+        self.style_keys.setObjectName("markupStyleKeys")
+        self.style_keys.setChecked(getattr(prefs, "markup_style_keys", True))
+        self.style_keys.setToolTip(
+            "With a markup tool in hand, 1 to 9 draw the next markup in that\n"
+            "tool's style 1 to 9 from the Markup Styles toolbar; 0 is the default")
+        form.addRow("", self.style_keys)
+        layout.addWidget(markup)
+
         writing = QGroupBox("Writing")
         form = QFormLayout(writing)
         self.author = QLineEdit(getattr(prefs, "author", ""))
@@ -1349,6 +1360,7 @@ class PreferencesDialog(QDialog):
             insertion_point=self.insertion.isChecked(),
             gpu_drawing=self.gpu_drawing.isChecked(),
             recover_flattened=self.recover_flattened.isChecked(),
+            markup_style_keys=self.style_keys.isChecked(),
             page_thumbnails=getattr(self.prefs, "page_thumbnails", 1.0),
             result_decimals=self.result_decimals.value(),
             result_threshold=self.result_threshold.value(),

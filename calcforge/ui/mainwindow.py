@@ -1141,6 +1141,7 @@ class MainWindow(QMainWindow):
                        self.act_undo, self.act_redo):
             main_bar.addSeparator() if action is None else main_bar.addAction(action)
         self._add_toolbar(main_bar)
+        self._build_markup_styles_bar()       # beside it, where there is room
         # The markup tools get a row to themselves: there are enough of them
         # that sharing one with the file actions hides the last few.
         self.addToolBarBreak()
@@ -1428,6 +1429,13 @@ class MainWindow(QMainWindow):
             snug_number_box(spin)
         self._add_toolbar(style_bar)
         self._refresh_style_controls()
+
+    def _build_markup_styles_bar(self) -> None:
+        """The Markup Styles toolbar (markupstyles.py), on the Main bar's row:
+        Tools ▸ Toolbars ▸ Markup Styles shows and hides it."""
+        from .markupstyles import MarkupStyles
+        self.markup_styles = MarkupStyles(self)
+        self._add_toolbar(self.markup_styles.bar)
 
     def _calculation_bar(self) -> QToolBar:
         """Decision 18: MarkForge's toolbars, and a condensed Calculation
@@ -4871,6 +4879,8 @@ class MainWindow(QMainWindow):
             supported = common_capabilities(items)
         else:
             active = self._style_default_item()
+            if active is not None and getattr(self, "markup_styles", None) is not None:
+                self.markup_styles.dress(active)     # a markup style being edited
             # Nothing is selected, so these controls set what the next markup
             # of this kind starts as, which is a different question from what
             # can be changed about one that already exists.
@@ -4892,6 +4902,9 @@ class MainWindow(QMainWindow):
         else:
             kind = (f"New {self._type_name(active).lower()}" if active is not None
                     else "Nothing selected")
+            styles = getattr(self, "markup_styles", None)
+            if active is not None and styles is not None and styles.editing():
+                kind = f"{self._type_name(active)} style {styles.editing()}"
         self.style_kind_label.setText(f" {kind} ")
         for field, actions in self._style_widgets.items():
             for action in actions:
@@ -5401,6 +5414,8 @@ class MainWindow(QMainWindow):
             "Arrowhead size")
 
     def _style_line_ending(self, attribute: str, value: str) -> None:
+        if self._edit_markup_style(lambda item: setattr(item.style, attribute, value)):
+            return
         if not self.selected_items():
             item = self._style_default_item()
             if item is not None:
@@ -5543,6 +5558,8 @@ class MainWindow(QMainWindow):
         self.properties_panel.show_items(self.selected_items())
 
     def _style_cloud(self, value: float) -> None:
+        if self._edit_markup_style(lambda item: setattr(item, "cloud_size", float(value))):
+            return
         if not self.selected_items():
             self.default_cloud_size = float(value)
             return
@@ -5550,6 +5567,8 @@ class MainWindow(QMainWindow):
 
     def _style_symbol(self, value: str) -> None:
         if not value:
+            return
+        if self._edit_markup_style(lambda item: setattr(item, "symbol", value)):
             return
         if not self.selected_items():
             self.view.count_symbol = value
@@ -5577,6 +5596,8 @@ class MainWindow(QMainWindow):
         toolbar edits that remembered look instead, which is what makes a line
         type settable for them at all.
         """
+        if self._edit_markup_style(lambda item: mutate(item.style)):
+            return
         if self._remember_style_default(mutate):
             return
         if not self.selected_items():
@@ -5587,6 +5608,12 @@ class MainWindow(QMainWindow):
             return
         self._push_style(mutate, description,
                          predicate=lambda item: field in capabilities(item))
+
+    def _edit_markup_style(self, mutate) -> bool:
+        """With a numbered markup style picked and nothing selected, the
+        Properties toolbar edits that style (markupstyles.py)."""
+        styles = getattr(self, "markup_styles", None)
+        return styles is not None and styles.edit(mutate)
 
     def _remember_style_default(self, mutate) -> bool:
         """Change the stored look of the tool in hand. True if that is what this is."""

@@ -2285,7 +2285,8 @@ def _untinted(pixmap) -> QIcon:
     return icon
 
 
-def entry_thumbnail(entry, width: int = 48, height: int = 34) -> QPixmap:
+def entry_thumbnail(entry, width: int = 48, height: int = 34,
+                    max_scale: float = 1.6) -> QPixmap:
     """Draw a tool set entry as the thing it actually is.
 
     A row that says "Rectangle (properties)" tells you nothing you can pick out
@@ -2331,7 +2332,7 @@ def entry_thumbnail(entry, width: int = 48, height: int = 34) -> QPixmap:
     painter.setRenderHint(QPainter.TextAntialiasing, True)
     margin = 3.0
     scale = min((width - 2 * margin) / bounds.width(),
-                (height - 2 * margin) / bounds.height(), 1.6)
+                (height - 2 * margin) / bounds.height(), max_scale)
     painter.translate(width / 2, height / 2)
     painter.scale(scale, scale)
     painter.translate(-bounds.center())
@@ -2461,6 +2462,10 @@ class PropertiesPanel(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._items: list[MarkupItem] = []
         self._building = False
+        # A markup style being edited (markupstyles.py): its sample markup is
+        # shown, and each change is handed back instead of being an undo step.
+        self._style_edit = None
+        self._style_title = ""
         self.body = QWidget()
         self.setWidget(self.body)
         self.layout = QVBoxLayout(self.body)
@@ -2470,8 +2475,16 @@ class PropertiesPanel(QScrollArea):
         self.show_items([])
 
     # -- construction ------------------------------------------------------
-    def show_items(self, items: list[MarkupItem]) -> None:
+    def show_items(self, items: list[MarkupItem], style_edit=None) -> None:
         self._items = [i for i in items if isinstance(i, MarkupItem)]
+        if not self._items and style_edit is None:
+            styles = getattr(self.window, "markup_styles", None)
+            held = styles.panel_sample() if styles is not None else None
+            if held is not None:
+                item, self._style_title, changed = held
+                self.show_items([item], style_edit=changed)
+                return
+        self._style_edit = style_edit
         self._building = True
         while self.layout.count():
             child = self.layout.takeAt(0)
@@ -2498,7 +2511,8 @@ class PropertiesPanel(QScrollArea):
 
         first = self._items[0]
         # Bluebeam's heading: the markup's icon and "<Type> Properties"
-        heading = QLabel(f"{first.display_name()} Properties" if len(self._items) == 1
+        heading = QLabel(self._style_title if self._style_edit is not None
+                         else f"{first.display_name()} Properties" if len(self._items) == 1
                          else f"{len(self._items)} Markups Properties")
         heading.setObjectName("propHeading")
         font = heading.font()
@@ -2507,6 +2521,10 @@ class PropertiesPanel(QScrollArea):
         heading.setFont(font)
         self.layout.addWidget(heading)
 
+        if self._style_edit is not None:
+            # a style: how it looks, not what it is or where
+            self._add_style_sections(first)
+            return
         self._add_metadata(first)
         if all(getattr(i, "IS_CALC", False) and getattr(i, "region", None) is not None
                for i in self._items):
@@ -2566,6 +2584,23 @@ class PropertiesPanel(QScrollArea):
             if isinstance(first, PolyItem) and first.broken:
                 self._add_breaks(first)
             self._add_defaults(first)
+        self._fit_width()
+        self.layout.addStretch(1)
+        self._settle()
+        self._building = False
+
+    def _add_style_sections(self, first) -> None:
+        """Appearance, line ends and text: what a markup style is made of."""
+        appearance = common_capabilities([first])
+        texts = getattr(first, "HAS_TEXT", False) or isinstance(
+            first, (StampItem, CountItem, MeasureItem))
+        ends = isinstance(first, (PolyItem, MeasureItem, CalloutItem))
+        if appearance - {"font"} or texts or ends:
+            self._add_appearance(first, appearance)
+            if ends:
+                self._add_arrows(first)
+            if texts:
+                self._add_text(first, compact=not getattr(first, "HAS_TEXT", False))
         self._fit_width()
         self.layout.addStretch(1)
         self._settle()
@@ -2633,6 +2668,15 @@ class PropertiesPanel(QScrollArea):
         through on the way.
         """
         if self._building:
+            return
+        if self._style_edit is not None:
+            # a markup style is settings, not part of the document's undo
+            for item in self._items:
+                setter(item)
+                if hasattr(item, "apply_style"):
+                    item.apply_style()
+            self._style_edit(self._items[0])
+            self.changed.emit(description)
             return
         self.window.view.begin_snapshot()
         for item in self._items:
