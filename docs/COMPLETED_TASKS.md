@@ -530,3 +530,10 @@ The rulers' corner follows a theme change (it stayed dark in light mode).
 user's answer): on a sheet with one page the break cut the run off at the
 break, so the rows after it were nowhere. The page a break starts is now
 always there, and removing the break takes it back (above).
+
+**Dark-mode line and hatch lists, again (the user repeated it):** checked
+with the worst case — black line work and a black Cross hatch — on the
+Properties toolbar and in the Properties panel, closed and open: every
+sample is drawn in light ink. The toolbar's line list now names its styles
+as the panel does (Solid, Dash … rather than solid, dash), and a list's
+highlighted entry is Revu's deep blue. `test_the_toolbars_line_styles_are_named_as_in_properties_and_still_apply`.

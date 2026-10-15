@@ -450,3 +450,23 @@ def test_dark_mode_properties_panel_hatch_and_line_lists_can_be_seen(window):
             assert lightest > 150, (name, lightest)
     finally:
         window.toggle_theme(False)
+
+
+def test_the_toolbars_line_styles_are_named_as_in_properties_and_still_apply(window):
+    """The toolbar's line list said "solid, dash" where Properties says
+    "Solid, Dash" (2026-10-15); choosing one still sets the markup's style."""
+    from PySide6.QtCore import QPointF, QRectF
+    from calcforge.items.shapes import RectItem
+    combo = window.dash_combo
+    names = [combo.itemText(i) for i in range(combo.count())]
+    assert "Solid" in names and "Dash" in names and "dash" not in names
+    box = RectItem("rect", QRectF(0, 0, 60, 40))
+    window.scene.frames[0].add_markup(box, QPointF(100, 100))
+    box.setSelected(True)
+    window.refresh_selection()
+    combo.setCurrentIndex(combo.findData("dash"))
+    assert box.style.line_style == "dash"
+    window.scene.clearSelection()
+    box.setSelected(True)
+    window.refresh_selection()
+    assert combo.currentData() == "dash"

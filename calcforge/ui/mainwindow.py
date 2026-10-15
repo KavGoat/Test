@@ -1216,8 +1216,10 @@ class MainWindow(QMainWindow):
         from .widgets import big_pattern_dropdown
         big_pattern_dropdown(self.dash_combo)
         for name in DASH_ARRAYS:
-            self.dash_combo.addItem(_line_style_icon(name, _bar_ink(), 1), name)
-        self.dash_combo.currentTextChanged.connect(self._style_dash)
+            # named as the Properties panel names them; the style's own key kept as data
+            self.dash_combo.addItem(_line_style_icon(name, _bar_ink(), 1), name.title(), name)
+        self.dash_combo.currentIndexChanged.connect(
+            lambda index: self._style_dash(self.dash_combo.itemData(index)) if index >= 0 else None)
         self._style_widgets[DASH].append(style_bar.addWidget(self.dash_combo))
         # How far apart the dashes are — the line's thickness does not say.
         self.dash_scale_spin = QDoubleSpinBox()
@@ -4867,7 +4869,9 @@ class MainWindow(QMainWindow):
                     (self.arrow_end_combo,
                      max(self.arrow_end_combo.findData(active.style.arrow_end), 0),
                      "setCurrentIndex"),
-                    (self.dash_combo, active.style.line_style, "setCurrentText"),
+                    (self.dash_combo,
+                     max(self.dash_combo.findData(active.style.line_style), 0),
+                     "setCurrentIndex"),
                     (self.dash_scale_spin, active.style.dash_scale, "setValue"),
                     (self.font_spin, active.style.font_size, "setValue"),
                     (self.font_family_combo, QFont(QFontInfo(active.style.font()).family()),
@@ -8208,7 +8212,7 @@ class MainWindow(QMainWindow):
         # near-black they were invisible on the dark bar (the user, 2026-10-01)
         for index in range(self.dash_combo.count()):
             self.dash_combo.setItemIcon(
-                index, _line_style_icon(self.dash_combo.itemText(index), _bar_ink(), 1))
+                index, _line_style_icon(self.dash_combo.itemData(index), _bar_ink(), 1))
         for index in range(self.hatch_combo.count()):
             if self.hatch_combo.itemData(index) in HATCH_PATTERNS:   # not Manage…
                 self.hatch_combo.setItemIcon(

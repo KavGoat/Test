@@ -293,7 +293,8 @@ QGraphicsView {{ border: 0; }}
 
 /* --- the odds and ends ---------------------------------------------------- */
 QComboBox QAbstractItemView {{
-    border: 1px solid {field_edge}; selection-background-color: {accent};
+    border: 1px solid {field_edge}; selection-background-color: {picked};
+    selection-color: {picked_ink};
 }}
 QProgressBar {{
     border: 1px solid {chrome_edge}; border-radius: 3px; text-align: center;
