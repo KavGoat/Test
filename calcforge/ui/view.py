@@ -5464,6 +5464,13 @@ class PageView(QGraphicsView):
         scene_pos = self.mapToScene(event.pos())
         table = self.tables.item
         if table is not None and table.chrome_rect().contains(table.mapFromScene(scene_pos)):
+            # Excel: a right-click outside the selection moves it to that cell
+            # first, so the menu's commands act where the pointer is.
+            cell = table.cell_at(table.mapFromScene(scene_pos))
+            if cell is not None:
+                r0, c0, r1, c1 = self.tables.selection()
+                if not (r0 <= cell[0] <= r1 and c0 <= cell[1] <= c1):
+                    self.tables.select(cell)
             self.tables.context_menu(event.globalPos())
             event.accept()
             return
