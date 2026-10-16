@@ -268,10 +268,22 @@ class OffsetSession(QObject):
         self.window.refresh_selection()
         return copy
 
+    def _still_on_its_canvas(self) -> bool:
+        import shiboken6
+        try:
+            return (shiboken6.isValid(self.item) and shiboken6.isValid(self.view)
+                    and self.item.scene() is not None
+                    and self.item.scene() is self.view.scene())
+        except RuntimeError:
+            return False
+
     def finish(self) -> None:
-        self.view.viewport().removeEventFilter(self)
-        if self.preview is not None and self.preview.scene() is not None:
-            self.preview.scene().removeItem(self.preview)
+        import shiboken6
+        if shiboken6.isValid(self.view):
+            self.view.viewport().removeEventFilter(self)
+        preview = self.preview
+        if preview is not None and shiboken6.isValid(preview) and preview.scene() is not None:
+            preview.scene().removeItem(preview)
         self.preview = None
         self.bar.hide()
         if getattr(self.window, "_offset", None) is self:
@@ -280,6 +292,12 @@ class OffsetSession(QObject):
 
     def eventFilter(self, _watched, event) -> bool:
         kind = event.type()
+        if kind in (QEvent.MouseMove, QEvent.MouseButtonPress, QEvent.KeyPress) \
+                and not self._still_on_its_canvas():
+            # the markup's canvas has gone from the view (another document,
+            # or the markup deleted): the session goes with it (QA F-01)
+            self.finish()
+            return False
         if kind == QEvent.MouseMove:
             self._redraw(self.view.mapToScene(event.position().toPoint()))
             return False

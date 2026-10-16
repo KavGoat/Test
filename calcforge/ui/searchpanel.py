@@ -159,6 +159,19 @@ class SearchPanel(QWidget):
                              + (f", {cells} in table cells" if cells else ""))
         self._mark_all()
 
+    def forget(self) -> None:
+        """The document searched is no longer the one in view: its hits, and
+        the marks drawn for them, go (QA F-04). The words searched for stay,
+        so Find runs the same search on the document now in view."""
+        if not self.hits and not self.results.topLevelItemCount():
+            return
+        self.hits = []
+        self.results.blockSignals(True)
+        self.results.clear()
+        self.results.blockSignals(False)
+        self.summary.setText("")
+        self.window.view.set_search_marks([])
+
     def _mark_all(self, current=None) -> None:
         """Outline every drawing hit on the page; the chosen one strongest."""
         marks = []

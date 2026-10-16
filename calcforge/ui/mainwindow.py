@@ -111,6 +111,69 @@ def _command_id(method: str) -> str:
             "renumber_counts": "renumber_counts"}.get(method, method)
 
 
+#: What is read rather than looked at: equations, calculation text and
+#: blocks, tables, spreadsheets, charts. A copy of one a little down and to
+#: the right prints over the original and neither can be read (QA F-31).
+READ_TYPES = frozenset({"calc", "calc_drawing", "calc_text", "calc_block", "table",
+                        "sheet_run", "chart", "contents"})
+
+#: How far a duplicate of a drawn markup lands from its original, down and
+#: to the right (Revu), and the gap left beside something that is read.
+COPY_NUDGE = 12.0
+
+
+def copy_step(items, beside: bool = False) -> QPointF:
+    """Where a copy of *items* goes, from them: Revu's step down and to the
+    right for markups; for equations, tables and the like, just below them
+    (or just to the right if they are at the foot of the page) so the copy
+    can be read. *beside*: always just to the right (Multiply's default)."""
+    box = QRectF()
+    reads = False
+    frame = None
+    for item in items:
+        try:
+            rect = covered_rect(item)
+        except (AttributeError, RuntimeError):
+            continue
+        box = rect if box.isNull() else box.united(rect)
+        reads = reads or getattr(item, "TYPE", "") in READ_TYPES
+        frame = frame or item.parentItem()
+    if box.isNull():
+        return QPointF(COPY_NUDGE, COPY_NUDGE)
+    if beside:
+        return QPointF(box.width() + COPY_NUDGE, 0.0)
+    if not reads:
+        return QPointF(COPY_NUDGE, COPY_NUDGE)
+    page = frame.page_rect() if hasattr(frame, "page_rect") else None
+    below = QPointF(0.0, box.height() + COPY_NUDGE)
+    if page is None or box.translated(below).bottom() <= page.bottom():
+        return below
+    right = QPointF(box.width() + COPY_NUDGE, 0.0)
+    if box.translated(right).right() <= page.right():
+        return right
+    return below
+
+
+class ElidedLabel(QLabel):
+    """A one-line label that ends in "…" when it has less room than its
+    words, and never draws past its own edge. ``text()`` is still all of it
+    (the tooltip shows it whole)."""
+
+    def paintEvent(self, event) -> None:
+        from PySide6.QtGui import QPainter
+        painter = QPainter(self)
+        room = self.contentsRect()
+        words = " ".join(self.text().split())
+        shown = self.fontMetrics().elidedText(words, Qt.ElideRight, room.width())
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        painter.drawText(room, int(self.alignment()) | Qt.TextSingleLine, shown)
+        painter.end()
+
+    def setText(self, text: str) -> None:
+        super().setText(text)
+        self.setToolTip(text if text and len(text) > 40 else "")
+
+
 class CenteredStatusBar(QStatusBar):
     """Status bar with the page navigation centred in the room it has.
 
@@ -227,16 +290,25 @@ class CenteredStatusBar(QStatusBar):
             return 0
         return max(0, widget.minimumSizeHint().width() - widget.width())
 
+    #: Called once the bar is laid out again (a hovered command's tip
+    #: follows the controls it stands between).
+    after_layout = None
+
     def resizeEvent(self, event) -> None:
         self.fit_to_width()
         super().resizeEvent(event)
+        if self.after_layout is not None:
+            self.after_layout()
 
     def event(self, event) -> bool:
         # a control grew or shrank (the page size or the zoom changed what
         # it says): see again what fits
         if event.type() == QEvent.LayoutRequest:
             self.fit_to_width()
-        return super().event(event)
+        done = super().event(event)
+        if event.type() == QEvent.LayoutRequest and self.after_layout is not None:
+            self.after_layout()
+        return done
 
     def set_center_widget(self, widget: QWidget) -> None:
         self.center_widget = widget
@@ -284,7 +356,7 @@ class _SizeFollower(QObject):
     def eventFilter(self, watched, event) -> bool:
         if event.type() in (QEvent.Resize, QEvent.Move, QEvent.Show) and not self._posted:
             self._posted = True
-            QTimer.singleShot(0, self._run)
+            QTimer.singleShot(0, self, self._run)
         return False
 
     def _run(self) -> None:
@@ -737,6 +809,8 @@ class MainWindow(QMainWindow):
             dock.topLevelChanged.connect(
                 lambda floating, panel=dock.objectName():
                 None if floating else self._panel_landed_soon(panel))
+            dock.topLevelChanged.connect(
+                lambda floating, panel=dock: self._panel_floated(panel, floating))
             name = dock.objectName()
             dock.visibilityChanged.connect(
                 lambda visible, panel=name:
@@ -1626,11 +1700,11 @@ class MainWindow(QMainWindow):
         self.bottom_split.handle(1).installEventFilter(self._markups_handle_toggle)
         self.toolsets_panel = ToolSetsPanel(self)
         self.dock_toolsets = self._dock("Tool Chest", self.toolsets_panel,
-                                        Qt.BottomDockWidgetArea, "dock_toolsets")
+                                        Qt.LeftDockWidgetArea, "dock_toolsets")
         self.bookmarks_panel = BookmarksPanel(self)
         self.bookmarks_panel.bookmarkActivated.connect(self.go_to_bookmark)
         self.dock_bookmarks = self._dock("Bookmarks", self.bookmarks_panel,
-                                         Qt.BottomDockWidgetArea, "dock_bookmarks")
+                                         Qt.LeftDockWidgetArea, "dock_bookmarks")
         from .searchpanel import SearchPanel
         self.search_panel = SearchPanel(self)
         self.dock_search = self._dock("Search", self.search_panel,
@@ -1787,6 +1861,52 @@ class MainWindow(QMainWindow):
             if was_open:
                 self.show_panel(name, True)
         self.tabify_panels()
+
+    def _panel_floated(self, dock, floating: bool) -> None:
+        """A panel came off its side. By its float button it stays a window
+        of its own; by a drag it is put back on its side if the drag ends
+        anywhere but on a side (the user, 2026-10-16: dragged into the middle
+        it was left lying over the canvas and the other panels)."""
+        if not floating:
+            dock.floated_on_purpose = False
+            return
+        if dock.floated_on_purpose:
+            return
+        timer = getattr(self, "_drag_watch", None)
+        if timer is None:
+            timer = self._drag_watch = QTimer(self)
+            timer.setInterval(40)
+            timer.timeout.connect(self._panel_drag_over)
+        self._dragged_panels = getattr(self, "_dragged_panels", set())
+        self._dragged_panels.add(dock)
+        timer.start()
+
+    def _panel_drag_over(self) -> None:
+        if QApplication.mouseButtons() & Qt.LeftButton:
+            return                              # still being dragged
+        self._drag_watch.stop()
+        for dock in list(getattr(self, "_dragged_panels", ())):
+            self.put_panel_back(dock)
+        self._dragged_panels = set()
+
+    def put_panel_back(self, dock) -> None:
+        """A panel a drag left floating, or a saved arrangement left along
+        the top or bottom, goes back to its own side, open, among its tabs."""
+        from shiboken6 import isValid
+        if not isValid(dock) or dock.floated_on_purpose:
+            return
+        area = self.dockWidgetArea(dock)
+        if not dock.isFloating() and area in (Qt.LeftDockWidgetArea, Qt.RightDockWidgetArea):
+            return
+        name = dock.objectName()
+        side = self.panel_sides.get(name, self.DEFAULT_SIDES.get(name, LEFT))
+        was_open = not dock.isHidden()
+        dock.setFloating(False)
+        self.addDockWidget(AREAS[side], dock)
+        if was_open and name in self.PANEL_ICONS:
+            self.show_panel(name, True)
+        self.tabify_panels()
+        self.note_layout_change()
 
     def _panel_landed_soon(self, name: str) -> None:
         if getattr(self, "_tabifying", False):
@@ -2417,10 +2537,22 @@ class MainWindow(QMainWindow):
         self._refresh_status_icons()
         status.addWidget(self.status_toggles)
 
-        self.status_hint = QLabel("Ready")
+        # what is going on, cut short with "…" when the bar has no room for
+        # all of it (the tooltip has the rest)
+        self.status_hint = ElidedLabel("Ready")
+        self.status_hint.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.status_hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.status_hint.setMinimumWidth(0)
         status.addWidget(self.status_hint)
+        # a hovered command's tip, over the free room of the bar's left half
+        # (never over its buttons) while the pointer is on the command
+        self.status_tip = ElidedLabel("", status)
+        self.status_tip.setObjectName("statusTip")
+        self.status_tip.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.status_tip.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.status_tip.setAutoFillBackground(True)
+        self.status_tip.setBackgroundRole(status.backgroundRole())
+        self.status_tip.hide()
 
         self.status_position = QLabel("")
         self.status_position.setMinimumWidth(150)
@@ -2725,6 +2857,10 @@ class MainWindow(QMainWindow):
         if any(stack is seen for seen in self._connected_undo_stacks):
             return
         stack.cleanChanged.connect(self._undo_clean_slot)
+        # Undo and Redo are greyed and lit by whichever history is in hand;
+        # only the window's first one used to tell them (QA F-02)
+        stack.canUndoChanged.connect(self._refresh_undo_actions)
+        stack.canRedoChanged.connect(self._refresh_undo_actions)
         self._connected_undo_stacks.append(stack)
 
     # ==================================================================
@@ -3387,11 +3523,17 @@ class MainWindow(QMainWindow):
 
     def _new_undo_stack(self):
         # Replacing one view's document must not clear another view's history.
+        # What was under way on the canvas going out is finished first, on
+        # the history it belongs to (not the one about to replace it).
+        self.view.leave_the_canvas()
         self.undo_stack = QUndoStack(self)
         self.undo_stack.setUndoLimit(200)
         from . import release
         release.STACKS.add(self.undo_stack)
         self._connect_undo_stack(self.undo_stack)
+        # the menu's Undo and Redo follow the new history (QA F-02: after an
+        # Undo and File ▸ New they stayed greyed for good)
+        self._refresh_undo_actions()
 
     def new_document(self, confirm: bool = True) -> None:
         if confirm and not self.confirm_discard():
@@ -3932,6 +4074,11 @@ class MainWindow(QMainWindow):
         if getattr(self, "left_rail_bar", None) is not None:
             self.arrange_side_toolbars()
         if getattr(self, "docks_by_name", None):
+            for dock in self.panels:
+                if dock.isFloating():
+                    dock.floated_on_purpose = True     # left floating: kept so
+                else:
+                    self.put_panel_back(dock)          # saved along the top: to its side
             self.tabify_panels()          # panels saved stacked are tabbed, once
         return done
 
@@ -3997,6 +4144,50 @@ class MainWindow(QMainWindow):
                 return
         super().keyPressEvent(event)
 
+    def event(self, event) -> bool:
+        if event.type() == QEvent.StatusTip:
+            self._show_status_tip(event.tip())
+            return True
+        return super().event(event)
+
+    def _show_status_tip(self, tip: str) -> None:
+        """A hovered command's tip, in the footer's left half: from after
+        the Show Grid and snap buttons to the end of the page navigation
+        (which it stands in for while the pointer is in a menu, as Qt's own
+        message does), ended with "…" where it runs out (QA F-23). Qt's
+        message was painted from the bar's left edge across those buttons,
+        its words over their icons. All is as it was when the pointer
+        leaves."""
+        bar = self.statusBar()
+        label = getattr(self, "status_tip", None)
+        if label is None or bar is None:
+            return
+        if not tip:
+            label.hide()
+            bar.after_layout = None
+            return
+        label.setText(tip)
+        bar.after_layout = self._place_status_tip
+        self._place_status_tip()
+        label.show()
+        label.raise_()
+
+    def _place_status_tip(self) -> None:
+        bar = self.statusBar()
+        label = self.status_tip
+        start = self.status_toggles.geometry().right() + 6 \
+            if self.status_toggles.isVisible() else 4
+        # up to the controls kept on the right (Scale, Fit Width, zoom …),
+        # wherever the page navigation has been centred to
+        left_half = {self.status_toggles, self.status_hint, self.status_position,
+                     label, getattr(bar, "center_widget", None), *bar._spacers}
+        rights = [child.geometry().left() for child in bar.children()
+                  if isinstance(child, QWidget) and not child.isWindow()
+                  and child.isVisible() and child not in left_half
+                  and type(child).__name__ != "QSizeGrip" and child.geometry().left() > start]
+        end = (min(rights) - 6) if rights else bar.width() // 2
+        label.setGeometry(start, 0, max(0, end - start), bar.height())
+
     def closeEvent(self, event) -> None:
         # Nothing is settled here on purpose. Finishing an open markup touches
         # the panels, and the arrangement written a few lines further down
@@ -4021,11 +4212,9 @@ class MainWindow(QMainWindow):
         # Every open document has an undo stack of its own, and all of them
         # report a clean change back to this window. Leaving the ones behind
         # other tabs connected means they call a window that has gone.
+        from . import release
         for stack in self._connected_undo_stacks:
-            try:
-                stack.cleanChanged.disconnect(self._undo_clean_slot)
-            except (RuntimeError, TypeError):
-                pass
+            release.disconnect_stack(stack, self)
         event.accept()
         # Closed for good: whatever only this window showed — its canvases,
         # their markups, tables and equations, its undo histories and the
@@ -4036,6 +4225,26 @@ class MainWindow(QMainWindow):
         except RuntimeError:
             pass
         self._let_go()
+        self._go_for_good()
+
+    def _go_for_good(self) -> None:
+        """A window closed for good is taken down, not just hidden (QA F-14).
+
+        Kept, every window ever closed went on being restyled with the
+        application (New Window took 2 s, then 3.6, then 5.3 … 35 s by the
+        twelfth), went on filtering every event of the application, and its
+        timers went on firing into it. The other windows stop counting it
+        now, and Qt deletes it once the events in hand are through."""
+        windows = type(self)._windows
+        while self in windows:
+            windows.remove(self)
+        application = QApplication.instance()
+        if application is not None and getattr(self, "_filters_the_application", False):
+            application.removeEventFilter(self)
+            self._filters_the_application = False
+        for timer in self.findChildren(QTimer):
+            timer.stop()
+        self.deleteLater()
 
     # ==================================================================
     # autosave and recovery
@@ -4687,17 +4896,34 @@ class MainWindow(QMainWindow):
                 written[id(page)] = (generation, entry["items"])
             pages.append(entry)
         self._written_pages = written
-        return {"pages": pages, "current": self.current_index}
+        # and how the view was, so an undo or redo of the change shows the
+        # pages as they were seen then (QA F-21: after undoing A0 the view
+        # stayed at 17 %, or on page 2, or on the empty desk)
+        view = {"zoom": self.view.zoom(),
+                "h": self.view.horizontalScrollBar().value(),
+                "v": self.view.verticalScrollBar().value()}
+        return {"pages": pages, "current": self.current_index, "view": view}
 
     def _restore_structure(self, snapshot: dict, preserve_view: bool = False) -> None:
         scroll = (self.view.horizontalScrollBar().value(),
                   self.view.verticalScrollBar().value())
         self.document.pages = [Page.from_dict(entry) for entry in snapshot["pages"]]
-        self.current_index = snapshot.get("current", 0)
+        self.current_index = max(0, min(snapshot.get("current", 0),
+                                        len(self.document.pages) - 1))
         self.rebuild_scenes()
-        if preserve_view:
+        seen = snapshot.get("view")
+        if seen:
+            self.view.set_zoom(float(seen["zoom"]))
+            self.view.horizontalScrollBar().setValue(int(seen["h"]))
+            self.view.verticalScrollBar().setValue(int(seen["v"]))
+        elif preserve_view:
             self.view.horizontalScrollBar().setValue(scroll[0])
             self.view.verticalScrollBar().setValue(scroll[1])
+        index = self.current_index
+        self.view._shown_page = index
+        self.current_index = -1          # so the chrome is told, even unmoved
+        self.follow_scrolled_page(index)
+        self.current_index = index
         self.update_title()
 
     def warn_undefined(self, names: list, why: str) -> None:
@@ -4720,7 +4946,9 @@ class MainWindow(QMainWindow):
         self.mark_modified()
 
     def _structural_change(self, description: str, mutate,
-                           preserve_view: bool = False) -> None:
+                           preserve_view: bool = False) -> bool:
+        """Change the pages as one undo step; False if nothing changed (and
+        nothing was recorded)."""
         before = self._structure_snapshot()
         scroll = (self.view.horizontalScrollBar().value(),
                   self.view.verticalScrollBar().value())
@@ -4740,11 +4968,16 @@ class MainWindow(QMainWindow):
         self.view._shown_page = target
         self.follow_scrolled_page(target)
         after = self._structure_snapshot(reuse=getattr(self, "_written_pages", None))
+        if after["pages"] == before["pages"]:
+            # nothing about the pages changed (Page Setup OK'd as it was, say):
+            # nothing to undo either (QA F-28)
+            return False
         restore = (lambda snapshot: self._restore_structure(snapshot, True)) \
             if preserve_view else self._restore_structure
         self.undo_stack.push(DocumentStructureCommand(before, after, description,
                                                       restore))
         self.mark_modified()
+        return True
 
     def page_index(self, index: Optional[int] = None) -> int:
         """The page a command applies to: the one named, else the current one."""
@@ -5041,11 +5274,29 @@ class MainWindow(QMainWindow):
         from .sheetpages import with_runs
         pages = with_runs(self.document, pages)      # a spreadsheet's paper is its run's
 
+        if all(page.setup.to_dict() == setup.to_dict() for page in pages):
+            # OK with nothing changed changes nothing: not the view, not the
+            # history (QA F-28)
+            self.status_hint.setText("Page Setup: nothing changed")
+            return
+
         def mutate():
             for page in pages:
                 page.setup = PageSetup.from_dict(setup.to_dict())
-        self._structural_change("Page setup", mutate)
-        self.view.fit_page()
+        if self._structural_change("Page setup", mutate):
+            self.view.fit_page()
+            self._note_view_after_change()
+
+    def _note_view_after_change(self) -> None:
+        """The view settled after the last page change was recorded (a fit,
+        say): a redo of it comes back to this view, not the one before."""
+        index = self.undo_stack.index() - 1
+        command = self.undo_stack.command(index) if index >= 0 else None
+        after = getattr(command, "after", None)
+        if isinstance(after, dict) and "view" in after:
+            after["view"] = {"zoom": self.view.zoom(),
+                             "h": self.view.horizontalScrollBar().value(),
+                             "v": self.view.verticalScrollBar().value()}
 
     def set_page_setup(self, setup: PageSetup, all_pages: bool = False) -> None:
         """Give the current page (or every page) this paper; one undo step."""
@@ -5320,8 +5571,9 @@ class MainWindow(QMainWindow):
                     item.setRotation(item.rotation() + turn)
                     item.setPos(item.pos() + landing - item.mapToParent(centre))
             self.current_index = which
-        self._structural_change("Rotate page", mutate)
-        self.view.fit_page()
+        if self._structural_change("Rotate page", mutate):
+            self.view.fit_page()
+            self._note_view_after_change()
 
     def _rotate_background(self, page, clockwise: bool) -> str:
         """A quarter-turned copy of the page's sheet, if it has one.
@@ -5412,8 +5664,9 @@ class MainWindow(QMainWindow):
             setup.margin_bottom = page.setup.margin_bottom
             page.setup = setup
             self.current_index = which
-        self._structural_change(f"Page size {name}", mutate)
-        self.view.fit_page()
+        if self._structural_change(f"Page size {name}", mutate):
+            self.view.fit_page()
+            self._note_view_after_change()
 
     def _rebuild_current_page_menu(self) -> None:
         self.current_page_menu.clear()
@@ -6303,6 +6556,22 @@ class MainWindow(QMainWindow):
             self.addToolBar(Qt.TopToolBarArea, bar)
         return bar
 
+    def end_canvas_sessions(self, view) -> None:
+        """*view*'s canvas is going (another document in its place, or the
+        canvas taken apart): nothing begun on it may outlive it.
+
+        An Offset session went on watching the view's mouse and drew its
+        preview into the canvas that had been taken apart — the next drag
+        crashed the application (QA F-01). The Search panel's hits pointed
+        at the old pages and its marks stayed drawn on every later document
+        (QA F-04)."""
+        offset = getattr(self, "_offset", None)
+        if offset is not None and getattr(offset, "view", None) is view:
+            offset.finish()
+        panel = getattr(self, "search_panel", None)
+        if panel is not None and view is getattr(self, "view", None):
+            panel.forget()
+
     def start_offset(self):
         """Edit ▸ Offset (O)."""
         from .offset import OffsetSession, can_offset
@@ -6426,7 +6695,7 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
             self.view.setFocus(Qt.OtherFocusReason)
             QApplication.instance().installEventFilter(self._presentation_keys())
-            QTimer.singleShot(0, self.view.fit_page)
+            QTimer.singleShot(0, self.view, self.view.fit_page)
         elif not on and getattr(self, "_presenting", None) is not None:
             was, self._presenting = self._presenting, None
             QApplication.instance().removeEventFilter(self._presentation_keys())
@@ -7123,7 +7392,7 @@ class MainWindow(QMainWindow):
             self.hatch_combo.setCurrentIndex(
                 hatch_index(self.hatch_combo, self._hatch_shown()))
             self.hatch_combo.blockSignals(False)
-            QTimer.singleShot(0, self.manage_hatches)
+            QTimer.singleShot(0, self, self.manage_hatches)
             return
         self._style_change(HATCH, lambda style: setattr(style, "hatch", value or ""),
                            "Hatch")
@@ -8768,9 +9037,19 @@ class MainWindow(QMainWindow):
         """Put a clipboard payload down under the pointer."""
         self.view.begin_snapshot()
         self.view.scene().clearSelection()
-        # A paste lands under the pointer, the way it does in Bluebeam.
+        # A paste lands under the pointer, the way it does in Bluebeam —
+        # while the pointer is on what is in view. Gone from it (scrolled
+        # away, or never on the canvas), the copy goes beside where it was
+        # copied from, clear of it (QA F-31), rather than 14 pt over it.
         target = self.view.pointer_scene_pos()
+        if not self.view.mapToScene(self.view.viewport().rect()).boundingRect().contains(target):
+            target = None
         offset = None
+        frame = self.view.frame()
+        if target is None and payload:
+            previews = [preview for preview in (build_item(entry) for entry in payload)
+                        if preview is not None]
+            offset = copy_step(previews)
         if target is not None and payload:
             frame = self.view.frame_at(target) or self.view.frame()
             local = frame.mapFromScene(target)
@@ -8809,9 +9088,6 @@ class MainWindow(QMainWindow):
             if offset is not None:
                 copy["x"] = copy.get("x", 0) + offset.x()
                 copy["y"] = copy.get("y", 0) + offset.y()
-            else:
-                copy["x"] = copy.get("x", 0) + 14
-                copy["y"] = copy.get("y", 0) + 14
             item = build_item(copy)
             if item is None:
                 continue
@@ -8829,15 +9105,23 @@ class MainWindow(QMainWindow):
             return
         self.view.begin_snapshot()
         self.view.scene().clearSelection()
+        step = copy_step(items)
         for item in items:
             copy = item.clone()
             if copy is not None:
+                copy.setPos(item.pos() + step)
                 if hasattr(copy, "load_from_document"):
                     copy.load_from_document(self.document)
-                self.view.frame().add_markup(copy)
+                self._frame_of(item).add_markup(copy)
                 copy.setSelected(True)
         self.view.commit_snapshot("Duplicate")
         self.refresh_selection()
+
+    def _frame_of(self, item):
+        """The page *item* is on (a copy of it goes on the same page, not on
+        whichever page the chrome calls current)."""
+        frame = item.parentItem()
+        return frame if hasattr(frame, "add_markup") else self.view.frame()
 
     def select_all(self) -> None:
         tables = self.view.tables
@@ -8940,7 +9224,8 @@ class MainWindow(QMainWindow):
         page = self.current_page()
         scaled = page.scale.is_calibrated()
         dialog = dialogs.ArrayDialog(page.scale.display_unit if scaled else "mm",
-                                     scaled, self)
+                                     scaled, self,
+                                     across=self._distance_text(copy_step(items, beside=True).x(), page))
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
         dx_text, dy_text, count, duplicate = dialog.offsets()
@@ -8972,7 +9257,7 @@ class MainWindow(QMainWindow):
                     if hasattr(copy, "load_from_document"):
                         copy.load_from_document(self.document)
                     copy.setPos(item.pos() + offset)
-                    self.view.frame().add_markup(copy)
+                    self._frame_of(item).add_markup(copy)
                     copy.setSelected(True)
                     made += 1
                 elif step_index == count:
@@ -8984,6 +9269,19 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(
             f"Made {made} cop{'y' if made == 1 else 'ies'}" if duplicate
             else f"Moved {len(items)} markup(s)")
+
+    def _distance_text(self, points: float, page) -> Optional[str]:
+        """*points* on the paper as a typed distance in the page's units (the
+        inverse of distance_in_points), or None if it cannot be said."""
+        try:
+            if page.scale.is_calibrated():
+                unit = page.scale.display_unit
+                value = float((page.scale.length(1.0) * points).to(unit).magnitude)
+            else:
+                unit, value = "mm", points / MM_TO_PT
+        except Exception:  # noqa: BLE001 - an odd scale keeps the dialog's own default
+            return None
+        return f"{value:.4g} {unit}"
 
     def distance_in_points(self, text: str, page) -> float:
         """Read a typed distance as page points, honouring the page scale."""

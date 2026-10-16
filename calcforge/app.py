@@ -47,7 +47,13 @@ def apply_theme(application: QApplication, theme: str) -> None:
     # than being a set of images that only suit one of them.
     set_icon_theme(theme)
     application.setPalette(palette(theme))
-    application.setStyleSheet(stylesheet(theme))
+    sheet = stylesheet(theme)
+    # Restyling the application restyles every widget of every window. A new
+    # window asks for the theme already in force, and it gets that from the
+    # application anyway: only a real change is worth the restyle (QA F-14,
+    # where it was nine tenths of the time New Window took).
+    if application.styleSheet() != sheet:
+        application.setStyleSheet(sheet)
     app_settings().setValue("theme", theme)
 
 

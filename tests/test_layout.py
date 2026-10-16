@@ -64,11 +64,13 @@ def test_pin_every_panel_at_once(window):
     assert not any(dock.pinned for dock in window.panels)
 
 
-def test_a_panel_can_go_to_any_edge(window):
+def test_a_panel_goes_on_either_side_and_nowhere_else(window):
+    """Left or right, never along the top or the bottom (the user,
+    2026-10-16; the Markups List alone has the bottom). The drags themselves
+    are in test_panel_sides.py."""
     pages = panels(window)["dock_pages"]
-    assert pages.allowedAreas() == Qt.AllDockWidgetAreas
-    for area in (Qt.RightDockWidgetArea, Qt.TopDockWidgetArea,
-                 Qt.BottomDockWidgetArea, Qt.LeftDockWidgetArea):
+    assert pages.allowedAreas() == (Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+    for area in (Qt.RightDockWidgetArea, Qt.LeftDockWidgetArea):
         window.addDockWidget(area, pages)
         assert window.dockWidgetArea(pages) == area
 

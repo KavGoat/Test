@@ -1629,7 +1629,7 @@ class DocumentScene(QGraphicsScene):
         if many != self._many:
             self._many = many
             # the ones still selected show (or stop showing) their own handles
-            QTimer.singleShot(0, self._repaint_selected)
+            QTimer.singleShot(0, self, self._repaint_selected)
         return many
 
     def _repaint_selected(self) -> None:

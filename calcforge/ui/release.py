@@ -93,6 +93,22 @@ def release_scene(scene) -> None:
     scene.deleteLater()
 
 
+def disconnect_stack(stack, window) -> None:
+    """*window* is told nothing more by *stack* (its title, Undo and Redo)."""
+    for signal, slot in ((stack.cleanChanged, getattr(window, "_undo_clean_slot", None)),
+                         (stack.canUndoChanged, getattr(window, "_refresh_undo_actions", None)),
+                         (stack.canRedoChanged, getattr(window, "_refresh_undo_actions", None))):
+        if slot is None:
+            continue
+        with warnings.catch_warnings():
+            # (a closing window has disconnected it already)
+            warnings.simplefilter("ignore", RuntimeWarning)
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+
+
 def release_stack(stack, windows=()) -> None:
     """An undo history nobody can reach: its commands (and the items they
     hold) go with it."""
@@ -106,10 +122,7 @@ def release_stack(stack, windows=()) -> None:
             with warnings.catch_warnings():
                 # (a closing window has disconnected it already)
                 warnings.simplefilter("ignore", RuntimeWarning)
-                try:
-                    stack.cleanChanged.disconnect(window._undo_clean_slot)
-                except (RuntimeError, TypeError):
-                    pass
+                disconnect_stack(stack, window)
             held[:] = [seen for seen in held if seen is not stack]
     stack.clear()
     stack.deleteLater()

@@ -1805,7 +1805,7 @@ class _ToolGrid(QListWidget):
         if event.size().width() != event.oldSize().width() and self.fit(event.size().width()):
             header = self.parentWidget()
             if isinstance(header, _SetHeader):
-                QTimer.singleShot(0, header.sync)
+                QTimer.singleShot(0, header, header.sync)
 
 
 class _SetHeader(QWidget):

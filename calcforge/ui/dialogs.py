@@ -1197,7 +1197,7 @@ class RectangleSizeDialog(QDialog):
 class ArrayDialog(QDialog):
     """Move or copy the selection at exact spacing, any number of times."""
 
-    def __init__(self, unit: str, scaled: bool, parent=None):
+    def __init__(self, unit: str, scaled: bool, parent=None, across: Optional[str] = None):
         super().__init__(parent)
         self.setWindowTitle("Multiply")
         layout = QVBoxLayout(self)
@@ -1212,7 +1212,9 @@ class ArrayDialog(QDialog):
         layout.addWidget(note)
 
         form = QFormLayout()
-        self.dx = QLineEdit(f"1 {unit}")
+        # out of the box, one copy just beside the original (*across*: the
+        # selection's width and a little): 1 mm put it on top (QA F-31)
+        self.dx = QLineEdit(across or f"1 {unit}")
         self.dy = QLineEdit("0")
         form.addRow("Across (x)", self.dx)
         form.addRow("Down (y)", self.dy)

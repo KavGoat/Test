@@ -103,8 +103,7 @@ class DockTitleBar(QWidget):
         layout.addWidget(self.pin)
 
         self.float_button = self._button("float", "Float this panel")
-        self.float_button.clicked.connect(
-            lambda: dock.setFloating(not dock.isFloating()))
+        self.float_button.clicked.connect(lambda: dock.float_on_purpose(not dock.isFloating()))
         layout.addWidget(self.float_button)
 
         self.close_button = self._button("close", "Hide this panel")
@@ -153,6 +152,10 @@ class DockTitleBar(QWidget):
         self.float_button.setEnabled(not pinned)
 
 
+#: Where a panel may be docked.
+PANEL_AREAS = Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea
+
+
 class PanelDock(QDockWidget):
     """A dock that can be pinned in place, hidden, and put back."""
 
@@ -163,7 +166,13 @@ class PanelDock(QDockWidget):
         super().__init__(title, parent)
         self.setObjectName(name)
         self.setWidget(widget)
-        self.setAllowedAreas(Qt.AllDockWidgetAreas)
+        # Panels go on the left or the right, never along the top or the
+        # bottom (the user, 2026-10-16: the Markups List alone has the bottom,
+        # and it is not a dock)
+        self.setAllowedAreas(PANEL_AREAS)
+        #: floated with its float button: kept floating. Floated by a drag
+        #: that ended away from both sides: put back (MainWindow).
+        self.floated_on_purpose = False
         self._pinned = False
         self._collapsed = False
         self._restore_size = None
@@ -176,6 +185,11 @@ class PanelDock(QDockWidget):
         self._bar.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setTitleBarWidget(self._bar)
         self.set_pinned(False)
+
+    def float_on_purpose(self, floating: bool) -> None:
+        """The float button: out of its side as a window of its own, or back."""
+        self.floated_on_purpose = bool(floating)
+        self.setFloating(bool(floating))
 
     def minimumSizeHint(self) -> QSize:
         """Let the main-window splitter squeeze a dock fully out of view."""

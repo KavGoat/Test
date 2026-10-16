@@ -727,6 +727,15 @@ class PageView(QGraphicsView):
         if frames is None:
             frames = self.involved_frames()
         self._snapshot = [(frame, frame.serialize_items()) for frame in frames]
+        self._snapshot_selection = self._selected_uids()
+
+    def _selected_uids(self) -> set:
+        """The markups picked now, by id (what an undo picks again)."""
+        scene = self.scene()
+        if scene is None:
+            return set()
+        return {uid for uid in (getattr(item, "uid", None) for item in scene.selectedItems())
+                if uid}
 
     def involved_frames(self, *items) -> list:
         """Every page a gesture starting now could plausibly change.
@@ -827,10 +836,14 @@ class PageView(QGraphicsView):
         stack = self.window.undo_stack
         if len(changed) > 1:
             stack.beginMacro(text)
+        picked_before = getattr(self, "_snapshot_selection", None)
+        picked_after = self._selected_uids()
         for frame, before, after in changed:
             self.push_command(PageEditCommand(frame, before, after,
                                               text, on_apply=self.after_undo,
-                                              coalesce=coalesce, find_frame=self.frame_for_page))
+                                              coalesce=coalesce, find_frame=self.frame_for_page,
+                                              selected_before=picked_before,
+                                              selected_after=picked_after))
         if len(changed) > 1:
             stack.endMacro()
         self.documentEdited.emit()
@@ -984,10 +997,49 @@ class PageView(QGraphicsView):
         return self._zoom
 
     def setScene(self, scene) -> None:
+        previous = self.scene()
+        if previous is not None and scene is not previous:
+            # What was going on in the canvas going out goes with it: a
+            # half-drawn markup, an open editor, an Offset under way, the
+            # Search panel's marks. Left behind, they reached into a canvas
+            # that had been taken apart (QA F-01: Offset, then New PDF, then
+            # a drag crashed the application).
+            self.leave_the_canvas()
         super().setScene(scene)
         self._update_desk_margin()
+        if scene is not None and scene is not previous:
+            # The turn belongs to the document's canvas, not to the view
+            # (QA F-09): coming to another document shows it at its own.
+            self._view_turn = int(getattr(scene, "reading_turn", 0) or 0) % 360
         if scene is not None and hasattr(self, "rulers"):
-            scene.selectionChanged.connect(self.rulers.refresh)
+            # once per canvas: each tab switch connected it again
+            told = getattr(self, "_rulers_told", None)
+            if told is None:
+                import weakref
+                told = self._rulers_told = weakref.WeakSet()
+            if scene not in told:
+                told.add(scene)
+                scene.selectionChanged.connect(self.rulers.refresh)
+
+    def forget_insertion_marks(self) -> None:
+        """No red cross (Calc mode) and no insertion point (Markup mode)."""
+        self.calc.clear_cross()
+        if self._insertion_point is not None:
+            self._insertion_point = None
+            self.viewport().update()
+
+    def leave_the_canvas(self) -> None:
+        """Put down everything that belongs to the canvas in view, quietly:
+        it is being replaced by another document's (or taken apart)."""
+        window = getattr(self, "window", None)
+        try:
+            self.escape_everything(quiet=True)
+        except RuntimeError:
+            pass
+        if window is not None and hasattr(window, "end_canvas_sessions"):
+            window.end_canvas_sessions(self)
+        self._search_marks = []
+        self._snapshot = []
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -1939,6 +1991,14 @@ class PageView(QGraphicsView):
                     -4, -4, 4, 4).contains(scene_pos):
                 self.close_block()
 
+        if (event.button() == Qt.LeftButton and self.tool_key not in ("select", "pan")
+                and not self.window.holding_a_format()):
+            # Something is being drawn or put down somewhere: the red cross
+            # and the insertion point left by an earlier click are not where
+            # the next thing goes any more (the user, 2026-10-16: after a
+            # rectangle drawn elsewhere the first point was still showing)
+            self.forget_insertion_marks()
+
         if self.tables.mouse_press(event, scene_pos):
             event.accept()
             return
@@ -2640,7 +2700,7 @@ class PageView(QGraphicsView):
             self.viewport().update()
         return super().viewportEvent(event)
 
-    def escape_everything(self) -> str:
+    def escape_everything(self, quiet: bool = False) -> str:
         """One press of Escape, back to a blank slate.
 
         Escape used to peel one layer at a time, which reads well on paper and
@@ -2698,6 +2758,12 @@ class PageView(QGraphicsView):
             self.set_tool("select")
             self.toolFinished.emit("select")
         self.window.put_the_format_painter_down()
+        # Offset under way on this view (Esc reaches the view, not the
+        # viewport the session watches)
+        offset = getattr(self.window, "_offset", None)
+        if offset is not None and getattr(offset, "view", None) is self:
+            offset.finish()
+            undone.append("Offset")
         # Qt's mouse ownership is independent of our tool mode. A release
         # lost to another window must not leave an item capturing later input.
         scene = self.scene()
@@ -2714,7 +2780,8 @@ class PageView(QGraphicsView):
         self.viewport().update()
         message = "Back to nothing selected" if not undone else (
             "Cancelled " + ", ".join(undone))
-        self.statusMessage.emit(message)
+        if not quiet:
+            self.statusMessage.emit(message)
         return message
 
     def _become_a_drawn_cloud(self, scene_pos: QPointF) -> None:
@@ -3180,6 +3247,11 @@ class PageView(QGraphicsView):
                 # enabled. Dragging still draws a marquee.
                 # In Calc mode SMath's red cross is the insertion point (it
                 # was placed on the press); one marker, never two.
+                if not self.calc.calc_mode():
+                    # a click in Markup mode is not where an equation goes:
+                    # the red cross of an earlier Calc-mode click goes, and
+                    # does not come back at the old place with Calc mode
+                    self.calc.clear_cross()
                 if preferences.current().insertion_point and not self.calc.calc_mode():
                     frame = self.frame_at(scene_pos)
                     if frame is not None:

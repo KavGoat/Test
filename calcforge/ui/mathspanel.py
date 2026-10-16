@@ -148,7 +148,7 @@ class MathsPanel(QScrollArea):
         super().resizeEvent(event)
         # and once the new columns have settled, the content to the panel's
         # width (a scroll area only resizes what is in it on its own resize)
-        QTimer.singleShot(0, self._fill_the_width)
+        QTimer.singleShot(0, self, self._fill_the_width)
 
     def _fill_the_width(self) -> None:
         inner = self.widget()

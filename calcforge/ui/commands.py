@@ -26,9 +26,18 @@ class PageEditCommand(QUndoCommand):
 
     def __init__(self, frame, before: list[dict], after: list[dict], text: str,
                  on_apply: Optional[Callable] = None, coalesce: bool = False,
-                 find_frame: Optional[Callable] = None):
+                 find_frame: Optional[Callable] = None,
+                 selected_before: Optional[set] = None,
+                 selected_after: Optional[set] = None):
         super().__init__(text)
         self.frame = frame
+        # What was picked before the edit and after it, by markup id. An
+        # undo picks again what was picked before (Revu: the markup a Delete,
+        # Cut or Hide took away comes back selected), a redo what was picked
+        # after (QA F-34). None: the edit did not say, and the selection in
+        # hand is kept.
+        self.selected_before = selected_before
+        self.selected_after = selected_after
         # Undoing a page added or moved rebuilds every page's frame: the page
         # is found again by its id when the step is applied, or a redo after
         # it wrote into a frame no longer on the canvas (2026-10-10).
@@ -68,6 +77,7 @@ class PageEditCommand(QUndoCommand):
             return False
         self.after = other.after
         self.stamp = other.stamp
+        self.selected_after = other.selected_after
         return True
 
     def _live_frame(self):
@@ -77,12 +87,21 @@ class PageEditCommand(QUndoCommand):
                 self.frame = found
         return self.frame
 
-    def _apply(self, data: list[dict]) -> None:
+    def _apply(self, data: list[dict], wanted: Optional[set] = None) -> None:
         self._live_frame()
         selected = {item.uid for item in self.frame.markups() if item.isSelected()}
+        if wanted is not None:
+            # the whole canvas's selection: a step that changed two pages is
+            # two of these, and each of them picks the same
+            scene = self.frame.scene()
+            if scene is not None:
+                for item in scene.selectedItems():
+                    if getattr(item, "uid", None) not in wanted:
+                        item.setSelected(False)
+            selected = wanted
         self.frame.load_items(data)
         for item in self.frame.markups():
-            if item.uid in selected:
+            if item.uid in selected and item.isVisible():
                 item.setSelected(True)
         if self.on_apply is not None:
             self.on_apply()
@@ -93,10 +112,10 @@ class PageEditCommand(QUndoCommand):
         if self._skip_first_redo:
             self._skip_first_redo = False
             return
-        self._apply(self.after)
+        self._apply(self.after, self.selected_after)
 
     def undo(self) -> None:
-        self._apply(self.before)
+        self._apply(self.before, self.selected_before)
 
 
 class DocumentStructureCommand(QUndoCommand):
