@@ -50,3 +50,24 @@ logs one line per finding in the findings format.
 Every inventory line has a passing test or a dated "not a bug" note.
 Every speed budget is met. No placement finding is open. Every novice task
 is completed in at most the clicks a Revu, Excel or SMath user would need.
+
+## 5. Every command, by mouse and keyboard, checked by eye (the user, 2026-10-16)
+"Every button, context menu, feature, anything a block of code adds needs to be
+tested with a mouse and keyboard and visually checked."
+- `tools/qa/exercise.py` drives every inventory line the way a person would:
+  - click the toolbar button where it is drawn;
+  - open the menu bar menu with the mouse and click the item;
+  - right-click the real target and click the item in the menu that pops up;
+  - press its shortcut;
+  - type into its fields.
+- Each command is run in a state where it applies (the right markup selected,
+  a sheet page open, Calc mode, several pages, and so on).
+- It records: exceptions, time taken, whether something visible changed or a
+  dialog opened, whether one undo restores the page, and before/after
+  screenshots gathered onto contact sheets.
+- `tests/test_every_command.py` keeps the mechanical part permanent: every
+  command triggers with no exception and no hang, and undoes in one step.
+- The area testers look at every contact sheet: wrong result, artefacts,
+  clipped text, dark-mode visibility, a dialog that doesn't match Revu.
+- New code doesn't count as done until its commands appear in the inventory
+  and pass this.
