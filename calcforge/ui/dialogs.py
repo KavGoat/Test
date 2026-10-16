@@ -7,7 +7,7 @@ import re
 from typing import Optional
 
 from PySide6.QtCore import QEvent, QKeyCombination, Qt, Signal
-from PySide6.QtGui import QFont, QKeySequence, QPalette, QPixmap
+from PySide6.QtGui import QFont, QKeySequence, QPalette
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QMenu,
                                QPlainTextEdit,
                                QDialog,
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComb
 from ..core.document import (PAGE_SIZES, PAPER_UNITS, PageScale, PageSetup)
 from ..core.units import parse_unit, unit_text
 from ..io import pdfio
-from .widgets import UnitCombo
+from .widgets import PagesRange, UnitCombo, page_ranges  # noqa: F401
 
 
 def _buttons(dialog: QDialog) -> QDialogButtonBox:
@@ -37,7 +37,7 @@ class PageSetupDialog(QDialog):
 
     def __init__(self, setup: PageSetup, parent=None, multiple_pages: bool = False):
         super().__init__(parent)
-        self.setWindowTitle("Page setup")
+        self.setWindowTitle("Page Setup")
         self.setup = PageSetup.from_dict(setup.to_dict())
         layout = QVBoxLayout(self)
 
@@ -108,119 +108,9 @@ class PageSetupDialog(QDialog):
         return setup
 
 
-class NewPagesDialog(QDialog):
-    """Number and paper size for pages inserted in one undo step."""
-
-    def __init__(self, setup: PageSetup, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Add pages")
-        form = QFormLayout(self)
-        self.count = QSpinBox()
-        self.count.setRange(1, 500)
-        self.count.setValue(1)
-        form.addRow("Number", self.count)
-        self.paper = QComboBox()
-        self.paper.addItems(["Same as current"] + list(PAGE_SIZES))
-        form.addRow("Paper", self.paper)
-        self.orientation = QComboBox()
-        self.orientation.addItems(["portrait", "landscape"])
-        self.orientation.setCurrentText(setup.orientation)
-        form.addRow("Orientation", self.orientation)
-        form.addRow(_buttons(self))
-
-    def chosen_setup(self, current: PageSetup) -> PageSetup:
-        setup = PageSetup.from_dict(current.to_dict())
-        if self.paper.currentIndex() > 0:
-            size = self.paper.currentText()
-            setup.size_name = size
-            setup.width_mm, setup.height_mm = PAGE_SIZES[size]
-            setup.orientation = self.orientation.currentText()
-        return setup
-
-
-class PagesChooser(QWidget):
-    """Revu's Pages: All Pages, Current (n), Selected (only when pages are
-    picked in Thumbnails) or Custom, with the range in a box beside it —
-    "1-3, 5, 9" — which typing into makes Custom (the user, 2026-10-15)."""
-
-    ALL, CURRENT, SELECTED, CUSTOM = "all", "current", "selected", "custom"
-
-    def __init__(self, count: int, current: int = 0, selected=None,
-                 default: str = CURRENT, parent=None):
-        super().__init__(parent)
-        self.count = max(int(count), 1)
-        self.current = min(max(int(current), 0), self.count - 1)
-        self.selected = sorted(selected or [])
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        self.combo = QComboBox()
-        self.combo.setObjectName("pagesChoice")
-        self.combo.addItem("All Pages", self.ALL)
-        self.combo.addItem(f"Current ({self.current + 1})", self.CURRENT)
-        if self.selected:
-            self.combo.addItem("Selected", self.SELECTED)
-        self.combo.addItem("Custom", self.CUSTOM)
-        self.range = QLineEdit()
-        self.range.setObjectName("pagesRange")
-        self.range.setPlaceholderText("1-3, 5")
-        self.range.setToolTip("Pages and ranges, e.g. 1-3, 5, 9")
-        row.addWidget(self.combo, 1)
-        row.addWidget(self.range, 1)
-        self.combo.currentIndexChanged.connect(self._fill)
-        self.range.textEdited.connect(self._typed)
-        self.choose(default)
-
-    def which(self) -> str:
-        return self.combo.currentData()
-
-    def choose(self, which: str, text: Optional[str] = None) -> None:
-        index = self.combo.findData(which)
-        self.combo.setCurrentIndex(index if index >= 0 else self.combo.findData(self.CURRENT))
-        self._fill()
-        if text is not None:
-            self.range.setText(text)
-
-    def _fill(self, *_args) -> None:
-        which = self.which()
-        if which == self.ALL:
-            self.range.setText("1" if self.count == 1 else f"1-{self.count}")
-        elif which == self.CURRENT:
-            self.range.setText(str(self.current + 1))
-        elif which == self.SELECTED:
-            self.range.setText(page_ranges(self.selected))
-
-    def _typed(self, _text: str) -> None:
-        if self.which() != self.CUSTOM:
-            was = self.combo.blockSignals(True)
-            self.combo.setCurrentIndex(self.combo.findData(self.CUSTOM))
-            self.combo.blockSignals(was)
-
-    def page_indexes(self) -> Optional[list]:
-        """The chosen pages, from 0; None when the Custom range will not read."""
-        which = self.which()
-        if which == self.ALL:
-            return list(range(self.count))
-        if which == self.CURRENT:
-            return [self.current]
-        if which == self.SELECTED:
-            return list(self.selected)
-        from .colorprocess import parse_pages
-        return parse_pages(self.range.text(), self.count)
-
-
-def page_ranges(indexes) -> str:
-    """[0, 1, 2, 4] as "1-3, 5"."""
-    parts, run = [], []
-    for index in sorted(set(indexes)):
-        if run and index == run[-1] + 1:
-            run.append(index)
-            continue
-        if run:
-            parts.append(str(run[0] + 1) if len(run) == 1 else f"{run[0] + 1}-{run[-1] + 1}")
-        run = [index]
-    if run:
-        parts.append(str(run[0] + 1) if len(run) == 1 else f"{run[0] + 1}-{run[-1] + 1}")
-    return ", ".join(parts)
+# The shared Pages control (Revu's All Pages / Current / Selected / Custom)
+# lives in widgets.py; the old name stays for what used it.
+PagesChooser = PagesRange
 
 
 # Revu's Set Scale (the user, 2026-10-15: "page scale pop up doesn't look
@@ -665,7 +555,7 @@ class ScaleDialog(QDialog):
             row += 1
         else:
             self.name.hide()
-        self.pages = PagesChooser(count, current, selected)
+        self.pages = PagesRange(count, current, selected)
         if not viewport:
             grid.addWidget(QLabel("Pages:"), row, 0)
             grid.addWidget(self.pages, row, 1)
@@ -807,7 +697,7 @@ class ScaleDialog(QDialog):
 
     def restore(self, state: dict) -> None:
         self._filling = True
-        self.pages.choose(state.get("pages", PagesChooser.CURRENT), state.get("range"))
+        self.pages.choose(state.get("pages", PagesRange.CURRENT), state.get("range"))
         self.separate_y.setChecked(bool(state.get("separate_y")))
         self.x_row.restore(state.get("x", {}))
         self.y_row.restore(state.get("y", {}))
@@ -919,113 +809,6 @@ def read_ratio(text: str) -> Optional[float]:
     return ratio if ratio and ratio > 0 else None
 
 
-class PdfImportDialog(QDialog):
-    """Choose a PDF and which of its pages to bring in."""
-
-    def __init__(self, parent=None, current_setup: Optional[PageSetup] = None):
-        super().__init__(parent)
-        self.setWindowTitle("Insert PDF pages")
-        self.path = ""
-        self._count = 0
-        layout = QVBoxLayout(self)
-
-        picker = QHBoxLayout()
-        self.file = QLineEdit()
-        self.file.setPlaceholderText("Choose a PDF file…")
-        self.file.setReadOnly(True)
-        browse = QPushButton("Browse…")
-        browse.clicked.connect(self.browse)
-        picker.addWidget(self.file, 1)
-        picker.addWidget(browse)
-        layout.addLayout(picker)
-
-        form = QFormLayout()
-        self.pages = QLineEdit("all")
-        self.pages.setPlaceholderText("all, or 1-3,7")
-        form.addRow("Pages", self.pages)
-
-        self.fit = QComboBox()
-        self.fit.addItem("Keep the PDF's own page size", pdfio.FIT_ORIGINAL)
-        self.fit.addItem("Fit to A4", pdfio.FIT_A4)
-        self.fit.addItem("Fit to this document's page size", pdfio.FIT_CURRENT)
-        form.addRow("Page size", self.fit)
-
-        # No resolution is asked about, because there is none to choose: an
-        # inserted page is drawn from the file at whatever size it is being
-        # looked at. The only question left is one about this document, which
-        # is what size of page the imported ones should be.
-        layout.addLayout(form)
-
-        self.info = QLabel("")
-        self.info.setStyleSheet("color:#5a6270;")
-        layout.addWidget(self.info)
-
-        # A look at what is actually coming in. A drawing that renders blank is
-        # obvious here rather than after it has been inserted.
-        self.preview = QLabel("Choose a PDF to see the first page it will bring in")
-        self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setWordWrap(True)
-        self.preview.setMinimumHeight(200)
-        self.preview.setStyleSheet(
-            "QLabel { border:1px solid palette(mid); background: palette(base); "
-            "color:#5a6270; }")
-        layout.addWidget(self.preview, 1)
-        self.pages.textChanged.connect(lambda _: self.show_preview())
-
-        layout.addWidget(_buttons(self))
-
-    def _say_in_preview(self, message: str) -> None:
-        """Words instead of a picture. Clearing the pixmap first, because
-        setting a null one afterwards would wipe the words again."""
-        self.preview.clear()
-        self.preview.setText(message)
-
-    def show_preview(self) -> None:
-        """Draw the first page of the chosen range into the preview panel."""
-        if not self.path or not self._count:
-            return
-        indices = pdfio.parse_page_range(self.pages.text(), self._count)
-        if not indices:
-            self._say_in_preview("No pages in that range")
-            return
-        try:
-            image = pdfio.render_preview(self.path, indices[0], 560)
-        except Exception as exc:  # noqa: BLE001
-            self._say_in_preview(str(exc))
-            return
-        if image is None or image.isNull():
-            self._say_in_preview(f"Page {indices[0] + 1} could not be drawn")
-            return
-        self.preview.setPixmap(QPixmap.fromImage(image).scaled(
-            self.preview.width() - 8, self.preview.height() - 8,
-            Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        self.preview.setText("")
-
-    def browse(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Choose a PDF", "",
-                                              "PDF files (*.pdf);;All files (*)")
-        if not path:
-            return
-        try:
-            self._count = pdfio.page_count(path)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Insert PDF", str(exc))
-            return
-        self.path = path
-        self.file.setText(path)
-        self.info.setText(f"{os.path.basename(path)} — {self._count} page"
-                          f"{'s' if self._count != 1 else ''}")
-        self.show_preview()
-
-    def selection(self) -> tuple[str, list[int], str, float, bool]:
-        indices = pdfio.parse_page_range(self.pages.text(), self._count)
-        # The last of these says whether to make markups out of the page's own
-        # line work. It is off: a page comes in as the page, and turning a
-        # drawing into thousands of editable lines is a thing to ask for, not
-        # a thing to have happen.
-        return (self.path, indices, self.fit.currentData(), pdfio.BEST_DPI, False)
-
-
 # Insert field…: MarkForge's fields and SMath's (its Insert > Field dialog, with
 # its formats), as header/footer tokens.
 FIELD_CHOICES = [
@@ -1046,7 +829,7 @@ class DocumentPropertiesDialog(QDialog):
 
     def __init__(self, document, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Document properties")
+        self.setWindowTitle("Document Properties")
         self.document = document
         self.resize(900, 660)
         layout = QVBoxLayout(self)
@@ -1356,7 +1139,7 @@ class CountSubjectDialog(QDialog):
 
     def __init__(self, subject: str, symbol: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Count tool")
+        self.setWindowTitle("Count Tool")
         layout = QFormLayout(self)
         self.subject = QLineEdit(subject)
         self.subject.setPlaceholderText("Doors, sprinkler heads, columns…")
@@ -1375,7 +1158,7 @@ class RectangleSizeDialog(QDialog):
     def __init__(self, width_text: str, height_text: str, unit: str, parent=None,
                  scaled: bool = True):
         super().__init__(parent)
-        self.setWindowTitle("Rectangle size")
+        self.setWindowTitle("Rectangle Size")
         layout = QVBoxLayout(self)
         if scaled:
             message = ("This page has a scale, so the rectangle can be set out at an "
@@ -1407,7 +1190,7 @@ class ArrayDialog(QDialog):
 
     def __init__(self, unit: str, scaled: bool, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Multiple")
+        self.setWindowTitle("Multiply")
         layout = QVBoxLayout(self)
         if scaled:
             message = ("This page has a scale, so distances are real distances. "
@@ -1504,7 +1287,7 @@ class ShortcutManagerDialog(QDialog):
 
     def __init__(self, manager, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Keyboard shortcuts")
+        self.setWindowTitle("Keyboard Shortcuts")
         self.manager = manager
         self.resize(780, 640)
         outer = QVBoxLayout(self)
@@ -1656,7 +1439,7 @@ class ShortcutManagerDialog(QDialog):
         clashes = self.clashes()
         if clashes:
             QMessageBox.warning(
-                self, "Keyboard shortcuts",
+                self, "Keyboard Shortcuts",
                 "These keys are each bound to more than one thing:\n\n  "
                 + "\n  ".join(sorted(clashes))
                 + "\n\nClear one of them, or give it a different key.")
@@ -1700,7 +1483,7 @@ class _GesturesSheet(QWidget):
     """The things the mouse and the canvas do, which are not rebindable.
 
     It lives inside the shortcut manager rather than in a dialog of its own:
-    two menu entries both called "Keyboard shortcuts" only ever made people
+    two menu entries both called "Keyboard Shortcuts" only ever made people
     open the wrong one.
     """
 
@@ -1753,7 +1536,7 @@ class ToolbarDialog(QDialog):
 
     def __init__(self, tools, chosen, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Tools on the toolbar")
+        self.setWindowTitle("Customise Toolbars")
         self.resize(420, 560)
         layout = QVBoxLayout(self)
         note = QLabel("Tick the tools you want on the toolbar. Everything stays "
@@ -1882,7 +1665,7 @@ class FlattenDialog(QDialog):
 
         pages = QHBoxLayout()
         pages.addWidget(QLabel("Pages:"))
-        self.pages = PagesChooser(count, current, selected_pages, default=PagesChooser.ALL)
+        self.pages = PagesRange(count, current, selected_pages, default=PagesRange.ALL)
         pages.addWidget(self.pages, 1)
         layout.addLayout(pages)
 
@@ -2064,43 +1847,67 @@ class PreferencesDialog(QDialog):
 
 
 class SpellingDialog(QDialog):
-    """One misspelt word: change it, skip it, or learn it.
+    """Revu's Check Spelling, one misspelt word at a time: Ignore Once,
+    Ignore All, Add to Dictionary, Change, Change All and Close.
 
-    *choice* says which button closed it: ``change``, ``ignore``, ``add`` or
-    ``stop``.
+    *choice* says which button closed it: ``ignore_once``, ``ignore_all``,
+    ``add``, ``change``, ``change_all`` or ``stop`` (Close).
     """
+
+    CHOICES = (("Ignore Once", "ignore_once"), ("Ignore All", "ignore_all"),
+               ("Add to Dictionary", "add"), ("Change", "change"),
+               ("Change All", "change_all"))
 
     def __init__(self, word: str, text: str, at: int, suggestions: list,
                  parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Check spelling")
+        self.setWindowTitle("Check Spelling")
+        self.setMinimumWidth(492)
         self.choice = "stop"
         layout = QVBoxLayout(self)
         before = text[max(at - 30, 0):at]
         after = text[at + len(word):at + len(word) + 30]
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        grid.setColumnStretch(1, 1)
         context = QLabel(f"…{html.escape(before)}<b style='color:#e03131'>"
                          f"{html.escape(word)}</b>{html.escape(after)}…")
         context.setTextFormat(Qt.RichText)
         context.setWordWrap(True)
-        layout.addWidget(context)
-        form = QFormLayout()
+        grid.addWidget(QLabel("Not in Dictionary:"), 0, 0, Qt.AlignTop)
+        grid.addWidget(context, 0, 1)
         self.edit = QLineEdit(suggestions[0] if suggestions else word)
-        form.addRow("Change to", self.edit)
+        grid.addWidget(QLabel("Change To:"), 1, 0)
+        grid.addWidget(self.edit, 1, 1)
         self.options = QListWidget()
         self.options.addItems(suggestions)
         self.options.currentTextChanged.connect(self.edit.setText)
         self.options.itemDoubleClicked.connect(lambda _item: self._close("change"))
-        form.addRow("Suggestions", self.options)
-        layout.addLayout(form)
-        buttons = QHBoxLayout()
-        for label, choice in (("Change", "change"), ("Ignore", "ignore"),
-                              ("Add word", "add"), ("Stop", "stop")):
+        grid.addWidget(QLabel("Suggestions:"), 2, 0, Qt.AlignTop)
+        grid.addWidget(self.options, 2, 1)
+        body = QHBoxLayout()
+        body.setSpacing(12)
+        body.addLayout(grid, 1)
+        column = QVBoxLayout()
+        column.setSpacing(6)
+        self.buttons = {}
+        for label, choice in self.CHOICES:
             button = QPushButton(label)
+            button.setObjectName(f"spell_{choice}")
             button.clicked.connect(lambda _checked=False, c=choice: self._close(c))
-            buttons.addWidget(button)
+            column.addWidget(button)
+            self.buttons[choice] = button
             if choice == "change":
                 button.setDefault(True)
-        layout.addLayout(buttons)
+        column.addStretch(1)
+        close = QPushButton("Close")
+        close.setObjectName("spell_close")
+        close.clicked.connect(lambda: self._close("stop"))
+        column.addWidget(close)
+        self.buttons["stop"] = close
+        body.addLayout(column)
+        layout.addLayout(body)
 
     def _close(self, choice: str) -> None:
         self.choice = choice
@@ -2114,41 +1921,91 @@ class SpellingDialog(QDialog):
 
 
 class LinkDialog(QDialog):
-    """Where a link goes: a page, a view, a file or a web address."""
+    """Revu's Action dialog (the Hyperlink tool): Jump to Page, Snapshot View
+    (the page and where the view is), Open File or Open URL."""
 
     def __init__(self, item, pages: int, current_view: tuple, parent=None):
         super().__init__(parent)
         from ..items.link import FILE, PAGE, VIEW, WEB
-        self.setWindowTitle("Link")
+        self.setWindowTitle("Action")
+        self.setMinimumWidth(492)
         self.item = item
         self._view = current_view
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        grid.setColumnStretch(1, 1)
+        layout.addLayout(grid)
         self.kind = QComboBox()
-        for key, label in ((PAGE, "Page"), (VIEW, "View"), (FILE, "File"), (WEB, "Web")):
+        self.kind.setObjectName("actionKind")
+        for key, label in ((PAGE, "Jump to Page"), (VIEW, "Snapshot View"),
+                           (FILE, "Open File"), (WEB, "Open URL")):
             self.kind.addItem(label, key)
         self.kind.setCurrentIndex(max(self.kind.findData(item.kind), 0))
-        form.addRow("Go to", self.kind)
+        grid.addWidget(QLabel("Action:"), 0, 0)
+        grid.addWidget(self.kind, 0, 1)
         self.page = QSpinBox()
         self.page.setRange(1, max(pages, 1))
         self.page.setValue(item.target_page + 1)
-        form.addRow("Page", self.page)
-        self.here = QPushButton("Use current view")
+        self.page.setSuffix(f" of {max(pages, 1)}")
+        self.page.setMinimumWidth(90)
+        self.here = QPushButton("Use Current View")
         self.here.setToolTip("The page and position the view is showing now")
         self.here.clicked.connect(self._use_view)
-        form.addRow("", self.here)
+        self.page_label = QLabel("Page:")
+        page_row = QHBoxLayout()
+        page_row.setContentsMargins(0, 0, 0, 0)
+        page_row.addWidget(self.page)
+        page_row.addWidget(self.here)
+        page_row.addStretch(1)
+        self.page_holder = QWidget()
+        self.page_holder.setLayout(page_row)
+        grid.addWidget(self.page_label, 1, 0)
+        grid.addWidget(self.page_holder, 1, 1)
         self.address = QLineEdit(item.address)
         self.address.setPlaceholderText("https://… or a file path")
-        form.addRow("Address", self.address)
-        browse = QPushButton("Browse…")
-        browse.clicked.connect(self._browse)
-        form.addRow("", browse)
-        layout.addLayout(form)
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self.browse = QPushButton("Browse…")
+        self.browse.clicked.connect(self._browse)
+        self.address_label = QLabel("Address:")
+        address_row = QHBoxLayout()
+        address_row.setContentsMargins(0, 0, 0, 0)
+        address_row.addWidget(self.address, 1)
+        address_row.addWidget(self.browse)
+        self.address_holder = QWidget()
+        self.address_holder.setLayout(address_row)
+        grid.addWidget(self.address_label, 2, 0)
+        grid.addWidget(self.address_holder, 2, 1)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        ok = QPushButton("OK")
+        ok.setDefault(True)
+        ok.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(ok)
+        buttons.addWidget(cancel)
+        layout.addSpacing(4)
+        layout.addLayout(buttons)
         self._y = item.target_y
+        self.kind.currentIndexChanged.connect(self._show_fields)
+        self._show_fields()
+
+    def _show_fields(self, *_args) -> None:
+        """Jump to Page and Snapshot View take a page; Open File and Open URL
+        an address (Browse… only for a file)."""
+        from ..items.link import FILE, PAGE, VIEW
+        kind = self.kind.currentData()
+        on_page = kind in (PAGE, VIEW)
+        for widget in (self.page_label, self.page_holder):
+            widget.setVisible(on_page)
+        for widget in (self.address_label, self.address_holder):
+            widget.setVisible(not on_page)
+        self.here.setVisible(kind == VIEW)
+        self.browse.setVisible(kind == FILE)
+        self.address.setPlaceholderText("A file to open" if kind == FILE
+                                        else "https://…")
+        self.adjustSize()
 
     def _use_view(self) -> None:
         from ..items.link import VIEW
@@ -2159,7 +2016,7 @@ class LinkDialog(QDialog):
 
     def _browse(self) -> None:
         from ..items.link import FILE
-        path, _ = QFileDialog.getOpenFileName(self, "Link to file")
+        path, _ = QFileDialog.getOpenFileName(self, "Open File")
         if path:
             self.address.setText(path)
             self.kind.setCurrentIndex(self.kind.findData(FILE))
@@ -2223,3 +2080,14 @@ class ViewportsDialog(QDialog):
         if viewport is not None:
             self.window_.delete_viewport(self.page, viewport)
             self.fill()
+
+
+# Revu's page dialogs live in pagedialogs.py; the old names stay for what
+# used them ("Add pages" is Insert Blank Page, "Insert PDF pages" is Insert
+# Pages).
+from .pagedialogs import (ApplyToPagesDialog, CropPagesDialog,  # noqa: E402,F401
+                          DeletePagesDialog, ExtractPagesDialog, InsertBlankPageDialog,
+                          InsertPagesDialog, SplitDocumentDialog)
+
+NewPagesDialog = InsertBlankPageDialog
+PdfImportDialog = InsertPagesDialog

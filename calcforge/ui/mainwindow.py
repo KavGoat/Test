@@ -6,6 +6,7 @@ import sys
 import base64
 import json
 import os
+import re
 from typing import Optional
 
 from PySide6.QtCore import (QBuffer, QByteArray, QEvent, QIODevice, QMimeData, QModelIndex, QObject,
@@ -861,8 +862,9 @@ class MainWindow(QMainWindow):
                   checkable=True,
                   tip="Open or close the markups list under the drawing — or "
                       "drag its bar up and down")
-        self._act("crop_page", "Crop Pages", lambda: self.select_tool("crop"),
-                  tip="Drag the part of the page to keep; Undo restores the rest")
+        self._act("crop_page", "Crop Pages…", lambda: self.crop_pages(),
+                  tip="Cut margins off the chosen pages, or drag the part to keep "
+                      "(Get Window); Undo restores the rest")
         self._act("extract_pages", "Extract Pages…", lambda: self.extract_pages(),
                   tip="Save chosen pages, with their markups, as a new PDF")
         self._act("split_pages", "Split Document…", lambda: self.split_into_files(),
@@ -1124,17 +1126,19 @@ class MainWindow(QMainWindow):
                   tip="Put the panels and toolbars back where they started")
         self._act("lock_toolbars", "Lock Toolbars", self.lock_toolbars, "",
                   checkable=True, tip="Stop the toolbars being dragged about")
-        self._act("customise_toolbar", "Customize Toolbars…",
+        self._act("customise_toolbar", "Customise Toolbars…",
                   self.customise_toolbar,
                   tip="Pick which tools appear on the markup toolbar")
 
-        self._act("add_page", "Blank Page", lambda: self.add_page())
+        self._act("add_page", "Blank Page…", lambda: self.add_page(),
+                  tip="Insert Blank Page: the size, how many, and where they go")
         self._act("add_sheet_page", "Spreadsheet page", lambda: self.insert_sheet_page(),
                   tip="A page of spreadsheet cells; pages next to each other are one sheet")
         self._act("sheet_page_setup", "Sheet Layout…", lambda: self.sheet_page_setup(),
                   tip="Print area, titles, fit to page width, centring, gridlines and headings")
         self._act("duplicate_page", "Duplicate Page", lambda: self.duplicate_page())
-        self._act("delete_page", "Delete Pages", lambda: self.delete_page())
+        self._act("delete_page", "Delete Pages…", lambda: self.delete_page(),
+                  tip="Delete Pages: choose which pages to take out")
         # No key: Ctrl+Shift+P shows the problems panel, and page setup is on
         # the Page menu and on a page's own right-click menu.
         self._act("page_setup", "Page Setup…", self.page_setup, "", "page")
@@ -3603,7 +3607,10 @@ class MainWindow(QMainWindow):
                 and not isinstance(QWidget.window(watched), dialogs.QDialog)
                 and QApplication.activePopupWidget() is None
                 and watched is not self.view and not self.view.isAncestorOf(watched)
-                and watched is not self.document_tabs):
+                and watched is not self.document_tabs
+                # Rename Page Label's in-place box: Escape leaves the label
+                and not (isinstance(watched, QLineEdit)
+                         and watched.objectName() == "pageLabelEditor")):
             if event.type() == QEvent.KeyPress:
                 self.view.escape_everything()
             event.accept()
@@ -3908,18 +3915,49 @@ class MainWindow(QMainWindow):
             return self.current_index
         return max(0, min(int(index), len(self.document.pages) - 1))
 
-    def add_page(self, index: Optional[int] = None, before: bool = False) -> None:
-        from .sheetpages import safe_target
-        target = safe_target(self.document, self.page_index(index) + (0 if before else 1))
-        count = 1
-        setup = PageSetup.from_dict(self.current_page().setup.to_dict())
-        if self.interactive_prompts:
-            dialog = dialogs.NewPagesDialog(setup, self)
-            if dialog.exec() != dialogs.QDialog.Accepted:
-                return
-            count = dialog.count.value()
-            setup = dialog.chosen_setup(setup)
+    def thumbnail_selection(self) -> list[int]:
+        """The pages picked out in Thumbnails, for a Pages control's
+        Selected — which only appears when something besides the page in
+        view is picked (Revu: "only appears if pages were selected")."""
+        picked = self.selected_pages()
+        return picked if picked and picked != [self.current_index] else []
 
+    def blank_page_dialog(self, index: Optional[int] = None,
+                          before: bool = False) -> "dialogs.InsertBlankPageDialog":
+        """Revu's Insert Blank Page, placed Before or After page *index* (the
+        page in view when none is named); not yet shown."""
+        which = self.page_index(index)
+        return dialogs.InsertBlankPageDialog(
+            self.document.pages[which].setup, self, count=len(self.document.pages),
+            page=which, after=not before)
+
+    def add_page(self, index: Optional[int] = None, before: bool = False) -> None:
+        """Document ▸ Insert ▸ Blank Page…, and the Thumbnails menu's Insert
+        Blank Page ▸ Before / After, which open the dialog placed there."""
+        if not self.interactive_prompts:
+            # one page of the same paper, where asked: what the suite and
+            # scripted callers build documents with
+            from .sheetpages import safe_target
+            which = self.page_index(index)
+            target = safe_target(self.document, which + (0 if before else 1))
+            setup = PageSetup.from_dict(self.document.pages[which].setup.to_dict())
+            self._insert_blank_pages(target, 1, setup)
+            return
+        dialog = self.blank_page_dialog(index, before)
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return
+        self.finish_blank_page(dialog)
+
+    def finish_blank_page(self, dialog) -> int:
+        """Insert the pages *dialog* asked for, where it said; one undo step.
+        Says where the first of them is."""
+        from .sheetpages import safe_target
+        target = safe_target(self.document, dialog.target())
+        count = dialog.page_count.value()
+        self._insert_blank_pages(target, count, dialog.chosen_setup())
+        return target
+
+    def _insert_blank_pages(self, target: int, count: int, setup: PageSetup) -> None:
         def mutate():
             for offset in range(count):
                 page = self.document.add_page(target + offset)
@@ -4050,11 +4088,53 @@ class MainWindow(QMainWindow):
         self.pages_panel.list.setCurrentRow(target)
         self.status_hint.setText(f"Page pasted in as page {target + 1}")
 
-    def delete_page(self, index: Optional[int] = None, pages: Optional[list] = None) -> None:
+    def _pages_for(self, index: Optional[int] = None) -> list[int]:
+        """The pages a page dialog starts on: from the menu bar, what
+        Thumbnails has picked out (else the page in view); from a page's own
+        menu, that page or the run it is in."""
+        picked = self.thumbnail_selection()
+        return picked if index is None and picked else self.pages_acted_on(index)
+
+    def _pages_preset(self, pages_range, going: list, which: int) -> None:
+        """Set a Pages control to *going*: Selected when that is what
+        Thumbnails has picked, Current when it is the one page, else Custom."""
+        if going and going == pages_range.selected:
+            pages_range.choose(pages_range.SELECTED)
+        elif going == [pages_range.current]:
+            pages_range.choose(pages_range.CURRENT)
+        elif going:
+            pages_range.set_custom(dialogs.page_ranges(going))
+
+    def delete_pages_dialog(self, index: Optional[int] = None,
+                            pages: Optional[list] = None) -> "dialogs.DeletePagesDialog":
+        """Revu's Delete Pages, set to the page (or the run picked out, or the
+        *pages* given); not yet shown."""
+        which = self.page_index(index)
+        going = sorted(pages) if pages is not None else self._pages_for(index)
+        dialog = dialogs.DeletePagesDialog(len(self.document.pages), which,
+                                           self.thumbnail_selection(), self)
+        self._pages_preset(dialog.pages, going, which)
+        return dialog
+
+    def delete_page(self, index: Optional[int] = None, pages: Optional[list] = None,
+                    ask: bool = True) -> None:
         """Take out the page — or the whole run picked out in the panel, or
-        the *pages* given (a sheet's, from its tab)."""
+        the *pages* given (a sheet's, from its tab) — after Revu's Delete
+        Pages dialog, which can change which."""
         if len(self.document.pages) <= 1:
-            QMessageBox.information(self, "Delete page", "A document needs at least one page.")
+            QMessageBox.information(self, "Delete Pages", "A document needs at least one page.")
+            return
+        if ask and self.interactive_prompts and pages is not None:
+            # a sheet's pages, from its tab: Excel's question, not Revu's dialog
+            asked = (f"Delete page {pages[0] + 1}?" if len(pages) == 1
+                     else f"Delete these {len(pages)} pages?")
+            if QMessageBox.question(self, "Delete Pages", asked) != QMessageBox.Yes:
+                return
+        elif ask and self.interactive_prompts:
+            dialog = self.delete_pages_dialog(index, pages)
+            if dialog.exec() != dialogs.QDialog.Accepted:
+                return
+            self.finish_delete_pages(dialog)
             return
         going = sorted(pages) if pages is not None else self.pages_acted_on(index)
         # Never all of them: a document has to keep a page. The last one in
@@ -4062,11 +4142,20 @@ class MainWindow(QMainWindow):
         # end of what was there rather than the start of it.
         if len(going) >= len(self.document.pages):
             going = going[:len(self.document.pages) - 1]
+        self._delete_pages(going)
+
+    def finish_delete_pages(self, dialog) -> int:
+        """Delete the pages *dialog* chose; how many went. Every page cannot."""
+        problem = dialog.problem()
+        if problem:
+            self.status_hint.setText(problem)
+            return 0
+        going = sorted(dialog.page_indexes())
+        self._delete_pages(going)
+        return len(going)
+
+    def _delete_pages(self, going: list) -> None:
         if not going:
-            return
-        asked = (f"Delete page {going[0] + 1}?" if len(going) == 1
-                 else f"Delete these {len(going)} pages?")
-        if QMessageBox.question(self, "Delete page", asked) != QMessageBox.Yes:
             return
         from .calcedit import undefined_without
         going_equations = [item for which in going
@@ -4157,10 +4246,26 @@ class MainWindow(QMainWindow):
                     listed.item(row).setSelected(True)
         self.apply_scale_change()
 
+    def insert_pages_dialog(self, index: Optional[int] = None,
+                            before: bool = False) -> "dialogs.InsertPagesDialog":
+        """Revu's Insert Pages, placed Before or After page *index* (the page
+        in view when none is named); not yet shown."""
+        which = self.page_index(index)
+        return dialogs.PdfImportDialog(self, self.current_page().setup,
+                                       count=len(self.document.pages), page=which,
+                                       after=not before)
+
     def insert_pdf(self, index: Optional[int] = None, before: bool = False) -> None:
-        dialog = dialogs.PdfImportDialog(self, self.current_page().setup)
+        """Document ▸ Insert ▸ Pages…, and the Thumbnails menu's Insert Pages
+        ▸ Before… / After…, which open the dialog placed there."""
+        dialog = self.insert_pages_dialog(index, before)
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
+        self.finish_insert_pages(dialog, index, before)
+
+    def finish_insert_pages(self, dialog, index: Optional[int] = None,
+                            before: bool = False) -> None:
+        """Bring in the pages *dialog* chose, where it placed them."""
         chosen = dialog.selection()
         # A dialog written before any of this says nothing about the last two,
         # and the answer to both is now fixed anyway: everything the file holds
@@ -4169,9 +4274,11 @@ class MainWindow(QMainWindow):
         dpi = chosen[3] if len(chosen) > 3 else pdfio.BEST_DPI
         vectors = bool(chosen[4]) if len(chosen) > 4 else False
         if not path or not indices:
-            QMessageBox.information(self, "Insert PDF", "No pages were selected.")
+            QMessageBox.information(self, "Insert Pages", "No pages were selected.")
             return
-        target = self.page_index(index) + (0 if before else 1)
+        target = dialog.target() if hasattr(dialog, "target") \
+            else self.page_index(index) + (0 if before else 1)
+        target = max(0, min(target, len(self.document.pages)))
         if project_io.carries_a_document(path):
             self.insert_calcforge_pages(path, at=target, indices=indices)
             return
@@ -4185,7 +4292,7 @@ class MainWindow(QMainWindow):
         try:
             self._structural_change(f"Insert {len(indices)} PDF page(s)", mutate)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Insert PDF", str(exc))
+            QMessageBox.critical(self, "Insert Pages", str(exc))
             return
         self.view.fit_page()
         lines = sum(len(page.frame.markups()) if page.frame is not None else 0
@@ -4528,22 +4635,24 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         # -- insert, delete, rotate, label -------------------------------------------
         blank = menu.addMenu("Insert Blank Page")
-        blank.addAction("Before", lambda: self.add_page_before(index)).setToolTip(
-            "Insert a blank page before this page")
-        blank.addAction("After", lambda: self.add_page(index)).setToolTip(
-            "Insert a blank page after this page")
+        blank.addAction("Before…", lambda: self.add_page_before(index)).setToolTip(
+            "Insert Blank Page, placed before this page")
+        blank.addAction("After…", lambda: self.add_page(index)).setToolTip(
+            "Insert Blank Page, placed after this page")
         pages = menu.addMenu("Insert Pages")
         pages.addAction("Before…", lambda: self.insert_pdf(index, before=True)).setToolTip(
-            "Insert PDF pages before this page")
+            "Insert Pages from a PDF, placed before this page")
         pages.addAction("After…", lambda: self.insert_pdf(index)).setToolTip(
-            "Insert PDF pages after this page")
+            "Insert Pages from a PDF, placed after this page")
         pages.addSeparator()
         pages.addAction("Image Before…",
                         lambda: self.insert_image_page(index, before=True)).setToolTip(
             "Insert an image page before this page")
         pages.addAction("Image After…", lambda: self.insert_image_page(index)).setToolTip(
             "Insert an image page after this page")
-        delete = menu.addAction("Delete Pages", lambda: self.delete_page(index))
+        extract = menu.addAction("Extract Pages…", lambda: self._extract_from_menu(index))
+        extract.setToolTip(f"Save {these} as a new PDF")
+        delete = menu.addAction("Delete Pages…", lambda: self.delete_page(index))
         delete.setToolTip(f"Delete {these}")
         delete.setEnabled(many)
         turn = menu.addMenu("Rotate Pages")
@@ -4553,8 +4662,8 @@ class MainWindow(QMainWindow):
         turn_acw = turn.addAction("Anticlockwise", lambda: self.rotate_page(index, False))
         turn_acw.setToolTip("Turn the paper and everything drawn on it anticlockwise")
         if not several:
-            rename = menu.addAction("Rename Page Label…", lambda: self.rename_page(index))
-            rename.setToolTip("Give this page a custom label")
+            rename = menu.addAction("Rename Page Label", lambda: self.rename_page(index))
+            rename.setToolTip("Edit this page's label on its thumbnail (F2)")
             reset = menu.addAction("Reset Page Label", lambda: self.reset_page_label(index))
             reset.setToolTip("Restore the imported label, or the normal page number")
             reset.setEnabled(page.label != page.source_note.strip())
@@ -4628,13 +4737,13 @@ class MainWindow(QMainWindow):
         return menutidy.tidy(menu)
 
     def cut_pages(self, index: Optional[int] = None) -> None:
-        """Revu's Cut Pages: the pages copied, then deleted (asked first)."""
+        """Revu's Cut Pages: the pages copied, then deleted (one undo step)."""
         going = self.pages_acted_on(index)
         if len(going) >= len(self.document.pages):
             self.status_hint.setText("A document needs at least one page")
             return
         self.copy_page(index)
-        self.delete_page(index)
+        self.delete_page(index, ask=False)
 
     def reset_all_page_labels(self) -> None:
         """Revu's Reset All Page Labels: every page back to its imported
@@ -4672,21 +4781,34 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Print", str(exc))
 
     def rename_page(self, index: int) -> None:
-        """Give one page the label shown in the Pages panel."""
+        """Revu's Rename Page Label: the label is edited in place on the page's
+        thumbnail (F2 there does the same). Should the Thumbnails panel not be
+        showable, a small Rename Page Label box asks instead."""
         index = self.page_index(index)
+        if index != self.current_index:
+            self.go_to_page(index)             # Revu re-labels the current page
+        self.show_panel("dock_pages", True)
+        if self.pages_panel.isVisible() and self.pages_panel.edit_label(index) is not None:
+            return
         page = self.document.pages[index]
         label, accepted = QInputDialog.getText(
-            self, "Rename page", "Label", text=page.label)
-        if not accepted:
+            self, "Rename Page Label", "Label:", text=page.label)
+        if accepted:
+            self.set_page_label(index, label)
+
+    def set_page_label(self, index: int, label: str) -> None:
+        """Give one page the label shown in Thumbnails; one undo step."""
+        if not 0 <= index < len(self.document.pages):
             return
-        label = label.strip()
-        if label == page.label:
+        page = self.document.pages[index]
+        label = (label or "").strip()
+        if label == page.label or (label == str(index + 1) and not page.label):
             return
 
         def mutate():
             page.label = label
 
-        self._structural_change("Rename page", mutate, preserve_view=True)
+        self._structural_change("Rename page label", mutate, preserve_view=True)
 
     def reset_page_label(self, index: int) -> None:
         """Restore the source label where there is one, otherwise no override."""
@@ -4903,35 +5025,44 @@ class MainWindow(QMainWindow):
         if not mistakes:
             self.status_hint.setText("Spelling: no mistakes found")
             if self.interactive_prompts:
-                QMessageBox.information(self, "Check spelling",
+                QMessageBox.information(self, "Check Spelling",
                                         "No spelling mistakes were found.")
             return 0
         checker = shared()
         ignored: set = set()
+        # Change All: the word, lower-cased, to what every later one becomes
+        always: dict = {}
         changed = 0
         shift: dict = {}
         self.view.begin_snapshot(self.view.all_frames())
         for item, start, length, word in mistakes:
             key = word.lower()
-            if key in ignored or checker.knows(word):
+            if key in ignored or (key not in always and checker.knows(word)):
                 continue
             at = start + shift.get(id(item), 0)
-            self.scene.clearSelection()
-            item.setSelected(True)
-            self.view.ensureVisible(item)
-            dialog = dialogs.SpellingDialog(word, item.doc.toPlainText(), at,
-                                            checker.suggestions(word), self)
-            answer = dialog.exec() if self.interactive_prompts else 0
-            action = dialog.choice if answer else "stop"
-            if action == "stop":
-                break
-            if action == "ignore":
-                ignored.add(key)
-                continue
-            if action == "add":
-                remember(word)
-                continue
-            replacement = dialog.replacement()
+            if key in always:
+                replacement = always[key]
+            else:
+                self.scene.clearSelection()
+                item.setSelected(True)
+                self.view.ensureVisible(item)
+                dialog = dialogs.SpellingDialog(word, item.doc.toPlainText(), at,
+                                                checker.suggestions(word), self)
+                answer = dialog.exec() if self.interactive_prompts else 0
+                action = dialog.choice if answer else "stop"
+                if action == "stop":
+                    break
+                if action == "ignore_once":
+                    continue
+                if action in ("ignore", "ignore_all"):
+                    ignored.add(key)
+                    continue
+                if action == "add":
+                    remember(word)
+                    continue
+                replacement = dialog.replacement()
+                if action == "change_all" and replacement:
+                    always[key] = replacement
             if not replacement or replacement == word:
                 continue
             cursor = QTextCursor(item.doc)
@@ -5133,6 +5264,9 @@ class MainWindow(QMainWindow):
     def select_tool(self, key: str) -> None:
         if key != self.view.tool_key:
             self.view.clear_pending_tool()
+        if key != "crop":
+            # Crop Pages' Get Window was given up: the Crop tool crops again
+            self._crop_dialog_state = None
         self.put_the_format_painter_down()
         self.view.set_tool(key)
         action = self.tool_actions.get(key)
@@ -5616,7 +5750,7 @@ class MainWindow(QMainWindow):
         if not self.interactive_prompts:
             return
         from PySide6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "Rename table",
+        name, ok = QInputDialog.getText(self, "Rename Table",
                                         "Name (formulas and equations that use it follow):",
                                         text=item.name)
         if ok and name.strip():
@@ -6533,13 +6667,77 @@ class MainWindow(QMainWindow):
         if region.width() < 4 or region.height() < 4:
             self.status_hint.setText("Crop: drag the part of the page to keep")
             return False
+        state = getattr(self, "_crop_dialog_state", None)
+        if state is not None:
+            # Get Window: the dragged region's margins go back to Crop Pages
+            from ..core.document import PT_TO_MM
+            self._crop_dialog_state = None
+            whole = frame.page_rect()
+            state["margins"] = {
+                "top": (region.top() - whole.top()) * PT_TO_MM,
+                "bottom": (whole.bottom() - region.bottom()) * PT_TO_MM,
+                "left": (region.left() - whole.left()) * PT_TO_MM,
+                "right": (whole.right() - region.right()) * PT_TO_MM}
+            state["proportional"] = False
+            self.select_tool("select")
+            self.crop_pages(state=state)
+            return True
         target = frame.page
         pages = [page for page in self.document.pages if page.frame is not None
                  and (page is target or (every_page
                       and abs(page.width_pt - target.width_pt) < 0.5
                       and abs(page.height_pt - target.height_pt) < 0.5))]
+        return self._crop_pages([(page, region) for page in pages])
+
+    # -- Crop Pages (Revu's dialog) ----------------------------------------
+    def crop_pages_dialog(self, state: Optional[dict] = None) -> "dialogs.CropPagesDialog":
+        """Revu's Crop Pages for the page or the run picked out; not yet shown.
+        After Get Window it comes back with the dragged region's margins."""
+        which = self.current_index
+        dialog = dialogs.CropPagesDialog(len(self.document.pages), which,
+                                         self.thumbnail_selection(), self, state=state)
+        if state is None:
+            self._pages_preset(dialog.pages, self._pages_for(), which)
+        return dialog
+
+    def crop_pages(self, state: Optional[dict] = None) -> bool:
+        """Document ▸ Crop Pages…: margins off the chosen pages, or Get Window
+        to drag the part to keep (the Crop tool) and come back."""
+        dialog = self.crop_pages_dialog(state)
+        answer = dialog.exec()
+        if answer == dialogs.CropPagesDialog.PICK:
+            self._crop_dialog_state = dialog.state()
+            self.select_tool("crop")
+            self.status_hint.setText("Crop Pages: drag the part of the page to keep — "
+                                     "its margins go back to the dialog")
+            return False
+        if answer != dialogs.QDialog.Accepted:
+            return False
+        return self.finish_crop_pages(dialog)
+
+    def finish_crop_pages(self, dialog) -> bool:
+        """Cut *dialog*'s margins off each of its pages; one undo step."""
+        from ..core.document import MM_TO_PT
+        margins = {side: value * MM_TO_PT for side, value in dialog.margins_mm().items()}
+        regions = []
+        for which in dialog.page_indexes() or []:
+            page = self.document.pages[which]
+            whole = page.frame.page_rect() if page.frame is not None \
+                else QRectF(0, 0, page.width_pt, page.height_pt)
+            region = QRectF(whole.left() + margins["left"], whole.top() + margins["top"],
+                            whole.width() - margins["left"] - margins["right"],
+                            whole.height() - margins["top"] - margins["bottom"])
+            if region.width() < 4 or region.height() < 4:
+                self.status_hint.setText(f"Crop Pages: those margins leave nothing of "
+                                         f"page {which + 1}")
+                return False
+            regions.append((page, region))
+        return self._crop_pages(regions) if regions else False
+
+    def _crop_pages(self, regions: list) -> bool:
+        """Crop each (page, region) to its region, in one undo step."""
         changes = []
-        for page in pages:
+        for page, region in regions:
             source = None
             if page.pdf_key and page.pdf_page_index is not None:
                 source = self._cropped_pdf(page, region)
@@ -6549,17 +6747,17 @@ class MainWindow(QMainWindow):
             background = None
             if page.background_key and not page.pdf_key:
                 background = self._crop_background(page, region)
-            changes.append((page, source, background))
+            changes.append((page, source, background, region))
 
         from .calcedit import undefined_without
-        kept = QRectF(0, 0, region.width(), region.height())
         off_the_page = []
         cropped_names: list = []
 
         def apply():
             from ..core.document import PT_TO_MM
             off_the_page.clear()
-            for page, source, background in changes:
+            for page, source, background, region in changes:
+                kept = QRectF(0, 0, region.width(), region.height())
                 frame_now = page.frame
                 if source is not None:
                     page.pdf_key = self.document.add_asset(source, "pdf")
@@ -6621,24 +6819,80 @@ class MainWindow(QMainWindow):
         except Exception:                                   # noqa: BLE001
             return None
 
+    def extract_pages_dialog(self, index: Optional[int] = None) -> "dialogs.ExtractPagesDialog":
+        """Revu's Extract Pages, set to the page or the run picked out; not
+        yet shown."""
+        which = self.page_index(index)
+        dialog = dialogs.ExtractPagesDialog(len(self.document.pages), which,
+                                            self.thumbnail_selection(), self)
+        self._pages_preset(dialog.pages, self._pages_for(index), which)
+        return dialog
+
     def extract_pages(self, indices=None, path: str = "") -> str:
-        """Save the chosen pages, with their markups, as a new PDF."""
-        from PySide6.QtWidgets import QFileDialog, QInputDialog
+        """Document ▸ Extract Pages…: save the chosen pages, with their
+        markups, as a new PDF (Revu's dialog first, when none are given)."""
+        if indices is not None:
+            return self._extract(indices, path)
+        dialog = self.extract_pages_dialog()
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return ""
+        made = self.finish_extract_pages(dialog, path)
+        return made[0] if made else ""
+
+    def finish_extract_pages(self, dialog, path: str = "") -> list[str]:
+        """What *dialog* chose: the pages to one file at *path* (asked for
+        when not given) or, as Separate Files, one file each named after it
+        with the page's number or label; then Delete Pages After Extracting
+        and Open Files After Extraction. The files written."""
+        from PySide6.QtWidgets import QFileDialog
+        indices = sorted(dialog.page_indexes() or [])
+        if not indices:
+            return []
+        if not path:
+            base = os.path.splitext(self.document.path or "document.pdf")[0]
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Extract Pages", f"{base} extract.pdf", "PDF files (*.pdf)")
+            if not path:
+                return []
+        if dialog.separate.isChecked():
+            stem = os.path.splitext(path)[0]
+            made, used = [], set()
+            for which in indices:
+                name = str(which + 1)
+                if dialog.use_labels.isChecked():
+                    label = self.document.pages[which].label.strip()
+                    name = re.sub(r'[\\/:*?"<>|]+', "-", label) or name
+                while name in used:
+                    name += f" ({which + 1})"
+                used.add(name)
+                made.append(self._extract([which], f"{stem} {name}.pdf"))
+            made = [one for one in made if one]
+            self.status_hint.setText(f"Extracted {len(made)} file(s) beside "
+                                     f"{os.path.basename(stem)}")
+        else:
+            made = [self._extract(indices, path)]
+        if dialog.delete_after.isChecked():
+            if len(indices) >= len(self.document.pages):
+                self.status_hint.setText("Extracted; every page was extracted, so none "
+                                         "were deleted (a document keeps one)")
+            else:
+                self._delete_pages(indices)
+        if dialog.open_after.isChecked():
+            for one in made:
+                self.open_in_new_tab()
+                self._open_chosen(one)
+        return made
+
+    def _extract(self, indices, path: str) -> str:
         total = len(self.document.pages)
-        if indices is None:
-            text, accepted = QInputDialog.getText(
-                self, "Extract pages", "Pages (e.g. 1-3, 7)",
-                text=str(self.current_index + 1))
-            if not accepted:
-                return ""
-            indices = pdfio.parse_page_range(text, total)
         indices = [i for i in indices if 0 <= i < total]
         if not indices:
             return ""
         if not path:
+            from PySide6.QtWidgets import QFileDialog
             base = os.path.splitext(self.document.path or "document.pdf")[0]
             path, _ = QFileDialog.getSaveFileName(
-                self, "Extract pages", f"{base} extract.pdf", "PDF files (*.pdf)")
+                self, "Extract Pages", f"{base} extract.pdf", "PDF files (*.pdf)")
             if not path:
                 return ""
         lost = self._save_pages_as(indices, path)
@@ -6646,25 +6900,56 @@ class MainWindow(QMainWindow):
         self.warn_undefined(lost, f"In {os.path.basename(path)}, defined on pages left behind")
         return path
 
-    def split_into_files(self, every: int = 0, folder: str = "") -> list[str]:
-        """Split the document into files of *every* pages each."""
-        from PySide6.QtWidgets import QFileDialog, QInputDialog
-        total = len(self.document.pages)
+    def _extract_from_menu(self, index: int) -> list[str]:
+        """The Thumbnails menu's Extract Pages…: the dialog, set to that page
+        or the run picked out."""
+        dialog = self.extract_pages_dialog(index)
+        if dialog.exec() != dialogs.QDialog.Accepted:
+            return []
+        return self.finish_extract_pages(dialog)
+
+    def split_document_dialog(self) -> "dialogs.SplitDocumentDialog":
+        """Revu's Split Document, for this document; not yet shown."""
+        where = self.document.path or ""
+        stem = os.path.splitext(os.path.basename(where or "document.pdf"))[0]
+        return dialogs.SplitDocumentDialog(len(self.document.pages),
+                                           os.path.dirname(where), stem, self)
+
+    def split_into_files(self, every: int = 0, folder: str = "",
+                         suffix: str = "part") -> list[str]:
+        """Document ▸ Split Document…: files of *every* pages each (Revu's
+        dialog first, when not given)."""
+        from PySide6.QtWidgets import QFileDialog
         if every <= 0:
-            every, accepted = QInputDialog.getInt(
-                self, "Split document", "Pages in each file", 1, 1, max(total, 1))
-            if not accepted:
+            dialog = self.split_document_dialog()
+            if folder:
+                dialog.folder.setText(folder)
+            if dialog.exec() != dialogs.QDialog.Accepted:
                 return []
+            return self.finish_split(dialog)
         if not folder:
-            folder = QFileDialog.getExistingDirectory(self, "Split document into")
+            folder = QFileDialog.getExistingDirectory(self, "Split Document")
             if not folder:
                 return []
         stem = os.path.splitext(os.path.basename(self.document.path or "document.pdf"))[0]
+        return self._split(every, folder,
+                           lambda n: f"{stem} {suffix} {n}.pdf" if suffix else f"{stem} {n}.pdf")
+
+    def finish_split(self, dialog) -> list[str]:
+        """Split as *dialog* chose: its Page Count, Folder and suffix."""
+        folder = dialog.folder.text().strip()
+        if not folder or not os.path.isdir(folder):
+            return []
+        return self._split(dialog.page_count.value(), folder, dialog.file_name)
+
+    def _split(self, every: int, folder: str, file_name) -> list[str]:
+        total = len(self.document.pages)
+        every = max(int(every), 1)
         written = []
         warned: list = []
         for number, start in enumerate(range(0, total, every), start=1):
             chunk = list(range(start, min(start + every, total)))
-            path = os.path.join(folder, f"{stem} part {number}.pdf")
+            path = os.path.join(folder, file_name(number))
             lost = self._save_pages_as(chunk, path)
             if lost:
                 warned.append(f"{os.path.basename(path)}: {', '.join(lost)}")
@@ -7011,7 +7296,7 @@ class MainWindow(QMainWindow):
             chosen = into
         else:
             chosen, accepted = QInputDialog.getItem(
-                self, "Add to a tool set", "Which set?", names,
+                self, "Add to Tool Set", "Tool set:", names,
                 max(names.index(into), 0) if into in names else 0, False)
             if not accepted:
                 return
@@ -7790,7 +8075,7 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QInputDialog
 
         wanted, said = QInputDialog.getText(
-            self, "Find a tool", "What do you want to do?")
+            self, "Find a Tool", "What do you want to do?")
         if not said or not wanted.strip():
             return
         found = self.tools_matching(wanted)
@@ -7975,7 +8260,7 @@ class MainWindow(QMainWindow):
         if anchor is not None and page.frame is not None:
             y = max(page.frame.mapFromScene(anchor).y(), 0.0)
         suggestion = page.label or self._nearby_heading(page, y) or f"Page {index + 1}"
-        title, accepted = QInputDialog.getText(self, "Add bookmark", "Name",
+        title, accepted = QInputDialog.getText(self, "Add Bookmark", "Name:",
                                                text=suggestion)
         if not accepted:
             return
@@ -8007,7 +8292,7 @@ class MainWindow(QMainWindow):
         index = self.page_index(index)
         page = self.document.pages[index]
         suggestion = page.label or self._nearby_heading(page, 0.0) or f"Page {index + 1}"
-        title, accepted = QInputDialog.getText(self, "Add bookmark", "Name",
+        title, accepted = QInputDialog.getText(self, "Add Bookmark", "Name:",
                                                text=suggestion)
         if not accepted or not title.strip():
             return
@@ -8333,26 +8618,38 @@ class MainWindow(QMainWindow):
         self.refresh_lists()
         self.view.viewport().update()
 
-    def apply_to_pages(self, item) -> None:
+    def apply_to_pages_dialog(self) -> "dialogs.ApplyToPagesDialog":
+        """Revu's Apply to Pages, a Custom Range of the pages picked in
+        Thumbnails when there are some; not yet shown."""
+        here = self.document.index_of(self.current_page())
+        landscapes = [page.width_pt > page.height_pt for page in self.document.pages]
+        picked = [i for i in self.thumbnail_selection() if i != here]
+        return dialogs.ApplyToPagesDialog(landscapes, here, picked, self)
+
+    def apply_to_pages(self, item, pages: Optional[list] = None) -> None:
         """Put a copy of this markup on other pages, in the same place."""
         if item is None or len(self.document.pages) < 2:
             self.status_hint.setText("There is only one page to put it on")
             return
-        here = self.document.index_of(self.current_page())
-        others = [index for index in range(len(self.document.pages)) if index != here]
-        choice, accepted = QInputDialog.getItem(
-            self, "Apply to pages", "Put a copy of this markup on:",
-            ["Every other page", "Every page after this one",
-             "Every page before this one"], 0, False)
-        if not accepted:
+        if pages is None:
+            dialog = self.apply_to_pages_dialog()
+            if self.interactive_prompts and dialog.exec() != dialogs.QDialog.Accepted:
+                return
+            self.finish_apply_to_pages(item, dialog)
             return
-        if choice.endswith("after this one"):
-            others = [index for index in others if index > here]
-        elif choice.endswith("before this one"):
-            others = [index for index in others if index < here]
+        self._copy_onto_pages(item, pages)
+
+    def finish_apply_to_pages(self, item, dialog) -> int:
+        """Copy *item* onto the pages *dialog* chose; how many it went on."""
+        return self._copy_onto_pages(item, dialog.page_indexes() or [])
+
+    def _copy_onto_pages(self, item, pages) -> int:
+        here = self.document.index_of(self.current_page())
+        others = [index for index in sorted(set(pages))
+                  if 0 <= index < len(self.document.pages) and index != here]
         if not others:
             self.status_hint.setText("No pages to put it on")
-            return
+            return 0
         payload = item.serialize()
         frames = [self.document.pages[index].frame for index in others
                   if self.document.pages[index].frame is not None]
@@ -8361,8 +8658,9 @@ class MainWindow(QMainWindow):
             copy = build_item(dict(payload, uid=os.urandom(8).hex()))
             if copy is not None:
                 frame.add_markup(copy, QPointF(item.pos()))
-        self.view.commit_snapshot("Apply to pages")
+        self.view.commit_snapshot("Apply to Pages")
         self.status_hint.setText(f"Copied onto {len(frames)} page(s)")
+        return len(frames)
 
     def show_properties_panel(self) -> None:
         self.show_panel("dock_properties", True)
@@ -8758,7 +9056,7 @@ class MainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, "Choose a folder for the images")
         if not folder:
             return
-        dpi, ok = QInputDialog.getInt(self, "Export images", "Resolution (dpi):", 200, 72, 600)
+        dpi, ok = QInputDialog.getInt(self, "Export Images", "Resolution (dpi):", 200, 72, 600)
         if not ok:
             return
         try:
@@ -8770,14 +9068,14 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(f"Wrote {len(written)} image(s) to {folder}")
 
     def export_markups(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Export markups", "markups.csv",
+        path, _ = QFileDialog.getSaveFileName(self, "Summary", "markups.csv",
                                               "CSV files (*.csv)")
         if not path:
             return
         try:
             count = export_io.export_markups_csv(self.document, path)
         except Exception as exc:
-            QMessageBox.critical(self, "Export markups", str(exc))
+            QMessageBox.critical(self, "Summary", str(exc))
             return
         self.status_hint.setText(f"Exported {count} markup(s)")
 

@@ -545,6 +545,49 @@ class PagesPanel(QWidget):
         QTimer.singleShot(900, self.list,
                           lambda: self.list.set_external_drop_row(None))
 
+    # -- Rename Page Label, in place (Revu's Re-Label) ------------------------
+    def edit_label(self, row: int):
+        """Make page *row*'s label editable on its thumbnail, as Revu's
+        Rename Page Label does: Enter (or clicking away) keeps it, Escape
+        leaves it as it was. The editor, or None when there is no such row."""
+        self.finish_label_edit(keep=False)
+        entry = self.list.item(row)
+        document = getattr(self.window, "document", None)
+        if entry is None or document is None or not 0 <= row < len(document.pages):
+            return None
+        self.list.scrollToItem(entry)
+        page = document.pages[row]
+        editor = QLineEdit(self.list.viewport())
+        editor.setObjectName("pageLabelEditor")
+        editor.setText(page.label.strip() or str(row + 1))
+        editor.setToolTip("The page's label: Enter keeps it, Esc leaves it as it was")
+        editor.setAlignment(Qt.AlignHCenter)
+        box = self.list.visualItemRect(entry)
+        tall = editor.sizeHint().height()
+        editor.setGeometry(box.left() + 2, box.bottom() - tall - 1,
+                           max(box.width() - 4, 40), tall)
+        editor.row = row
+        editor.installEventFilter(self)
+        editor.editingFinished.connect(lambda: self.finish_label_edit(keep=True))
+        self.label_editor = editor
+        editor.show()
+        editor.selectAll()
+        editor.setFocus(Qt.OtherFocusReason)
+        return editor
+
+    def finish_label_edit(self, keep: bool = True) -> None:
+        """Close the label editor; with *keep*, the label typed is the page's."""
+        editor = getattr(self, "label_editor", None)
+        if editor is None:
+            return
+        self.label_editor = None
+        row, text = editor.row, editor.text().strip()
+        editor.hide()
+        editor.deleteLater()
+        self.list.setFocus(Qt.OtherFocusReason)
+        if keep:
+            self.window.set_page_label(row, text)
+
     def eventFilter(self, watched, event):
         """Ctrl+C and Ctrl+V on the thumbnails copy and paste whole pages.
 
@@ -556,6 +599,26 @@ class PagesPanel(QWidget):
         over the thumbnails, as Bluebeam's does: it says where Ctrl+V will put
         the page.
         """
+        editor = getattr(self, "label_editor", None)
+        if editor is not None and watched is editor:
+            if event.type() == QEvent.ShortcutOverride:
+                event.accept()             # typing a label never fires a shortcut
+                return False
+            if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
+                self.finish_label_edit(keep=False)
+                return True
+            return False
+        if watched is self.list and event.type() in (QEvent.ShortcutOverride,
+                                                     QEvent.KeyPress) \
+                and event.key() == Qt.Key_F2 and event.modifiers() == Qt.NoModifier:
+            # F2: Rename Page Label, in place
+            if event.type() == QEvent.ShortcutOverride:
+                event.accept()
+                return True
+            row = self.list.currentRow()
+            if row >= 0:
+                self.edit_label(row)
+            return True
         if watched is self.list and event.type() in (QEvent.ShortcutOverride,
                                                      QEvent.KeyPress):
             copy = event.matches(QKeySequence.Copy)
@@ -3332,7 +3395,7 @@ class PropertiesPanel(QScrollArea):
             lambda on: self._apply(lambda i: setattr(i, "show_label", on), "Label"))
         form.addRow("", label)
 
-        calibrate = QPushButton("Calibrate scale…")
+        calibrate = QPushButton("Calibrate…")
         calibrate.setToolTip("Pick a known distance on this page and enter its length")
         calibrate.clicked.connect(lambda: self.window.calibrate_dialog())
         form.addRow("", calibrate)

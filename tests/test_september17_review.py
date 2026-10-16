@@ -291,9 +291,9 @@ def test_add_pages_accepts_count_and_paper_size_in_one_undo(window, monkeypatch)
     from calcforge.ui import dialogs
     window.interactive_prompts = True
     def choose(dialog):
-        dialog.count.setValue(3)
+        dialog.page_count.setValue(3)              # Insert Blank Page's Page Count
         dialog.paper.setCurrentText("A3")
-        dialog.orientation.setCurrentText("landscape")
+        dialog.landscape.setChecked(True)
         return dialogs.QDialog.Accepted
     monkeypatch.setattr(dialogs.NewPagesDialog, "exec", choose)
     before = len(window.document.pages)
