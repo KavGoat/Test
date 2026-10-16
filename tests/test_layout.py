@@ -356,6 +356,9 @@ def test_nothing_in_the_footer_is_drawn_on_top_of_anything_else(window, qapp):
     down_there = [window.status_hint, window.status_position,
                   window.page_navigation, window.status_scale,
                   window.status_fit, window.status_size, window.zoom_combo]
+    # a control the footer has dropped for want of room (it is on the »
+    # menu) is not drawn anywhere: only what is shown can overlap
+    down_there = [one for one in down_there if not one.isHidden()]
     for index, one in enumerate(down_there):
         for other in down_there[index + 1:]:
             assert not one.geometry().intersects(other.geometry()), \

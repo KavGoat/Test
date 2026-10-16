@@ -64,7 +64,7 @@ class TableControls:
         add(self.fill)
         add(self._sep())
         self.align = {}
-        for key, text, tip in (("left", "⯇", "Align left"), ("center", "≡", "Center"),
+        for key, text, tip in (("left", "⯇", "Align left"), ("center", "≡", "Centre"),
                                ("right", "⯈", "Align right")):
             b = QToolButton()
             b.setText(text)

@@ -97,12 +97,12 @@ TOOLS: list[Tool] = [
          "Mark a revision: drag a rectangular Cloud, or click each corner for a "
          "custom Cloud+ — Enter or a right-click closes it",
          factory=_rect("cloud")),
-    Tool("highlight", "Highlight area", "highlight", DRAG, "Draw", "J",
+    Tool("highlight", "Highlight Area", "highlight", DRAG, "Draw", "J",
          "Drag over anything to highlight it — it darkens what is underneath "
          "rather than covering it", factory=_rect("highlight")),
-    Tool("redact", "Redact", "redact", DRAG, "Draw", "",
+    Tool("redact", "Mark for Redaction", "redact", DRAG, "Draw", "",
          "Opaque black-out box", factory=_rect("redact")),
-    Tool("link", "Link", "link", DRAG, "Navigate", "",
+    Tool("link", "Hyperlink", "link", DRAG, "Navigate", "",
          "Drag a region that goes to a page, a view, a file or a web address "
          "when clicked — a real link in the saved PDF",
          factory=lambda: _link()),
@@ -110,10 +110,11 @@ TOOLS: list[Tool] = [
          "Drag the part of the page to keep; the rest is cropped away, and "
          "Undo brings it back", factory=_rect("marquee")),
     Tool("whiteout", "Whiteout", "eraser", SNAPSHOT, "Draw", "",
-         "Drag a region to clear flattened PDF artwork; Undo restores it",
+         "Revu's Cut Content (Erase Content): drag a region to clear the "
+         "flattened PDF artwork in it; Undo restores it",
          factory=_rect("marquee")),
 
-    Tool("text", "Text box", "text", DRAG, "Annotate", "T", "Text box",
+    Tool("text", "Text Box", "text", DRAG, "Annotate", "T", "A box of words on the page",
          factory=lambda: TextItem("")),
     Tool("callout", "Callout", "callout", ANCHOR, "Annotate", "Q",
          "Click what it points at, then click where the words go",
@@ -161,15 +162,15 @@ TOOLS: list[Tool] = [
     Tool("measure_angle", "Angle", "measure_angle", POLY, "Measure", "Shift+Alt+G",
          "Measure an angle from three points", min_points=3, max_points=3,
          factory=_measure(measure_module.ANGLE)),
-    Tool("measure_radius", "Center radius", "measure_radius", DRAG, "Measure", "",
+    Tool("measure_radius", "Centre Radius", "measure_radius", DRAG, "Measure", "",
          "Measure a radius", max_points=2, factory=_measure(measure_module.RADIUS)),
     Tool("measure_diameter", "Diameter", "measure_diameter", DRAG, "Measure",
          "Shift+Alt+D",
          "Measure a diameter", max_points=2, factory=_measure(measure_module.DIAMETER)),
-    Tool("cutout_polygon", "Polygon cut-out", "cutout_polygon", POLY, "Measure", "",
+    Tool("cutout_polygon", "Polygon Cut-Out", "cutout_polygon", POLY, "Measure", "",
          "Draw a hole in the area measurement under it — the hole comes off "
          "the area", min_points=3, factory=_measure(measure_module.AREA)),
-    Tool("cutout_ellipse", "Ellipse cut-out", "cutout_ellipse", DRAG, "Measure", "",
+    Tool("cutout_ellipse", "Ellipse Cut-Out", "cutout_ellipse", DRAG, "Measure", "",
          "Drag a round hole in the area measurement under it",
          factory=_rect("ellipse")),
     Tool("count", "Count", "count", CLICK, "Measure", "Shift+Alt+C",

@@ -209,8 +209,10 @@ def test_ctrl_1_is_transpose_in_an_equation_and_fit_width_outside(win):
     assert win.view.calc.item.text().startswith("Mtranspose(") or \
         "transpose(" in win.view.calc.item.text()
     win.view.calc.leave()   # Esc keeps the equation open, as in WebSMath
+    # Fit Width is on Revu's Ctrl+0 now (audit L2); Ctrl+0 in an equation is
+    # still SMath's ≥
     win.view.set_zoom(3.0)
-    keys(win, Qt.Key_1, Qt.ControlModifier)
+    keys(win, Qt.Key_0, Qt.ControlModifier)
     assert win.view._zoom != 3.0, "fit width outside an equation"
 
 

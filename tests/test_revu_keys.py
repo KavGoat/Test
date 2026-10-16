@@ -270,9 +270,16 @@ def test_revus_keys_for_flatten_dark_mode_and_lock(win):
     assert keys(win.act_recover_flattened) == ["Ctrl+Shift+U"]
     assert keys(win.act_dark) == ["Ctrl+3"]
     assert keys(win.act_lock) == ["Ctrl+Shift+L", "Ctrl+L"]
-    # unchanged on purpose
-    assert keys(win.act_duplicate) == ["Ctrl+D"]
-    assert keys(win.act_array) == ["Ctrl+Shift+D"]
+    # Revu's (audit L2): Ctrl+D Document Properties, Ctrl+Shift+D Delete
+    # Pages, Ctrl+Shift+N Insert Blank Page, Ctrl+M Multiply in Markup mode —
+    # and what had those keys moved, not lost
+    assert keys(win.act_doc_props) == ["Ctrl+D"]
+    assert keys(win.act_delete_page) == ["Ctrl+Shift+D"]
+    assert keys(win.act_add_page) == ["Ctrl+Shift+N"]
+    assert keys(win.act_duplicate) == ["Ctrl+J"]
+    assert keys(win.act_new_window) == ["Ctrl+Alt+Shift+N"]
+    assert keys(win.act_array) == ["Ctrl+M"]
+    assert keys(win.act_insert_matrix) == []          # Calc mode's Ctrl+M
     assert win.shortcuts.sequence("tool.stamp") == "S"
     assert win.shortcuts.sequence("tool.measure_length") == "M"
     assert win.shortcuts.conflicts() == {}

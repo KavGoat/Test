@@ -27,10 +27,10 @@ def test_the_menu_bar_is_revus_with_a_calculation_menu(window):
 
     def walk(menu):
         for action in menu.actions():
+            # an insert command carries its own Before / After submenu
+            in_menus.add(action)
             if action.menu():
                 walk(action.menu())
-            else:
-                in_menus.add(action)
     for action in window.menuBar().actions():
         if action.menu():
             walk(action.menu())

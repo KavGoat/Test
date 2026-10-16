@@ -28,7 +28,7 @@ from typing import Callable, Optional
 
 MODIFY, COLORIZE, GRAYSCALE, BLACK_WHITE, LSH, MASK = (
     "modify", "colorize", "grayscale", "bw", "lsh", "mask")
-NAMES = {MODIFY: "Modify Colors", COLORIZE: "Colorize", GRAYSCALE: "Grayscale",
+NAMES = {MODIFY: "Modify Colours", COLORIZE: "Colourise", GRAYSCALE: "Greyscale",
          BLACK_WHITE: "Black and White", LSH: "Luminosity, Saturation, and Hue",
          MASK: "Mask Images"}
 #: Modify Colors changes a colour exactly — the same to the nearest of 255

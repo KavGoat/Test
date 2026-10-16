@@ -65,7 +65,8 @@ def two_checks(v):
 
 def test_block_on_the_toolbar_wraps_the_selected_equations(v):
     block, outside, inside, after = two_checks(v)
-    assert [a.text() for a in v.window.calculation_bar.actions() if a.text() == "Block"]
+    assert [a.text() for a in v.window.calculation_bar.actions()
+            if a.text() == "Calculation Block"]
     assert set(block.members()) == set(inside)
     assert block.isSelected() and block.TYPE == "calc_block"
     # a block of its own: not an equation, not in the Markups list

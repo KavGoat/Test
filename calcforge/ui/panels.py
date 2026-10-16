@@ -282,17 +282,25 @@ class PagesPanel(QWidget):
         layout.setSpacing(4)
 
         buttons = QHBoxLayout()
+        # Each button is the menus' command under the menus' name (bug hunt
+        # E4); the two inserts offer Before / After on their arrow, as every
+        # insert does, and a click on the button itself puts it after.
         # Lambdas, not the bound methods: clicked() carries a "checked" bool
         # that would otherwise arrive as the page to act on.
-        for label, tip, slot in (
-                ("+", "Add a page", lambda: self.window.add_page()),
-                ("▦", "Insert a spreadsheet page (pages next to each other are one sheet)",
-                 lambda: self.window.insert_sheet_page()),
-                ("⧉", "Duplicate the page, or the pages picked out",
+        family = {entry[0]: entry for entry in self.window.insert_family()}
+        self.page_buttons = {}
+        for key, label, tip, slot in (
+                ("add_page", "+", "Insert Blank Page — after this page; the arrow "
+                 "offers Before or After", lambda: self.window.add_page()),
+                ("add_sheet_page", "▦", "Insert Spreadsheet Page — after this page "
+                 "(pages next to each other are one sheet); the arrow offers Before "
+                 "or After", lambda: self.window.insert_sheet_page()),
+                ("duplicate_page", "⧉", "Duplicate Page — the page, or the pages "
+                 "picked out",
                  lambda: self.window.duplicate_page(
                      self.window.selected_pages()[0]
                      if self.window.selected_pages() else None)),
-                ("−", "Delete the page, or the pages picked out",
+                ("delete_page", "−", "Delete Pages… — the page, or the pages picked out",
                  lambda: self.window.delete_page(
                      self.window.selected_pages()[0]
                      if self.window.selected_pages() else None))):
@@ -300,7 +308,13 @@ class PagesPanel(QWidget):
             button.setText(label)
             button.setToolTip(tip)
             button.clicked.connect(slot)
+            if key in family:
+                choice = QMenu(button)
+                self.window.fill_insert_choice(choice, family[key])
+                button.setMenu(choice)
+                button.setPopupMode(QToolButton.MenuButtonPopup)
             buttons.addWidget(button)
+            self.page_buttons[key] = button
         layout.addLayout(buttons)
 
         self.list = PageListWidget()
@@ -2629,7 +2643,7 @@ class PropertiesPanel(QScrollArea):
                     lambda i: setattr(i, "keep_aspect", on), "Snapshot ratio"))
                 form.addRow("", keep)
                 form.addRow("Source Page:", QLabel(str(first.source_page)))
-                colours = QPushButton("Change Colors…")
+                colours = QPushButton("Change Colours…")
                 colours.clicked.connect(lambda: self.window.change_colors(first))
                 form.addRow("", colours)
             elif isinstance(first, RectItem) and first.kind in ("rect", "ellipse"):
@@ -2637,7 +2651,7 @@ class PropertiesPanel(QScrollArea):
         if len(self._items) > 1 and any(getattr(i, "style", None) is not None
                                         for i in self._items):
             # Revu's Change Multiple Colors, in Appearance for a selection
-            colours = QPushButton("Change Colors…")
+            colours = QPushButton("Change Colours…")
             colours.setObjectName("changeMultipleColors")
             colours.setToolTip("Change one colour the selected markups use to another")
             colours.clicked.connect(lambda: self.window.change_multiple_colors(list(self._items)))
@@ -3326,7 +3340,7 @@ class PropertiesPanel(QScrollArea):
             lambda on: self._apply(lambda i: setattr(i, "keep_aspect", on),
                                    "Image"))
         form.addRow("", keep)
-        colours = QPushButton("Color Processing…")
+        colours = QPushButton("Colour Processing…")
         colours.clicked.connect(lambda: self.window.change_colors(item))
         form.addRow("", colours)
 

@@ -570,6 +570,13 @@ _ALREADY_BOUND = {
     "calc_mode": "command.calc_mode",
 }
 
+# Keys that mean one command in Markup mode and another in Calc mode (the
+# user, 2026-10-15: Ctrl+M is Revu's Multiply in Markup mode and SMath's
+# Matrix in Calc mode). Only the action of the mode in force carries the key
+# (MainWindow._apply_mode_keys); the shortcut list does not count the pair as
+# a clash because the two modes are never on together.
+_SHORTCUT_SCOPES = {"array": "markup", "insert_matrix": "calc"}
+
 _SHORTCUT_GROUPS = {
     "calculate": "SMath", "insert_matrix": "SMath", "auto_calc": "SMath",
     "new": "File", "open": "File", "save": "File", "save_as": "File",
@@ -603,6 +610,14 @@ _SHORTCUT_GROUPS = {
     "split_pages": "Page", "duplicate_page": "Page", "delete_page": "Page",
     "page_setup": "Page", "scale": "Page", "viewports": "Page", "header_footer": "Page",
     "bookmark": "Page", "contents": "Page", "doc_props": "Page",
+    "rotate_pages_cw": "Page", "rotate_pages_acw": "Page",
+    "insert_page_break": "Spreadsheet", "remove_page_break": "Spreadsheet",
+    "reset_page_breaks": "Spreadsheet", "set_print_area": "Spreadsheet",
+    "clear_print_area": "Spreadsheet", "sheet_page_setup": "Spreadsheet",
+    "replace_text": "Edit", "show_panels": "Window",
+    "panel_pages": "Window", "panel_bookmarks": "Window", "panel_toolsets": "Window",
+    "panel_properties": "Window", "panel_search": "Window", "panel_page": "Window",
+    "panel_maths": "Window", "panel_variables": "Window",
     "renumber_counts": "Markup", "check_spelling": "Markup",
     "shortcuts": "Help", "sample": "Help",
     "find_tool": "Help", "find_text": "Edit",
@@ -820,6 +835,13 @@ class MainWindow(QMainWindow):
         self.view.tables.bar = self.formula_bar
         layout.addWidget(self.formula_bar)
         layout.addWidget(self.bottom_split, 1)
+        # Revu's empty workspace, once the last document is closed (novice
+        # 24): no page and no "Untitled", only the way to a document
+        self.empty_workspace = self._build_empty_workspace()
+        layout.addWidget(self.empty_workspace, 1)
+        self.empty_workspace.hide()
+        self._workspace_empty = False
+        self._enabled_before_empty: dict = {}
         self.setCentralWidget(central)
 
         # The rails go in the toolbar areas, which is what puts them hard
@@ -858,7 +880,10 @@ class MainWindow(QMainWindow):
         "command.font_increase", "command.font_decrease"}
 
     def _act(self, key: str, text: str, slot, shortcut: str = "", icon_name: str = "",
-             checkable: bool = False, tip: str = "") -> QAction:
+             checkable: bool = False, tip: str = "", name: str = "") -> QAction:
+        """A window command. *name* is what the shortcut list calls it when
+        the menu's own wording is short for it (Insert ▸ "Pages" is Insert
+        Pages there); by default the menu's text."""
         action = QAction(text, self)
         if icon_name:
             self.give_icon(action, icon_name)
@@ -875,8 +900,9 @@ class MainWindow(QMainWindow):
                 self.action_ids[key] = already
             else:
                 shortcut = self.shortcuts.register(
-                    f"command.{key}", text.rstrip("…"), shortcut,
-                    _SHORTCUT_GROUPS.get(key, "Document"))
+                    f"command.{key}", (name or text).rstrip("…"), shortcut,
+                    _SHORTCUT_GROUPS.get(key, "Document"),
+                    scope=_SHORTCUT_SCOPES.get(key, "always"))
                 self.action_ids[key] = f"command.{key}"
             action.setShortcut(QKeySequence(shortcut))
         action.setCheckable(checkable)
@@ -893,16 +919,20 @@ class MainWindow(QMainWindow):
         self._act("new", "New PDF", lambda: self.new_document(), "Ctrl+N", "new")
         self._act("new_tab", "New Tab", lambda: self.open_in_new_tab(), "Ctrl+T",
                   tip="Open another document beside this one, in its own tab")
-        self._act("new_window", "New Window", self.open_new_window, "Ctrl+Shift+N",
+        # Ctrl+Shift+N is Revu's Insert Blank Page (audit L2); New Window
+        # moved up a modifier rather than losing its key.
+        self._act("new_window", "New Window", self.open_new_window, "Ctrl+Alt+Shift+N",
                   tip="Open a second window with a document of its own")
         self._act("markups_list", "Markups List", self.show_markups_list, "Alt+L",
                   checkable=True,
                   tip="Open or close the markups list under the drawing — or "
                       "drag its bar up and down")
-        self._act("crop_page", "Crop Pages…", lambda: self.crop_pages(),
+        # Revu's keys for Crop Pages and Extract Pages (audit B1)
+        self._act("crop_page", "Crop Pages…", lambda: self.crop_pages(), "Alt+Shift+O",
                   tip="Cut margins off the chosen pages, or drag the part to keep "
                       "(Get Window); Undo restores the rest")
         self._act("extract_pages", "Extract Pages…", lambda: self.extract_pages(),
+                  "Ctrl+Shift+X",
                   tip="Save chosen pages, with their markups, as a new PDF")
         self._act("split_pages", "Split Document…", lambda: self.split_into_files(),
                   tip="Save the document as several PDFs of so many pages each")
@@ -910,11 +940,11 @@ class MainWindow(QMainWindow):
         self.page_layout_group = QActionGroup(self)
         self.page_layout_group.setExclusive(True)
         for key, text, tip in (
-                ("single", "Single Page", "One page at a time, fitted to the window; the wheel "
+                ("single", "Single Page Mode", "One page at a time, fitted to the window; the wheel "
                  "scrolls it and turns to the next page at its end"),
-                ("continuous", "Continuous", "Every page in one column"),
-                ("side", "Side-by-Side", "Two pages at a time: odd on the left, even on the right"),
-                ("continuous_side", "Continuous Side-by-Side",
+                ("continuous", "Continuous Mode", "Every page in one column"),
+                ("side", "Side-by-Side Mode", "Two pages at a time: odd on the left, even on the right"),
+                ("continuous_side", "Continuous Side-by-Side Mode",
                  "Every page, two to a row, in one column")):
             action = self._act(f"layout_{key}", text,
                                lambda _checked=False, mode=key: self.set_page_layout(mode),
@@ -967,21 +997,31 @@ class MainWindow(QMainWindow):
         # exact thing the requirement says must never happen. It never reached
         # the shortcut list either, because keys reserved for the text are not
         # registered, so it was a binding nobody could see or change.
-        self._act("insert_pdf", "Pages from Document…", lambda: self.insert_pdf(),
-                  "Ctrl+Shift+I", "pdf")
-        self._act("insert_workbook", "Excel Workbook…", lambda: self.insert_workbook(),
-                  tip="An Excel workbook's worksheets as spreadsheet pages after this page "
+        #
+        # The ways of putting pages in are one family, offered the same way
+        # wherever they are (bug hunt E1–E4): under Insert ▸ (and File ▸
+        # Import ▸) each is a submenu of Before / After the page in view,
+        # as on the page menu; the key, or a click on the toolbar button,
+        # puts it after the page in view (_build_insert_family).
+        self._act("insert_pdf", "Pages", lambda: self.insert_pdf(),
+                  "Ctrl+Shift+I", "pdf", name="Insert Pages",
+                  tip="Insert Pages: pages from a PDF, before or after this page")
+        self._act("insert_workbook", "Excel Workbook", lambda: self.insert_workbook(),
+                  name="Insert Excel Workbook",
+                  tip="Insert Excel Workbook: its worksheets as spreadsheet pages "
                       "(cells, formulas, formats, names and page layout)")
-        self._act("import_toolset", "Import Tool Set…",
-                  lambda: self.import_toolset(),
-                  tip="Bring in a Bluebeam tool set — a .btx file")
+        self._act("import_toolset", "Tool Set…",
+                  lambda: self.import_toolset(), name="Import Tool Set",
+                  tip="Import Tool Set: bring in a Bluebeam tool set — a .btx file")
         self._act("manage_toolsets", "Manage Tool Sets…", lambda: self.manage_toolsets(),
                   tip="Show, hide, order, rename and remove tool sets")
-        self._act("insert_image_page", "Image Page…",
-                  lambda: self.insert_image_page(), "", "image")
-        self._act("export_pdf", "Export PDF…", self.export_pdf, "Ctrl+E", "pdf")
-        self._act("export_png", "Export Images…", self.export_images,
-                  tip="Export every printable page as an image")
+        self._act("insert_image_page", "Image Page",
+                  lambda: self.insert_image_page(), "", "image", name="Insert Image Page",
+                  tip="Insert Image Page: a picture as a page of its own")
+        self._act("export_pdf", "PDF…", self.export_pdf, "Ctrl+E", "pdf", name="Export PDF",
+                  tip="Export PDF: a plain PDF of the document, markups drawn in")
+        self._act("export_png", "Images…", self.export_images, name="Export Images",
+                  tip="Export Images: every printable page as an image")
         self._act("export_markups", "Markups Summary…", self.export_markups,
                   tip="Export the document's markup list")
         self._act("print", "Print…", self.print_document, "Ctrl+P", "print")
@@ -1020,7 +1060,10 @@ class MainWindow(QMainWindow):
         self._act("paste_here", "Paste Here…", self.paste_with_preview,
                   "Ctrl+Alt+V",
                   tip="Carry what was copied on the pointer and click to drop it")
-        self._act("duplicate", "Duplicate", self.duplicate_selection, "Ctrl+D")
+        # Ctrl+D is Revu's Document Properties (audit L2): Duplicate takes
+        # Ctrl+J, the key it has in drawing programs.
+        self._act("duplicate", "Duplicate", self.duplicate_selection, "Ctrl+J",
+                  tip="A copy of the selection, a little down and to the right")
         self._act("delete", "Delete", self.delete_selection, "", "delete")
         self._act("select_all", "Select All", self.select_all, "Ctrl+A")
         # SMath (decisions 5, 6 and 18): the mode switch and the calculation
@@ -1035,17 +1078,16 @@ class MainWindow(QMainWindow):
                   tip="Recalculate what depends on an equation as soon as it is left")
         self.act_auto_calc.setChecked(True)
         self._act("insert_matrix", "Matrix", self.insert_matrix, "Ctrl+M",
-                  tip="Insert a matrix into the equation, or start one")
+                  tip="Insert a matrix into the equation, or start one "
+                      "(Ctrl+M in Calc mode; in Markup mode Ctrl+M is Multiply)")
         self._act("insert_plot", "Plot", self.insert_plot,
                   tip="A 2-D plot at the red cross or the pointer (@ in Calc mode)")
-        self._act("insert_block", "Block", self.insert_block,
+        self._act("insert_block", "Calculation Block", self.insert_block,
                   tip="A calculation block round the selected equations, or at the red "
                       "cross: its equations move, copy and delete with it, and it can "
                       "keep what they define to itself (Self-contained)")
-        self._act("insert_table", "Table", self.insert_table,
-                  tip="Drag out a table on the page: the rows and columns follow the "
-                      "size you drag. Excel's formulas, formats and units in its cells; "
-                      "the equations can read its values")
+        self._act("insert_table", TOOL_MAP["table"].label, self.insert_table,
+                  tip=TOOL_MAP["table"].hint)
         self._act("insert_chart", "Chart", lambda: self.insert_chart(),
                   tip="A chart of the cells picked out in a table: XY scatter, line or "
                       "column, with log axes, error bars and trendlines (double-click it "
@@ -1082,7 +1124,7 @@ class MainWindow(QMainWindow):
                       tip=tip)
         # Keys inside an equation only (the SMath section of the shortcut
         # manager): on the menu without a window shortcut, since outside an
-        # equation Ctrl+E is Export PDF and Ctrl+Shift+D is Multiple.
+        # equation Ctrl+E is Export PDF and Ctrl+Shift+D is Delete Pages.
         self._act("insert_function", "Function…", self.insert_function,
                   tip="Insert a function into the equation (Ctrl+E in an equation)")
         self._act("constants", "Constants…", self.show_constants,
@@ -1095,9 +1137,11 @@ class MainWindow(QMainWindow):
         self._act("offset", "Offset", self.start_offset, "O",
                   tip="A copy of the selected markup a set distance away, on the side "
                       "the pointer is — Revu's Offset")
-        self._act("array", "Multiply…", self.array_selection,
-                  "Ctrl+Shift+D",
-                  tip="Repeat the selection at a fixed spacing, any number of times")
+        # Revu's Ctrl+M in Markup mode; Ctrl+Shift+D is Revu's Delete Pages
+        # (the user, 2026-10-15)
+        self._act("array", "Multiply…", self.array_selection, "Ctrl+M",
+                  tip="Repeat the selection at a fixed spacing, any number of times "
+                      "(Ctrl+M in Markup mode; in Calc mode Ctrl+M is Matrix)")
         self._act("front", "Bring to Front", lambda: self.reorder("front"), "Ctrl+Shift+]",
                   tip="Bring the selection to the front")
         self._act("back", "Send to Back", lambda: self.reorder("back"), "Ctrl+Shift+[", tip="Send the selection behind every other markup")
@@ -1119,7 +1163,7 @@ class MainWindow(QMainWindow):
                   tip="Underline the words picked out, or the whole markup")
         self._act("text_left", "Align Left",
                   lambda: self.format_content(alignment="left"), "Ctrl+Alt+Left")
-        self._act("text_center", "Align Center",
+        self._act("text_center", "Align Centre",
                   lambda: self.format_content(alignment="center"), "Ctrl+Alt+Home")
         self._act("text_right", "Align Right",
                   lambda: self.format_content(alignment="right"), "Ctrl+Alt+Right")
@@ -1130,8 +1174,10 @@ class MainWindow(QMainWindow):
 
         self._act("zoom_in", "Zoom In", self.view.zoom_in, "Ctrl++", "zoom_in")
         self._act("zoom_out", "Zoom Out", self.view.zoom_out, "Ctrl+-", "zoom_out")
-        self._act("fit_page", "Fit Page", self.view.fit_page, "Ctrl+0", "fit")
-        self._act("fit_width", "Fit Width", self.view.fit_width, "Ctrl+1")
+        # Revu's zoom keys (audit L2): Fit Page Ctrl+9, Fit Width Ctrl+0,
+        # Actual Size Ctrl+8
+        self._act("fit_page", "Fit Page", self.view.fit_page, "Ctrl+9", "fit")
+        self._act("fit_width", "Fit Width", self.view.fit_width, "Ctrl+0")
         self._act("zoom_sel", "Zoom to Selection", self.view.zoom_to_selection, "Ctrl+2",
                   tip="Zoom to the selected markups")
         # Turning the view is a way of looking at the page, not a change to
@@ -1141,7 +1187,7 @@ class MainWindow(QMainWindow):
                   lambda: self.view.rotate_view(True), "Ctrl+Shift+.",
                   tip="Turn the page on screen, for reading a drawing "
                       "sideways — the page itself is not changed")
-        self._act("turn_view_acw", "Rotate Counterclockwise",
+        self._act("turn_view_acw", "Rotate Anticlockwise",
                   lambda: self.view.rotate_view(False), "Ctrl+Shift+,",
                   tip="Turn the page on screen the other way — the page "
                       "itself is not changed")
@@ -1154,11 +1200,13 @@ class MainWindow(QMainWindow):
                   "Ctrl+PgUp")
         self._act("next_page", "Next Page", lambda: self.go_to_page(self.current_index + 1),
                   "Ctrl+PgDown")
-        self._act("actual_size", "Actual Size", lambda: self.view.set_zoom(1.0), "Ctrl+Alt+0")
+        self._act("actual_size", "Actual Size", lambda: self.view.set_zoom(1.0), "Ctrl+8")
         self._act("pin_panels", "Pin Panels", self.pin_all_panels, "", checkable=True,
                   tip="Keep the panels where they are, so a stray drag cannot move them")
-        self._act("show_panels", "Show Panels", self.show_all_panels,
-                  tip="Open the default panel on each side")
+        # Revu's Hide Panels (Shift+F4): every panel away, and back again
+        self._act("show_panels", "Hide/Show Panels", self.hide_or_show_panels, "Shift+F4",
+                  tip="Hide every panel for more room for the drawing; again brings "
+                      "them back (the default ones when none were open)")
         self._act("reset_layout", "Reset Layout", self.reset_layout,
                   tip="Put the panels and toolbars back where they started")
         self._act("lock_toolbars", "Lock Toolbars", self.lock_toolbars, "",
@@ -1167,23 +1215,42 @@ class MainWindow(QMainWindow):
                   self.customise_toolbar,
                   tip="Pick which tools appear on the markup toolbar")
 
-        self._act("add_page", "Blank Page…", lambda: self.add_page(),
+        # Ctrl+Shift+N is Revu's Insert Blank Page (audit L2)
+        self._act("add_page", "Blank Page", lambda: self.add_page(), "Ctrl+Shift+N",
+                  name="Insert Blank Page",
                   tip="Insert Blank Page: the size, how many, and where they go")
         self._act("add_sheet_page", "Spreadsheet Page", lambda: self.insert_sheet_page(),
-                  tip="A page of spreadsheet cells; pages next to each other are one sheet")
+                  name="Insert Spreadsheet Page",
+                  tip="Insert Spreadsheet Page: a page of spreadsheet cells; on a "
+                      "spreadsheet it is one more page of that sheet")
         self._act("sheet_page_setup", "Sheet Layout…", lambda: self.sheet_page_setup(),
                   tip="Print area, titles, fit to page width, centring, gridlines and headings")
         self._act("duplicate_page", "Duplicate Page", lambda: self.duplicate_page())
-        self._act("delete_page", "Delete Pages…", lambda: self.delete_page(),
+        # Revu's Ctrl+Shift+D (audit L2)
+        self._act("delete_page", "Delete Pages…", lambda: self.delete_page(), "Ctrl+Shift+D",
                   tip="Delete Pages: choose which pages to take out")
+        # Revu's Rotate Pages, on the Document menu as well as the page menu
+        # (bug hunt E7): the same two choices in both
+        self._act("rotate_pages_cw", "Clockwise", lambda: self.rotate_page(None, True),
+                  name="Rotate Pages Clockwise",
+                  tip="Turn the page in view and everything drawn on it a quarter "
+                      "turn clockwise. To turn only the way it is shown, use View ▸ "
+                      "Rotate View.")
+        self._act("rotate_pages_acw", "Anticlockwise", lambda: self.rotate_page(None, False),
+                  name="Rotate Pages Anticlockwise",
+                  tip="Turn the page in view and everything drawn on it a quarter "
+                      "turn anticlockwise")
         # No key: Ctrl+Shift+P shows the problems panel, and page setup is on
         # the Page menu and on a page's own right-click menu.
         self._act("page_setup", "Page Setup…", self.page_setup, "", "page")
-        self._act("scale", "Page Scale…", self.calibrate_dialog,
-                  "Ctrl+Shift+K", "calibrate")
+        # Revu's name, the same everywhere (bug hunt E11, novice 13)
+        self._act("scale", "Set Scale…", self.calibrate_dialog,
+                  "Ctrl+Shift+K", "calibrate",
+                  tip="Set Scale: what a length on this page measures")
         self._act("viewports", "Viewports…", self.viewports_dialog, "", "viewport",
                   tip="The regions of this page drawn at their own scale")
-        self._act("doc_props", "Document Properties…", lambda: self.document_properties())
+        self._act("doc_props", "Document Properties…", lambda: self.document_properties(),
+                  "Ctrl+D")
         self._act("header_footer", "Headers && Footers…", self.edit_header_footer, "",
                   tip="Page numbers, the date, a title and a logo on every page")
 
@@ -1221,7 +1288,7 @@ class MainWindow(QMainWindow):
         self.act_snap_items.setChecked(True)
         self.act_snap_content.setChecked(True)
         self.act_snap_alignment.setChecked(True)
-        self._act("sticky", "Stay Active", self.toggle_sticky, "", "pin",
+        self._act("sticky", "Reuse", self.toggle_sticky, "", "pin",
                   checkable=True,
                   tip="Stay on the current tool after drawing instead of returning to Select")
         self._act("check_spelling", "Check Spelling in Markups…", self.check_spelling, "F7",
@@ -1252,10 +1319,10 @@ class MainWindow(QMainWindow):
                   tip="Take this one's look, then click another to paint it on")
         self._act("hide", "Hide", self.hide_selection,
                   tip="Take it off the screen and out of the print, without "
-                      "deleting it — Show hidden brings it back")
+                      "deleting it — Show Hidden brings it back")
         self._act("show_hidden", "Show Hidden", self.show_hidden,
                   tip="Bring back everything that was hidden")
-        self._act("flatten", "Flatten Selection", self.flatten_selection,
+        self._act("flatten", "Flatten", self.flatten_selection,
                   tip="Make it part of the drawing rather than a markup on top "
                       "of it — it can no longer be moved or edited")
         # Revu's keys for Flatten… and Unflatten (QA, 2026-10-15)
@@ -1274,11 +1341,30 @@ class MainWindow(QMainWindow):
         self._act("contents", "Table of Contents", self.insert_contents_block,
                   tip="Insert a table of contents built from document bookmarks")
         self._act("about", f"About {APP_NAME}", self.show_about)
-        self._act("color_processing", "Color Processing…", lambda: self.color_processing(),
-                  tip="Bluebeam's Color Processing: change the page's own colours — modify, "
-                      "colorize, grayscale, black and white, luminosity/saturation/hue, mask images")
+        self._act("color_processing", "Colour Processing…", lambda: self.color_processing(),
+                  tip="Bluebeam's Colour Processing: change the page's own colours — modify, "
+                      "colourise, greyscale, black and white, luminosity/saturation/hue, "
+                      "mask images")
         self._act("record_slowdowns", "Record Slow-Downs", self.record_slowdowns, checkable=True,
                   tip="Note what the window was doing whenever it stalled, in a file to send back")
+        # Excel's and Word's Ctrl+H (novice 19): the Search panel, ready to
+        # replace. In an open table Ctrl+H is the cells' own Replace.
+        self._act("replace_text", "Replace", self.replace_in_document, "Ctrl+H",
+                  tip="Search for words and replace them in the markups (the "
+                      "Search panel, with the Replace box ready)")
+        # Excel's Page Layout ▸ Breaks and Print Area (novice 11), on the menu
+        # bar as well as the cells' right-click menu: they act on the
+        # spreadsheet open for typing, at its active cell
+        self._act("insert_page_break", "Insert Page Break", self.insert_page_break,
+                  tip="A page break above the active cell's row and left of its column")
+        self._act("remove_page_break", "Remove Page Break", self.remove_page_break,
+                  tip="Take away the page breaks at the active cell's top and left")
+        self._act("reset_page_breaks", "Reset All Page Breaks", self.reset_page_breaks,
+                  tip="Every page break of this spreadsheet back to where it falls by itself")
+        self._act("set_print_area", "Set Print Area", self.set_print_area,
+                  tip="Print only the cells picked out")
+        self._act("clear_print_area", "Clear Print Area", self.clear_print_area,
+                  tip="Print the whole spreadsheet again")
         for key, revu in self.REVU_SECOND_KEYS.items():
             self._second_key(key, revu)
 
@@ -1370,13 +1456,21 @@ class MainWindow(QMainWindow):
                                   + (f"\n{tool.hint}" if tool.hint else ""))
                 if tool.shortcut and len(tool.shortcut) == 1:
                     action.setShortcut(QKeySequence(tool.shortcut))
-                action.triggered.connect(lambda _checked=False, key=tool.key:
-                                         self.select_tool(key))
+                if tool.key == "table":
+                    # the same command as Calculation ▸ Table (novice 21)
+                    action.triggered.connect(lambda _checked=False: self.insert_table())
+                else:
+                    action.triggered.connect(lambda _checked=False, key=tool.key:
+                                             self.select_tool(key))
                 self.tool_group.addAction(action)
                 bar.addAction(action)
                 self.tool_actions[tool.key] = action
         tool_bar.addSeparator()
         tool_bar.addAction(self.act_sticky)
+        # The Calculation bar's Table is the Tools bar's Table — one button
+        # in two places, so it reads, tips and lights up the same (novice 21)
+        self.calculation_bar.insertAction(self.act_insert_table, self.tool_actions["table"])
+        self.calculation_bar.removeAction(self.act_insert_table)
         self._add_toolbar(measure_bar)
         # The markup tools get a row to themselves: there are enough of them
         # that sharing one with anything else hides the last few.
@@ -1470,7 +1564,9 @@ class MainWindow(QMainWindow):
                                       Qt.LeftDockWidgetArea, "dock_search")
         from .pagepanel import PagePanel
         self.page_panel = PagePanel(self)
-        self.dock_page = self._dock("Page Setup", self.page_panel,
+        # "Page", not "Page Setup": that is the dialog (bug hunt E12). Alt+U,
+        # Revu's Measurements key: the scale and viewports live here.
+        self.dock_page = self._dock("Page", self.page_panel,
                                     Qt.RightDockWidgetArea, "dock_page")
         from .mathspanel import MathsPanel
         self.maths_panel = MathsPanel(self)
@@ -1495,7 +1591,7 @@ class MainWindow(QMainWindow):
         "dock_toolsets": ("Tool Chest", "panel_toolsets"),
         "dock_properties": ("Properties", "panel_properties"),
         "dock_search": ("Search", "panel_search"),
-        "dock_page": ("Page Setup", "panel_page"),
+        "dock_page": ("Page", "panel_page"),
         "dock_maths": ("Maths", "panel_maths"),
         "dock_variables": ("Variables", "panel_variables"),
     }
@@ -1700,6 +1796,12 @@ class MainWindow(QMainWindow):
         for name, dock in self.docks_by_name.items():
             if name in self.PANEL_ICONS:
                 self.rail_for(name).show_open(name, not dock.isHidden())
+                # and its tick in Window ▸ Panels
+                action = getattr(self, f"act_panel_{name[5:]}", None)
+                if action is not None and action.isChecked() == dock.isHidden():
+                    action.blockSignals(True)
+                    action.setChecked(not dock.isHidden())
+                    action.blockSignals(False)
 
     def _build_search(self) -> None:
         # The Markup | Calc switch and the search box sit after Help in the
@@ -1866,178 +1968,294 @@ class MainWindow(QMainWindow):
             page_index, uid = target
             self.reveal_markup(page_index, uid)
 
+    # -- the ways of putting pages in: one family, one shape -------------------------
+    def insert_family(self) -> list:
+        """Every way of putting pages in, in the order every menu lists them
+        (bug hunt E1–E4): (act key, its name on its own, whether it opens a
+        dialog, what it does given (page, before), what it puts in)."""
+        return [
+            ("add_page", "Insert Blank Page", True,
+             lambda i, b: self.add_page(i, before=b), "A blank page"),
+            ("add_sheet_page", "Insert Spreadsheet Page", False,
+             lambda i, b: self.insert_sheet_page(i, before=b), "A page of spreadsheet cells"),
+            ("insert_pdf", "Insert Pages", True,
+             lambda i, b: self.insert_pdf(i, before=b), "Pages from a PDF"),
+            ("insert_image_page", "Insert Image Page", True,
+             lambda i, b: self.insert_image_page(i, before=b), "An image as a page"),
+            ("insert_workbook", "Insert Excel Workbook", True,
+             lambda i, b: self.insert_workbook(None, i, before=b),
+             "An Excel workbook's sheets as spreadsheet pages"),
+        ]
+
+    def fill_insert_choice(self, sub: QMenu, entry: tuple, index: Optional[int] = None) -> None:
+        """Before / After for one member of the insert family: of page
+        *index*, or of the page in view at the time when it is None."""
+        key, _name, dialog, run, what = entry
+        where = f"page {index + 1}" if index is not None else "the page in view"
+        if key == "add_sheet_page":
+            page = self.document.pages[self.page_index(index)] if index is not None else None
+            if page is not None and page.sheet is not None:
+                what = "Another page of this spreadsheet, at its end"
+        dots = "…" if dialog else ""
+        before = sub.addAction(f"Before{dots}", lambda _c=False: run(index, True))
+        before.setToolTip(f"{what}, placed before {where}")
+        after = sub.addAction(f"After{dots}", lambda _c=False: run(index, False))
+        after.setToolTip(f"{what}, placed after {where}")
+        before.setStatusTip(before.toolTip())
+        after.setStatusTip(after.toolTip())
+
+    def _build_insert_family(self) -> None:
+        """Each insert command carries its own Before / After submenu, so
+        wherever the command is put — Document ▸ Insert, File ▸ Import, the
+        Main toolbar's button — it is offered the same way. Its key, or a
+        click on the button itself, puts it after the page in view."""
+        for entry in self.insert_family():
+            action = getattr(self, f"act_{entry[0]}")
+            sub = QMenu(action.text(), self)
+            sub.setObjectName(f"menuInsert_{entry[0]}")
+            self.fill_insert_choice(sub, entry)
+            after = sub.actions()[-1]
+
+            def show_key(after=after, action=action):
+                # the key the command answers to, beside the choice it makes
+                after.setShortcut(action.shortcut())
+                after.setShortcutContext(Qt.WidgetShortcut)
+            sub.aboutToShow.connect(show_key)
+            action.setMenu(sub)
+
+    def _tool_entry(self, key: str) -> QAction:
+        """A menu entry that picks up tool *key*, under the tool's own name."""
+        tool = TOOL_MAP[key]
+        entry = self.give_icon(QAction(tool.label, self), tool.icon)
+        entry.setToolTip(tool.hint)
+        entry.setStatusTip(tool.hint)
+        if key == "table":
+            entry.triggered.connect(lambda _c=False: self.insert_table())
+        else:
+            entry.triggered.connect(lambda _c=False, k=key: self.select_tool(k))
+        self.insert_tool_actions.setdefault(key, []).append(entry)
+        return entry
+
+    # Revu's Alt keys for its panels (audit L2/L3), and their names in
+    # Window ▸ Panels, which Revu lists alphabetically
+    PANEL_KEYS = {"dock_bookmarks": "Alt+B", "dock_page": "Alt+U", "dock_search": "Alt+1",
+                  "dock_pages": "Alt+T", "dock_toolsets": "Alt+X"}
+
+    def _build_panel_actions(self) -> list:
+        """Window ▸ Panels: one checkable entry per panel, with Revu's key,
+        kept in step with the rails (sync_rails)."""
+        made = []
+        for name, (label, _icon) in self.PANEL_ICONS.items():
+            key = f"panel_{name[5:]}"
+            action = self._act(key, label,
+                               lambda on, n=name: self.show_panel(n, on),
+                               self.PANEL_KEYS.get(name, ""), checkable=True,
+                               name=f"{label} Panel",
+                               tip=f"Open or close the {label} panel")
+            action.setChecked(not self.docks_by_name[name].isHidden())
+            made.append(action)
+        made.append(self.act_markups_list)
+        return sorted(made, key=lambda a: a.text().lower())
+
     def _build_menus(self) -> None:
         """Bluebeam Revu's menu bar — Revu, File, Edit, View, Document, Batch,
         Tools, Window, Help — with CalcForge's own Calculation menu between
         Tools and Window (the user's choice, 2026-10-14). Every command keeps
-        its place in one of them; what Revu has, where Revu has it."""
+        its place in one of them; what Revu has, where Revu has it, in Revu's
+        order (audit B1, L1–L6), each family together and named alike
+        everywhere (bug hunt E1–E19)."""
+        from . import menutidy
         bar = self.menuBar()
         self._build_search()
+        self._build_insert_family()
+        self.insert_tool_actions: dict[str, list[QAction]] = {}
+
+        def fill(menu, actions):
+            for action in actions:
+                if action is None:
+                    menu.addSeparator()
+                elif isinstance(action, QMenu):
+                    menu.addMenu(action)
+                else:
+                    menu.addAction(action)
 
         revu_menu = bar.addMenu("CalcFo&rge")
         revu_menu.setObjectName("menuApp")
-        for action in (self.act_about, None, self.act_preferences, self.act_shortcuts,
-                       None, self.act_quit):
-            revu_menu.addSeparator() if action is None else revu_menu.addAction(action)
+        # Preferences and Keyboard Shortcuts are in Revu's own menu (decided
+        # 2026-10-15; F1 stays on Keyboard Shortcuts, which is CalcForge's help
+        # for its keys — audit L6 was unsure of Revu's key)
+        fill(revu_menu, (self.act_about, None, self.act_preferences, self.act_shortcuts,
+                         None, self.act_quit))
 
+        # -- File ---------------------------------------------------------------
         file_menu = bar.addMenu("&File")
-        for action in (self.act_new, self.act_new_tab, self.act_new_window, self.act_open):
-            file_menu.addAction(action)
+        fill(file_menu, (self.act_new, self.act_new_tab, self.act_new_window, self.act_open))
         self.recent_menu = file_menu.addMenu("Open Recent")
         self.recent_menu.setObjectName("menuOpenRecent")
         self.recent_menu.aboutToShow.connect(self._fill_recent)
-        for action in (None, self.act_close_tab, self.act_close_all, None,
-                       self.act_save, self.act_save_as, self.act_save_all, None):
-            file_menu.addSeparator() if action is None else file_menu.addAction(action)
-        # what comes in from elsewhere, beside what goes out — an Excel
-        # workbook was only under Document ▸ Insert, which nobody looks in
-        # for it (the user, 2026-10-15: "you somehow removed import excel")
+        fill(file_menu, (None, self.act_close_tab, self.act_close_all, None,
+                         self.act_save, self.act_save_as, self.act_save_all, None))
+        # what comes in from elsewhere, beside what goes out (the user,
+        # 2026-10-15: "you somehow removed import excel"). The page inserts
+        # here are the same commands as Document ▸ Insert, Before / After
+        # alike; the words of the submenu are not repeated (E6).
         import_menu = file_menu.addMenu("Import")
         import_menu.setObjectName("menuImport")
-        for action in (self.act_insert_workbook, self.act_insert_pdf,
-                       self.act_insert_image_page, self.act_import_toolset):
-            import_menu.addAction(action)
+        fill(import_menu, (self.act_insert_pdf, self.act_insert_image_page,
+                           self.act_insert_workbook, None, self.act_import_toolset))
         export_menu = file_menu.addMenu("Export")
-        for action in (self.act_export_pdf, self.act_export_png, self.act_export_markups):
-            export_menu.addAction(action)
-        file_menu.addSeparator()
-        file_menu.addAction(self.act_preview)
-        file_menu.addAction(self.act_print)
+        export_menu.setObjectName("menuExport")
+        fill(export_menu, (self.act_export_pdf, self.act_export_png, self.act_export_markups))
+        fill(file_menu, (None, self.act_preview, self.act_print))
 
+        # -- Edit (audit L1) ----------------------------------------------------
         edit_menu = bar.addMenu("&Edit")
-        edit_menu.addAction(self.act_undo)
-        edit_menu.addAction(self.act_redo)
+        edit_menu.setObjectName("menuEdit")
+        fill(edit_menu, (self.act_undo, self.act_redo))
         # Revu's Undo History: what has been done, newest first; choosing one
         # undoes back to before it
         self.undo_history_menu = edit_menu.addMenu("Undo History")
         self.undo_history_menu.setObjectName("menuUndoHistory")
         self.undo_history_menu.aboutToShow.connect(self._fill_undo_history)
-        for action in (None, self.act_cut, self.act_copy,
-                       self.act_paste, self.act_paste_in_place, self.act_paste_here,
-                       self.act_duplicate, self.act_offset, self.act_array, None, self.act_hide,
-                       self.act_show_hidden, self.act_delete, None,
-                       self.act_select_all, self.act_format_painter, None,
-                       self.act_lock, self.act_group, self.act_ungroup):
-            edit_menu.addSeparator() if action is None else edit_menu.addAction(action)
-        order_menu = edit_menu.addMenu("Arrange")
-        for action in (self.act_front, self.act_forward, self.act_backward, self.act_back):
-            order_menu.addAction(action)
-        align_menu = edit_menu.addMenu("Align")
+        # the clipboard family, then what is done to a markup without
+        # changing it — grouped as on a markup's right-click menu (E16, E17)
+        fill(edit_menu, (None, self.act_cut, self.act_copy, self.act_paste,
+                         self.act_paste_in_place, self.act_paste_here, self.act_duplicate,
+                         self.act_offset, self.act_array, self.act_delete, None))
+        order_menu = edit_menu.addMenu("Order")
+        order_menu.setObjectName("menuOrder")
+        fill(order_menu, (self.act_front, self.act_forward, self.act_backward, self.act_back))
+        align_menu = edit_menu.addMenu("Alignment")
+        align_menu.setObjectName("menuAlignment")
         for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
             align_menu.addAction(getattr(self, f"act_align_{key}"))
+        fill(edit_menu, (self.act_flatten, self.act_recover_flattened, self.act_lock,
+                         self.act_hide, self.act_show_hidden, self.act_group,
+                         self.act_ungroup))
         text_menu = edit_menu.addMenu("Text")
-        for action in (self.act_bold, self.act_italic, self.act_underline, None,
-                       self.act_text_left, self.act_text_center, self.act_text_right,
-                       None, self.act_font_increase, self.act_font_decrease):
-            text_menu.addSeparator() if action is None else text_menu.addAction(action)
-        edit_menu.addSeparator()
-        edit_menu.addAction(self.act_find_text)
-        edit_menu.addAction(self.act_apply_redactions)
+        text_menu.setObjectName("menuText")
+        fill(text_menu, (self.act_bold, self.act_italic, self.act_underline, None,
+                         self.act_text_left, self.act_text_center, self.act_text_right,
+                         None, self.act_font_increase, self.act_font_decrease))
+        # Revu's Pan, Select and Snapshot are on its Edit menu
+        fill(edit_menu, (None, self._tool_entry("pan"), self._tool_entry("select"),
+                         self.act_select_all, None, self._tool_entry("snapshot"),
+                         self.act_format_painter, None))
+        # Revu's PDF Content: the redaction box, Whiteout (its Cut and Erase
+        # Content), and burning the redactions in
+        content = edit_menu.addMenu("PDF Content")
+        content.setObjectName("menuPdfContent")
+        fill(content, (self._tool_entry("redact"), self._tool_entry("whiteout"), None,
+                       self.act_apply_redactions))
+        fill(edit_menu, (None, self.act_find_text, self.act_replace_text))
         spelling = edit_menu.addMenu("Check Spelling")
         spelling.addAction(self.act_check_spelling)
 
+        # -- View (audit L5) ----------------------------------------------------
         view_menu = bar.addMenu("&View")
-        for action in (self.act_fit_page, self.act_fit_width, self.act_actual_size,
-                       self.act_zoom_in, self.act_zoom_out, self.act_zoom_sel, None):
-            view_menu.addSeparator() if action is None else view_menu.addAction(action)
-        for action in (self.act_layout_single, self.act_layout_continuous, self.act_layout_side,
-                       self.act_layout_continuous_side, self.act_cover_page, None):
-            view_menu.addSeparator() if action is None else view_menu.addAction(action)
+        view_menu.setObjectName("menuView")
+        fill(view_menu, (self.act_fit_page, self.act_fit_width, self.act_actual_size,
+                         self.act_zoom_in, self.act_zoom_out, self.act_zoom_sel, None,
+                         self.act_layout_single, self.act_layout_continuous,
+                         self.act_layout_side, self.act_layout_continuous_side,
+                         self.act_cover_page, None))
         rotate_menu = view_menu.addMenu("Rotate View")
-        for action in (self.act_turn_view_cw, self.act_turn_view_acw, self.act_turn_view_reset):
-            rotate_menu.addAction(action)
-        for action in (self.act_split_view, self.act_separate_views, None,
-                       self.act_rulers, self.act_crosshair, None,
-                       self.act_grid, self.act_snap, self.act_snap_content,
-                       self.act_snap_items, self.act_snap_alignment,
-                       self.act_snap_pdf_alignment, None, self.act_margins,
-                       self.act_name_tags, self.act_dark):
-            view_menu.addSeparator() if action is None else view_menu.addAction(action)
+        rotate_menu.setObjectName("menuRotateView")
+        fill(rotate_menu, (self.act_turn_view_cw, self.act_turn_view_acw,
+                           self.act_turn_view_reset))
+        fill(view_menu, (self.act_split_view, self.act_separate_views, None,
+                         self.act_rulers, self.act_crosshair, None,
+                         self.act_grid, self.act_snap, self.act_snap_content,
+                         self.act_snap_items, self.act_snap_alignment,
+                         self.act_snap_pdf_alignment, None, self.act_margins,
+                         self.act_name_tags, self.act_dark))
         dimmer_menu = view_menu.addMenu("Dimmer")
         dimmer_menu.addAction(self.act_dim_content)
         dimmer_menu.addSeparator()
         for level in self.dimmer_levels.actions():
             dimmer_menu.addAction(level)
-        for action in (None, self.act_prev_page, self.act_next_page):
-            view_menu.addSeparator() if action is None else view_menu.addAction(action)
+        fill(view_menu, (None, self.act_prev_page, self.act_next_page))
 
+        # -- Document (audit B1): Revu's order, then CalcForge's own -----------
         # Mnemonic on the "D": Revu's Document menu (Alt+P draws freehand).
         page_menu = bar.addMenu("&Document")
         page_menu.setObjectName("menuDocument")
-        for action in (self.act_doc_props, self.act_page_setup, None):
-            page_menu.addSeparator() if action is None else page_menu.addAction(action)
-        self.current_page_menu = page_menu.addMenu("Current Page")
-        self.current_page_menu.aboutToShow.connect(self._rebuild_current_page_menu)
+        fill(page_menu, (self.act_doc_props, self.act_page_setup))
+        rotate_pages = page_menu.addMenu("Rotate Pages")
+        rotate_pages.setObjectName("menuRotatePages")
+        fill(rotate_pages, (self.act_rotate_pages_cw, self.act_rotate_pages_acw))
         insert_pages = page_menu.addMenu("Insert")
-        for action in (self.act_add_page, self.act_add_sheet_page, self.act_insert_pdf,
-                       self.act_insert_image_page, self.act_insert_workbook):
-            insert_pages.addAction(action)
-        for action in (self.act_duplicate_page, self.act_extract_pages, self.act_split_pages,
-                       self.act_delete_page, self.act_crop_page, None,
-                       self.act_sheet_page_setup, self.act_header_footer, self.act_scale,
-                       self.act_viewports, self.act_bookmark, self.act_contents, None,
-                       self.act_color_processing, None, self.act_flatten,
-                       self.act_recover_flattened):
-            page_menu.addSeparator() if action is None else page_menu.addAction(action)
+        insert_pages.setObjectName("menuInsert")
+        for entry in self.insert_family():
+            insert_pages.addAction(getattr(self, f"act_{entry[0]}"))
+        fill(page_menu, (self.act_extract_pages, self.act_split_pages, self.act_delete_page,
+                         self.act_crop_page, None, self.act_header_footer, None,
+                         self.act_color_processing, None, self.act_flatten_document,
+                         self.act_recover_flattened, None))
+        # CalcForge's own, together at the end
+        self.current_page_menu = page_menu.addMenu("Current Page")
+        self.current_page_menu.setObjectName("menuCurrentPage")
+        self.current_page_menu.aboutToShow.connect(self._rebuild_current_page_menu)
+        fill(page_menu, (self.act_duplicate_page, self.act_bookmark, self.act_contents))
 
-        batch_menu = bar.addMenu("&Batch")
+        batch_menu = bar.addMenu("B&atch")      # Alt+B is Revu's Bookmarks panel
         batch_menu.setObjectName("menuBatch")
-        batch_menu.addAction(self.act_export_markups)       # Revu's Summary
-        batch_menu.addAction(self.act_flatten_document)
+        fill(batch_menu, (self.act_export_markups,       # Revu's Summary
+                          self.act_flatten_document, self.act_recover_flattened))
 
-        tools_menu = bar.addMenu("&Tools")
+        # -- Tools (audit L4) ---------------------------------------------------
+        tools_menu = bar.addMenu("T&ools")      # Alt+T is Revu's Thumbnails panel
         tools_menu.setObjectName("menuTools")
-        self.insert_tool_actions: dict[str, list[QAction]] = {}
         # Every drawing tool, by name: somebody who does not know which button
         # the polygon is under can find it by reading, as in Revu's Tools menu.
+        # Pan, Select and Snapshot are on Edit, Redact and Whiteout under Edit
+        # ▸ PDF Content, as in Revu.
+        on_edit = {"pan", "select", "snapshot", "redact", "whiteout"}
         markup_sub = tools_menu.addMenu("Markup")
-        for tool in TOOLS:
-            if tool.category == "Annotate":
-                action = self.give_icon(QAction(tool.label, self), tool.icon)
-                action.triggered.connect(lambda _c=False, key=tool.key: self.select_tool(key))
-                markup_sub.addAction(action)
-                self.insert_tool_actions.setdefault(tool.key, []).append(action)
+        markup_sub.setObjectName("menuMarkup")
+        for tool in tools_in("Annotate"):
+            markup_sub.addAction(self._tool_entry(tool.key))
         markup_sub.addSeparator()
-        for heading in ("Draw", "Measure", "Navigate"):
-            sub = markup_sub if heading == "Draw" else tools_menu.addMenu(
-                {"Measure": "Measure", "Navigate": "Navigation"}[heading])
-            for tool in tools_in(heading):
-                if tool.mode == NONE and heading != "Navigate":
-                    continue
-                entry = self.give_icon(QAction(tool.label, self), tool.icon)
-                entry.setToolTip(tool.hint)
-                entry.triggered.connect(
-                    lambda _c=False, key=tool.key: self.select_tool(key))
-                sub.addAction(entry)
-                self.insert_tool_actions.setdefault(tool.key, []).append(entry)
+        for tool in tools_in("Draw"):
+            if tool.mode != NONE and tool.key not in on_edit:
+                markup_sub.addAction(self._tool_entry(tool.key))
+        measure_sub = tools_menu.addMenu("Measure")
+        measure_sub.setObjectName("menuMeasure")
+        for tool in tools_in("Measure"):
+            if tool.mode != NONE:
+                measure_sub.addAction(self._tool_entry(tool.key))
+        # the page's scale and its viewports, with Calibrate (novice 13)
+        fill(measure_sub, (None, self.act_scale, self.act_viewports))
+        for tool in tools_in("Navigate"):
+            if tool.key not in on_edit:
+                tools_menu.addAction(self._tool_entry(tool.key))
         tools_menu.addSeparator()
         self.selection_menu = tools_menu.addMenu("Selected Markups")
         self.selection_menu.aboutToShow.connect(self._rebuild_selection_menu)
-        for action in (self.act_autosize, self.act_sticky, self.act_renumber_counts,
-                       self.act_forget_defaults):
-            tools_menu.addAction(action)
-        tools_menu.addSeparator()
+        fill(tools_menu, (self.act_autosize, self.act_sticky, self.act_renumber_counts,
+                          self.act_forget_defaults, None))
         chest_menu = tools_menu.addMenu("Tool Chest")      # Revu: Tools ▸ Tool Chest
+        chest_menu.setObjectName("menuToolChest")
         chest_menu.addAction(self.act_manage_toolsets)
-        chest_menu.addAction(self.act_import_toolset)
+        # outside File ▸ Import its name is said in full, as on the Tool
+        # Chest panel's own menu
+        menutidy.proxy(chest_menu, self.act_import_toolset, "Import Tool Set…")
         toolbars_menu = tools_menu.addMenu("Toolbars")
         for toolbar in self.toolbars:
             toolbars_menu.addAction(toolbar.toggleViewAction())
-        toolbars_menu.addSeparator()
-        toolbars_menu.addAction(self.act_lock_toolbars)
-        toolbars_menu.addAction(self.act_customise_toolbar)
+        fill(toolbars_menu, (None, self.act_lock_toolbars, self.act_customise_toolbar))
 
+        # -- Calculation (CalcForge's own) --------------------------------------
         calc_menu = bar.addMenu("&Calculation")
+        calc_menu.setObjectName("menuCalculation")
         # Calc mode is the switch on the menu bar (and F12), not a menu entry
         self.addAction(self.act_calc_mode)
-        for action in (self.act_calculate, self.act_auto_calc,
-                       None, self.act_insert_plot, self.act_insert_matrix,
-                       self.act_insert_calc_text, self.act_insert_block,
-                       self.act_insert_table, self.act_insert_chart, self.act_insert_function,
-                       self.act_calc_rules,
-                       self.act_constants, None):
-            calc_menu.addSeparator() if action is None else calc_menu.addAction(action)
-        calc_menu.addAction(self.act_insert_operator)
+        fill(calc_menu, (self.act_calculate, self.act_auto_calc, None,
+                         self.act_insert_plot, self.act_insert_matrix,
+                         self.act_insert_calc_text, self.act_insert_block,
+                         self.act_insert_table, self.act_insert_chart,
+                         self.act_insert_function, self.act_insert_operator,
+                         self.act_constants))
         on_selection = calc_menu.addMenu("Selection")
         for key in ("solve", "calculate_selection", "invert", "determinant"):
             on_selection.addAction(getattr(self, f"act_{key}"))
@@ -2045,27 +2263,36 @@ class MainWindow(QMainWindow):
         for name in ("if", "for", "while", "line"):
             program_menu.addAction(getattr(self, f"act_prog_{name}"))
         calc_menu.addSeparator()
-        calc_menu.addAction(self.act_double_check)
+        calc_menu.addAction(self.act_calc_rules)
+        # A spreadsheet's Page Layout, shaped as on its cells' right-click
+        # menu and Excel's ribbon: Breaks ▸, Print Area ▸, Sheet Layout…
+        # (novice 11: there was no page-break command on the menu bar)
+        layout_menu = calc_menu.addMenu("Page Layout")
+        layout_menu.setObjectName("menuPageLayout")
+        breaks = layout_menu.addMenu("Breaks")
+        fill(breaks, (self.act_insert_page_break, self.act_remove_page_break,
+                      self.act_reset_page_breaks))
+        area = layout_menu.addMenu("Print Area")
+        fill(area, (self.act_set_print_area, self.act_clear_print_area))
+        fill(layout_menu, (None, self.act_sheet_page_setup))
+        layout_menu.aboutToShow.connect(self._refresh_page_layout_menu)
+        layout_menu.aboutToHide.connect(self._page_layout_menu_closed)
+        fill(calc_menu, (None, self.act_double_check))
 
+        # -- Window (audit L3) --------------------------------------------------
         window_menu = bar.addMenu("&Window")
         window_menu.setObjectName("menuWindow")
         panels_menu = window_menu.addMenu("Panels")
-        for dock in self.panels:
-            panels_menu.addAction(dock.toggleViewAction())
-        window_menu.addAction(self.act_markups_list)
-        window_menu.addSeparator()
-        window_menu.addAction(self.act_full_screen)
-        window_menu.addAction(self.act_presentation)
-        window_menu.addSeparator()
-        window_menu.addAction(self.act_show_panels)
-        window_menu.addAction(self.act_pin_panels)
-        window_menu.addAction(self.act_reset_layout)
+        panels_menu.setObjectName("menuPanels")
+        fill(panels_menu, self._build_panel_actions())
+        fill(window_menu, (self.act_show_panels, None, self.act_full_screen,
+                           self.act_presentation, None, self.act_pin_panels,
+                           self.act_reset_layout))
 
         help_menu = bar.addMenu("&Help")
-        help_menu.addAction(self.act_find_tool)
-        help_menu.addSeparator()
-        help_menu.addAction(self.act_record_slowdowns)
-        help_menu.addAction(self.act_about)
+        help_menu.setObjectName("menuHelp")
+        fill(help_menu, (self.act_find_tool, None,
+                         self.act_record_slowdowns, self.act_about))
 
     def _build_status(self) -> None:
         status = CenteredStatusBar()
@@ -2121,7 +2348,7 @@ class MainWindow(QMainWindow):
         status.addPermanentWidget(self.status_dimmer)
 
         self.status_scale = QToolButton()
-        self.status_scale.setText("Scale 1:1")
+        self.status_scale.setText("Scale Not Set")
         self.status_scale.setAutoRaise(True)
         self.status_scale.setToolTip("Click to set the page scale")
         self.status_scale.clicked.connect(self.calibrate_dialog)
@@ -2190,7 +2417,7 @@ class MainWindow(QMainWindow):
 
         self.status_fit = QToolButton()
         self.status_fit.setAutoRaise(True)
-        self.status_fit.setText("Fit width")
+        self.status_fit.setText("Fit Width")
         self.status_fit.setToolTip("Fit the page across the window")
         self.status_fit.clicked.connect(self.view.fit_width)
         status.addPermanentWidget(self.status_fit)
@@ -2246,7 +2473,7 @@ class MainWindow(QMainWindow):
         self.zoom_combo = QComboBox()
         self.zoom_combo.setEditable(True)
         self.zoom_combo.addItems(["25%", "50%", "75%", "100%", "125%", "150%", "200%",
-                                  "400%", "Fit page", "Fit width"])
+                                  "400%", "Fit Page", "Fit Width"])
         self.zoom_combo.setCurrentText("100%")
         self.zoom_combo.activated.connect(self._zoom_chosen)
         status.addPermanentWidget(self.zoom_combo)
@@ -2403,7 +2630,22 @@ class MainWindow(QMainWindow):
         return os.path.basename(document.path) if document.path else "Untitled"
 
     def open_in_new_tab(self, document=None) -> int:
-        """Put another document beside this one, with a tab of its own."""
+        """Put another document beside this one, with a tab of its own —
+        or, from the empty workspace, in place of the blank one behind it."""
+        if self._workspace_empty:
+            if document is None:
+                self.new_document(confirm=False)
+                self._open_documents[self._active_tab] = self._current_document_state()
+                return self._active_tab
+            self.show_empty_workspace(False)
+            where = self.open_in_new_tab(document)
+            placeholder = 0 if where > 0 else 1
+            self._open_documents.pop(placeholder)
+            self.document_tabs.blockSignals(True)
+            self.document_tabs.removeTab(placeholder)
+            self._active_tab = self.document_tabs.currentIndex()
+            self.document_tabs.blockSignals(False)
+            return self._active_tab
         held = self.view.tool_key
         self.view.escape_everything()
         if not self._open_documents:
@@ -2609,6 +2851,91 @@ class MainWindow(QMainWindow):
         self.document_tabs.blockSignals(False)
         self._adopt_document_state(self._open_documents[index])
 
+    # -- the empty workspace (novice 24) ---------------------------------------------
+    #: What still works with no document open, as in Revu: making or opening
+    #: one, the window and its panels, the application's own settings.
+    WORKSPACE_COMMANDS = {
+        "new", "new_tab", "new_window", "open", "quit", "preferences", "shortcuts",
+        "about", "find_tool", "record_slowdowns", "full_screen", "dark", "show_panels",
+        "pin_panels", "reset_layout", "lock_toolbars", "customise_toolbar",
+        "import_toolset", "manage_toolsets", "close_all", "markups_list",
+    }
+
+    def _build_empty_workspace(self) -> QWidget:
+        from PySide6.QtWidgets import QPushButton
+        space = QWidget()
+        space.setObjectName("emptyWorkspace")
+        outer = QVBoxLayout(space)
+        outer.addStretch(1)
+        said = QLabel("No document is open")
+        said.setObjectName("emptyWorkspaceTitle")
+        said.setAlignment(Qt.AlignCenter)
+        font = said.font()
+        font.setPointSizeF(font.pointSizeF() * 1.4)
+        said.setFont(font)
+        outer.addWidget(said)
+        hint = QLabel("File ▸ New PDF (Ctrl+N) or File ▸ Open… (Ctrl+O)")
+        hint.setAlignment(Qt.AlignCenter)
+        outer.addWidget(hint)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        for text, key in (("New PDF", "new"), ("Open…", "open")):
+            button = QPushButton(text)
+            button.setObjectName(f"emptyWorkspace_{key}")
+            button.clicked.connect(lambda _c=False, k=key: getattr(self, f"act_{k}").trigger())
+            row.addWidget(button)
+        row.addStretch(1)
+        outer.addLayout(row)
+        outer.addStretch(2)
+        return space
+
+    @property
+    def workspace_empty(self) -> bool:
+        return self._workspace_empty
+
+    def show_empty_workspace(self, empty: bool) -> None:
+        """No document in view: the canvas, its tab and the commands that need
+        a document go, and the window says how to get one (Revu). A document
+        made or opened brings everything back."""
+        if empty == self._workspace_empty:
+            return
+        self._workspace_empty = empty
+        self.view.escape_everything()
+        for widget in (self.bottom_split, self.document_tabs):
+            widget.setVisible(not empty)
+        if empty:
+            self.formula_bar.hide()
+        self.empty_workspace.setVisible(empty)
+        # the panels and the footer say nothing about a document that is not
+        # there: the blank one behind the workspace is not shown in them
+        # (the Tool Chest is the application's, not the document's)
+        for dock in self.panels:
+            if dock is not self.dock_toolsets and dock.widget() is not None:
+                dock.widget().setEnabled(not empty)
+        # the blank page's thumbnail is not shown (the list keeps its place)
+        self.pages_panel.list.viewport().setVisible(not empty)
+        self.statusBar().setEnabled(not empty)
+        actions = [(name[4:], getattr(self, name)) for name in dir(self)
+                   if name.startswith("act_") and isinstance(getattr(self, name), QAction)]
+        actions += [(f"tool.{key}", action) for key, action in self.tool_actions.items()]
+        actions += [(f"menu.{key}.{i}", action)
+                    for key, entries in self.insert_tool_actions.items()
+                    for i, action in enumerate(entries)]
+        if empty:
+            self._enabled_before_empty = {}
+            for key, action in actions:
+                if key in self.WORKSPACE_COMMANDS or key.startswith("panel_"):
+                    continue
+                self._enabled_before_empty[key] = action.isEnabled()
+                action.setEnabled(False)
+        else:
+            for key, action in actions:
+                if key in self._enabled_before_empty:
+                    action.setEnabled(self._enabled_before_empty[key])
+            self._enabled_before_empty = {}
+            self._refresh_undo_actions()
+        self.update_title()
+
     def close_document_tab(self, index: int, moving: bool = False) -> None:
         """Closing a view must not silently discard its document's edits."""
         if not (0 <= index < len(self._open_documents)):
@@ -2639,8 +2966,12 @@ class MainWindow(QMainWindow):
                 host.unsplit(other, carry_over=False)
                 return
         if len(self._open_documents) == 1:
+            # Revu leaves an empty workspace, not an "Untitled" document
+            # (novice 24): a blank document stands behind it, out of sight,
+            # until one is made or opened
             self.new_document(confirm=False)
             self._open_documents[0] = self._current_document_state()
+            self.show_empty_workspace(True)
             return
         if 0 <= self._active_tab < len(self._open_documents):
             self._open_documents[self._active_tab] = self._current_document_state()
@@ -2709,6 +3040,7 @@ class MainWindow(QMainWindow):
         self.rebuild_scenes()
         self.select_tool("select")
         self.toggle_calc_mode(False)          # decision 7: File > New is in Markup mode
+        self.show_empty_workspace(False)
         self.view.fit_page()
         self.update_title()
 
@@ -2793,6 +3125,7 @@ class MainWindow(QMainWindow):
             return
         self.undo_stack.clear()
         self.current_index = 0
+        self.show_empty_workspace(False)
         self.rebuild_scenes()
         self.view.fit_page()
         self.update_title()
@@ -2861,6 +3194,7 @@ class MainWindow(QMainWindow):
             return
         remember_recent_file(path)
         self.current_index = 0
+        self.show_empty_workspace(False)
         self.rebuild_scenes()
         self.view.fit_page()
         self.update_title()
@@ -3345,6 +3679,9 @@ class MainWindow(QMainWindow):
         return True
 
     def update_title(self) -> None:
+        if getattr(self, "_workspace_empty", False):
+            self.setWindowTitle(APP_NAME)
+            return
         name = os.path.basename(self.document.path) if self.document.path else "Untitled"
         try:
             dirty = "" if self.undo_stack.isClean() else " •"
@@ -3514,7 +3851,9 @@ class MainWindow(QMainWindow):
             # Shift+E included — starts an equation.
             binding = self.shortcuts.binding_for(QKeySequence(event.keyCombination()),
                                                  scopes=(MARKUP,))
-            if binding is not None:
+            # a Markup-mode *command* (Multiply's Ctrl+M) has handed its key
+            # to the Calc-mode one (_apply_mode_keys); only tool keys stop here
+            if binding is not None and binding.kind != COMMAND:
                 event.accept()
                 return True
         if event.type() == QEvent.ShortcutOverride and self.view.is_editing():
@@ -3540,6 +3879,40 @@ class MainWindow(QMainWindow):
     def show_all_panels(self) -> None:
         self.show_panel("dock_pages", True)
         self.show_panel("dock_properties", True)
+
+    def hide_or_show_panels(self, _checked: bool = False) -> None:
+        """Revu's Hide Panels (Shift+F4): with any panel open, every one goes
+        and is remembered; pressed again, they come back — the default one
+        on each side when none had been open."""
+        open_now = [name for name, dock in self.docks_by_name.items()
+                    if name in self.PANEL_ICONS and not dock.isHidden()]
+        if open_now:
+            self._panels_hidden = open_now
+            for name in open_now:
+                self.show_panel(name, False)
+            self.status_hint.setText("Panels hidden — Shift+F4 brings them back")
+            return
+        wanted = getattr(self, "_panels_hidden", None) or []
+        self._panels_hidden = []
+        if not wanted:
+            self.show_all_panels()
+            return
+        for name in wanted:
+            self.show_panel(name, True)
+
+    def _apply_mode_keys(self) -> None:
+        """A key shared by a Markup-mode and a Calc-mode command (Ctrl+M:
+        Multiply, or SMath's Matrix) is carried only by the command of the
+        mode in force, so the two never fight over it."""
+        calc_on = self.view.calc.calc_mode()
+        for key, scope in _SHORTCUT_SCOPES.items():
+            action = getattr(self, f"act_{key}", None)
+            action_id = self.action_ids.get(key)
+            if action is None or action_id is None:
+                continue
+            live = (scope == "calc") == calc_on
+            action.setShortcuts(self._keys_for(key, self.shortcuts.sequence(action_id))
+                                if live else [])
 
     def lock_toolbars(self, locked: bool) -> None:
         for bar in self.toolbars:
@@ -4561,10 +4934,13 @@ class MainWindow(QMainWindow):
         """Everything you can do to one page — or to the run picked out.
 
         Revu's Thumbnails menu, in its order and with its names (QA round 4,
-        audit A1): Page Setup…, Set Scale… | Cut, Copy and Paste Pages |
-        Insert Blank Page, Insert Pages, Delete Pages, Rotate Pages, Rename
-        Page Label, Reset All Page Labels | Print Pages… | Flatten… — then
-        CalcForge's own, in a group of their own at the end.
+        audit A1): Page Setup…, Set Scale… | Cut, Copy and Paste Pages, and
+        Move Up / Down beside them | every insert, Before or After, then
+        Duplicate, Extract, Split, Delete, Crop and Rotate Pages, and the page
+        labels | Print Pages… and whether the page prints | Flatten…,
+        Unflatten, Colour Processing… — then CalcForge's own, in a group of
+        their own at the end. Each family is together and named as on the
+        Document menu (bug hunt E1–E14).
 
         The tooltips say which pages: with six sheets picked out, "Delete
         these 6 pages" is what Delete Pages does, so nothing is taken away by
@@ -4577,11 +4953,18 @@ class MainWindow(QMainWindow):
         these = f"these {len(acting)} pages" if several else "page"
         page = self.document.pages[index]
         menu = menu or QMenu(self)
+
+        def here(run):
+            """*run* on this page: the page goes in view first, as the
+            Document menu's commands act on the page in view."""
+            return lambda _checked=False: (self.go_to_page(index), run())
+
         # -- page setup and scale ----------------------------------------------------
-        menu.addAction("Page Setup…", lambda: (self.go_to_page(index), self.page_setup()))
-        menu.addAction("Set Scale…", lambda: (self.go_to_page(index), self.calibrate_dialog()))
+        menu.addAction("Page Setup…", here(self.page_setup))
+        menu.addAction(self.act_scale.text(), here(self.calibrate_dialog)).setToolTip(
+            self.act_scale.toolTip())
         menu.addSeparator()
-        # -- the clipboard -------------------------------------------------------------
+        # -- the clipboard, and moving the pages along (E9) ----------------------------
         many = len(self.document.pages) > 1
         cut = menu.addAction("Cut Pages", lambda: self.cut_pages(index))
         cut.setToolTip(f"Copy {these}, then delete them")
@@ -4597,48 +4980,41 @@ class MainWindow(QMainWindow):
         after = paste.addAction("After", lambda: self.paste_page(index))
         after.setToolTip(f"Paste the copied pages after page {index + 1}")
         paste.setEnabled(waiting is not None)
+        first, last = acting[0], acting[-1]
+        up = menu.addAction("Move Up", lambda: self.move_page(first, first - 1, len(acting)))
+        up.setToolTip(f"Move {these} one place towards the start")
+        up.setEnabled(first > 0)
+        down = menu.addAction("Move Down", lambda: self.move_page(first, first + 1, len(acting)))
+        down.setToolTip(f"Move {these} one place towards the end")
+        down.setEnabled(last < len(self.document.pages) - 1)
         menu.addSeparator()
-        # -- insert, delete, rotate, label -------------------------------------------
+        # -- insert, and the rest of what is done to pages ---------------------------
         # Every way of putting pages in, together and the same shape: each
-        # one Before or After this page (the user, 2026-10-16: "Spreadsheet
-        # After" sat in another group from Insert Pages, and Excel had none).
-        def inserting(title, before, after, tip):
-            sub = menu.addMenu(title)
-            sub.addAction("Before…" if before[1] else "Before", before[0]).setToolTip(
-                f"{tip}, placed before this page")
-            sub.addAction("After…" if after[1] else "After", after[0]).setToolTip(
-                f"{tip}, placed after this page")
-            return sub
-        inserting("Insert Blank Page", (lambda: self.add_page_before(index), True),
-                  (lambda: self.add_page(index), True), "A blank page")
-        inserting("Insert Spreadsheet Page",
-                  (lambda: self.insert_sheet_page(index, before=True), False),
-                  (lambda: self.insert_sheet_page(index), False), "A page of spreadsheet cells")
-        inserting("Insert Pages", (lambda: self.insert_pdf(index, before=True), True),
-                  (lambda: self.insert_pdf(index), True), "Pages from a PDF")
-        inserting("Insert Image Page",
-                  (lambda: self.insert_image_page(index, before=True), True),
-                  (lambda: self.insert_image_page(index), True), "An image as a page")
-        inserting("Insert Excel Workbook",
-                  (lambda: self.insert_workbook(None, index, before=True), True),
-                  (lambda: self.insert_workbook(None, index), True),
-                  "An Excel workbook's sheets as spreadsheet pages")
-        if page.sheet is not None:
-            menu.addAction("Add Sheet Page", lambda: self.insert_sheet_page(index)).setToolTip(
-                "Another page for this spreadsheet's cells")
+        # one Before or After this page (the user, 2026-10-16), the same
+        # family the Document menu's Insert ▸ offers (insert_family). On a
+        # spreadsheet page Insert Spreadsheet Page is one more page of it.
+        for entry in self.insert_family():
+            self.fill_insert_choice(menu.addMenu(entry[1]), entry, index)
         duplicate = menu.addAction("Duplicate Pages" if several else "Duplicate Page",
                                    lambda: self.duplicate_page(index))
         duplicate.setToolTip(f"Duplicate {these}")
-        extract = menu.addAction("Extract Pages…", lambda: self._extract_from_menu(index))
+        extract = menu.addAction(self.act_extract_pages.text(),
+                                 lambda: self._extract_from_menu(index))
         extract.setToolTip(f"Save {these} as a new PDF")
-        delete = menu.addAction("Delete Pages…", lambda: self.delete_page(index))
+        split = menu.addAction(self.act_split_pages.text(), here(self.split_into_files))
+        split.setToolTip(self.act_split_pages.toolTip())
+        delete = menu.addAction(self.act_delete_page.text(), lambda: self.delete_page(index))
         delete.setToolTip(f"Delete {these}")
         delete.setEnabled(many)
+        crop = menu.addAction(self.act_crop_page.text(), here(self.crop_pages))
+        crop.setToolTip(self.act_crop_page.toolTip())
         turn = menu.addMenu("Rotate Pages")
-        turn_cw = turn.addAction("Clockwise", lambda: self.rotate_page(index, True))
+        turn_cw = turn.addAction(self.act_rotate_pages_cw.text(),
+                                 lambda: self.rotate_page(index, True))
         turn_cw.setToolTip("Turn the paper and everything drawn on it. To turn "
                            "only the way it is shown, use View ▸ Rotate View.")
-        turn_acw = turn.addAction("Anticlockwise", lambda: self.rotate_page(index, False))
+        turn_acw = turn.addAction(self.act_rotate_pages_acw.text(),
+                                  lambda: self.rotate_page(index, False))
         turn_acw.setToolTip("Turn the paper and everything drawn on it anticlockwise")
         if not several:
             rename = menu.addAction("Rename Page Label", lambda: self.rename_page(index))
@@ -4650,25 +5026,32 @@ class MainWindow(QMainWindow):
         every.setToolTip("Every page back to its imported label, or the normal page number")
         every.setEnabled(any(p.label != p.source_note.strip() for p in self.document.pages))
         menu.addSeparator()
+        # -- printing: the command and whether the page prints, together (E10) -----
         printing = menu.addAction("Print Pages…", lambda: self.print_pages(index))
         printing.setToolTip(f"Print {these}")
+        include = menu.addAction("Include in Print && Export")
+        include.setToolTip("Whether the page, or the pages picked out, are printed and "
+                           "exported with the rest")
+        include.setCheckable(True)
+        include.setChecked(all(self.document.pages[i].printable for i in acting))
+        include.toggled.connect(
+            lambda on, chosen=tuple(acting): self.set_pages_printable(chosen, on))
         menu.addSeparator()
+        # -- flatten and colour: the Document menu's group (E14, E15) ---------------
         menu.addAction(self.act_flatten_document)
-        processing = menu.addAction("Colour Processing…", lambda: self.color_processing(index))
+        menu.addAction(self.act_recover_flattened)
+        processing = menu.addAction(self.act_color_processing.text(),
+                                    lambda: self.color_processing(index))
         processing.setEnabled(bool(page.background_key or page.pdf_key))
         menu.addSeparator()
         # -- CalcForge's own ------------------------------------------------------------
-        here = menu.addAction("Go to Page", lambda: self.go_to_page(index))
-        here.setToolTip("Go to this page")
-        bookmark = menu.addAction("Add Bookmark", lambda: self.bookmark_page(index))
+        go = menu.addAction("Go to Page", lambda: self.go_to_page(index))
+        go.setToolTip("Go to this page")
+        bookmark = menu.addAction(self.act_bookmark.text(), lambda: self.bookmark_page(index))
         bookmark.setToolTip("Add this page to the document bookmarks")
-        first, last = acting[0], acting[-1]
-        up = menu.addAction("Move Up", lambda: self.move_page(first, first - 1, len(acting)))
-        up.setEnabled(first > 0)
-        down = menu.addAction("Move Down", lambda: self.move_page(first, first + 1, len(acting)))
-        down.setEnabled(last < len(self.document.pages) - 1)
         if page.sheet is not None:
-            layout = menu.addAction("Sheet Layout…", lambda: self.sheet_page_setup(index))
+            layout = menu.addAction(self.act_sheet_page_setup.text(),
+                                    lambda: self.sheet_page_setup(index))
             layout.setToolTip("Print area, titles, fit to page width, centring, gridlines")
         from . import calcsections
         calcsections.add_menu(self, menu, index)
@@ -4686,19 +5069,13 @@ class MainWindow(QMainWindow):
             entry.toggled.connect(
                 lambda on, i=index, w=which: self.set_page_running_text(i, w, on))
         running.addSeparator()
-        wording = running.addAction("Headers && Footers…", self.edit_header_footer)
+        wording = running.addAction(self.act_header_footer.text(), self.edit_header_footer)
         wording.setToolTip("Edit the document's header and footer wording")
         paper = menu.addMenu("Paper Size")
         for name in PAGE_SIZES:
             entry = paper.addAction(name, lambda n=name: self.set_page_size(index, n))
             entry.setCheckable(True)
             entry.setChecked(page.setup.size_name == name)
-        include = menu.addAction("Print")
-        include.setToolTip("Include the selected page or pages in print and export")
-        include.setCheckable(True)
-        include.setChecked(all(self.document.pages[i].printable for i in acting))
-        include.toggled.connect(
-            lambda on, chosen=tuple(acting): self.set_pages_printable(chosen, on))
         editable = menu.addAction("Make This Page's Markups Editable",
                                   lambda: self.make_markups_editable(index))
         editable.setToolTip(
@@ -5087,9 +5464,17 @@ class MainWindow(QMainWindow):
         if tabs is not None:
             tabs.refresh()                  # and its tab is the current one
         scale = self.current_page().scale
-        self.status_scale.setText(f"Scale {scale.label}")
-        self.status_scale.setToolTip(
-            f"1 page point = {format_quantity(scale.length_per_pt, 5)}\nClick to change")
+        # Revu's "Scale Not Set" (novice 12): a page nobody has scaled must
+        # not look as if it measured 1:1
+        if scale.is_calibrated():
+            self.status_scale.setText(f"Scale {scale.label}")
+            self.status_scale.setToolTip(
+                f"1 page point = {format_quantity(scale.length_per_pt, 5)}\n"
+                "Click to change (Set Scale…)")
+        else:
+            self.status_scale.setText("Scale Not Set")
+            self.status_scale.setToolTip("This page has no scale: measurements are paper "
+                                         "distances.\nClick to set one (Set Scale…)")
         self.refresh_page_bar()
 
     def refresh_page_bar(self) -> None:
@@ -5172,6 +5557,7 @@ class MainWindow(QMainWindow):
             action.setShortcuts(self._keys_for(key, sequence))
         for action_id, action in getattr(self, "symbol_actions", {}).items():
             action.setShortcut(QKeySequence(self.shortcuts.sequence(action_id)))
+        self._apply_mode_keys()
 
     def insert_symbol(self, text: str) -> None:
         """Put a symbol in at the cursor, wherever the cursor is."""
@@ -5673,6 +6059,7 @@ class MainWindow(QMainWindow):
                 widget.blockSignals(False)
         self.status_hint.setText("Calc mode — typing on the page starts an equation" if on
                                  else "Markup mode — the markup tools' keys")
+        self._apply_mode_keys()
         self.view.viewport().update()
 
     def calculate(self) -> None:
@@ -5746,10 +6133,12 @@ class MainWindow(QMainWindow):
         open_document_rules(self)
 
     def insert_table(self) -> None:
-        """Drag out a table (a click gives Excel's handful of cells)."""
+        """Drag out a table (a click gives Excel's handful of cells): the
+        Table tool, from the Tools or Calculation toolbar, Tools ▸ Markup or
+        Calculation ▸ Table alike."""
         self.view.calc.leave()
         self.view.tables.close()
-        self.view.set_tool("table")
+        self.select_tool("table")
         self.status_hint.setText("Drag out the table: the rows and columns follow the size "
                                  "you drag · a click makes a 4 × 3 table")
 
@@ -6598,7 +6987,7 @@ class MainWindow(QMainWindow):
             return
         self.status_hint.setText(
             "This page has no scale — measurements are paper distances. "
-            "Click “Scale 1:1” in the status bar to set one.")
+            "Click “Scale Not Set” in the status bar to set one.")
 
     def choose_count_subject(self) -> None:
         dialog = dialogs.CountSubjectDialog(self.view.count_subject, self.view.count_symbol, self)
@@ -8150,6 +8539,83 @@ class MainWindow(QMainWindow):
         panel.query.setFocus(Qt.ShortcutFocusReason)
         panel.query.selectAll()
 
+    def replace_in_document(self, _checked: bool = False) -> None:
+        """Ctrl+H, Excel's and Word's Replace: the Search panel with its
+        Replace box ready to type in — or the Find box first, when there is
+        nothing to look for yet."""
+        self.show_panel("dock_search", True)
+        panel = self.search_panel
+        box = panel.replacement if panel.query.text() else panel.query
+        box.setFocus(Qt.ShortcutFocusReason)
+        box.selectAll()
+
+    # -- the spreadsheet's Page Layout from the menu bar (novice 11) -------------
+    def _sheet_for_layout(self):
+        """(spreadsheet, active cell, cells picked out) that Calculation ▸
+        Page Layout acts on: the spreadsheet open for typing, else the one on
+        the page in view (no active cell then); (None, None, None) when there
+        is neither."""
+        tables = self.view.tables
+        item = tables.item
+        if item is not None and getattr(item, "SHEET_RUN", False):
+            return item, tuple(tables.active), list(tables.selection())
+        if self.current_page().sheet is not None:
+            from .sheetlayout import _run_item
+            item = _run_item(self, self.current_index)
+            if item is not None:
+                return item, None, None
+        return None, None, None
+
+    def _refresh_page_layout_menu(self) -> None:
+        from . import sheetlayout
+        item, cell, area = self._sheet_for_layout()
+        self.act_insert_page_break.setEnabled(cell is not None and (cell[0] > 0 or cell[1] > 0))
+        self.act_remove_page_break.setEnabled(
+            cell is not None and sheetlayout.has_break(item, *cell))
+        self.act_reset_page_breaks.setEnabled(item is not None)
+        self.act_set_print_area.setEnabled(area is not None)
+        self.act_clear_print_area.setEnabled(item is not None)
+
+    def _page_layout_menu_closed(self) -> None:
+        """Greyed only while the menu is open: a key bound to one of them
+        still works out what it can do when it is pressed."""
+        for action in (self.act_insert_page_break, self.act_remove_page_break,
+                       self.act_reset_page_breaks, self.act_set_print_area,
+                       self.act_clear_print_area):
+            action.setEnabled(True)
+
+    def insert_page_break(self, _checked: bool = False) -> None:
+        from . import sheetlayout
+        item, cell, _area = self._sheet_for_layout()
+        if cell is None:
+            self.status_hint.setText("Click the cell the new page starts at first")
+            return
+        sheetlayout.insert_break(self, item, *cell)
+
+    def remove_page_break(self, _checked: bool = False) -> None:
+        from . import sheetlayout
+        item, cell, _area = self._sheet_for_layout()
+        if cell is not None:
+            sheetlayout.remove_break(self, item, *cell)
+
+    def reset_page_breaks(self, _checked: bool = False) -> None:
+        from . import sheetlayout
+        item, _cell, _area = self._sheet_for_layout()
+        if item is not None:
+            sheetlayout.reset_breaks(self, item)
+
+    def set_print_area(self, _checked: bool = False) -> None:
+        from . import sheetlayout
+        item, _cell, area = self._sheet_for_layout()
+        if area is not None:
+            sheetlayout.set_print_area(self, item, area)
+
+    def clear_print_area(self, _checked: bool = False) -> None:
+        from . import sheetlayout
+        item, _cell, _area = self._sheet_for_layout()
+        if item is not None:
+            sheetlayout.set_print_area(self, item, None)
+
     def find_a_tool(self) -> None:
         """Type what you want to do; it says which tool does it.
 
@@ -9509,10 +9975,13 @@ class MainWindow(QMainWindow):
 
         What belongs to the kind of thing clicked (an equation's settings, a
         table's Edit Table, a measurement's Variable) comes first; then
-        Revu's: Cut, Copy, Paste, Multiply…, Format Painter, Delete |
+        Revu's: Cut, Copy, Paste (Paste in Place, Paste Here… and Duplicate
+        with them, as on the Edit menu), Multiply…, Format Painter, Delete |
         Control Point ▸, Arc Segment, Round All Corners | Order ▸,
-        Alignment ▸, Flatten, Lock, Hide, Group | CalcForge's shape extras |
-        Add to Tool Chest ▸, Set as Default, Apply to Pages…, Properties.
+        Alignment ▸, Flatten, Unflatten, Lock, Hide, Show Hidden, Group |
+        CalcForge's shape extras | Add to Tool Chest ▸, Set as Default, Apply
+        to Pages…, Properties. The Edit menu groups the same families the
+        same way (bug hunt E14, E16–E18).
         """
         from . import menutidy
         menu = menu or QMenu(self)
@@ -9577,10 +10046,10 @@ class MainWindow(QMainWindow):
         # hidden or flattened (decision 17): only what applies to them
         calc_like = bool(getattr(item, "IS_CALC", False))
         # -- Revu: the clipboard -------------------------------------------------
-        menu.addAction(self.act_cut)
-        menu.addAction(self.act_copy)
-        menu.addAction(self.act_paste)
-        menu.addAction(self.act_array)
+        for action in (self.act_cut, self.act_copy, self.act_paste,
+                       self.act_paste_in_place, self.act_paste_here, self.act_duplicate,
+                       self.act_array):
+            menu.addAction(action)
         if not calc_like:
             menu.addAction(self.act_format_painter)
         menutidy.proxy(menu, self.act_delete, "Delete", QKeySequence(Qt.Key_Delete))
@@ -9601,10 +10070,12 @@ class MainWindow(QMainWindow):
         for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
             align.addAction(getattr(self, f"act_align_{key}"))
         if not calc_like:
-            menutidy.proxy(menu, self.act_flatten, "Flatten")
+            menu.addAction(self.act_flatten)
+            menu.addAction(self.act_recover_flattened)
         menu.addAction(self.act_lock)
         if not calc_like:
             menu.addAction(self.act_hide)
+            menu.addAction(self.act_show_hidden)
         if len([i for i in self.selected_items() if isinstance(i, MarkupItem)]) > 1:
             menu.addAction(self.act_group)
         if any(getattr(i, "group", "") for i in self.selected_items()):
@@ -9622,7 +10093,7 @@ class MainWindow(QMainWindow):
             straight.setChecked(item.label_angle is None)
             straight.toggled.connect(
                 lambda on, i=item: self.set_label_angle(i, None if on else 0.0))
-            menutidy.proxy(menu, self.act_scale, "Set Scale…")
+            menu.addAction(self.act_scale)
         if hasattr(item, "size_to_text"):
             menu.addAction(self.act_autosize)
         if isinstance(item, RectItem) and item.kind in SIZED_SHAPES and not is_table:
@@ -9634,7 +10105,6 @@ class MainWindow(QMainWindow):
             show.setCheckable(True)
             show.setChecked(item.show_size)
             show.toggled.connect(lambda on: self.set_size_visible(item, on))
-        menu.addAction(self.act_duplicate)
         several = self.colour_changeable(item)
         if len(several) > 1:
             # Revu's Change Multiple Colors: one colour of the selection
@@ -9683,18 +10153,28 @@ class MainWindow(QMainWindow):
         menu.addAction(self.act_prev_page)
         menu.addSeparator()
         menu.addAction(self.act_select_all)
+        # hidden markups cannot be right-clicked, so the page is where they
+        # are brought back from (E17)
+        menu.addAction(self.act_show_hidden)
         menu.addSeparator()
-        if self.view.calc.calc_mode() and frame is not None:
-            self._fill_calc_here(menu, frame, scene_pos)
-            menu.addSeparator()
+        # Everything that can be put in where the pointer is, in one place
+        # (E5): in Calc mode SMath's inserts first, then the markups
         insert = menu.addMenu("Insert Here")
+        if self.view.calc.calc_mode() and frame is not None:
+            self._fill_calc_here(insert, frame, scene_pos)
+            insert.addSeparator()
         for key in ("text", "callout", "note", "stamp", "image"):
             tool = TOOL_MAP[key]
             insert.addAction(icon(tool.icon), menutidy.title_case(tool.label),
                              lambda _c=False, k=key, p=scene_pos: self._insert_at(k, p))
+        if self.view.calc.calc_mode() and frame is not None:
+            index = self.document.index_of(frame.page)
+            if index is not None and index >= 0:
+                from . import calcsections
+                calcsections.add_menu(self, menu, index)
         menu.addSeparator()
         menu.addAction(self.act_page_setup)
-        menutidy.proxy(menu, self.act_scale, "Set Scale…")
+        menu.addAction(self.act_scale)
         if frame is not None:
             spot = frame.mapFromScene(scene_pos)
             viewport = frame.page.viewport_at(spot.x(), spot.y())
@@ -9709,7 +10189,8 @@ class MainWindow(QMainWindow):
         menu.addAction(self.act_find_text)
 
     def _fill_calc_here(self, menu, frame, scene_pos: QPointF) -> None:
-        """Calc mode's group on the page menu: SMath's inserts, at the click."""
+        """Calc mode's part of Insert Here ▸: SMath's inserts, at the click,
+        named as on the Calculation menu and toolbar."""
         from .sheetpages import blocks_calc
         if blocks_calc(frame):
             return                      # no equations on a spreadsheet page
@@ -9725,17 +10206,14 @@ class MainWindow(QMainWindow):
                 if then is not None:
                     then()
             return run
-        equation = menu.addAction("Insert Equation Here", here())
+        equation = menu.addAction("Equation", here())
         equation.setToolTip("Put the red cross here: what is typed next is an equation")
-        menu.addAction("Text Region", here(self.insert_calc_text)).setToolTip(
+        menu.addAction(self.act_insert_calc_text.text(), here(self.insert_calc_text)).setToolTip(
             "Calculation text here (\" in Calc mode)")
-        menu.addAction("Calculation Block", here(self.insert_block)).setToolTip(
+        menu.addAction(self.act_insert_block.text(), here(self.insert_block)).setToolTip(
             "An empty calculation block here")
-        menu.addAction("Plot", here(self.insert_plot)).setToolTip("A 2-D plot here (@ in Calc mode)")
-        index = self.document.index_of(frame.page)
-        if index is not None and index >= 0:
-            from . import calcsections
-            calcsections.add_menu(self, menu, index)
+        menu.addAction(self.act_insert_plot.text(), here(self.insert_plot)).setToolTip(
+            "A 2-D plot here (@ in Calc mode)")
 
     def _insert_at(self, key: str, scene_point: QPointF) -> None:
         """Put a new markup on the page under *scene_point*."""

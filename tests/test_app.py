@@ -273,7 +273,8 @@ def test_a_page_excluded_from_print_is_grey_and_is_not_exported(window, tmp_path
     window.add_page()
     window.add_page()
     menu = window.page_menu(1)
-    include = next(action for action in menu.actions() if action.text() == "Print")
+    include = next(action for action in menu.actions()
+                   if action.text() == "Include in Print && Export")
     assert include.isChecked()
     include.setChecked(False)                 # the real QAction signal path
 

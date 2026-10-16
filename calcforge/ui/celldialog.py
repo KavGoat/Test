@@ -232,14 +232,14 @@ class FormatCellsDialog(QDialog):
         st = self.start
         self.h_align = QComboBox()
         self._h = ["general", "left", "center", "right", "fill", "justify", "centerAcross"]
-        self.h_align.addItems(["General", "Left", "Center", "Right", "Fill", "Justify", "Center Across Selection"])
+        self.h_align.addItems(["General", "Left", "Centre", "Right", "Fill", "Justify", "Centre Across Selection"])
         self.h_align.setCurrentIndex(self._h.index(st.h_align) if st.h_align in self._h else 0)
         self.indent = QSpinBox()
         self.indent.setRange(0, 15)
         self.indent.setValue(st.indent)
         self.v_align = QComboBox()
         self._v = ["top", "center", "bottom"]
-        self.v_align.addItems(["Top", "Center", "Bottom"])
+        self.v_align.addItems(["Top", "Centre", "Bottom"])
         self.v_align.setCurrentIndex(self._v.index(st.v_align) if st.v_align in self._v else 2)
         self.wrap = QCheckBox("Wrap text")
         self.wrap.setChecked(st.wrap)

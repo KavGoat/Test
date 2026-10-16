@@ -312,7 +312,7 @@ def test_the_wheel_can_be_set_to_scroll_instead(window):
 def test_the_footer_switches_between_continuous_and_page_scrolling(window):
     _three_pages(window)
     page_action = next(action for action in window.status_scroll.menu().actions()
-                       if action.text() == "Single Page")
+                       if action.text() == "Single Page Mode")
     page_action.trigger()
     assert window.status_scroll.text() == "Single Page"
     assert window.view.scroll_mode == "page"
@@ -329,7 +329,7 @@ def test_the_footer_switches_between_continuous_and_page_scrolling(window):
     assert window.current_index == 0
 
     continuous = next(action for action in window.status_scroll.menu().actions()
-                      if action.text() == "Continuous")
+                      if action.text() == "Continuous Mode")
     continuous.trigger()
     assert window.status_scroll.text() == "Continuous"
     assert window.view.scroll_mode == "continuous"

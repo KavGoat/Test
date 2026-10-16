@@ -10,7 +10,7 @@ undo stack.
 
 While an equation has the cursor, SMath's keys win (decision 6): the window's
 shortcut filter already holds shortcuts back while ``view.is_editing()``, so
-Ctrl+0 means ≥ here and fit-page elsewhere. A Ctrl key SMath has no use for
+Ctrl+0 means ≥ here and Fit Width elsewhere. A Ctrl key SMath has no use for
 (save, print, zoom) is handed to the window's own command.
 """
 from __future__ import annotations

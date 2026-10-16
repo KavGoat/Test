@@ -106,25 +106,31 @@ the sheet tab, a cell and a row heading, every toolbar, every panel's buttons.
 
 | # | Family | Type | Finding | Status |
 |---|---|---|---|---|
-| E1 | Insert | 2 | One command, three names: "Insert Pages ▸" (page menu, Revu's name) vs "Pages from Document…" (Document ▸ Insert, File ▸ Import, Main toolbar) | open |
-| E2 | Insert | 2,3 | "Add Sheet Page" on a spreadsheet page's menu is exactly Insert Spreadsheet Page ▸ After (`insert_sheet_page(index)`), under another name, two groups away in "CalcForge's own" | open |
-| E3 | Insert | 4 | From the menu bar, Blank Page… and Pages from Document… ask where (their dialogs have a placement); Spreadsheet Page, Image Page… and Excel Workbook… always go after the current page, no choice. Before/After exists only in the page menu | open |
-| E4 | Insert | 2 | Thumbnails panel "+" is "Add a page" (opens Insert Blank Page); "▦" is "Insert a spreadsheet page" — two wordings for the menu's Insert Blank Page / Insert Spreadsheet Page | open |
-| E5 | Insert/Calc | 3 | Calc mode's canvas menu: "Insert Equation Here" and "Calculation Block" sit outside the "Insert Here ▸" submenu that holds Text Box, Callout, Note… ; the Calculation toolbar and menu call it "Block" | open |
-| E6 | Import/Export | 2 | Inside the submenus: File ▸ Import ▸ "Import Tool Set…" and File ▸ Export ▸ "Export PDF…", "Export Images…" repeat the menu's word; the siblings ("Excel Workbook…", "Markups Summary…") don't | open |
-| E7 | Rotate | 1,2 | Document menu has Duplicate, Extract, Split, Delete, Crop Pages but no Rotate Pages (only in Current Page ▸). Page menu says "Anticlockwise", View ▸ Rotate View says "Rotate Counterclockwise" (UK decision: Anticlockwise) | open |
-| E8 | Extract/Crop/Split | 1 | Split Document… and Crop Pages… are in the Document menu but not the page menu, which has Extract Pages… beside where they'd go | open |
-| E9 | Move | 1,3 | Move Up / Move Down are only in the page menu, and there in "CalcForge's own" group, away from Cut/Copy/Paste Pages and the inserts | open |
-| E10 | Print | 2,3 | The page menu has "Print Pages…" (prints) and, at the bottom, a tick called just "Print" (include in print/export) — same word, different thing, two groups apart. Properties' markup tick is also "Print" | open |
-| E11 | Scale | 2 | `calibrate_dialog` is "Set Scale…" (page menu, canvas menu, a measurement's menu) but "Page Scale…" in the Document menu | open |
-| E12 | Page setup | 2 | Window ▸ Panels ▸ "Page Setup" is a panel; "Page Setup…" everywhere else is the dialog | open |
-| E13 | Sheet layout | 2 | `sheet_page_setup` is "Sheet Layout…" (Document, page menu) but "Page Layout ▸ Page Layout…" in the cell menu | open |
-| E14 | Flatten | 1,2 | "Flatten…" (page menu, Batch) is the dialog; Document has "Flatten Selection" + "Unflatten" but not "Flatten…"; a markup's menu says "Flatten"; Unflatten is in no right-click menu | open |
-| E15 | Colour | 2,4 | Spelling mixed for one family (UK decided): Document "Color Processing…" vs page menu "Colour Processing…"; markup menu "Change Colours…" vs Properties buttons "Change Colors…"; an image's right-click "Colour Processing…" and Properties "Color Processing…" open Change Colours (`change_colors(item)`), not the page's Colour Processing of the same name | open |
-| E16 | Copy/paste | 1,3 | Edit has Paste in Place and Paste Here…; a markup's menu has neither. Its "Duplicate" is in the shape-extras group after Show Size, not with Cut/Copy/Paste as in Edit | open |
-| E17 | Hide/Lock/Delete | 3 | Edit menu: Hide, Show Hidden and Delete in one group, Lock in another; a markup's menu groups Flatten, Lock, Hide and puts Delete with Cut/Copy/Paste. Show Hidden is in no right-click menu | open |
-| E18 | Align | 2 | Edit ▸ "Align ▸" / "Arrange ▸" vs a markup's "Alignment ▸" / "Order ▸" (round 4 asked for Revu's); Edit ▸ Text ▸ "Align Center" vs Align ▸ "Align Centre" in the same menu | open |
-| E19 | Names | 2 | Lower-case tool names in Tools ▸ Markup/Measure: "Text box", "Highlight area", "Center radius", "Polygon cut-out", "Ellipse cut-out" (the canvas menu says "Text Box") | open |
+| E1 | Insert | 2 | One command, three names: "Insert Pages ▸" (page menu, Revu's name) vs "Pages from Document…" (Document ▸ Insert, File ▸ Import, Main toolbar) | fixed (round 6) |
+| E2 | Insert | 2,3 | "Add Sheet Page" on a spreadsheet page's menu is exactly Insert Spreadsheet Page ▸ After (`insert_sheet_page(index)`), under another name, two groups away in "CalcForge's own" | fixed (round 6) |
+| E3 | Insert | 4 | From the menu bar, Blank Page… and Pages from Document… ask where (their dialogs have a placement); Spreadsheet Page, Image Page… and Excel Workbook… always go after the current page, no choice. Before/After exists only in the page menu | fixed (round 6) |
+| E4 | Insert | 2 | Thumbnails panel "+" is "Add a page" (opens Insert Blank Page); "▦" is "Insert a spreadsheet page" — two wordings for the menu's Insert Blank Page / Insert Spreadsheet Page | fixed (round 6) |
+| E5 | Insert/Calc | 3 | Calc mode's canvas menu: "Insert Equation Here" and "Calculation Block" sit outside the "Insert Here ▸" submenu that holds Text Box, Callout, Note… ; the Calculation toolbar and menu call it "Block" | fixed (round 6) |
+| E6 | Import/Export | 2 | Inside the submenus: File ▸ Import ▸ "Import Tool Set…" and File ▸ Export ▸ "Export PDF…", "Export Images…" repeat the menu's word; the siblings ("Excel Workbook…", "Markups Summary…") don't | fixed (round 6) |
+| E7 | Rotate | 1,2 | Document menu has Duplicate, Extract, Split, Delete, Crop Pages but no Rotate Pages (only in Current Page ▸). Page menu says "Anticlockwise", View ▸ Rotate View says "Rotate Counterclockwise" (UK decision: Anticlockwise) | fixed (round 6) |
+| E8 | Extract/Crop/Split | 1 | Split Document… and Crop Pages… are in the Document menu but not the page menu, which has Extract Pages… beside where they'd go | fixed (round 6) |
+| E9 | Move | 1,3 | Move Up / Move Down are only in the page menu, and there in "CalcForge's own" group, away from Cut/Copy/Paste Pages and the inserts | fixed (round 6) |
+| E10 | Print | 2,3 | The page menu has "Print Pages…" (prints) and, at the bottom, a tick called just "Print" (include in print/export) — same word, different thing, two groups apart. Properties' markup tick is also "Print" | fixed (round 6) |
+| E11 | Scale | 2 | `calibrate_dialog` is "Set Scale…" (page menu, canvas menu, a measurement's menu) but "Page Scale…" in the Document menu | fixed (round 6) |
+| E12 | Page setup | 2 | Window ▸ Panels ▸ "Page Setup" is a panel; "Page Setup…" everywhere else is the dialog | fixed (round 6) |
+| E13 | Sheet layout | 2 | `sheet_page_setup` is "Sheet Layout…" (Document, page menu) but "Page Layout ▸ Page Layout…" in the cell menu | fixed (round 6) |
+| E14 | Flatten | 1,2 | "Flatten…" (page menu, Batch) is the dialog; Document has "Flatten Selection" + "Unflatten" but not "Flatten…"; a markup's menu says "Flatten"; Unflatten is in no right-click menu | fixed (round 6) |
+| E15 | Colour | 2,4 | Spelling mixed for one family (UK decided): Document "Color Processing…" vs page menu "Colour Processing…"; markup menu "Change Colours…" vs Properties buttons "Change Colors…"; an image's right-click "Colour Processing…" and Properties "Color Processing…" open Change Colours (`change_colors(item)`), not the page's Colour Processing of the same name | fixed (round 6) |
+| E16 | Copy/paste | 1,3 | Edit has Paste in Place and Paste Here…; a markup's menu has neither. Its "Duplicate" is in the shape-extras group after Show Size, not with Cut/Copy/Paste as in Edit | fixed (round 6) |
+| E17 | Hide/Lock/Delete | 3 | Edit menu: Hide, Show Hidden and Delete in one group, Lock in another; a markup's menu groups Flatten, Lock, Hide and puts Delete with Cut/Copy/Paste. Show Hidden is in no right-click menu | fixed (round 6) |
+| E18 | Align | 2 | Edit ▸ "Align ▸" / "Arrange ▸" vs a markup's "Alignment ▸" / "Order ▸" (round 4 asked for Revu's); Edit ▸ Text ▸ "Align Center" vs Align ▸ "Align Centre" in the same menu | fixed (round 6) |
+| E19 | Names | 2 | Lower-case tool names in Tools ▸ Markup/Measure: "Text box", "Highlight area", "Center radius", "Polygon cut-out", "Ellipse cut-out" (the canvas menu says "Text Box") | fixed (round 6) |
+
+Round 6 (2026-10-16) fixed E1–E19 in the menus, right-click menus, toolbars and
+panel buttons; `tests/test_command_families.py` checks each family in every
+place. Left for their owners: the Properties panel and Properties toolbar keep
+Revu's "Color:" / "Fill Color:" field labels and the markup's "Print" tick
+(propbar.py, Revu-parity tests).
 
 Worked: every insert type has Before/After in the page menu and Document ▸
 Current Page (7763468); Cut/Copy/Paste Pages, Duplicate, Extract, Delete Pages…,
