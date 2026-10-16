@@ -597,9 +597,11 @@ class TableEditing:
         from ..sheet.explain import why
         return why(item.sheet, row, col)
 
+    _keep_view = False          # a heading clicked: the canvas stays where it is (Excel)
+
     def _scroll_to(self, cell) -> None:
         item = self._item
-        if item is None or self.drag is not None:
+        if item is None or self.drag is not None or self._keep_view:
             return
         rect = item.mapRectToScene(item.cell_rect(*cell))
         self.view.ensureVisible(rect, 8, 8)
@@ -698,11 +700,11 @@ class TableEditing:
         if hit is not None and view.tool_key == "select":
             # a spreadsheet's headings kept in view: a whole column or row
             run, zone = hit
-            if self.item is not run:
-                self.open(run, (0, 0))
             if event.button() == Qt.RightButton:
+                if self.item is not run:
+                    self._open_in_place(run)
                 return False
-            return self._press_zone(run, zone, event, scene_pos)
+            return self._press_heading(run, zone, event, scene_pos)
         if view.tool_key == "table" and event.button() == Qt.LeftButton:
             frame = view.frame_at(scene_pos)
             if frame is not None:
@@ -734,8 +736,12 @@ class TableEditing:
                     if zone and zone[0] == "cell" and not self._in_selection(zone[1], zone[2]):
                         self.select((zone[1], zone[2]))
                     return False            # the context menu comes with the release
-                return self._press_zone(item, zone, event, scene_pos)
-        if event.button() != Qt.LeftButton or view.tool_key != "select":
+                return self._press_heading(item, zone, event, scene_pos)
+        if view.tool_key != "select":
+            return False
+        if self._press_run_heading(event, scene_pos):
+            return True
+        if event.button() != Qt.LeftButton:
             return False
         target = self.table_at(scene_pos)
         if target is None or not view.editable(target):
@@ -772,6 +778,58 @@ class TableEditing:
                 self.drag = ("select", cell)
                 return True
         return False
+
+    HEADING_ZONES = ("row", "col", "corner", "row_edge", "col_edge")
+
+    def _press_run_heading(self, event, scene_pos: QPointF) -> bool:
+        """A spreadsheet page not open yet, pressed on its row numbers or
+        column letters: they are always drawn, so they select a whole row or
+        column (or size one) at once, as Excel's do — in either mode. They
+        used to do nothing until a cell had been clicked first (bug hunt,
+        2026-10-16: "in calc mode can't select rows")."""
+        if self.item is not None or event.modifiers() & Qt.ControlModifier:
+            return False
+        view = self.view
+        for run in view.scene().items(scene_pos):
+            if isinstance(run, MarkupItem) and run.isVisible() and not _is_run(run):
+                return False             # a markup over the headings is picked first
+            if not _is_run(run) or not view.editable(run):
+                continue
+            local = run.mapFromScene(scene_pos)
+            if run.local_rect().contains(local) or not run.chrome_rect().contains(local):
+                return False
+            zone = self._zone(run, local)
+            if not zone or zone[0] not in self.HEADING_ZONES:
+                return False
+            if event.button() == Qt.RightButton:
+                if zone[0] in ("row", "col"):
+                    self._press_heading(run, zone, event, scene_pos)
+                    self.drag = None
+                return False             # the heading menu comes with the release
+            if event.button() != Qt.LeftButton:
+                return False
+            return self._press_heading(run, zone, event, scene_pos)
+        return False
+
+    def _open_in_place(self, run) -> None:
+        """Open a spreadsheet without scrolling the canvas back to A1."""
+        self._keep_view = True
+        try:
+            self.open(run, (0, 0))
+        finally:
+            self._keep_view = False
+
+    def _press_heading(self, run, zone, event, scene_pos: QPointF) -> bool:
+        """A row number or column letter pressed: the row or column chosen
+        where it is — Excel never scrolls the sheet for a heading click (it
+        used to jump back to A1, or across to column A)."""
+        if self.item is not run:
+            self._open_in_place(run)
+        self._keep_view = zone is not None and zone[0] in ("row", "col", "corner")
+        try:
+            return self._press_zone(run, zone, event, scene_pos)
+        finally:
+            self._keep_view = False
 
     def _press_edge(self, target, local: QPointF, event, scene_pos: QPointF) -> bool:
         """A spreadsheet page not open yet, pressed on its print area's edge
