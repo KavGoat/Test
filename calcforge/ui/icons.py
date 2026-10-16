@@ -784,9 +784,15 @@ def icon(name: str, size: int = 24) -> QIcon:
 
 @lru_cache(maxsize=64)
 def colour_icon(colour: str, size: int = 20) -> QIcon:
+    # a dark swatch on dark mode's charcoal is ringed in light grey, or a
+    # black one is a hole in the dialog (F-37: Preferences' equation colour)
+    shade = QColor(colour)
+    edge = QColor(200, 200, 200) if (_theme == "dark" and shade.isValid()
+                                     and shade.lightness() < 110) else QColor(120, 128, 140)
+
     def draw(painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setPen(QPen(QColor(120, 128, 140), 1))
+        painter.setPen(QPen(edge, 1))
         painter.setBrush(QBrush(QColor(colour)))
         painter.drawRoundedRect(QRectF(2.5, 2.5, size - 5, size - 5), 3, 3)
     return drawn_icon(draw, size)

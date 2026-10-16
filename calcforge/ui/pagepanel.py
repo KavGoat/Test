@@ -37,6 +37,10 @@ class PagePanel(QScrollArea):
         # -- paper ---------------------------------------------------------
         paper = QGroupBox("Page")
         form = QFormLayout(paper)
+        # room for both sizes, "210.0 mm × 297.0 mm", in the dock's width
+        left, top, right, bottom = form.getContentsMargins()
+        form.setContentsMargins(min(left, 6), top, min(right, 6), bottom)
+        form.setHorizontalSpacing(min(form.horizontalSpacing(), 6))
         self.size = QComboBox()
         self.size.setObjectName("pageSize")
         self.size.addItems(list(PAGE_SIZES) + ["Custom"])
@@ -48,6 +52,7 @@ class PagePanel(QScrollArea):
         self.orientation.activated.connect(lambda _i: self._paper_changed(self.orientation))
         form.addRow("Orientation", self.orientation)
         sizes = QHBoxLayout()
+        sizes.setSpacing(2)
         self.width_mm = QDoubleSpinBox()
         self.height_mm = QDoubleSpinBox()
         for box in (self.width_mm, self.height_mm):
@@ -105,6 +110,7 @@ class PagePanel(QScrollArea):
         self.precision.setObjectName("pagePrecision")
         self.precision.setRange(0, 6)
         self.precision.setToolTip("Decimal places measurements are shown to")
+        self.precision.setKeyboardTracking(False)
         self.precision.valueChanged.connect(lambda _v: self._scale_changed())
         form.addRow("Decimal places", self.precision)
         layout.addWidget(scale)
@@ -135,6 +141,28 @@ class PagePanel(QScrollArea):
         layout.addWidget(ports)
         self._build_sheet(layout)
         layout.addStretch(1)
+        self._fit_width()
+
+    def _fit_width(self) -> None:
+        """Everything fits the panel's width, as Revu's panels do (exercise
+        round 1, F-22). The boxes shrink to what they must show rather than
+        pushing the panel wider than the dock — which it then scrolled
+        sideways as soon as a field took focus, cutting the start off every
+        label."""
+        from PySide6.QtWidgets import QAbstractSpinBox, QLineEdit
+        body = self.widget()
+        for box in body.findChildren(QComboBox) + body.findChildren(QAbstractSpinBox):
+            box.setMinimumWidth(min(box.minimumSizeHint().width(), 64))
+        for edit in body.findChildren(QLineEdit):
+            if not isinstance(edit.parentWidget(), (QAbstractSpinBox, QComboBox)):
+                edit.setMinimumWidth(0)
+        # the spreadsheet's rows, too wide for the dock, put their field
+        # under their label
+        self.sheet_box.layout().setRowWrapPolicy(QFormLayout.WrapLongRows)
+        # and should the dock still be narrower than that, the labels keep
+        # their place: the panel never scrolls sideways (its bar is off)
+        bar = self.horizontalScrollBar()
+        bar.valueChanged.connect(lambda value: bar.setValue(0) if value else None)
 
     # -- a spreadsheet page: Excel's Page Layout -------------------------------
     MARGINS = {"Normal": (0.7, 0.75, 0.7, 0.75), "Wide": (1.0, 1.0, 1.0, 1.0),

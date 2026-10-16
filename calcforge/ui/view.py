@@ -519,6 +519,12 @@ def rescue_stranded(scene) -> int:
     return moved
 
 
+def fewest_corners(item) -> int:
+    """How few corners an outline can have: a closed one keeps three, a
+    line two (F-36: Subtract Control Point made a two-point "polygon")."""
+    return 3 if getattr(item, "closed", True) else 2
+
+
 class PageView(QGraphicsView):
     """Displays one :class:`~calcforge.ui.scene.PageScene` and edits it."""
 
@@ -2896,7 +2902,7 @@ class PageView(QGraphicsView):
             reach = SNAP_REACH / max(self.zoom(), 0.05)
             vertex = self._point_near(item, local, reach)
             if vertex is not None:
-                if shift and len(item.corner_points()) > 2:
+                if shift and len(item.corner_points()) > fewest_corners(item):
                     return (item, "delete", vertex)
                 if control:
                     return (item, "round", vertex)
@@ -3859,8 +3865,13 @@ class PageView(QGraphicsView):
         note_scale = False
         # A rectangle or ellipse is sized in the bar beside the corner while
         # it is drawn; nothing more is asked once it is down.
-        if getattr(draft, "TYPE", "") == "link":
-            self.window.edit_link(draft)
+        if getattr(draft, "TYPE", "") == "link" and not self.window.edit_link(draft, new=True):
+            # Revu: cancelling the Action dialog takes the drawn link away —
+            # Cancel changes nothing (exercise round 1, F-08)
+            detach(draft)
+            self.selectionChanged.emit()
+            self.finish_tool()
+            return
         if isinstance(draft, MeasureItem):
             if draft.kind != DIMENSION:
                 note_scale = True
@@ -3955,9 +3966,11 @@ class PageView(QGraphicsView):
         target = self.area_under(centre, ignore=draft)
         if target is None:
             detach(draft)
-            self.statusMessage.emit(
-                f"{tool.label}: draw it inside an area measurement")
             self.finish_tool()
+            # said after the tool is put down, whose own hint would wipe it
+            # (exercise round 1, F-35: nothing drawn and nothing said)
+            self.statusMessage.emit(
+                f"{tool.label}: nothing to cut — draw it inside an Area measurement")
             return True
         hole = [target.mapFromScene(point) for point in ring]
         target.prepareGeometryChange()
@@ -3972,9 +3985,9 @@ class PageView(QGraphicsView):
         self.selectionChanged.emit()
         # A measurement says what is left; a plain shape has no total to say.
         left = getattr(target, "value_text", "") or getattr(target, "size_text", "")
+        self.finish_tool()
         self.statusMessage.emit(f"Taken out: {left}" if left
                                 else f"Taken out of the {target.NAME.lower()}")
-        self.finish_tool()
         return True
 
     @staticmethod

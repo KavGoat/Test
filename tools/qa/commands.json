@@ -7234,8 +7234,8 @@
     {
      "via": "toolbar",
      "bar": "Style",
-     "label": "End size: how big the line ends are, whatever the line width",
-     "widget": "DoubleSpinBox"
+     "label": "End size: how big the line ends are — Auto sizes them from the line width",
+     "widget": "ValueCombo"
     }
    ]
   },
@@ -7370,8 +7370,8 @@
     {
      "via": "toolbar",
      "bar": "Style",
-     "label": "(unlabelled)",
-     "widget": "DoubleSpinBox"
+     "label": "Font size, in points",
+     "widget": "ValueCombo"
     }
    ]
   },
@@ -16398,7 +16398,7 @@
    "id": "R0333",
    "area": "Right-click menus",
    "where": "Canvas, equation ▸ Equation ▸ Decimal places",
-   "name": "18 choices: Trailing zeros, Significant figures mode, 0, 1, 2, 3, 4 *, 5 …",
+   "name": "17 choices: Trailing zeros, 0, 1, 2, 3, 4 *, 5 …",
    "note": "value list, toggles",
    "shortcut": "",
    "state": "equation",
@@ -16407,8 +16407,7 @@
      "via": "context",
      "target": "item",
      "path": [
-      "Equation",
-      "Decimal places",
+      "Decimal Places",
       "*"
      ],
      "kind": "each"
@@ -16739,8 +16738,7 @@
      "via": "context",
      "target": "item",
      "path": [
-      "Equation",
-      "Decimal places"
+      "Decimal Places"
      ],
      "kind": "submenu"
     }

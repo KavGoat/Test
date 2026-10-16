@@ -58,7 +58,9 @@ _DARK_TOKENS = {
     "tab_on": "#4e4e4e",
     "ink": "#ffffff",
     "ink_soft": "#d9d9d9",
-    "ink_faint": "#8a8a8a",
+    # greyed words read on the charcoal (F-37: disabled labels were near
+    # invisible): 5:1, against 3.9:1 for #8a8a8a
+    "ink_faint": "#9e9e9e",
     "accent": "#0083db",
     "accent_soft": "#454545",
     "accent_edge": "#0083db",
@@ -295,7 +297,7 @@ QCheckBox::indicator:hover, QAbstractItemView::indicator:hover {{ border-color: 
 QCheckBox::indicator:checked, QAbstractItemView::indicator:checked {{
     background: {accent}; border-color: {accent}; image: url("{arrow_tick}");
 }}
-QCheckBox::indicator:disabled {{ border-color: {chrome_edge}; background: {surface}; }}
+QCheckBox::indicator:disabled {{ border-color: {field_edge}; background: {surface}; }}
 /* and a round one for a choice of one: unticked radios were near invisible
    in dark mode (Set Scale's Preset | Custom; QA, 2026-10-15) */
 QRadioButton::indicator {{
@@ -308,7 +310,7 @@ QRadioButton::indicator:checked {{
     background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
         stop:0 {accent}, stop:0.5 {accent}, stop:0.56 {field}, stop:1 {field});
 }}
-QRadioButton::indicator:disabled {{ border-color: {chrome_edge}; background: {surface}; }}
+QRadioButton::indicator:disabled {{ border-color: {field_edge}; background: {surface}; }}
 QToolTip {{
     background: {ink}; color: {field}; border: 0; padding: 6px 8px;
     border-radius: 3px;

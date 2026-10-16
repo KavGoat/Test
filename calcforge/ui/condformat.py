@@ -155,13 +155,36 @@ class RulesEditor(QWidget):
 
 
 def _store(document) -> dict:
+    """The document's presets and name rules, to read. Opening a dialog
+    changes nothing in the document: only its OK does (exercise round 1,
+    F-08 — Cancel used to leave the settings written)."""
     store = document.settings.calc_rules
     if not isinstance(store, dict):
         store = {}
-    store.setdefault("presets", {})
-    store.setdefault("by_name", [])
-    document.settings.calc_rules = store
-    return store
+    return {"presets": store.get("presets") or {}, "by_name": store.get("by_name") or []}
+
+
+def _settings_step(window, before, description: str) -> bool:
+    """One undo step from the document's rules *before* to how they are now."""
+    from .commands import DocumentStructureCommand
+    after = copy.deepcopy(window.document.settings.calc_rules)
+
+    def normal(store):
+        store = store if isinstance(store, dict) else {}
+        return store.get("presets") or {}, store.get("by_name") or []
+
+    if normal(after) == normal(before):
+        # OK with nothing changed: the document is left as it was
+        window.document.settings.calc_rules = before
+        return False
+
+    def restore(store) -> None:
+        window.document.settings.calc_rules = copy.deepcopy(store)
+        window.document.modified = True
+        redraw_all(window)
+
+    window.undo_stack.push(DocumentStructureCommand(before, after, description, restore))
+    return True
 
 
 class EquationRulesDialog(QDialog):
@@ -188,6 +211,7 @@ class EquationRulesDialog(QDialog):
         layout.addWidget(self.own)
         self.editor = RulesEditor(copy.deepcopy(first.cond_rules or []))
         layout.addWidget(self.editor)
+        self.saved_presets: dict = {}
         save = QPushButton("Save these rules as a preset…")
         save.clicked.connect(self.save_preset)
         layout.addWidget(save, 0, Qt.AlignLeft)
@@ -214,7 +238,8 @@ class EquationRulesDialog(QDialog):
         open_document_rules(self.window)
         now = self.preset_combo.currentText()
         self.preset_combo.clear()
-        self.preset_combo.addItems(sorted(_store(self.window.document)["presets"]))
+        self.preset_combo.addItems(sorted(set(_store(self.window.document)["presets"])
+                                          | set(self.saved_presets)))
         self.preset_combo.setCurrentText(now)
         self.preset.setEnabled(self.preset_combo.count() > 0)
 
@@ -226,8 +251,8 @@ class EquationRulesDialog(QDialog):
             if not ok or not name.strip():
                 return
         name = name.strip()
-        _store(self.window.document)["presets"][name] = self.editor.rules()
-        self.window.document.modified = True
+        # kept with the dialog, and written with its OK (Cancel changes nothing)
+        self.saved_presets[name] = self.editor.rules()
         if self.preset_combo.findText(name) < 0:
             self.preset_combo.addItem(name)
         self.preset_combo.setCurrentText(name)
@@ -241,7 +266,21 @@ class EquationRulesDialog(QDialog):
             rules, preset = None, self.preset_combo.currentText()
         else:
             rules, preset = None, ""
-        set_rules(self.window, self.items, rules, preset)
+        if self.saved_presets:
+            # the presets saved here and the equations' rules: one undo step
+            window = self.window
+            before = copy.deepcopy(window.document.settings.calc_rules)
+            store = copy.deepcopy(_store(window.document))
+            store["presets"].update(copy.deepcopy(self.saved_presets))
+            window.undo_stack.beginMacro("Conditional formatting")
+            window.document.settings.calc_rules = store
+            window.document.modified = True
+            _settings_step(window, before, "Conditional formatting presets")
+            set_rules(window, self.items, rules, preset)
+            window.undo_stack.endMacro()
+            redraw_all(window)
+        else:
+            set_rules(self.window, self.items, rules, preset)
         super().accept()
 
 
@@ -277,11 +316,15 @@ class DocumentRulesDialog(QDialog):
         self.names = QListWidget()
         self.names.addItems(sorted(self.presets))
         side.addWidget(self.names)
+        self._needs_preset = []
         for text, slot in (("New", self.new_preset), ("Rename", self.rename_preset),
                            ("Delete", self.delete_preset)):
             b = QPushButton(text)
-            b.clicked.connect(slot)
+            b.clicked.connect(lambda _checked=False, run=slot: run())
             side.addWidget(b)
+            if text != "New":
+                # F-36: they were offered with no preset to rename or delete
+                self._needs_preset.append(b)
         top.addLayout(side)
         self.editor = RulesEditor()
         top.addWidget(self.editor, 1)
@@ -309,6 +352,7 @@ class DocumentRulesDialog(QDialog):
         self.names.currentTextChanged.connect(self._switch)
         if self.names.count():
             self.names.setCurrentRow(0)
+        self._enable()
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -323,6 +367,11 @@ class DocumentRulesDialog(QDialog):
         self._keep()
         self._current = name or None
         self.editor.set_rules(copy.deepcopy(self.presets.get(name, [])))
+        self._enable()
+
+    def _enable(self) -> None:
+        for button in getattr(self, "_needs_preset", ()):
+            button.setEnabled(self._current is not None)
 
     def new_preset(self, name: str = "") -> None:
         if not name:
@@ -371,6 +420,7 @@ class DocumentRulesDialog(QDialog):
         self._current = None
         self.names.takeItem(self.names.currentRow())
         self._refresh_presets()
+        self._enable()
 
     def add_name_rule(self, pattern: str, preset: str) -> None:
         r = self.by_name.rowCount()
@@ -413,9 +463,18 @@ class DocumentRulesDialog(QDialog):
 
 def apply_document_rules(window, store: dict, renamed: dict | None = None) -> None:
     """The document's presets and name rules; equations using a renamed
-    preset follow it to its new name."""
+    preset follow it to its new name. One undo step (F-08)."""
+    before = copy.deepcopy(window.document.settings.calc_rules)
+    view = window.view
+    stack = window.undo_stack
+    renaming = bool(renamed) and view.scene() is not None
+    if renaming:
+        stack.beginMacro("Conditional formatting rules")
+        view.begin_snapshot([page.frame for page in window.document.pages
+                             if getattr(page, "frame", None) is not None])
     window.document.settings.calc_rules = copy.deepcopy(store)
-    window.document.modified = True
+    if _settings_step(window, before, "Conditional formatting rules"):
+        window.document.modified = True
     if renamed:
         from ..items.calc import CalcItem
         for page in window.document.pages:
@@ -426,6 +485,9 @@ def apply_document_rules(window, store: dict, renamed: dict | None = None) -> No
             for record in getattr(page, "_pending_items", ()):     # pages not built yet
                 if record.get("cond_preset") in renamed:
                     record["cond_preset"] = renamed[record["cond_preset"]]
+    if renaming:
+        view.commit_snapshot("Conditional formatting rules")
+        stack.endMacro()
     redraw_all(window)
 
 
@@ -447,6 +509,7 @@ def open_document_rules(window) -> None:
         window._last_rules_dialog = dialog
         return
     dialog.exec()
+    dialog.deleteLater()            # not kept, hidden, as the window's child
 
 
 def open_equation_rules(window, items) -> None:
@@ -455,3 +518,4 @@ def open_equation_rules(window, items) -> None:
         window._last_rules_dialog = dialog
         return
     dialog.exec()
+    dialog.deleteLater()

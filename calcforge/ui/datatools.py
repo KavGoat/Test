@@ -196,6 +196,13 @@ class TextRuleDialog(QDialog):
         layout.addRow(buttons)
 
     def accept(self) -> None:
+        if not self.text.text():
+            # an empty text is in every cell: the rule would paint them all
+            # (F-36); Excel asks for the text
+            self.text.setFocus()
+            self.text.setPlaceholderText("type the text to look for")
+            self.text.setStyleSheet("border: 1px solid #c92a2a")
+            return
         add_rule(self.tables, {"type": "text", "how": self.how.currentData(), "text": self.text.text(),
                                "format": self.look.look()})
         super().accept()
@@ -268,10 +275,21 @@ class _FormatPicker(QWidget):
         self._labels()
 
     def _labels(self):
+        # each shown as it is on the paper — the font colour on white, the
+        # fill with words that read on it — whichever theme the dialog is in
+        # (F-37: dark red words on a dark button)
+        def ink_on(colour: str) -> str:
+            shade = QColor(colour)
+            light = 0.299 * shade.red() + 0.587 * shade.green() + 0.114 * shade.blue()
+            return "#000000" if light > 140 else "#ffffff"
         self.fill_button.setText(f"Fill {self.fill or 'none'}")
-        self.fill_button.setStyleSheet(f"background:{self.fill}" if self.fill else "")
+        self.fill_button.setStyleSheet(
+            f"background:{self.fill}; color:{ink_on(self.fill)}; border:1px solid #888; padding:3px 8px;"
+            if self.fill else "")
         self.color_button.setText(f"Font {self.color or 'auto'}")
-        self.color_button.setStyleSheet(f"color:{self.color}" if self.color else "")
+        self.color_button.setStyleSheet(
+            f"background:#ffffff; color:{self.color}; border:1px solid #888; padding:3px 8px;"
+            if self.color else "")
 
     def _pick(self, which):
         got = QColorDialog.getColor(QColor(getattr(self, which) or "#ffc7ce"), self)
@@ -631,11 +649,64 @@ def filter_menu(tables, col: int, global_pos) -> QMenu:
     clear.setEnabled(col in tables.item.sheet.filter.get("criteria", {}))
     menu.addAction("Choose Values…", lambda: values_dialog(tables, col))
     menu.addAction("Number/Text Filter…", lambda: custom_filter_dialog(tables, col))
-    menu.addAction("Top 10…", lambda: tables._change("Filter", lambda wb, s: data.set_criteria(
-        wb, s, col, {"kind": "top", "n": 10})))
+    menu.addAction("Top 10…", lambda: top10_dialog(tables, col))
     if global_pos is not None and getattr(tables.view.window, "interactive_prompts", True):
         menu.exec(global_pos)
     return menu
+
+
+class Top10Dialog(QDialog):
+    """Excel's Top 10 AutoFilter: Show [Top|Bottom] [10] [Items|Percent] —
+    a dialog, as its "…" promises (F-36: it applied at once)."""
+
+    def __init__(self, tables, col: int):
+        super().__init__(tables.view)
+        from PySide6.QtWidgets import QSpinBox
+        self.tables, self.col = tables, col
+        self.setWindowTitle("Top 10 AutoFilter")
+        now = (tables.item.sheet.filter or {}).get("criteria", {}).get(col) or {}
+        if now.get("kind") != "top":
+            now = {}
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Show"))
+        row = QHBoxLayout()
+        self.which = QComboBox()
+        self.which.addItem("Top", False)
+        self.which.addItem("Bottom", True)
+        self.which.setCurrentIndex(1 if now.get("bottom") else 0)
+        self.count = QSpinBox()
+        self.count.setRange(1, 500)
+        self.count.setValue(int(now.get("n", 10)))
+        self.unit = QComboBox()
+        self.unit.addItem("Items", False)
+        self.unit.addItem("Percent", True)
+        self.unit.setCurrentIndex(1 if now.get("percent") else 0)
+        for widget in (self.which, self.count, self.unit):
+            row.addWidget(widget)
+        layout.addLayout(row)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def criteria(self) -> dict:
+        crit = {"kind": "top", "n": self.count.value()}
+        if self.which.currentData():
+            crit["bottom"] = True
+        if self.unit.currentData():
+            crit["percent"] = True
+        return crit
+
+    def accept(self) -> None:
+        crit, col = self.criteria(), self.col
+        self.tables._change("Filter", lambda wb, s: data.set_criteria(wb, s, col, crit))
+        super().accept()
+
+
+def top10_dialog(tables, col):
+    dialog = Top10Dialog(tables, col)
+    _show(tables.view.window, dialog)
+    return dialog
 
 
 def _sort_filtered(tables, col, ascending):
@@ -652,6 +723,14 @@ class ValuesDialog(QDialog):
         crit = sheet.filter.get("criteria", {}).get(col)
         chosen = set(crit["values"]) if crit and crit.get("kind") == "values" else None
         layout = QVBoxLayout(self)
+        # Excel's: what the list is, and (Select All) above it (F-36: it had
+        # neither)
+        from ..sheet.refs import col_letters
+        layout.addWidget(QLabel(f"Show the rows whose column {col_letters(col)} holds:"))
+        self.select_all = QCheckBox("(Select All)")
+        self.select_all.setObjectName("filterSelectAll")
+        self.select_all.setTristate(True)
+        layout.addWidget(self.select_all)
         self.list = QListWidget()
         for text in data.column_values(sheet, col):
             entry = QListWidgetItem(text or "(Blanks)")
@@ -660,10 +739,30 @@ class ValuesDialog(QDialog):
             entry.setCheckState(Qt.Checked if chosen is None or text in chosen else Qt.Unchecked)
             self.list.addItem(entry)
         layout.addWidget(self.list)
+        self._sync_all()
+        self.select_all.clicked.connect(self._all_clicked)
+        self.list.itemChanged.connect(lambda _entry: self._sync_all())
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _all_clicked(self) -> None:
+        on = self.select_all.checkState() != Qt.Unchecked
+        self.list.blockSignals(True)
+        for i in range(self.list.count()):
+            self.list.item(i).setCheckState(Qt.Checked if on else Qt.Unchecked)
+        self.list.blockSignals(False)
+        self._sync_all()
+
+    def _sync_all(self) -> None:
+        ticked = sum(self.list.item(i).checkState() == Qt.Checked
+                     for i in range(self.list.count()))
+        state = (Qt.Checked if ticked == self.list.count() else
+                 Qt.Unchecked if not ticked else Qt.PartiallyChecked)
+        self.select_all.blockSignals(True)
+        self.select_all.setCheckState(state)
+        self.select_all.blockSignals(False)
 
     def set_checked(self, texts: list) -> None:
         for i in range(self.list.count()):
@@ -789,6 +888,23 @@ class ValidationDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
+        # only what the chosen Allow uses can be filled in, as Excel's
+        # (F-36: every field was open for "Any value")
+        self.kind.currentIndexChanged.connect(lambda _i: self._enable())
+        self.op.currentIndexChanged.connect(lambda _i: self._enable())
+        self._enable()
+
+    def _enable(self) -> None:
+        kind = self.kind.currentData()
+        ranged = kind not in ("any", "list", "custom")
+        two = ranged and self.op.currentData() in ("between", "notBetween")
+        self.op.setEnabled(ranged)
+        self.a.setEnabled(ranged)
+        self.b.setEnabled(two)
+        self.source.setEnabled(kind == "list")
+        self.dropdown.setEnabled(kind == "list")
+        self.formula.setEnabled(kind == "custom")
+        self.blank.setEnabled(kind != "any")
 
     def rule(self) -> dict:
         kind = self.kind.currentData()

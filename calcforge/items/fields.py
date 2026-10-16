@@ -36,8 +36,20 @@ def variable_value(document, name: str) -> str:
     return f"{row.value} {row.unit}".strip()
 
 
-def expand(text: str, document, page_index: int) -> str:
-    """*text* with every field replaced by its value."""
+#: What a blank document property is called on screen, «Author»: one left
+#: empty would otherwise go into the box as nothing at all, to be neither
+#: seen nor picked out (exercise round 1, F-15). On paper it is still blank.
+PLACEHOLDER_NAMES = {"id": "Document id", "filename": "File name"}
+
+
+def placeholder(body: str) -> str:
+    name = body.split(":", 1)[0]
+    return "«" + PLACEHOLDER_NAMES.get(name, name.capitalize()) + "»"
+
+
+def expand(text: str, document, page_index: int, placeholders: bool = False) -> str:
+    """*text* with every field replaced by its value — and, with
+    *placeholders*, a blank one by its name in «»."""
     if document is None:
         return text
 
@@ -45,13 +57,17 @@ def expand(text: str, document, page_index: int) -> str:
         body = match.group(1)
         if body.startswith("="):
             return variable_value(document, body[1:].strip())
-        return document.expand_fields(match.group(0), page_index)
+        value = document.expand_fields(match.group(0), page_index)
+        if placeholders and not value.strip():
+            return placeholder(body)
+        return value
     return FIELD.sub(one, text or "")
 
 
-def shown_document(item):
+def shown_document(item, on_screen: bool = False):
     """The box's words with their fields filled in — a copy of its document,
-    each field's place keeping the look it was typed in; kept for a moment."""
+    each field's place keeping the look it was typed in; kept for a moment.
+    *on_screen*, a blank document property shows as «its name»."""
     from PySide6.QtGui import QTextCursor
     doc = item.doc
     raw = doc.toPlainText()
@@ -64,7 +80,8 @@ def shown_document(item):
     index = pages.index(page) if page in pages else 0
     kept = getattr(item, "_fields_shown", None)
     now = time.monotonic()
-    if kept is not None and kept[0] == (raw, index, doc.textWidth()) and now - kept[1] < FRESH_FOR:
+    key = (raw, index, doc.textWidth(), bool(on_screen))
+    if kept is not None and kept[0] == key and now - kept[1] < FRESH_FOR:
         return kept[2]
     copy = doc.clone(item)
     matches = list(FIELD.finditer(raw))
@@ -73,11 +90,11 @@ def shown_document(item):
         cursor.setPosition(match.start())
         cursor.setPosition(match.end(), QTextCursor.KeepAnchor)
         look = cursor.charFormat()
-        cursor.insertText(expand(match.group(0), document, index), look)
+        cursor.insertText(expand(match.group(0), document, index, on_screen), look)
     copy.setTextWidth(doc.textWidth())
     if kept is not None and kept[2] is not doc:
         kept[2].deleteLater()
-    item._fields_shown = ((raw, index, doc.textWidth()), now, copy)
+    item._fields_shown = (key, now, copy)
     return copy
 
 

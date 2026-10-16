@@ -31,15 +31,31 @@ def find_on_page(data: bytes, index: int, needle: str, width_pt: float,
         scale_y = height_pt / max(page.rect.height, 1e-6)
         matrix = page.rotation_matrix * pymupdf.Matrix(scale_x, scale_y)
         found = []
+        words = None
         for hit in page.search_for(needle):
             box = pymupdf.Rect(hit) * matrix
-            around = pymupdf.Rect(hit.x0 - 80, hit.y0 - 1, hit.x1 + 80, hit.y1 + 1)
-            context = " ".join(page.get_textbox(around).split())
+            if words is None:
+                words = page.get_text("words")
             found.append(((box.x0, box.y0, box.width, box.height),
-                          context or needle))
+                          _words_around(words, hit) or needle))
         return found
     except Exception:                                  # noqa: BLE001
         engine.drain_messages()
         return []
     finally:
         engine.close(document)
+
+
+def _words_around(words, hit, reach: float = 80.0) -> str:
+    """The words on the hit's line within *reach* of it, each one whole.
+
+    Clipping the page's text to a box round the hit cut the first and last
+    words where the box's edge fell, so "Sheet 1: beam TBC" was listed as
+    "heet 1: beam TBC" (exercise round 1, F-24).
+    """
+    middle = (hit.y0 + hit.y1) / 2
+    near = [word for word in words
+            if word[1] <= middle <= word[3]
+            and word[2] > hit.x0 - reach and word[0] < hit.x1 + reach]
+    near.sort(key=lambda word: (word[5], word[6], word[7], word[0]))
+    return " ".join(word[4] for word in near)

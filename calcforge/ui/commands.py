@@ -58,7 +58,13 @@ class PageEditCommand(QUndoCommand):
             return False
         if other.frame is not self.frame or other.text() != self.text():
             return False
-        if other.stamp - self.stamp > MERGE_PAUSE:
+        # A field being typed into names its run (an object of its own, as
+        # *coalesce*): every keystroke of it is the one edit, however slowly
+        # it is typed (exercise round 1, F-06).
+        if other.coalesce is not True or self.coalesce is not True:
+            if other.coalesce is not self.coalesce:
+                return False
+        elif other.stamp - self.stamp > MERGE_PAUSE:
             return False
         self.after = other.after
         self.stamp = other.stamp
