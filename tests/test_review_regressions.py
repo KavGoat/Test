@@ -283,7 +283,7 @@ def test_multiple_has_a_working_shortcut(window, monkeypatch, qapp):
     monkeypatch.setattr(dialogs.ArrayDialog, "offsets", lambda self: ("10 mm", "0", 2, True))
     _show_for_shortcut(window, qapp)
     count = len(window.view.frame().markups())
-    QTest.keyClick(window.view, Qt.Key_D, Qt.ControlModifier | Qt.ShiftModifier)
+    QTest.keyClick(window.view, Qt.Key_M, Qt.ControlModifier)      # Revu's Ctrl+M in Markup mode
     qapp.processEvents()
     assert len(window.view.frame().markups()) == count + 2
 

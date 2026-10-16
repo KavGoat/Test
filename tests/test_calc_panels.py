@@ -39,7 +39,7 @@ def src(item):
 
 def test_the_calculation_toolbar_has_smaths_commands(win):
     names = [a.text() for a in win.calculation_bar.actions() if a.text()]
-    assert names == ["Calculate", "Auto-Calc", "Plot", "Matrix", "Calc Text", "Block", "Table",
+    assert names == ["Calculate", "Auto-Calc", "Plot", "Matrix", "Calc Text", "Calculation Block", "Table",
                      "If", "For", "While", "Line"]
     for action in win.calculation_bar.actions():
         if action.text():
