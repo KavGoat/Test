@@ -513,3 +513,35 @@ def test_opening_a_3000_row_workbook_within_budget(w, tmp_path):
     # machine running the suite in parallel: the work itself is held down
     # by the two tests above, this catches it growing back
     assert ms < 7000
+
+
+def test_a_column_edge_drag_redraws_no_rows_until_let_go(w, monkeypatch):
+    """Excel's guide line while the edge is dragged: each move laid the
+    sheet out again and drew its rows afresh, 25-60 ms a move (findings
+    5.3); a move now redraws two thin strips and sizes nothing."""
+    from PySide6.QtCore import QEvent
+    from tests.test_usability import _mouse
+    run = sheet_with_formulas(w)
+    open_cell(w, run, 2, 1)
+    xs, ys = run.edges()
+    edge = run.mapToScene(QPointF(xs[2], ys[0] - 6))
+    vp = w.view.viewport()
+    QApplication.sendEvent(vp, _mouse(w.view, QEvent.MouseButtonPress, edge.x(), edge.y()))
+    idle()
+    laid_out = Calls(monkeypatch, SheetRunItem, "layout_changed", only=run)
+    drawn = Calls(monkeypatch, SheetRunItem, "_paint_rows", only=run)
+    steps = iter(range(1, 40))
+
+    def move():
+        k = next(steps)
+        QApplication.sendEvent(vp, _mouse(w.view, QEvent.MouseMove, edge.x() + 2 * k, edge.y(),
+                                          Qt.NoButton, Qt.LeftButton))
+    ms = timed(move, n=7, fastest=True)
+    assert laid_out.count == 0 and drawn.count == 0
+    assert ms < 25                       # 25-60 ms before, about 5 now
+    QApplication.sendEvent(vp, _mouse(w.view, QEvent.MouseButtonRelease, edge.x() + 14, edge.y()))
+    idle()
+    assert laid_out.count == 1, "sized once, when let go"
+    moved = run.mapFromScene(QPointF(edge.x() + 14, edge.y())).x() - run.mapFromScene(edge).x()
+    assert the_run(w).sheet.width(1) == pytest.approx(48.0 + moved, abs=1.0), \
+        "the edge where it was let go (to a screen pixel)"

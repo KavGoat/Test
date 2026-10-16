@@ -92,8 +92,11 @@ def _tokenize(text: str) -> list[Token]:
             out.append(Token("end", "", lead, i))
             return out
         ch = text[i]
-        m = _RANGE_RE.match(text, i)
-        if m and (ch.isalpha() or ch in "$'_" or ch.isdigit() or ord(ch) > 127):
+        # only where a reference can start (an operator never does): the
+        # pattern was tried at every character (findings 5.5)
+        m = _RANGE_RE.match(text, i) if (ch.isalpha() or ch in "$'_" or ch.isdigit()
+                                          or ord(ch) > 127) else None
+        if m:
             whole = m.group(0)
             # a row range like 3:7 only where a reference can stand
             looks_like_rows = m.group(6) is not None

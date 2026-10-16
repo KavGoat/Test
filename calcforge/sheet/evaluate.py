@@ -267,6 +267,9 @@ def scalar(v):
     return v
 
 
+_call = None
+
+
 # -- the tree ----------------------------------------------------------------------------
 def ev(n, ctx: Ctx):
     t = type(n)
@@ -277,9 +280,10 @@ def ev(n, ctx: Ctx):
     if t is F.Binary:
         return _binary(n, ctx)
     if t is F.Call:
-        from .functions import call
-
-        return call(n, ctx)
+        global _call
+        if _call is None:                 # imported once (findings 5.5)
+            from .functions import call as _call
+        return _call(n, ctx)
     if t is F.Str:
         return n.value
     if t is F.Area:
