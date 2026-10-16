@@ -6,7 +6,7 @@ import csv
 from PySide6.QtCore import (QByteArray, QEvent, QMimeData, QPoint, QPointF, QRect, QRectF, QSize,
                             QTimer, Qt, Signal)
 from PySide6.QtGui import (QColor, QDrag, QFont, QFontInfo, QFontMetrics, QIcon, QKeySequence,
-                           QPainter, QPen, QPixmap)
+                           QPainter, QPen, QPixmap, QPolygonF)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
                                QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
@@ -897,6 +897,95 @@ class PagesPanel(QWidget):
 # Markups list
 # ---------------------------------------------------------------------------
 
+def _natural_key(text: str) -> tuple:
+    """"Page 10" after "Page 9", "12.5" after "9": numbers compared as numbers."""
+    import re
+    return tuple((0, float(part), "") if part[:1].isdigit() else (1, 0.0, part.lower())
+                 for part in re.findall(r"\d+(?:\.\d+)?|\D+", text or ""))
+
+
+class _MarkupRow(QTreeWidgetItem):
+    """A row (or a page heading) of the Markups list, sorted as a person
+    reads it: Page 2 before Page 10, a width of 2 before 10."""
+
+    def __lt__(self, other) -> bool:
+        tree = self.treeWidget()
+        column = tree.sortColumn() if tree is not None else 0
+        return _natural_key(self.text(column)) < _natural_key(other.text(column))
+
+
+class _FilterHeader(QHeaderView):
+    """The Markups list's headings with Revu's filter button on each.
+
+    A left-click on a heading sorts by it; a left-click on the funnel at its
+    right end opens that column's filter list (Revu's Filter List), which
+    used to be only on a right-click nobody looks for (novice finding 14).
+    The funnel is blue while the column is filtered."""
+
+    filterClicked = Signal(int, QPoint)
+    BUTTON = 14
+
+    def __init__(self, panel):
+        super().__init__(Qt.Horizontal)
+        self.panel = panel
+        self.setSectionsClickable(True)
+        self.setMouseTracking(True)
+
+    def filter_rect(self, logical: int) -> QRect:
+        """Where column *logical*'s filter button is, in the header."""
+        x = self.sectionViewportPosition(logical)
+        width = self.sectionSize(logical)
+        size = self.BUTTON
+        return QRect(x + width - size - 3, (self.height() - size) // 2, size, size)
+
+    def sectionSizeFromContents(self, logical: int) -> QSize:   # noqa: N802
+        size = super().sectionSizeFromContents(logical)
+        return QSize(size.width() + self.BUTTON + 4, size.height())
+
+    def paintSection(self, painter: QPainter, rect: QRect, logical: int) -> None:  # noqa: N802
+        painter.save()
+        super().paintSection(painter, rect, logical)
+        painter.restore()
+        button = QRect(rect.right() - self.BUTTON - 2, rect.top() + (rect.height() - self.BUTTON) // 2,
+                       self.BUTTON, self.BUTTON)
+        filtered = logical in self.panel.column_filters
+        colour = QColor("#0083db") if filtered else self.palette().buttonText().color()
+        if not filtered:
+            colour.setAlpha(150)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(colour)
+        b = QRectF(button).adjusted(2.5, 3, -2.5, -3)
+        funnel = QPolygonF([QPointF(b.left(), b.top()), QPointF(b.right(), b.top()),
+                            QPointF(b.center().x() + 1.2, b.center().y() + 0.5),
+                            QPointF(b.center().x() + 1.2, b.bottom()),
+                            QPointF(b.center().x() - 1.2, b.bottom() - 1.5),
+                            QPointF(b.center().x() - 1.2, b.center().y() + 0.5)])
+        painter.drawPolygon(funnel)
+        painter.restore()
+
+    def mousePressEvent(self, event) -> None:                    # noqa: N802
+        if event.button() == Qt.LeftButton:
+            point = event.position().toPoint()
+            logical = self.logicalIndexAt(point)
+            if logical >= 0 and self.filter_rect(logical).contains(point):
+                self.filterClicked.emit(logical, self.mapToGlobal(
+                    self.filter_rect(logical).bottomLeft()))
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:                  # noqa: N802
+        point = event.position().toPoint()
+        logical = self.logicalIndexAt(point)
+        if (event.button() == Qt.LeftButton and logical >= 0
+                and self.filter_rect(logical).contains(point)):
+            event.accept()             # the press opened the filter: no sort
+            return
+        super().mouseReleaseEvent(event)
+
+
 class MarkupsPanel(QWidget):
     """Every markup in the document as a list, the way Bluebeam's Markups list works.
 
@@ -965,7 +1054,11 @@ class MarkupsPanel(QWidget):
         self.tree.itemSelectionChanged.connect(self._picked)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._row_menu)
-        header = self.tree.header()
+        # Values each column is narrowed to; a column not here shows all.
+        self.column_filters: dict[int, set] = {}
+        header = _FilterHeader(self)
+        self.tree.setHeader(header)
+        header.filterClicked.connect(self.filter_menu)
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.setSectionsMovable(True)
         header.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -973,13 +1066,13 @@ class MarkupsPanel(QWidget):
             lambda point: self.filter_menu(header.logicalIndexAt(point),
                                            header.mapToGlobal(point)))
         self.tree.setSortingEnabled(True)
+        # Page 1 first, as Revu lists them (Qt starts a sorted list descending)
+        self.tree.sortByColumn(0, Qt.AscendingOrder)
         # Sizing a column to its contents reads a sample of the rows, not all
         # of them: with a thousand markups, all of them was a tenth of a
         # second each time anything changed (2026-10-05).
         self.tree.header().setResizeContentsPrecision(64)
         layout.addWidget(self.tree, 1)
-        # Values each column is narrowed to; a column not here shows all.
-        self.column_filters: dict[int, set] = {}
         # True while the list is being rebuilt or is following the canvas, so
         # that putting a selection into it does not send that selection
         # straight back out and fight whatever set it.
@@ -1076,7 +1169,7 @@ class MarkupsPanel(QWidget):
         for index, item, row in found:
             if not self._shown(row, needle):
                 continue
-            node = QTreeWidgetItem(row)
+            node = _MarkupRow(row)
             node.setData(0, Qt.UserRole, (index, item.uid))
             node.setIcon(1, icon(_icon_for(item), 16))
             for place, colour in ((3, item.style.stroke), (4, item.style.fill)):
@@ -1095,9 +1188,9 @@ class MarkupsPanel(QWidget):
             rows.append(row)
         for key in order:
             children = groups.get(key, [])
-            if not children and (needle or self.column_filters):
-                continue
-            parent = QTreeWidgetItem([key] + empty[1:])
+            if not children:
+                continue           # a page with no markups is not listed (Revu)
+            parent = _MarkupRow([key] + empty[1:])
             font = parent.font(0)
             font.setBold(True)
             parent.setFont(0, font)
@@ -1148,9 +1241,8 @@ class MarkupsPanel(QWidget):
             self.column_filters.pop(column, None)
         else:
             self.column_filters[column] = set(allowed)
-        header = self.tree.headerItem()
-        name = self.COLUMNS[column]
-        header.setText(column, f"{name} ▾" if column in self.column_filters else name)
+        # the heading's funnel turns blue while its column is filtered
+        self.tree.header().viewport().update()
         self.rebuild(self.window.document)
 
     def _clear_column_filters(self) -> None:
@@ -2539,6 +2631,36 @@ class PropertiesPanel(QScrollArea):
 
     # -- construction ------------------------------------------------------
     def show_items(self, items: list[MarkupItem], style_edit=None) -> None:
+        """Build the panel for *items*.
+
+        Building it sends a few thousand events (each widget is made,
+        polished, laid out), and every one of them used to pass through the
+        application's event filters in Python on the way — twice the time of
+        the building itself, and a click on a markup stalled for a tenth of
+        a second (novice finding 25). Nothing typed or clicked can arrive
+        while the panel is being built, so those filters stand aside for it."""
+        application = QApplication.instance()
+        window = self.window
+        if (application is None or getattr(self, "_filters_aside", False)
+                or getattr(window, "_presenting", None) is not None):
+            # (the call within; or presenting, whose own key filter must keep
+            # its place in front of the window's)
+            self._show_items(items, style_edit)
+            return
+        filters = [watcher for watcher in (
+            window if getattr(window, "_filters_the_application", False) else None,
+            getattr(application, "_wheel_filter", None)) if watcher is not None]
+        for watcher in filters:
+            application.removeEventFilter(watcher)
+        self._filters_aside = True
+        try:
+            self._show_items(items, style_edit)
+        finally:
+            self._filters_aside = False
+            for watcher in filters:
+                application.installEventFilter(watcher)
+
+    def _show_items(self, items: list[MarkupItem], style_edit=None) -> None:
         self._items = [i for i in items if isinstance(i, MarkupItem)]
         if not self._items and style_edit is None:
             styles = getattr(self.window, "markup_styles", None)
@@ -2883,14 +3005,17 @@ class PropertiesPanel(QScrollArea):
             ("Y:", item.pos().y(), lambda i, v: i.setPos(i.pos().x(), v), False),
         ]
         if item.RESIZABLE and rect.width() > 0 and rect.height() > 0:
+            # Revu's names: the size on the paper, not what it measures —
+            # a measurement's own value is in its Measurement section, in
+            # the page scale's units (novice finding 26, audit G2)
             rows += [
-                ("Width:", rect.width(), self._set_width, True),
-                ("Height:", rect.height(), self._set_height, True),
+                ("Document Width:", rect.width(), self._set_width, True),
+                ("Document Height:", rect.height(), self._set_height, True),
             ]
         for label, value, setter, is_size in rows:
             box = _spin(value * PT_TO_MM, 0.1 if is_size else -20000.0, 20000.0, 1, 1.0)
-            box.setObjectName("layout" + label.rstrip(":"))
-            box.setToolTip(f"{value:.1f} pt")
+            box.setObjectName("layout" + label.rstrip(":").split()[-1])
+            box.setToolTip(f"{value:.1f} pt on the paper" if is_size else f"{value:.1f} pt")
             box.valueChanged.connect(
                 lambda millimetres, apply=setter:
                 self._slide(lambda i: apply(i, millimetres * MM_TO_PT),
@@ -3346,7 +3471,8 @@ class PropertiesPanel(QScrollArea):
 
         if item.kind in ("area", "volume", "perimeter"):
             unit = UnitCombo(self.window.current_page().scale.area_unit)
-            unit.currentTextChanged.connect(self.window.set_area_unit)
+            unit.setObjectName("measureAreaUnit")
+            unit.unitChanged.connect(self.window.set_area_unit)
             form.addRow("Area Unit:", unit)
         if item.kind == "volume":
             depth = QLineEdit(item.depth_text)

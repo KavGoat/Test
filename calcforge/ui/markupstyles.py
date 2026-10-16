@@ -510,6 +510,38 @@ class MarkupStyles(QObject):
         self.bar.refresh(force=True)
         return number
 
+    @staticmethod
+    def title(key: str, number: int) -> str:
+        """A style's name as a heading: "Callout Style 1" — or, renamed, the
+        name it was given. "Callout Style 1 — Style 1" said it twice
+        (novice finding 27)."""
+        entries = styles_for(key)
+        name = entries[number - 1].name if 1 <= number <= len(entries) else ""
+        if not name or name == f"Style {number}":
+            return f"{TOOL_MAP[key].label} Style {number}"
+        return name
+
+    def save_markup(self, item) -> int:
+        """Right-click ▸ Save as Markup Style: keep *item*'s look as the next
+        style of the tool that draws it. Returns its number (0: not kept)."""
+        key = self.tool_for_item(item)
+        if not key or not styled(key):
+            self.window.status_hint.setText("This kind of markup has no styles")
+            return 0
+        entries = styles_for(key)
+        if len(entries) >= MAX_STYLES:
+            self.window.status_hint.setText(f"A tool holds at most {MAX_STYLES} styles")
+            return 0
+        number = len(entries) + 1
+        entries.append(MarkupStyle(f"Style {number}", payload_of(item)))
+        set_styles_for(key, entries)
+        self.bar.refresh(force=True)
+        label = TOOL_MAP[key].label
+        self.window.status_hint.setText(
+            f"Saved as {label} Style {number} — with the {label} tool, press "
+            f"{number} to draw in it")
+        return number
+
     def rename(self, number: int, name: str = "") -> bool:
         key = self.tool_key()
         entries = styles_for(key) if key else []
@@ -674,7 +706,7 @@ class MarkupStyles(QObject):
             return None
         item = self.sample(key, number)
         self._panel_item = item
-        title = f"{TOOL_MAP[key].label} Style {number} — {entries[number - 1].name}"
+        title = self.title(key, number)
 
         def changed(edited, key=key, number=number) -> None:
             if self.editing() == number and self.window.view.tool_key == key:

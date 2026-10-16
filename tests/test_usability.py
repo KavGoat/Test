@@ -2123,8 +2123,8 @@ def test_choosing_to_pick_points_starts_the_calibrate_tool(window, monkeypatch):
     assert "click one end" in window.status_hint.text().lower()
 
 
-@pytest.mark.parametrize("tool", ["rect", "ellipse", "measure_length",
-                                   "measure_area"])
+@pytest.mark.parametrize("tool", ["measure_length", "measure_area",
+                                   "measure_perimeter", "measure_diameter"])
 def test_the_first_scaled_tool_click_prompts_before_drawing(
         window, monkeypatch, tool):
     from calcforge.core.document import PageScale
@@ -2144,16 +2144,30 @@ def test_the_first_scaled_tool_click_prompts_before_drawing(
     assert window.view._draft is not None
 
 
-def test_cancelling_the_first_scale_prompt_does_not_create_a_markup(
+@pytest.mark.parametrize("tool", ["rect", "ellipse"])
+def test_a_plain_shape_never_prompts_for_a_scale(window, monkeypatch, tool):
+    # Revu: a rectangle is just a markup (audit H3, novice finding 5)
+    asked = []
+    monkeypatch.setattr(window, "calibrate_dialog", lambda: asked.append(tool))
+    window.interactive_prompts = True
+    window.select_tool(tool)
+    click(window.view, 100, 300)
+    assert asked == []
+    assert window.view._draft is not None
+
+
+def test_cancelling_the_first_scale_prompt_still_draws_the_measurement(
         window, monkeypatch):
+    # Cancel leaves the page without a scale, and the measurement is drawn in
+    # paper units ("Scale Not Set" in the status bar)
     monkeypatch.setattr(window, "calibrate_dialog", lambda: None)
     window.interactive_prompts = True
     window.select_tool("measure_length")
 
     click(window.view, 100, 300)
 
-    assert window.view._draft is None
-    assert markups(window) == []
+    assert window.view._draft is not None
+    assert not window.current_page().scale.is_calibrated()
 
 
 def test_two_clicks_and_a_length_set_the_scale(window, monkeypatch):
@@ -5485,6 +5499,9 @@ def test_a_grouped_shape_shows_no_control_points_of_its_own(window):
 
     assert not handles_drawn(line)
     window.ungroup_selection()
+    # both still picked: a multi-selection, one box round the two (Revu)
+    assert not handles_drawn(line)
+    window.scene.clearSelection()
     line.setSelected(True)
     assert handles_drawn(line)
 
@@ -7137,7 +7154,8 @@ def test_the_properties_panel_says_where_it_is_and_how_big(window):
     assert "Layout" in groups
     labels = [w.text().rstrip(":") for w in groups["Layout"].findChildren(
         type(groups["Layout"].findChild(QLabel)))]
-    for wanted in ("X", "Y", "Width", "Height", "Rotation"):
+    # Revu's names: the size is the size on the paper (audit G2)
+    for wanted in ("X", "Y", "Document Width", "Document Height", "Rotation"):
         assert wanted in labels, f"{wanted} should be in the panel"
 
     spins = groups["Layout"].findChildren(QDoubleSpinBox)

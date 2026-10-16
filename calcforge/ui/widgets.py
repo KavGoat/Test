@@ -85,8 +85,25 @@ class ColorButton(QToolButton):
             self.setIcon(colour_icon(self._colour))
 
 
+def shown_unit(unit: str) -> str:
+    """A unit as a person reads it: m², kN·m — never m^2 or kN*m."""
+    return (unit or "").replace("^2", "²").replace("^3", "³").replace("*", "·")
+
+
+def typed_unit(text: str) -> str:
+    """What was picked or typed in a unit box, in the form units are kept in."""
+    return (text or "").strip().replace("²", "^2").replace("³", "^3").replace("·", "*")
+
+
 class UnitCombo(QComboBox):
-    """Editable unit picker grouped by physical quantity."""
+    """Editable unit picker grouped by physical quantity.
+
+    It shows units as they are written — m², m³, kN·m — the way the values
+    beside them read (novice finding 26: "m^2" beside "149.34 m²"), and
+    hands back the form they are kept in: ``currentText()`` and
+    :attr:`unitChanged` give "m^2"."""
+
+    unitChanged = Signal(str)
 
     def __init__(self, value: str = ""):
         super().__init__()
@@ -96,9 +113,21 @@ class UnitCombo(QComboBox):
         for group, units in UNIT_MENU.items():
             self.insertSeparator(self.count())
             for unit in units:
-                self.addItem(unit)
+                self.addItem(shown_unit(unit))
         self.setCurrentText(value)
         self.setMinimumContentsLength(8)
+        self.currentTextChanged.connect(
+            lambda text: self.unitChanged.emit(typed_unit(text)))
+
+    def currentText(self) -> str:                      # noqa: N802 (Qt's name)
+        return typed_unit(super().currentText())
+
+    def shownText(self) -> str:                         # noqa: N802
+        """What the box shows: m²."""
+        return super().currentText()
+
+    def setCurrentText(self, text: str) -> None:       # noqa: N802 (Qt's name)
+        super().setCurrentText(shown_unit(text))
 
 
 def keep_the_wheel_with_the_scroller(application) -> None:
@@ -113,6 +142,9 @@ def keep_the_wheel_with_the_scroller(application) -> None:
     application._wheel_filter = WheelBelongsToTheScroller(application)
     application.installEventFilter(application._wheel_filter)
 
+
+#: Looked up once: the wheel filter sees every event the application has.
+_WHEEL = QEvent.Wheel
 
 #: The object names of the places where the wheel never changes a value.
 PROPERTIES = ("propertiesPanel", "toolbar_style")
@@ -143,7 +175,7 @@ class WheelBelongsToTheScroller(QObject):
         return False
 
     def eventFilter(self, watched, event):
-        if event.type() != QEvent.Wheel or not isinstance(watched, self.WATCHED):
+        if event.type() != _WHEEL or not isinstance(watched, self.WATCHED):
             return False
         # A dropdown never changes under the wheel, focused or not: turning
         # the wheel over one cycled through its values without being asked.

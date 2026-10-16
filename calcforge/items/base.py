@@ -416,6 +416,36 @@ def covered_rect(item) -> QRectF:
     return item.mapRectToParent(item.boundingRect())
 
 
+def many_selected(scene) -> bool:
+    """True when the selection is several things (Revu's multi-selection).
+
+    Then the markups' own control points are not offered: one dashed box
+    round the lot, with its own corner handles, is (ui/view.py), and a press
+    anywhere on any of them moves them all."""
+    ask = getattr(scene, "many_selected", None) if scene is not None else None
+    return bool(ask()) if callable(ask) else False
+
+
+#: Half the width of each kind of handle as it is drawn, in screen pixels: a
+#: press counts as on a handle only inside the square it is drawn in.
+CONTROL_HALF_PX = (HANDLE_SCREEN_PX + 1.0) / 2      # a gold control point
+SQUARE_HALF_PX = (HANDLE_SCREEN_PX + 1.5) / 2       # a scale-box corner, rotation
+LEADER_HALF_PX = HANDLE_SCREEN_PX / 2 + 1.0         # a leader's diamond
+
+
+def view_zoom(item) -> float:
+    """How many screen pixels one of *item*'s own units is, in its view."""
+    scene = item.scene() if item is not None else None
+    views = scene.views() if scene is not None else []
+    if views:
+        shape = views[0].transform()
+        zoom = math.hypot(shape.m11(), shape.m12())
+    else:
+        zoom = _CHROME_ZOOM[0]
+    own = item.sceneTransform()
+    return max(zoom * math.hypot(own.m11(), own.m12()), 0.01)
+
+
 def handle_zoom(painter: QPainter) -> float:
     shape = painter.transform()
     return max(math.hypot(shape.m11(), shape.m12()), 0.01)
@@ -489,6 +519,7 @@ HANDLE_CURSORS = {
     # matched by their shape below rather than listed here.
     # A measurement's own words: dragged to move them, turned to angle them.
     "lbl": Qt.SizeAllCursor,
+    "lbltext": Qt.SizeAllCursor,
 }
 
 #: The handles that turn a markup, which get Revu's curled arrow.
@@ -936,15 +967,31 @@ class MarkupItem(QGraphicsObject):
         return {"scale_nw": box.topLeft(), "scale_ne": box.topRight(),
                 "scale_se": box.bottomRight(), "scale_sw": box.bottomLeft()}
 
-    def handle_at(self, local_pos: QPointF, tolerance: float = HANDLE_SIZE) -> Optional[str]:
+    def handle_half_px(self, key: str) -> float:
+        """Half the drawn size of handle *key*, in screen pixels."""
+        if key == "rot" or key.startswith("scale_"):
+            return SQUARE_HALF_PX
+        if key in self.leader_handles():
+            return LEADER_HALF_PX
+        return CONTROL_HALF_PX
+
+    def handle_at(self, local_pos: QPointF, tolerance: Optional[float] = None,
+                  zoom: Optional[float] = None) -> Optional[str]:
+        """The handle under *local_pos*. A handle takes the press only inside
+        the square it is drawn in (QA finding 1.7: a reach of 4 pt round every
+        point covered nearly the whole stroke of a small markup, so pressing
+        its edge resized it instead of moving the selection)."""
         if self.locked:
             return None
+        if tolerance is None:
+            zoom = zoom if zoom else view_zoom(self)
         # the nearest within reach: a shape's corner and its scale-box corner
         # can both be in reach of one click
         best, best_distance = None, None
         for key, point in list(self.handle_points().items()) + list(self.scale_points().items()):
             dx, dy = abs(point.x() - local_pos.x()), abs(point.y() - local_pos.y())
-            if dx <= tolerance and dy <= tolerance:
+            reach = tolerance if tolerance is not None else self.handle_half_px(key) / zoom
+            if dx <= reach and dy <= reach:
                 distance = dx * dx + dy * dy
                 if best_distance is None or distance < best_distance:
                     best, best_distance = key, distance
@@ -1018,7 +1065,7 @@ class MarkupItem(QGraphicsObject):
         rotation handle a blue dot on a dashed stalk above."""
         if not self.isSelected() or not self._handles_visible:
             return
-        if self.group:
+        if self.group or many_selected(self.scene()):
             return
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)

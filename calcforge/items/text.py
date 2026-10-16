@@ -1372,6 +1372,12 @@ class CalloutItem(_TextBase):
     def clouds_a_region(self) -> bool:
         return any(leader.clouds() for leader in self.leaders)
 
+    def display_name(self) -> str:
+        """Revu's names: a call-out that clouds what it points at is a Cloud+."""
+        if self.label:
+            return self.label
+        return "Cloud+" if self.cloud_leader() is not None else self.NAME
+
     def cloud_leader(self):
         """The first leader that clouds something, if there is one."""
         for leader in self.leaders:

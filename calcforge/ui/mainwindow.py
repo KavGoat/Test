@@ -563,6 +563,11 @@ def _a_field_being_typed_in(widget) -> bool:
     return isinstance(widget, QAbstractSpinBox)
 
 
+#: The events MainWindow's application-wide filter acts on (eventFilter).
+_FILTERED_INPUT = frozenset((QEvent.ShortcutOverride, QEvent.KeyPress,
+                             QEvent.MouseButtonPress))
+
+
 class MainWindow(QMainWindow):
     """Everything the user sees: canvas, toolbars, panels and menus."""
 
@@ -2086,7 +2091,7 @@ class MainWindow(QMainWindow):
         status.addPermanentWidget(self.status_dimmer)
 
         self.status_scale = QToolButton()
-        self.status_scale.setText("Scale 1:1")
+        self.status_scale.setText("Scale Not Set")
         self.status_scale.setAutoRaise(True)
         self.status_scale.setToolTip("Click to set the page scale")
         self.status_scale.clicked.connect(self.calibrate_dialog)
@@ -2306,6 +2311,7 @@ class MainWindow(QMainWindow):
         application = QApplication.instance()
         if application is not None:
             application.installEventFilter(self)
+            self._filters_the_application = True     # (PropertiesPanel.show_items)
         self.pages_panel.pageSelected.connect(self.go_to_page)
         # (first page, how many, where the run now starts) — move_page takes
         # the last two the other way round
@@ -3678,8 +3684,13 @@ class MainWindow(QMainWindow):
         themselves.
         """
         # This application-wide filter also sees every paint/layout/timer
-        # event. Only input handled below needs a walk up the widget tree.
+        # event — thousands for one rebuild of the Properties panel — so the
+        # test for the ones it handles is kept as cheap as Python allows
+        # (novice finding 25). Only input handled below needs a walk up the
+        # widget tree.
         kind = event.type()
+        if kind not in _FILTERED_INPUT and kind != QEvent.FocusIn:
+            return False
         if (kind in (QEvent.MouseButtonPress, QEvent.FocusIn) and len(self._panes) > 1
                 and isinstance(watched, QWidget)):
             # Split View: a click (or the keyboard) in a pane makes it the
@@ -3687,9 +3698,8 @@ class MainWindow(QMainWindow):
             pane = self.pane_of(watched)
             if pane is not None and pane is not self._active_pane:
                 self.activate_pane(pane)
-        if kind not in (QEvent.ShortcutOverride, QEvent.KeyPress,
-                        QEvent.MouseButtonPress):
-            return super().eventFilter(watched, event)
+        if kind not in _FILTERED_INPUT:
+            return False
         owner = watched if isinstance(watched, QWidget) else None
         on_canvas = False
         while owner is not None and not isinstance(owner, MainWindow):
@@ -5321,9 +5331,16 @@ class MainWindow(QMainWindow):
         if tabs is not None:
             tabs.refresh()                  # and its tab is the current one
         scale = self.current_page().scale
-        self.status_scale.setText(f"Scale {scale.label}")
-        self.status_scale.setToolTip(
-            f"1 page point = {format_quantity(scale.length_per_pt, 5)}\nClick to change")
+        if scale.is_calibrated():
+            self.status_scale.setText(f"Scale {scale.label}")
+            self.status_scale.setToolTip(
+                f"1 page point = {format_quantity(scale.length_per_pt, 5)}\nClick to change")
+        else:
+            # Revu marks an uncalibrated page as such: "Scale 1:1" made a
+            # measurement look calibrated when it was not (novice finding 12)
+            self.status_scale.setText("Scale Not Set")
+            self.status_scale.setToolTip("This page has no scale: measurements are "
+                                         "paper distances\nClick to set the page scale")
         self.refresh_page_bar()
 
     def refresh_page_bar(self) -> None:
@@ -5775,6 +5792,7 @@ class MainWindow(QMainWindow):
             self.table_controls.sync()
             self.style_bar.layout().invalidate()
             self.style_bar.layout().activate()
+            self._style_bar_tables = True   # the bar's own controls come back next time
             return
         if hasattr(self, "table_controls"):
             self.table_controls.show(False)
@@ -5824,10 +5842,14 @@ class MainWindow(QMainWindow):
             hidden.add(self.font_family_combo)
         if isinstance(active, CalloutItem):
             hidden |= {self.arrow_start_combo, self.arrow_start_label_action}
+        changed = False
         for field, actions in self._style_widgets.items():
             for action in actions:
-                action.setVisible(field in shown and action not in hidden
-                                  and action.defaultWidget() not in hidden)
+                wanted = (field in shown and action not in hidden
+                          and action.defaultWidget() not in hidden)
+                if action.isVisible() != wanted:
+                    action.setVisible(wanted)
+                    changed = True
                 action.setEnabled(not idle)
         self.text_align_combo.setVisible(FONT in supported and isinstance(active, _TextBase))
         self._align_label.setVisible(self.text_align_combo.isVisibleTo(self.font_style_popup))
@@ -5836,10 +5858,15 @@ class MainWindow(QMainWindow):
             self._fill_totals(items)
         if not self.style_bar.isVisibleTo(self):
             self.style_bar.setVisible(True)
-        # which controls it holds changed: lay it out again (it used to be
-        # hidden and shown, which did this as a side effect)
-        self.style_bar.layout().invalidate()
-        self.style_bar.layout().activate()
+            changed = True
+        if changed or getattr(self, "_style_bar_tables", False):
+            # which controls it holds changed: lay it out again (it used to
+            # be hidden and shown, which did this as a side effect). Not when
+            # nothing came or went: laying the bar out was a quarter of
+            # picking a tool or a markup (novice finding 25).
+            self.style_bar.layout().invalidate()
+            self.style_bar.layout().activate()
+        self._style_bar_tables = False
         if active is None:
             return
         controls = ((self.stroke_button, active.style.stroke, "set_color"),
@@ -6841,7 +6868,7 @@ class MainWindow(QMainWindow):
             return
         self.status_hint.setText(
             "This page has no scale — measurements are paper distances. "
-            "Click “Scale 1:1” in the status bar to set one.")
+            "Click “Scale Not Set” in the status bar to set one.")
 
     def choose_count_subject(self) -> None:
         dialog = dialogs.CountSubjectDialog(self.view.count_subject, self.view.count_symbol, self)
@@ -6895,6 +6922,9 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, check)
 
     def refresh_selection(self) -> None:
+        scene = self.view.scene()
+        if scene is not None and hasattr(scene, "selection_reshaped"):
+            scene.selection_reshaped()        # grouped or ungrouped, perhaps
         items = self.selected_items()
         self.properties_panel.show_items(items)
         self.default_button.setEnabled(len(items) == 1)
@@ -9900,6 +9930,15 @@ class MainWindow(QMainWindow):
                 item, into=n, ask=False))
         add_tool.addSeparator()
         add_tool.addAction("Choose a Tool Set…", lambda: self.add_to_toolset(item))
+        styles = getattr(self, "markup_styles", None)
+        if not calc_like and styles is not None:
+            from .markupstyles import styled
+            if styled(styles.tool_for_item(item) or ""):
+                # the look kept for its tool, picked again with a number key
+                keep = menu.addAction("Save as Markup Style",
+                                      lambda: styles.save_markup(item))
+                keep.setToolTip("Keep this look as a style of its tool: "
+                                "press its number with the tool to draw in it")
         if not calc_like:
             default = menu.addAction("Set as Default", lambda: self.set_as_default(item))
             default.setToolTip("Use these properties for new markups of this kind")

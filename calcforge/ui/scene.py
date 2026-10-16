@@ -1583,6 +1583,12 @@ class DocumentScene(QGraphicsScene):
             theme = LIGHT
         self.set_canvas_colour(CANVAS.get(theme, CANVAS[LIGHT]))
         self.selectionChanged.connect(self.selectionInfoChanged.emit)
+        # Whether the selection is several things (many_selected), worked
+        # out when first asked after it changes — not on every one of the
+        # four hundred changes a Select All makes.
+        self._many = False
+        self._many_known = False
+        self.selectionChanged.connect(self.selection_reshaped)
         # A square of a page finished drawing in the background: repaint just
         # where it belongs. The scene listens rather than each page, because a
         # page frame is thrown away and rebuilt constantly and a signal still
@@ -1600,6 +1606,35 @@ class DocumentScene(QGraphicsScene):
         self._settling.setSingleShot(True)
         self._settling.setInterval(0)
         self._settling.timeout.connect(self._draw_what_arrived)
+
+    def selection_reshaped(self) -> None:
+        """The selection changed, or what it is made of did (grouped or
+        ungrouped): whether it is several things is worked out again."""
+        self._many_known = False
+
+    def many_selected(self) -> bool:
+        """True when more than one thing is selected — two markups, a markup
+        and a group, two groups. One group is one thing. Revu then shows one
+        box round the lot instead of each markup's control points."""
+        if self._many_known:
+            return self._many
+        units = set()
+        for item in self.selectedItems():
+            if isinstance(item, MarkupItem):
+                units.add(item.group or id(item))
+                if len(units) > 1:
+                    break
+        many = len(units) > 1
+        self._many_known = True
+        if many != self._many:
+            self._many = many
+            # the ones still selected show (or stop showing) their own handles
+            QTimer.singleShot(0, self._repaint_selected)
+        return many
+
+    def _repaint_selected(self) -> None:
+        for item in self.selectedItems():
+            item.update()
 
     def _part_of_a_page_arrived(self, key) -> None:
         self._arrived.append(key)

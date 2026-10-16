@@ -252,17 +252,38 @@ class MeasureItem(MarkupItem):
         handles = {f"v{index}": QPointF(point) for index, point in enumerate(self.points)}
         if self.show_label:
             centre = self._label_anchor() + self.label_offset
-            # The control dot sits on the value. Dragging it pulls the
-            # dimension line off what it measures; Shift and dragging it takes
-            # the value away onto a leader. One dot, both of the things a
-            # dimension is ever asked to do.
-            handles["lbl"] = centre
-            # A second handle to turn the text by, out along its own angle.
+            # The control dot stands just before the value, in line with it.
+            # Dragging it pulls the dimension line off what it measures;
+            # Shift and dragging it takes the value away onto a leader. One
+            # dot, both of the things a dimension is ever asked to do. It
+            # used to sit on the middle of the value, and with the turning
+            # handle beside it the answer could not be read (novice finding
+            # 10): the handles stand clear of the words, either side of them.
+            handles["lbl"] = centre + self._label_dot_shift()
+            # A second handle to turn the text by, out along its own angle,
+            # just past the end of the words.
             angle = math.radians(self.label_rotation())
-            reach = max(self.style.font_size * 2.2, 16.0)
+            reach = self._label_half_width() + self._handle_gap()
             handles["lblrot"] = QPointF(centre.x() + math.cos(angle) * reach,
                                         centre.y() + math.sin(angle) * reach)
         return handles
+
+    def _label_half_width(self) -> float:
+        """Half the width the value is written across (as _paint_label)."""
+        metrics = QFontMetricsF(self.style.font())
+        return (metrics.horizontalAdvance(self.value_text or "") + 8) / 2
+
+    def _handle_gap(self) -> float:
+        """How far a handle's centre stands off the words: its own radius,
+        at the zoom it is seen at, and a little room."""
+        from .base import CONTROL_HALF_PX, view_zoom
+        return CONTROL_HALF_PX / view_zoom(self) + 1.5
+
+    def _label_dot_shift(self) -> QPointF:
+        """From the middle of the value to its control dot, before the words."""
+        angle = math.radians(self.label_rotation())
+        reach = self._label_half_width() + self._handle_gap()
+        return QPointF(-math.cos(angle) * reach, -math.sin(angle) * reach)
 
     def control_dots(self) -> set[str]:
         """The dot on the value, which is what a dimension is adjusted by."""
@@ -297,12 +318,19 @@ class MeasureItem(MarkupItem):
                 self.prepareGeometryChange()
                 normal = self.dimension_normal()
                 middle = (self.points[0] + self.points[1]) / 2
-                away = local_pos - middle
+                away = local_pos - self._label_dot_shift() - middle
                 self.witness_reach = away.x() * normal.x() + away.y() * normal.y()
                 self.label_offset = QPointF(0, 0)
                 self.update()
                 self.geometryChanged.emit()
                 return
+            self.prepareGeometryChange()
+            # the dot is grabbed beside the words: they keep their distance
+            self.label_offset = local_pos - self._label_dot_shift() - self._label_anchor()
+            self.update()
+            return
+        if key == "lbltext":
+            # the words themselves, taken hold of (Shift on the value)
             self.prepareGeometryChange()
             self.label_offset = local_pos - self._label_anchor()
             self.update()
