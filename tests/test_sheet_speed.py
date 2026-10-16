@@ -98,12 +98,16 @@ class Paints(QObject):
 class Calls:
     """How often a method is called (patched for the test)."""
 
-    def __init__(self, monkeypatch, owner, name):
+    def __init__(self, monkeypatch, owner, name, only=None):
+        """*only*: count calls on that object alone. Windows left by earlier
+        tests in the same worker still paint their own tables, and counting
+        those made a loaded, parallel run fail on someone else's cells."""
         self.count = 0
         original = getattr(owner, name)
 
         def counted(*args, **kwargs):
-            self.count += 1
+            if only is None or (args and args[0] is only):
+                self.count += 1
             return original(*args, **kwargs)
         monkeypatch.setattr(owner, name, counted)
 
@@ -195,7 +199,7 @@ def test_a_key_typed_into_a_table_markup_redraws_only_the_cell(w, monkeypatch):
     w.view.tables.select((20, 1))
     idle()
     type_in(w, "1")
-    drawn = Calls(monkeypatch, TableItem, "_paint_text")
+    drawn = Calls(monkeypatch, TableItem, "_paint_text", only=table)
     ms = timed(lambda: type_in(w, "2"), n=7)
     assert ms < 100
     # 80 filled cells: all of them for each of 8 repaints a key, before
@@ -303,12 +307,17 @@ def test_a_screenful_of_cells_is_drawn_from_what_was_worked_out_before(w, monkey
 
 def test_picking_cells_in_a_table_markup_redraws_only_around_them(w, monkeypatch):
     table = a_table(w)
-    drawn = Calls(monkeypatch, TableItem, "_paint_text")
     cells = iter([(3, 1), (4, 2)] * 10)
 
     def pick():
         r, c = next(cells)
         click(w, table.mapToScene(table.cell_rect(r, c).center()))
+    # The first click opens the table, which draws all of it once (and twice
+    # on a loaded machine, as its repaints are coalesced less): picking cells
+    # is what is counted, so the table is open before counting starts.
+    pick()
+    idle()
+    drawn = Calls(monkeypatch, TableItem, "_paint_text", only=table)
     ms = timed(pick, n=6)
     assert ms < 100
     assert drawn.count / 6 < 25        # every one of its 80 filled cells, before
