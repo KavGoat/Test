@@ -424,3 +424,100 @@ class PatternCombo(QComboBox):
             take = min(wide, field.width() * high / max(field.height(), 1))
             source = QRect(int((wide - take) / 2 * ratio), 0, int(take * ratio), picture.height())
             painter.drawPixmap(field, picture, source)
+
+
+def page_ranges(indexes) -> str:
+    """[0, 1, 2, 4] as "1-3, 5"."""
+    parts, run = [], []
+    for index in sorted(set(indexes)):
+        if run and index == run[-1] + 1:
+            run.append(index)
+            continue
+        if run:
+            parts.append(str(run[0] + 1) if len(run) == 1 else f"{run[0] + 1}-{run[-1] + 1}")
+        run = [index]
+    if run:
+        parts.append(str(run[0] + 1) if len(run) == 1 else f"{run[0] + 1}-{run[-1] + 1}")
+    return ", ".join(parts)
+
+
+class PagesRange(QWidget):
+    """Revu's Pages, shared by every dialog that has one (Set Scale, Flatten
+    Markups, Delete, Extract and Crop Pages): All Pages, Current (n), Selected
+    — only when pages are picked in Thumbnails — or Custom, with the range in
+    a box beside it ("1-3, 5, 9"); typing into the box makes it Custom (the
+    user, 2026-10-15). Read with the same parser as Colour Processing."""
+
+    ALL, CURRENT, SELECTED, CUSTOM = "all", "current", "selected", "custom"
+
+    def __init__(self, count: int, current: int = 0, selected=None,
+                 default: str = CURRENT, parent=None):
+        from PySide6.QtWidgets import QLineEdit
+        super().__init__(parent)
+        self.count = max(int(count), 1)
+        self.current = min(max(int(current), 0), self.count - 1)
+        self.selected = sorted(selected or [])
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.combo = QComboBox()
+        self.combo.setObjectName("pagesChoice")
+        self.combo.addItem("All Pages", self.ALL)
+        self.combo.addItem(f"Current ({self.current + 1})", self.CURRENT)
+        if self.selected:
+            self.combo.addItem("Selected", self.SELECTED)
+        self.combo.addItem("Custom", self.CUSTOM)
+        self.range = QLineEdit()
+        self.range.setObjectName("pagesRange")
+        self.range.setPlaceholderText("1-3, 5")
+        self.range.setToolTip("Pages and ranges, e.g. 1-3, 5, 9")
+        row.addWidget(self.combo, 1)
+        row.addWidget(self.range, 1)
+        self.combo.currentIndexChanged.connect(self._fill)
+        self.range.textEdited.connect(self._typed)
+        self.choose(default)
+
+    def which(self) -> str:
+        return self.combo.currentData()
+
+    def choose(self, which: str, text=None) -> None:
+        """Pick All, Current, Selected or Custom (with *text* as its range).
+        Selected falls back to Current when nothing is picked in Thumbnails."""
+        index = self.combo.findData(which)
+        self.combo.setCurrentIndex(index if index >= 0 else self.combo.findData(self.CURRENT))
+        self._fill()
+        if text is not None:
+            self.range.setText(text)
+
+    def set_custom(self, text: str) -> None:
+        self.choose(self.CUSTOM, text)
+
+    def _fill(self, *_args) -> None:
+        which = self.which()
+        if which == self.ALL:
+            self.range.setText("1" if self.count == 1 else f"1-{self.count}")
+        elif which == self.CURRENT:
+            self.range.setText(str(self.current + 1))
+        elif which == self.SELECTED:
+            self.range.setText(page_ranges(self.selected))
+
+    def _typed(self, _text: str) -> None:
+        if self.which() != self.CUSTOM:
+            was = self.combo.blockSignals(True)
+            self.combo.setCurrentIndex(self.combo.findData(self.CUSTOM))
+            self.combo.blockSignals(was)
+
+    def page_indexes(self):
+        """The chosen pages, from 0; None when the Custom range will not read."""
+        which = self.which()
+        if which == self.ALL:
+            return list(range(self.count))
+        if which == self.CURRENT:
+            return [self.current]
+        if which == self.SELECTED:
+            return list(self.selected)
+        from .colorprocess import parse_pages
+        return parse_pages(self.range.text(), self.count)
+
+    def pages(self) -> list:
+        """The chosen pages, from 0; empty when the Custom range will not read."""
+        return self.page_indexes() or []

@@ -243,8 +243,9 @@ def test_the_shortcuts_shown_are_the_real_ones(w):
 def test_the_page_tab_and_sheet_tab_menus(w):
     labels = top_level(w.page_menu(0))
     assert labels[:5] == ["Page Setup…", "Set Scale…", "Cut Pages", "Copy Pages", "Paste Pages"]
-    for wanted in ("Insert Blank Page", "Insert Pages", "Delete Pages", "Rotate Pages",
-                   "Rename Page Label…", "Reset All Page Labels", "Print Pages…", "Flatten…"):
+    for wanted in ("Insert Blank Page", "Insert Pages", "Extract Pages…", "Delete Pages…",
+                   "Rotate Pages", "Rename Page Label", "Reset All Page Labels",
+                   "Print Pages…", "Flatten…"):
         assert wanted in labels
     assert labels.index("Flatten…") < labels.index("Spreadsheet After"), \
         "CalcForge's own come after Revu's"

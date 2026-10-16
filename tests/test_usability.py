@@ -1809,13 +1809,13 @@ def test_current_page_commands_are_reachable_from_the_menu_bar(window, qapp):
     menu.popup(window.mapToGlobal(window.rect().center()))
     qapp.processEvents()
     labels = _menu_labels(menu)
-    assert {"Rename Page Label…", "Insert Blank Page", "After", "Move Down",
+    assert {"Rename Page Label", "Insert Blank Page", "After…", "Move Down",
             "Rotate Pages", "Clockwise", "Colour Processing…"} <= set(labels)
 
     blank = _menu_entry(menu, "Insert Blank Page").menu()
     blank.popup(window.mapToGlobal(window.rect().center()))
     qapp.processEvents()
-    add = _menu_entry(blank, "After")
+    add = _menu_entry(blank, "After…")
     QTest.mouseClick(blank, Qt.LeftButton, Qt.NoModifier,
                      blank.actionGeometry(add).center())
     qapp.processEvents()
@@ -1856,7 +1856,7 @@ def test_every_tool_and_application_action_is_reachable_from_the_menu_bar(window
 def test_the_only_page_cannot_be_deleted_from_the_menu(window):
     assert len(window.document.pages) == 1
     actions = {action.text(): action for action in window.page_menu(0).actions()}
-    assert not actions["Delete Pages"].isEnabled()
+    assert not actions["Delete Pages…"].isEnabled()
 
 
 def test_inserting_an_image_page_can_be_undone(window, tmp_path, monkeypatch):
@@ -2200,7 +2200,7 @@ def test_a_page_label_can_be_renamed_and_reset_from_its_menu(window, monkeypatch
 
     menu = window.page_menu(0)
     next(action for action in menu.actions()
-         if action.text() == "Rename Page Label…").trigger()
+         if action.text() == "Rename Page Label").trigger()
     assert page.label == "Foundation"
     assert "Foundation" in window.pages_panel.list.item(0).text()
 
@@ -7987,8 +7987,9 @@ def _pick_pages(window, rows):
 
 
 def test_several_pages_are_deleted_together(window, monkeypatch):
-    """The whole picked run goes, in one undo step, after one question."""
-    from PySide6.QtWidgets import QMessageBox
+    """The whole picked run goes, in one undo step, after one dialog (Revu's
+    Delete Pages, set to the run picked out)."""
+    from calcforge.ui import dialogs
 
     for _ in range(4):
         window.add_page()
@@ -7997,13 +7998,15 @@ def test_several_pages_are_deleted_together(window, monkeypatch):
     keep = window.document.pages[0].uid, window.document.pages[4].uid
 
     asked = []
-    monkeypatch.setattr(QMessageBox, "question",
-                        lambda *a, **k: asked.append(a[2]) or QMessageBox.Yes)
+    monkeypatch.setattr(dialogs.DeletePagesDialog, "exec",
+                        lambda self: asked.append(self.pages.range.text())
+                        or dialogs.QDialog.Accepted)
+    window.interactive_prompts = True
     assert _pick_pages(window, [1, 2, 3]) == [1, 2, 3]
     window.delete_page(2)
 
     assert len(window.document.pages) == 2, "all three went"
-    assert asked and "3 pages" in asked[0], asked
+    assert asked == ["2-4"], asked
     assert [p.uid for p in window.document.pages] == list(keep)
     window.undo_stack.undo()
     assert len(window.document.pages) == 5, "and came back in one step"
@@ -8070,11 +8073,11 @@ def test_the_menu_says_how_many_pages_it_is_about(window):
     labels = [a.text() for a in actions]
     # Two-word labels; how many pages the command is about is in the tooltip,
     # so a command about six sheets still cannot read as being about one.
-    assert "Delete Pages" in labels
+    assert "Delete Pages…" in labels
     assert "Duplicate Pages" in labels
     assert "Copy Pages" in labels
     tips = {a.text(): a.toolTip() for a in actions}
-    assert tips["Delete Pages"] == "Delete these 2 pages"
+    assert tips["Delete Pages…"] == "Delete these 2 pages"
     assert tips["Duplicate Pages"] == "Duplicate these 2 pages"
     assert tips["Copy Pages"] == "Copy these 2 pages"
 
@@ -8082,8 +8085,8 @@ def test_the_menu_says_how_many_pages_it_is_about(window):
     actions = window.page_menu(1).actions()
     labels = [a.text() for a in actions]
     tips = {a.text(): a.toolTip() for a in actions}
-    assert "Delete Pages" in labels
-    assert tips["Delete Pages"] == "Delete page"
+    assert "Delete Pages…" in labels
+    assert tips["Delete Pages…"] == "Delete page"
 
 
 # ---------------------------------------------------------------------------
