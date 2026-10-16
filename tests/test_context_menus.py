@@ -284,8 +284,13 @@ def test_calc_modes_page_menu_has_smaths_inserts(w):
     assert insert[4:] == ["Text Box", "Callout", "Note", "Stamp", "Image"]
     assert "Insert Equation Here" not in top_level(menu)
     find(menu, "Insert Here", "Equation").trigger()
-    cross = w.view.calc.cross
-    assert cross is not None and abs(cross[1].y() - 200) < 10
+    # an equation there, waiting to be typed into (exercise round 1, F-35:
+    # it used to move only the red cross)
+    calc = w.view.calc
+    assert calc.editing()
+    spot = calc.item.pos()
+    assert abs(spot.y() - 200) < 20
+    calc.leave()
     w.toggle_calc_mode(False)
     menu = w.build_context_menu(None, QPointF(80, 200))
     assert "Equation" not in top_level(find(menu, "Insert Here").menu())

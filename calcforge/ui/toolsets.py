@@ -70,6 +70,13 @@ def apply_properties(item, properties: dict) -> None:
     data.update({key: value for key, value in properties.items()
                  if key not in CONTENT_KEYS})
     item.deserialize(data)
+    doc = getattr(item, "doc", None)
+    if doc is not None and hasattr(doc, "toPlainText") and not doc.toPlainText():
+        # A box with no words yet keeps none of its old look either: the
+        # empty line read back from it carried the old font — 10 pt, not
+        # bold, not italic — and what was typed took that rather than the
+        # style's (the user, 2026-10-16: a bold text box style drew plain).
+        doc.clear()
     if hasattr(item, "apply_style"):
         item.apply_style()
 

@@ -259,32 +259,31 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
         ('Equation ▸ Optimization ▸ Numeric', 'Calculation', 'always'),
     'canvas.equation.optimization.none':
         ('Equation ▸ Optimization ▸ None', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.trailing_zeros':
-        ('Equation ▸ Decimal places ▸ Trailing zeros', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.significant_figures_mode':
-        ('Equation ▸ Decimal places ▸ Significant figures mode', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.0': ('Equation ▸ Decimal places ▸ 0', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.1': ('Equation ▸ Decimal places ▸ 1', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.2': ('Equation ▸ Decimal places ▸ 2', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.3': ('Equation ▸ Decimal places ▸ 3', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.4': ('Equation ▸ Decimal places ▸ 4', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.5': ('Equation ▸ Decimal places ▸ 5', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.6': ('Equation ▸ Decimal places ▸ 6', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.7': ('Equation ▸ Decimal places ▸ 7', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.8': ('Equation ▸ Decimal places ▸ 8', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.9': ('Equation ▸ Decimal places ▸ 9', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.10':
-        ('Equation ▸ Decimal places ▸ 10', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.11':
-        ('Equation ▸ Decimal places ▸ 11', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.12':
-        ('Equation ▸ Decimal places ▸ 12', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.13':
-        ('Equation ▸ Decimal places ▸ 13', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.14':
-        ('Equation ▸ Decimal places ▸ 14', 'Calculation', 'always'),
-    'canvas.equation.decimal_places.15':
-        ('Equation ▸ Decimal places ▸ 15', 'Calculation', 'always'),
+    'canvas.decimal_places.trailing_zeros':
+        ('Decimal Places ▸ Trailing zeros', 'Calculation', 'always'),
+    'canvas.significant_figures': ('Significant Figures', 'Calculation', 'always'),
+    'canvas.decimal_places.0': ('Decimal Places ▸ 0', 'Calculation', 'always'),
+    'canvas.decimal_places.1': ('Decimal Places ▸ 1', 'Calculation', 'always'),
+    'canvas.decimal_places.2': ('Decimal Places ▸ 2', 'Calculation', 'always'),
+    'canvas.decimal_places.3': ('Decimal Places ▸ 3', 'Calculation', 'always'),
+    'canvas.decimal_places.4': ('Decimal Places ▸ 4', 'Calculation', 'always'),
+    'canvas.decimal_places.5': ('Decimal Places ▸ 5', 'Calculation', 'always'),
+    'canvas.decimal_places.6': ('Decimal Places ▸ 6', 'Calculation', 'always'),
+    'canvas.decimal_places.7': ('Decimal Places ▸ 7', 'Calculation', 'always'),
+    'canvas.decimal_places.8': ('Decimal Places ▸ 8', 'Calculation', 'always'),
+    'canvas.decimal_places.9': ('Decimal Places ▸ 9', 'Calculation', 'always'),
+    'canvas.decimal_places.10':
+        ('Decimal Places ▸ 10', 'Calculation', 'always'),
+    'canvas.decimal_places.11':
+        ('Decimal Places ▸ 11', 'Calculation', 'always'),
+    'canvas.decimal_places.12':
+        ('Decimal Places ▸ 12', 'Calculation', 'always'),
+    'canvas.decimal_places.13':
+        ('Decimal Places ▸ 13', 'Calculation', 'always'),
+    'canvas.decimal_places.14':
+        ('Decimal Places ▸ 14', 'Calculation', 'always'),
+    'canvas.decimal_places.15':
+        ('Decimal Places ▸ 15', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.0':
         ('Equation ▸ Exponential threshold ▸ 0', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.1':

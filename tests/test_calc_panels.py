@@ -201,7 +201,7 @@ def an_equation(window, text, x=100, y=120):
 def test_decimal_places_from_the_right_click_menu_and_undo(win):
     item = an_equation(win, "2/3=")
     assert display_text(item.region.display) == "0.6667"
-    menu_action(right_click(win, item), "Equation", "Decimal places", "2").trigger()
+    menu_action(right_click(win, item), "Decimal Places", "2").trigger()
     assert display_text(item.region.display) == "0.67"
     win.undo_something()
     (again,) = equations(win)
@@ -213,7 +213,7 @@ def test_fractions_and_trailing_zeros(win):
     menu_action(right_click(win, item), "Equation", "Fractions", "Fraction").trigger()
     assert display_text(item.region.display) == "1/4"
     menu_action(right_click(win, item), "Equation", "Fractions", "Default").trigger()
-    menu_action(right_click(win, item), "Equation", "Decimal places", "Trailing zeros").trigger()
+    menu_action(right_click(win, item), "Decimal Places", "Trailing zeros").trigger()
     assert display_text(item.region.display) == "0.2500"
 
 
@@ -235,7 +235,7 @@ def test_a_setting_applies_to_every_selected_equation(win):
     a.setSelected(True)
     b.setSelected(True)
     menu = win.build_context_menu(a, a.sceneBoundingRect().center())
-    menu_action(menu, "Equation", "Decimal places", "1").trigger()
+    menu_action(menu, "Decimal Places", "1").trigger()
     assert display_text(a.region.display) == "0.3"
     assert display_text(b.region.display) == "0.3"
 

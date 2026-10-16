@@ -236,6 +236,14 @@ def _panel(owner, name: str) -> QFrame:
 def _number(spin, width: int):
     spin.setFixedWidth(width)
     spin.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    return _typed_on_enter(spin)
+
+
+def _typed_on_enter(spin):
+    """A number typed into the box applies on Enter or on leaving it, as
+    Revu's do — one undo step, and no half-typed "2." drawn on the way. The
+    arrows and the wheel still apply at once."""
+    spin.setKeyboardTracking(False)
     return spin
 
 
@@ -611,7 +619,7 @@ def _build_more_panel(w) -> None:
     form.addRow("Subject:", w.subject_field)
     w.selected_count_label = QLabel("0")
     form.addRow("Markups:", w.selected_count_label)
-    w.dash_scale_spin = QDoubleSpinBox()
+    w.dash_scale_spin = _typed_on_enter(QDoubleSpinBox())
     w.dash_scale_spin.setObjectName("dashSpacing")
     w.dash_scale_spin.setRange(0.1, 50.0)
     w.dash_scale_spin.setDecimals(2)
@@ -638,7 +646,7 @@ def _build_more_panel(w) -> None:
     w.hatch_scale_spin.valueChanged.connect(lambda value: w._style_change(
         HATCH, lambda s: setattr(s, "hatch_scale", value / 100.0), "Hatch scale"))
     form.addRow("Hatch scale:", w.hatch_scale_spin)
-    w.hatch_opacity_spin = QSpinBox()
+    w.hatch_opacity_spin = _typed_on_enter(QSpinBox())
     w.hatch_opacity_spin.setObjectName("hatchOpacity")
     w.hatch_opacity_spin.setRange(0, 100)
     w.hatch_opacity_spin.setSuffix(" %")

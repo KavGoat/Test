@@ -12,6 +12,7 @@ import re
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QTextCursor, QTextDocument
 from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
+                               QMessageBox,
                                QLineEdit, QPushButton, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -71,8 +72,9 @@ class SearchPanel(QWidget):
         header = self.results.header()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        # what was found has the room; where it is takes only what it needs
         header.setSectionResizeMode(1, QHeaderView.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setMinimumSectionSize(30)
         self.results.itemClicked.connect(lambda node, _c: self.show_hit(node))
         self.results.currentItemChanged.connect(
@@ -80,6 +82,7 @@ class SearchPanel(QWidget):
         layout.addWidget(self.results, 1)
         bottom = QHBoxLayout()
         self.summary = QLabel("")
+        self.summary.setWordWrap(True)          # why nothing was replaced, said whole
         bottom.addWidget(self.summary, 1)
         replace_all = QPushButton("Replace all")
         replace_all.setToolTip("Replace every hit in the markups, as one undo step")
@@ -121,13 +124,11 @@ class SearchPanel(QWidget):
                             continue
                         for field, text in _searchable(item):
                             for match in pattern.finditer(text):
-                                start = max(match.start() - 30, 0)
                                 self.hits.append({
                                     "kind": MARKUP, "page": index, "item": item,
                                     "field": field, "start": match.start(),
                                     "length": match.end() - match.start(),
-                                    "context": text[start:match.end() + 30]
-                                    .replace("\n", " ")})
+                                    "context": _around(text, match.start(), match.end())})
         self._fill()
         return self.hits
 
@@ -144,6 +145,7 @@ class SearchPanel(QWidget):
                 where = f"{hit['item'].name} {col_letters(int(col))}{int(row) + 1}"
             node = QTreeWidgetItem([str(hit["page"] + 1), hit["context"], where])
             node.setData(0, Qt.UserRole, number)
+            node.setToolTip(1, hit["context"])      # the whole snippet, in a narrow panel
             self.results.addTopLevelItem(node)
         for column in range(3):
             self.results.resizeColumnToContents(column)
@@ -192,14 +194,27 @@ class SearchPanel(QWidget):
         self._mark_all(current=hit)
 
     # -- replacing ---------------------------------------------------------
+    DRAWING_TEXT = ("The drawing's own text is part of the PDF and cannot be replaced "
+                    "here: Replace changes words in markups, text boxes and cells.")
+
+    def _tell(self, words: str) -> None:
+        """Why nothing was replaced — said, as Revu says it, not left silent
+        (exercise round 1, F-24)."""
+        self.summary.setText(words)
+        self.window.status_hint.setText(words)
+        if getattr(self.window, "interactive_prompts", False):
+            QMessageBox.information(self, "Replace", words)
+
     def replace_current(self) -> int:
         node = self.results.currentItem()
         if node is None:
+            self._tell("Pick a result in the list to replace it" if self.hits
+                       else "Find something to replace first")
             return 0
         number = node.data(0, Qt.UserRole)
         hit = self.hits[number] if number is not None and number < len(self.hits) else None
         if hit is None or hit["kind"] != MARKUP:
-            self.summary.setText("Only words in markups can be replaced")
+            self._tell(self.DRAWING_TEXT)
             return 0
         if hit["field"] in EQUATION_FIELDS or hit["field"].startswith("value:"):
             self.summary.setText("An equation or a formula's value is changed by typing into it")
@@ -207,9 +222,18 @@ class SearchPanel(QWidget):
         return self._replace([hit])
 
     def replace_all(self) -> int:
-        return self._replace([hit for hit in self.hits if hit["kind"] == MARKUP
-                              and hit["field"] not in EQUATION_FIELDS
-                              and not hit["field"].startswith("value:")])
+        hits = [hit for hit in self.hits if hit["kind"] == MARKUP
+                and hit["field"] not in EQUATION_FIELDS
+                and not hit["field"].startswith("value:")]
+        if not hits:
+            if not self.hits:
+                self._tell("Find something to replace first")
+            elif any(hit["kind"] == DRAWING for hit in self.hits):
+                self._tell(self.DRAWING_TEXT)
+            else:
+                self._tell("An equation or a formula's value is changed by typing into it")
+            return 0
+        return self._replace(hits)
 
     def _replace(self, hits) -> int:
         if not hits:
@@ -249,6 +273,21 @@ class SearchPanel(QWidget):
         self.run()
         self.summary.setText(f"Replaced {changed} — " + self.summary.text())
         return changed
+
+
+def _around(text: str, start: int, end: int, reach: int = 30) -> str:
+    """The words round a hit, each one whole (F-24: the snippet began part
+    of the way into a word)."""
+    left = max(start - reach, 0)
+    if left > 0:
+        space = text.rfind(" ", 0, left + 1)
+        left = space + 1 if space >= 0 and start - space < reach * 2 else left
+    right = min(end + reach, len(text))
+    if right < len(text):
+        space = text.find(" ", right)
+        right = space if 0 <= space < end + reach * 2 else right
+    shown = text[left:right].replace("\n", " ").strip()
+    return ("…" if left > 0 else "") + shown + ("…" if right < len(text) else "")
 
 
 # Where an equation's words are: read-only — an equation is changed by

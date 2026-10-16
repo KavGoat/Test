@@ -318,6 +318,9 @@ class _ScaleRow:
         self.real_length = QLineEdit()
         self.real_length.setObjectName(f"scaleRealLength{axis.upper()}")
         self.real_length.setToolTip("The real-world length it stands for")
+        # after Calibrate the box waits for the known length (F-36: it read
+        # as "60.69 mm = [nothing] mm")
+        self.real_length.setPlaceholderText("real length")
         self.real_unit = QComboBox()
         self.real_unit.addItems(REAL_UNIT_NAMES)
         for box in (self.page_length, self.real_length):
@@ -1700,6 +1703,13 @@ class AboutDialog(QDialog):
         font.setBold(True)
         title.setFont(font)
         layout.addWidget(title)
+        # which CalcForge this is (F-36: About showed no version)
+        from PySide6 import __version__ as pyside_version
+        from .. import __version__
+        version = QLabel(f"Version {__version__} · Qt {pyside_version}")
+        version.setObjectName("aboutVersion")
+        version.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(version)
         body = QLabel(
             "A PDF markup editor for drawings, with SMath's live "
             "calculations on the page.\n\n"
@@ -1778,7 +1788,7 @@ class ToolbarDialog(QDialog):
         self.resize(420, 560)
         layout = QVBoxLayout(self)
         note = QLabel("Tick the tools you want on the toolbar. Everything stays "
-                      "available from the Insert and Markup menus and from its "
+                      "available from the Tools menu and from its "
                       "keyboard shortcut either way.")
         note.setWordWrap(True)
         layout.addWidget(note)

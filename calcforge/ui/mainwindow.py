@@ -435,6 +435,29 @@ def recent_files() -> list:
     return [str(v) for v in value if v][:RECENT_FILES]
 
 
+def start_folder(document=None) -> str:
+    """Where a file dialog opens: beside the document, else where the last
+    file was opened, else the person's Documents folder — never the folder
+    CalcForge happened to be started in (exercise round 1, F-36)."""
+    from PySide6.QtCore import QStandardPaths
+    path = getattr(document, "path", "") if document is not None else ""
+    if path and os.path.isdir(os.path.dirname(path)):
+        return os.path.dirname(path)
+    for recent in recent_files():
+        folder = os.path.dirname(recent)
+        if folder and os.path.isdir(folder):
+            return folder
+    documents = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+    return documents if documents and os.path.isdir(documents) else os.path.expanduser("~")
+
+
+def in_start_folder(name: str, document=None) -> str:
+    """*name* in the folder a dialog opens in, unless it already has one."""
+    if os.path.dirname(name):
+        return name
+    return os.path.join(start_folder(document), name)
+
+
 def remember_recent_file(path: str) -> None:
     from ..settings import app_settings
     path = os.path.abspath(path)
@@ -3396,7 +3419,8 @@ class MainWindow(QMainWindow):
     def open_document(self) -> None:
         """File ▸ Open: the file in a tab of its own, as Revu opens it."""
         from .xlsximport import OPEN_FILTER
-        path, _ = QFileDialog.getOpenFileName(self, "Open document", "", OPEN_FILTER)
+        path, _ = QFileDialog.getOpenFileName(self, "Open document",
+                                              start_folder(self.document), OPEN_FILTER)
         if not path:
             return
         self._open_chosen(path)
@@ -3501,6 +3525,7 @@ class MainWindow(QMainWindow):
     def save_all_documents(self) -> None:
         """Save every open document with unsaved changes, then come back."""
         here = self._active_tab
+        saved = 0
         for index in range(len(self._open_documents)):
             state = self._state_for_tab(index)
             if state["undo_stack"].isClean() and not state["document"].modified:
@@ -3508,7 +3533,12 @@ class MainWindow(QMainWindow):
             self.switch_to_document(index)
             if not self.save_document():
                 break
+            saved += 1
         self.switch_to_document(here)
+        # said, rather than nothing at all (exercise round 1, F-35)
+        self.status_hint.setText(
+            f"Saved {saved} document{'s' * (saved != 1)}" if saved
+            else "Save All: nothing to save — every open document is saved")
 
     def open_from_command_line(self, path: str) -> None:
         """`calcforge drawing.pdf`: open it as File > Open would."""
@@ -3657,7 +3687,8 @@ class MainWindow(QMainWindow):
 
     def save_document_as(self) -> bool:
         suggested = project_io.suggested_name(self.document)
-        path, _ = QFileDialog.getSaveFileName(self, "Save document as", suggested,
+        path, _ = QFileDialog.getSaveFileName(self, "Save document as",
+                                              in_start_folder(suggested, self.document),
                                               project_io.FILTER)
         if not path:
             return False
@@ -4042,6 +4073,15 @@ class MainWindow(QMainWindow):
     def current_page(self) -> Page:
         return self.document.pages[self.current_index]
 
+    def _go_to_page_asked(self, index: int) -> None:
+        """Go to Page from a page's menu: the current one too — its top, and
+        a word to say so, rather than nothing (exercise round 1, F-35)."""
+        if index == self.current_index and 0 <= index < len(self.document.pages):
+            self.view.go_to_page_top(index)
+            self.status_hint.setText(f"Page {index + 1} is the page in view")
+            return
+        self.go_to_page(index)
+
     def go_to_page(self, index: int) -> None:
         if not 0 <= index < len(self.document.pages) or index == self.current_index:
             return
@@ -4236,6 +4276,12 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.ShortcutOverride and self.view.is_editing():
             sequence = QKeySequence(event.keyCombination())
             binding = self.shortcuts.binding_for(sequence)
+            if binding is None and self._menu_mnemonic(event):
+                # Alt and a menu's letter opens that menu while an equation
+                # or a text box is being typed in, as it does in Revu and on
+                # any Windows program (exercise round 1, F-07): a mnemonic is
+                # not a command, and nothing else is bound to it.
+                return super().eventFilter(watched, event)
             if not (binding is not None and (binding.kind == TYPED_SYMBOL
                                              or binding.action_id in self.EDITOR_COMMANDS)):
                 # Including Ctrl+B, Ctrl+I and Ctrl+U. Whatever is bound to
@@ -4244,6 +4290,19 @@ class MainWindow(QMainWindow):
                 event.accept()
                 return True
         return super().eventFilter(watched, event)
+
+    def _menu_mnemonic(self, event) -> bool:
+        """Is this key Alt and the underlined letter of a menu on the bar?"""
+        if event.modifiers() & ~(Qt.AltModifier | Qt.KeypadModifier) or \
+                not event.modifiers() & Qt.AltModifier:
+            return False
+        key = event.key()
+        if not Qt.Key_A <= key <= Qt.Key_Z:
+            return False
+        sequence = QKeySequence(Qt.AltModifier | Qt.Key(key))
+        return any(action.isVisible() and action.isEnabled()
+                   and QKeySequence.mnemonic(action.text()) == sequence
+                   for action in self.menuBar().actions())
 
     # ==================================================================
     # panels and toolbars
@@ -4758,8 +4817,8 @@ class MainWindow(QMainWindow):
                    "assets": assets}
         QApplication.clipboard().setText(json.dumps(payload))
         self.status_hint.setText(
-            f"Copied page {wanted[0] + 1}" if len(wanted) == 1
-            else f"Copied {len(wanted)} pages")
+            (f"Copied page {wanted[0] + 1}" if len(wanted) == 1
+             else f"Copied {len(wanted)} pages") + " — Paste Pages puts a copy in")
 
     def page_on_the_clipboard(self) -> Optional[dict]:
         """The page waiting on the clipboard, if there is one."""
@@ -5428,7 +5487,7 @@ class MainWindow(QMainWindow):
         processing.setEnabled(bool(page.background_key or page.pdf_key))
         menu.addSeparator()
         # -- CalcForge's own ------------------------------------------------------------
-        go = menu.addAction("Go to Page", lambda: self.go_to_page(index))
+        go = menu.addAction("Go to Page", lambda: self._go_to_page_asked(index))
         go.setToolTip("Go to this page")
         bookmark = menu.addAction(self.act_bookmark.text(), lambda: self.bookmark_page(index))
         bookmark.setToolTip("Add this page to the document bookmarks")
@@ -5477,6 +5536,9 @@ class MainWindow(QMainWindow):
             return
         self.copy_page(index)
         self.delete_page(index, ask=False)
+        numbers = ", ".join(str(i + 1) for i in going)
+        self.status_hint.setText(f"Cut page{'s' * (len(going) > 1)} {numbers} — "
+                                 "Paste Pages puts " + ("them" if len(going) > 1 else "it") + " in again")
 
     def reset_all_page_labels(self) -> None:
         """Revu's Reset All Page Labels: every page back to its imported
@@ -5691,10 +5753,20 @@ class MainWindow(QMainWindow):
         """Every viewport on this page: change one's scale, or delete it."""
         page = self.current_page()
         if not page.viewports:
-            QMessageBox.information(
-                self, "Viewports",
-                "This page has no viewports. Use the Viewport tool to drag a "
-                "region of the sheet drawn at its own scale.")
+            # not a dead end (F-35): the way to make one is offered
+            words = ("This page has no viewports yet. A viewport is a region of "
+                     "the sheet drawn at its own scale: drag one out with the "
+                     "Viewport tool.")
+            if not self.interactive_prompts:
+                self.status_hint.setText(words)
+                return
+            box = QMessageBox(QMessageBox.Information, "Viewports", words,
+                              QMessageBox.Cancel, self)
+            draw = box.addButton("Draw a Viewport", QMessageBox.AcceptRole)
+            box.setDefaultButton(draw)
+            box.exec()
+            if box.clickedButton() is draw:
+                self.select_tool("viewport")
             return
         dialog = dialogs.ViewportsDialog(self, page)
         dialog.exec()
@@ -5767,6 +5839,10 @@ class MainWindow(QMainWindow):
         always: dict = {}
         changed = 0
         shift: dict = {}
+        # each word's box is picked out while it is asked about; afterwards
+        # the selection is what it was (F-29: the last box was left picked,
+        # its frame round the words)
+        was_selected = [item for item in self.scene.selectedItems()]
         self.view.begin_snapshot(self.view.all_frames())
         for item, start, length, word in mistakes:
             key = word.lower()
@@ -5812,6 +5888,12 @@ class MainWindow(QMainWindow):
             self.view.commit_snapshot("Check spelling")
         else:
             self.view.forget_snapshot()
+        import shiboken6
+        self.scene.clearSelection()
+        for item in was_selected:
+            if shiboken6.isValid(item) and item.scene() is self.scene:
+                item.setSelected(True)
+        self.view.selectionChanged.emit()
         self.status_hint.setText(f"Spelling: {changed} word(s) changed")
         return changed
 
@@ -6534,7 +6616,21 @@ class MainWindow(QMainWindow):
         frame, point = calc._where_typing_starts()
         if frame is None:
             return None
-        return calc.start(frame, point)
+        item = calc.start(frame, point)
+        if item is not None:
+            self._opened_by_command = item
+        return item
+
+    def _as_opened(self, item) -> None:
+        """An equation a command started — If, For, While, Line, a matrix, a
+        function or a constant into a new one — opens with what the command
+        put in it, as a plot opens with its plot: one Ctrl+Z takes the lot
+        away, rather than first leaving an empty equation on the page
+        (exercise round 1, F-08). Into an equation already being typed, the
+        insert is one more keystroke, taken back on its own."""
+        if item is not None and getattr(self, "_opened_by_command", None) is item:
+            item.region.editor._undo.clear()
+        self._opened_by_command = None
 
     def insert_matrix(self) -> None:
         from ..calc.engine.model import Matrix
@@ -6549,6 +6645,7 @@ class MainWindow(QMainWindow):
         editor._push_undo()
         editor._insert_box(Matrix(size[0], size[1]), into=0)
         self.view.calc._after_edit(item)
+        self._as_opened(item)
         self.view.setFocus()
 
     def insert_plot(self) -> None:
@@ -6763,6 +6860,7 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         self.view.calc._type(item, text)
+        self._as_opened(item)
         self.view.setFocus()
 
     def maths_key(self, name: str) -> None:
@@ -6809,6 +6907,7 @@ class MainWindow(QMainWindow):
             return
         item.region.editor.insert_structure(name)
         self.view.calc._after_edit(item)
+        self._as_opened(item)
         self.view.setFocus()
 
     def insert_function(self) -> None:
@@ -6818,6 +6917,7 @@ class MainWindow(QMainWindow):
             item = self._into_an_equation()
             if item is not None:
                 self.view.calc._type(item, name + "(")
+                self._as_opened(item)
 
     def show_constants(self) -> None:
         from . import calcdialogs
@@ -6826,6 +6926,7 @@ class MainWindow(QMainWindow):
             item = self._into_an_equation()
             if item is not None:
                 self.view.calc._type(item, typed)
+                self._as_opened(item)
 
     def double_check(self) -> None:
         """Every result recalculated by a second, independent calculator."""
@@ -7263,7 +7364,12 @@ class MainWindow(QMainWindow):
             return SnapshotItem()
         if tool.key == "calibrate" or tool.factory is None:
             return None
-        return tool.factory()
+        item = tool.factory()
+        if isinstance(item, RectItem) and item.kind == "marquee":
+            # a region being chosen — Crop, Whiteout — wears no style, so the
+            # bar has none to show (F-36: Whiteout's bar showed Crop's dashes)
+            return None
+        return item
 
     def _push_style(self, mutate, description: str, predicate=None) -> None:
         items = self.selected_items()
@@ -7300,7 +7406,7 @@ class MainWindow(QMainWindow):
         key = toolsets.remember_default(item)
         self.status_hint.setText(
             f"New {item.display_name().lower()}s will look like this one "
-            f"— Markup ▸ Forget defaults puts it back")
+            f"— Tools ▸ Forget Defaults puts it back")
         return key
 
     def set_selected_as_default(self) -> None:
@@ -7547,8 +7653,12 @@ class MainWindow(QMainWindow):
 
     SNAPSHOT_DPI = 300.0
 
-    def edit_link(self, item) -> bool:
-        """Ask where a link goes. False when the question was cancelled."""
+    def edit_link(self, item, new: bool = False) -> bool:
+        """Ask where a link goes. False when the question was cancelled.
+
+        A *new* link is still being drawn: where it goes is part of the one
+        undo step that adds it (exercise round 1, F-08), so no step of its
+        own is recorded here."""
         if not self.interactive_prompts:
             return True
         view_y = self.view.mapToScene(self.view.viewport().rect().topLeft())
@@ -7558,6 +7668,9 @@ class MainWindow(QMainWindow):
                                     (self.current_index, max(top, 0.0)), self)
         if dialog.exec() != dialogs.QDialog.Accepted:
             return False
+        if new:
+            dialog.apply()
+            return True
         self.view.begin_snapshot(self.view.involved_frames(item))
         dialog.apply()
         self.view.commit_snapshot("Edit link")
@@ -9218,6 +9331,11 @@ class MainWindow(QMainWindow):
         self.view.commit_snapshot("Bookmark" if on else "Remove bookmark")
         self.sync_text_bookmarks()
         self.bookmarks_panel.rebuild(self.document)
+        # said (F-35): the bookmark is in a panel that may well be shut
+        from ..items.fields import shown_text
+        words = (shown_text(item).strip().splitlines() or ["Text"])[0][:60]
+        self.status_hint.setText(f"Bookmarked “{words}”: it goes wherever the box goes"
+                                 if on else f"Bookmark “{words}” removed")
 
     def sync_text_bookmarks(self) -> bool:
         """Each text box marked as a bookmark has one: its words for a title,
@@ -9276,8 +9394,8 @@ class MainWindow(QMainWindow):
                                                text=suggestion)
         if not accepted:
             return
-        self.document.add_bookmark(title, index, y)
-        self.bookmarks_changed()
+        self.change_bookmarks("Add bookmark",
+                              lambda: self.document.add_bookmark(title, index, y))
         self.status_hint.setText(f"Bookmarked “{title.strip() or suggestion}”")
 
     @staticmethod
@@ -9308,8 +9426,8 @@ class MainWindow(QMainWindow):
                                                text=suggestion)
         if not accepted or not title.strip():
             return
-        self.document.add_bookmark(title.strip(), index, 0.0)
-        self.bookmarks_changed()
+        self.change_bookmarks("Add bookmark",
+                              lambda: self.document.add_bookmark(title.strip(), index, 0.0))
         self.status_hint.setText(f"Bookmarked “{title.strip()}”")
 
     # -- format painter ----------------------------------------------------
@@ -9641,7 +9759,8 @@ class MainWindow(QMainWindow):
     def apply_to_pages(self, item, pages: Optional[list] = None) -> None:
         """Put a copy of this markup on other pages, in the same place."""
         if item is None or len(self.document.pages) < 2:
-            self.status_hint.setText("There is only one page to put it on")
+            self.status_hint.setText("Apply to Pages: this document has only the one page "
+                                     "— there is no other page to copy it to")
             return
         if pages is None:
             dialog = self.apply_to_pages_dialog()
@@ -10036,6 +10155,25 @@ class MainWindow(QMainWindow):
         self._refresh_all_scenes()
         self.mark_modified()
 
+    def change_bookmarks(self, description: str, mutate) -> bool:
+        """Add, rename or remove bookmarks as one undo step (exercise round
+        1, F-08: Add Bookmark changed the document with nothing to undo).
+        False when nothing changed."""
+        from ..core.document import Bookmark
+        before = [mark.to_dict() for mark in self.document.bookmarks]
+        mutate()
+        after = [mark.to_dict() for mark in self.document.bookmarks]
+        if after == before:
+            return False
+
+        def restore(marks: list) -> None:
+            self.document.bookmarks = [Bookmark.from_dict(mark) for mark in marks]
+            self.bookmarks_changed()
+
+        self.undo_stack.push(DocumentStructureCommand(before, after, description, restore))
+        self.bookmarks_changed()
+        return True
+
     def go_to_bookmark(self, index: int, y: float = 0.0) -> None:
         """Show the page a bookmark points at, at the place it points to."""
         self.go_to_page(index)
@@ -10053,7 +10191,8 @@ class MainWindow(QMainWindow):
 
     def export_pdf(self) -> None:
         suggested = os.path.splitext(self.document.path or self.document.title or "document")[0]
-        path, _ = QFileDialog.getSaveFileName(self, "Export to PDF", suggested + ".pdf",
+        path, _ = QFileDialog.getSaveFileName(self, "Export to PDF",
+                                              in_start_folder(suggested + ".pdf", self.document),
                                               "PDF files (*.pdf)")
         if not path:
             return
@@ -10080,7 +10219,8 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(f"Wrote {len(written)} image(s) to {folder}")
 
     def export_markups(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Summary", "markups.csv",
+        path, _ = QFileDialog.getSaveFileName(self, "Summary",
+                                              in_start_folder("markups.csv", self.document),
                                               "CSV files (*.csv)")
         if not path:
             return
@@ -10320,7 +10460,8 @@ class MainWindow(QMainWindow):
                     item, "add", segment, local if on_a_side else None))
             add.setToolTip(f"Put a point in {this_side} side; Shift and the pointer "
                            "does this too")
-        if vertex is not None and len(corners) > 2:
+        from .view import fewest_corners
+        if vertex is not None and len(corners) > fewest_corners(item):
             take_out = points.addAction("Subtract Control Point",
                                         lambda: self._reshape(item, "delete", vertex))
             take_out.setToolTip(
@@ -10671,8 +10812,11 @@ class MainWindow(QMainWindow):
                 if then is not None:
                     then()
             return run
-        equation = menu.addAction("Equation", here())
-        equation.setToolTip("Put the red cross here: what is typed next is an equation")
+        # an empty equation here, its cursor waiting, as SMath's Insert ▸
+        # Math region (F-35: only the red cross used to move)
+        equation = menu.addAction("Equation", here(
+            lambda: self._as_opened(self._into_an_equation())))
+        equation.setToolTip("An equation here, ready to type into")
         menu.addAction(self.act_insert_calc_text.text(), here(self.insert_calc_text)).setToolTip(
             "Calculation text here (\" in Calc mode)")
         menu.addAction(self.act_insert_block.text(), here(self.insert_block)).setToolTip(

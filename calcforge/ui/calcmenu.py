@@ -95,12 +95,29 @@ def fill(window, menu: QMenu, item) -> None:
             r.fmt = None if made == worksheet.format else made
         return apply
 
+    # The variable's own settings first, as a measurement's Variable is
+    # first on its menu (the user, 2026-10-16): how many decimal places its
+    # value shows, whether those count significant figures, and Global.
+    # Lifted here from Equation ▸, not copied: one place for each.
+    places = menu.addMenu("Decimal Places")
+    places.setObjectName("menuDecimalPlaces")
+    check(places, "Trailing zeros", fmt.trailing_zeros,
+          set_fmt(trailing_zeros=not fmt.trailing_zeros))
+    places.addSeparator()
+    for n in range(16):
+        check(places, f"{n} *" if n == base.decimals else str(n), fmt.decimals == n,
+              set_fmt(decimals=n), f"Decimal places: {n}")
+    significant = check(menu, "Significant Figures", fmt.significant,
+                        set_fmt(significant=not fmt.significant), "Significant figures")
+    significant.setToolTip("Decimal Places counts significant figures, not places "
+                           "after the point")
     # calculation sections (2026-10-11): what a global equation defines is
     # read by every later section too
     made_global = check(menu, "Global (Read by Later Calc Sections)", region.is_global,
                         lambda r, on=not region.is_global: setattr(r, "is_global", on),
                         "Make global" if not region.is_global else "Make local")
     made_global.setToolTip("Its variables carry on past calc section breaks")
+    menu.addSeparator()
     equation = menu.addMenu("Equation")
     check(equation, "Display input data", region.show_input,
           lambda r: setattr(r, "show_input", not r.show_input))
@@ -120,23 +137,17 @@ def fill(window, menu: QMenu, item) -> None:
         check(optimization, title, current == key,
               lambda r, k=key: setattr(r, "optimization", k), f"Optimization: {title}")
 
-    places = equation.addMenu("Decimal places")
-    check(places, "Trailing zeros", fmt.trailing_zeros,
-          set_fmt(trailing_zeros=not fmt.trailing_zeros))
-    places.addSeparator()
-    check(places, "Significant figures mode", fmt.significant,
-          set_fmt(significant=not fmt.significant))
-    places.addSeparator()
-    for n in range(16):
-        check(places, f"{n} *" if n == base.decimals else str(n), fmt.decimals == n,
-              set_fmt(decimals=n), f"Decimal places: {n}")
     threshold = equation.addMenu("Exponential threshold")
     for n in range(16):
         check(threshold, f"{n} *" if n == base.threshold else str(n), fmt.threshold == n,
               set_fmt(threshold=n), f"Exponential threshold: {n}")
     fractions = equation.addMenu("Fractions")
+    # one tick: Default while the equation keeps the document's format (its
+    # choice marked *, as Decimal places marks it), else the one chosen —
+    # Decimal and Default were both ticked (exercise round 1, F-36)
     for key, title in (("decimal", "Decimal"), ("fraction", "Fraction"), ("auto", "Auto")):
-        check(fractions, title, fmt.fractions == key, set_fmt(fractions=key),
+        check(fractions, f"{title} *" if key == base.fractions else title,
+              region.fmt is not None and fmt.fractions == key, set_fmt(fractions=key),
               f"Fractions: {title}")
     check(fractions, "Default", region.fmt is None, lambda r: setattr(r, "fmt", None),
           "Result format: default")

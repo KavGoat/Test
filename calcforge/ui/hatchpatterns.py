@@ -48,11 +48,15 @@ class HatchPatternsDialog(QDialog):
         self.refill()
 
     def refill(self, current: str = "") -> None:
-        from .panels import _hatch_icon
+        from .icons import visible_ink
         self.list.clear()
+        ink = visible_ink(self.ink)
+        size = self.list.iconSize()
         for key in hatches.NAMES:
             own = key in hatches.CUSTOM
-            row = QListWidgetItem(_hatch_icon(key, self.ink),
+            # drawn at the list's own size: the lists' wide sample squeezed
+            # into it was grey on grey in dark mode (F-37)
+            row = QListWidgetItem(hatches.sample_icon(key, ink, size.width(), size.height()),
                                   hatches.display_name(key) + ("" if not own else "  (custom)"))
             row.setData(Qt.UserRole, key)
             self.list.addItem(row)

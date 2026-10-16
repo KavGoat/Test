@@ -167,25 +167,53 @@ class SpellChecker:
         return found
 
     def suggestions(self, word: str, limit: int = 5) -> list[str]:
-        """Likely dictionary replacements, closest first."""
+        """Likely dictionary replacements, closest first, in the word's case.
+
+        One slip of the finger comes first — two letters swapped, one
+        missed, doubled or mistyped — as a spell checker offers it: "Teh"
+        is "The" before it is "tech" (exercise round 1, F-29).
+        """
         cleaned = (word or "").strip().strip("'’-").lower()
         if not cleaned or not self.words():
             return []
         vocabulary = self.words()
-        matches = difflib.get_close_matches(cleaned, vocabulary,
-                                            n=max(int(limit), 1), cutoff=0.72)
+        count = max(int(limit), 1)
+        slips = _one_slip(cleaned, vocabulary)
+        matches = difflib.get_close_matches(cleaned, vocabulary, n=count, cutoff=0.72)
         if cleaned.endswith("s"):
             singular = difflib.get_close_matches(cleaned[:-1], vocabulary,
-                                                 n=max(int(limit), 1), cutoff=0.72)
+                                                 n=count, cutoff=0.72)
             matches = [candidate + "s" for candidate in singular
                        if self.knows(candidate + "s")] + matches
-        return list(dict.fromkeys(matches))[:max(int(limit), 1)]
+        found = list(dict.fromkeys(slips + matches))[:count]
+        stripped = (word or "").strip().strip("'’-")
+        if stripped.isupper() and len(stripped) > 1:
+            return [candidate.upper() for candidate in found]
+        if stripped[:1].isupper():
+            return [candidate[:1].upper() + candidate[1:] for candidate in found]
+        return found
 
     def learn(self, word: str) -> None:
         """Add a word to the personal list, so it stops being flagged."""
         cleaned = (word or "").strip().strip("'’-").lower()
         if cleaned:
             self.personal.add(cleaned)
+
+
+def _one_slip(word: str, vocabulary) -> list[str]:
+    """Dictionary words one keystroke from *word*: swapped letters first,
+    then a letter missed, one too many, one wrong; the commonest-looking
+    (shortest edit, then alphabetical) first within each."""
+    letters = "abcdefghijklmnopqrstuvwxyz'"
+    halves = [(word[:i], word[i:]) for i in range(len(word) + 1)]
+    swapped = [a + b[1] + b[0] + b[2:] for a, b in halves if len(b) > 1]
+    missed = [a + c + b for a, b in halves for c in letters]
+    extra = [a + b[1:] for a, b in halves if b]
+    wrong = [a + c + b[1:] for a, b in halves if b for c in letters]
+    found = []
+    for group in (swapped, missed, extra, wrong):
+        found += sorted({w for w in group if w != word and w in vocabulary})
+    return list(dict.fromkeys(found))
 
 
 _shared: Optional[SpellChecker] = None

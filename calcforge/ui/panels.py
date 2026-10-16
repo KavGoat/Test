@@ -7,8 +7,8 @@ from PySide6.QtCore import (QByteArray, QEvent, QMimeData, QPoint, QPointF, QRec
                             QTimer, Qt, Signal)
 from PySide6.QtGui import (QColor, QDrag, QFont, QFontInfo, QFontMetrics, QIcon, QKeySequence,
                            QPainter, QPen, QPixmap, QPolygonF)
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
-                               QDoubleSpinBox, QInputDialog, QMessageBox,
+from PySide6.QtWidgets import (QAbstractItemView, QAbstractSpinBox, QApplication,
+                               QCheckBox, QComboBox, QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QListView, QListWidget,
                                QListWidgetItem, QMenu, QPlainTextEdit, QPushButton, QSizePolicy,
@@ -1576,6 +1576,7 @@ class BookmarksPanel(QWidget):
 
         from .widgets import FlowLayout
         buttons = FlowLayout()           # wraps when the panel is narrow
+        self._needs_one = []
         for label, tip, slot in (
                 ("Add", "Bookmark where you are now", self.add_here),
                 ("Rename", "Rename the selected bookmark", self.rename),
@@ -1586,7 +1587,17 @@ class BookmarksPanel(QWidget):
             button.setToolTip(tip)
             button.clicked.connect(slot)
             buttons.addWidget(button)
+            if slot in (self.rename, self.remove):
+                self._needs_one.append(button)
         layout.addLayout(buttons)
+        # Rename and Delete want a bookmark picked out (F-36: they were
+        # offered with an empty list)
+        self.tree.currentItemChanged.connect(lambda *_: self._enable())
+        self._enable()
+
+    def _enable(self) -> None:
+        for button in self._needs_one:
+            button.setEnabled(self.tree.currentItem() is not None)
 
     # -- display -----------------------------------------------------------
     def rebuild(self, document=None) -> None:
@@ -1597,6 +1608,7 @@ class BookmarksPanel(QWidget):
                                     str(index + 1)])
             node.setData(0, Qt.UserRole, mark)
             self.tree.addTopLevelItem(node)
+        self._enable()
 
     def _selected(self):
         node = self.tree.currentItem()
@@ -1621,15 +1633,15 @@ class BookmarksPanel(QWidget):
         title, accepted = QInputDialog.getText(self, "Rename bookmark",
                                                "Name", text=mark.title)
         if accepted and title.strip():
-            mark.title = title.strip()
-            self.window.bookmarks_changed()
+            self.window.change_bookmarks(
+                "Rename bookmark", lambda: setattr(mark, "title", title.strip()))
 
     def remove(self) -> None:
         mark = self._selected()
         if mark is None:
             return
-        self.window.document.bookmarks.remove(mark)
-        self.window.bookmarks_changed()
+        self.window.change_bookmarks(
+            "Delete bookmark", lambda: self.window.document.bookmarks.remove(mark))
 
     def insert_contents(self) -> None:
         self.window.insert_contents_block()
@@ -2022,6 +2034,18 @@ class ToolSetsPanel(QWidget):
             self.tree.setItemWidget(header, 0, bar)
             self.headers[group.name] = bar
             header.setHidden(group.hidden)     # unticked in Manage Tool Sets
+        if all(group.hidden for group in self.groups):
+            # not an empty chest with nothing to say (F-36): how to get the
+            # sets back
+            note = QTreeWidgetItem(["Every tool set is hidden — tick one in the "
+                                    "Tool Chest menu, or Manage Tool Sets…"
+                                    if self.groups else
+                                    "No tool sets yet — New Tool Set… in the Tool Chest menu"])
+            note.setFlags(Qt.ItemIsEnabled)
+            note.setData(0, self.ENTRY_ROLE, -2)
+            note.setForeground(0, QColor("#868e96"))
+            note.setToolTip(0, "The Tool Chest menu is the gear at the top of this panel")
+            self.tree.addTopLevelItem(note)
         self.tree.blockSignals(False)
         if not getattr(self, "_watching_expansion", False):
             self.tree.itemExpanded.connect(self._sync_header)
@@ -2133,7 +2157,7 @@ class ToolSetsPanel(QWidget):
     # -- using a tool ------------------------------------------------------
     def _clicked(self, row, _column) -> None:
         """One click picks the tool up, so the next click on the page puts it down."""
-        if row is None or row.data(0, self.ENTRY_ROLE) in (None, -1):
+        if row is None or row.data(0, self.ENTRY_ROLE) in (None, -1, -2):
             return
         self.use_selected()
 
@@ -2873,6 +2897,11 @@ class PropertiesPanel(QScrollArea):
             combo.setMinimumWidth(0)
         for edit in self.body.findChildren(QLineEdit):
             edit.setMinimumWidth(0)
+        # A number typed in applies on Enter or on leaving the box, as Revu's
+        # do: one undo step, and no half-typed value drawn on the way. The
+        # arrows and the wheel still apply at once (F-06).
+        for spin in self.body.findChildren(QAbstractSpinBox):
+            spin.setKeyboardTracking(False)
 
     def _settle(self) -> None:
         """Re-lay-out the rebuilt form and scroll back to the top.
@@ -2946,6 +2975,19 @@ class PropertiesPanel(QScrollArea):
             item.update()
         self.window.view.commit_snapshot(description, coalesce=coalesce)
         self.changed.emit(description)
+
+    @staticmethod
+    def _typing_run(field):
+        """The undo run of typing into *field*.
+
+        Every keystroke shows at once, but the typing is one undo step, as in
+        Revu, however slowly it is typed (exercise round 1, F-06). Enter or
+        leaving the field ends the run; the next typing there is a new step.
+        """
+        run = [object()]
+        if isinstance(field, QLineEdit):
+            field.editingFinished.connect(lambda: run.__setitem__(0, object()))
+        return lambda: run[0]
 
     def _slide(self, setter, description: str) -> None:
         """A change from a slider or a spin box: part of one continuous run."""
@@ -3454,8 +3496,10 @@ class PropertiesPanel(QScrollArea):
         form = self._group("Contents")
         heading = QLineEdit(item.title)
         heading.setPlaceholderText("Contents")
+        typing = self._typing_run(heading)
         heading.textEdited.connect(
-            lambda text: self._apply(lambda i: setattr(i, "title", text), "Heading"))
+            lambda text: self._apply(lambda i: setattr(i, "title", text), "Heading",
+                                     coalesce=typing()))
         form.addRow("Heading:", heading)
 
         for label, attribute in (("Page numbers", "show_page_numbers"),
@@ -3500,9 +3544,10 @@ class PropertiesPanel(QScrollArea):
         body = QPlainTextEdit(item.comment)
         body.setFixedHeight(70)
         body.setPlaceholderText("What this note says")
+        typing = self._typing_run(body)
         body.textChanged.connect(
             lambda: self._apply(lambda i: setattr(i, "comment", body.toPlainText()),
-                                "Note text"))
+                                "Note text", coalesce=typing()))
         form.addRow(body)
 
     def _add_image(self, item) -> None:
@@ -3538,8 +3583,10 @@ class PropertiesPanel(QScrollArea):
 
         subject = QLineEdit(item.subject)
         subject.setToolTip("Measurements sharing a subject are totalled in the markups list")
+        typing = self._typing_run(subject)
         subject.textEdited.connect(
-            lambda text: self._apply(lambda i: setattr(i, "subject", text), "Subject"))
+            lambda text: self._apply(lambda i: setattr(i, "subject", text), "Subject",
+                                     coalesce=typing()))
         form.addRow("Counts as:", subject)
 
         if item.kind in ("area", "volume", "perimeter"):
@@ -3550,10 +3597,12 @@ class PropertiesPanel(QScrollArea):
         if item.kind == "volume":
             depth = QLineEdit(item.depth_text)
             depth.setPlaceholderText("e.g. 150 mm")
+            typing_depth = self._typing_run(depth)
             depth.textEdited.connect(
                 lambda text: self._apply(
                     lambda i: (setattr(i, "depth_text", text),
-                               i.refresh(page=self.window.current_page())), "Depth"))
+                               i.refresh(page=self.window.current_page())), "Depth",
+                    coalesce=typing_depth()))
             form.addRow("Depth:", depth)
 
         if len(self._items) == 1 and item.kind != "calibrate":
@@ -3602,8 +3651,10 @@ class PropertiesPanel(QScrollArea):
     def _add_count(self, item: CountItem) -> None:
         form = self._group("Count")
         subject = QLineEdit(item.subject)
+        typing = self._typing_run(subject)
         subject.textEdited.connect(
-            lambda text: self._apply(lambda i: setattr(i, "subject", text), "Count subject"))
+            lambda text: self._apply(lambda i: setattr(i, "subject", text), "Count subject",
+                                     coalesce=typing()))
         form.addRow("Subject:", subject)
         symbol = QComboBox()
         symbol.addItems(list(CountItem.SYMBOLS))
@@ -3634,8 +3685,10 @@ class PropertiesPanel(QScrollArea):
         form.addRow("Text:", preset)
         subtext = QLineEdit(item.subtext)
         subtext.setPlaceholderText("Name, date, revision…")
+        typing = self._typing_run(subtext)
         subtext.textEdited.connect(
-            lambda text: self._apply(lambda i: setattr(i, "subtext", text), "Stamp"))
+            lambda text: self._apply(lambda i: setattr(i, "subtext", text), "Stamp",
+                                     coalesce=typing()))
         form.addRow("Sub-text:", subtext)
         radius = QDoubleSpinBox()
         radius.setObjectName("stampCornerRadius")
@@ -3770,28 +3823,33 @@ class PropertiesPanel(QScrollArea):
         form = self._group("General")
         subject = QLineEdit(first.subject)
         subject.setObjectName("markupSubject")
+        typing_subject = self._typing_run(subject)
         subject.textEdited.connect(lambda text: self._apply(
-            lambda i: setattr(i, "subject", text), "Subject"))
+            lambda i: setattr(i, "subject", text), "Subject", coalesce=typing_subject()))
         form.addRow("Subject:", subject)
 
         author = QLineEdit(first.author)
         author.setObjectName("markupAuthor")
+        typing_author = self._typing_run(author)
         author.textEdited.connect(lambda text: self._apply(
-            lambda i: setattr(i, "author", text), "Author"))
+            lambda i: setattr(i, "author", text), "Author", coalesce=typing_author()))
         form.addRow("Author:", author)
 
         label = QLineEdit(first.label)
         label.setObjectName("markupLabel")
+        typing_label = self._typing_run(label)
         label.textEdited.connect(lambda text: self._apply(
-            lambda i: setattr(i, "label", text), "Label"))
+            lambda i: setattr(i, "label", text), "Label", coalesce=typing_label()))
         form.addRow("Label:", label)
 
         comment = QPlainTextEdit(first.comment)
         comment.setObjectName("markupComments")
         comment.setPlaceholderText("Comments")
         comment.setFixedHeight(58)
+        typing_comment = self._typing_run(comment)
         comment.textChanged.connect(lambda: self._apply(
-            lambda i: setattr(i, "comment", comment.toPlainText()), "Comment"))
+            lambda i: setattr(i, "comment", comment.toPlainText()), "Comment",
+            coalesce=typing_comment()))
         form.addRow(comment)
 
         if len(self._items) == 1 and getattr(first, "modified", ""):

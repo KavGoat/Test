@@ -1188,7 +1188,8 @@ class _TextBase(MarkupItem):
         painter.setPen(QPen(self.style.text_qcolor()))
         # its fields — page, date, a variable — filled in (items/fields.py)
         from .fields import shown_document
-        shown_document(self).documentLayout().draw(painter, context)
+        shown_document(self, on_screen=not getattr(self.parentItem(), "print_mode", False)
+                       ).documentLayout().draw(painter, context)
         painter.restore()
 
     # -- serialisation -----------------------------------------------------

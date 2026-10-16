@@ -416,7 +416,9 @@ class VariablesPanel(QWidget):
         scene = window.view.scene()
         scene.clearSelection()
         item.setSelected(True)
-        window.view.centerOn(item)
+        # brought into view, not centred: centring an equation at the left of
+        # the page put the desk beside it in the middle (F-36)
+        window.view.ensureVisible(item, 60, 60)
         window.refresh_selection()
 
     def _go_to_cells(self, sheet_name: str, block: tuple) -> None:

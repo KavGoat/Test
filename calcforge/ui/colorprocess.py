@@ -190,6 +190,10 @@ class ColorProcessingDialog(QDialog):
         self.kind.currentIndexChanged.connect(self._kind_changed)
         self.pages.currentIndexChanged.connect(self._changed)
         self._kind_changed()
+        # The preview is there as the dialog opens, not a moment after it
+        # (exercise round 1, F-27: Before and After were empty at first)
+        self._timer.stop()
+        self._preview()
 
     # -- each type's options ----------------------------------------------------------------
     def _side(self, *boxes) -> QVBoxLayout:
@@ -412,6 +416,8 @@ class ColorProcessingDialog(QDialog):
         for label, image in ((self.before, before), (self.after, after)):
             if image is None or image.isNull():
                 label.clear()
+                if label is self.after and before is not None and not before.isNull():
+                    label.setText("Working…")       # the helper is still at it
                 continue
             label.setPixmap(QPixmap.fromImage(image).scaled(
                 label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
@@ -625,6 +631,7 @@ def change_colors(window, item) -> Optional[ColorProcessingDialog]:
             painter.end()
             return image
         dialog.on_snapshot_preview = preview
+        dialog._preview()                # the snapshot's own after, from the start
     elif isinstance(item, ImageItem):
         image = QImage()
         data = window.document.asset(item.asset_key)
