@@ -4250,6 +4250,14 @@ class MainWindow(QMainWindow):
             self._filters_the_application = False
         for timer in self.findChildren(QTimer):
             timer.stop()
+        # nor is anything drawn for it while Qt has yet to delete it (a
+        # harness without an event loop never does): the Thumbnails went on
+        # drawing the pages of a closed window's document as the page cache
+        # finished them
+        panel = getattr(self, "pages_panel", None)
+        if panel is not None and hasattr(panel, "let_go"):
+            panel.let_go()
+        self.hide()
         self.deleteLater()
 
     # ==================================================================
@@ -4762,6 +4770,8 @@ class MainWindow(QMainWindow):
     # -- remembering it ------------------------------------------------
     def note_layout_change(self) -> None:
         """Something moved; write the arrangement out in a moment."""
+        if getattr(self, "_closed_for_good", False):
+            return                  # its panels going with it are not a change
         timer = getattr(self, "_layout_timer", None)
         if timer is not None:
             timer.start()

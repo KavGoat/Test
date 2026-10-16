@@ -318,6 +318,49 @@ def test_closed_windows_are_taken_down(w, errors):
     assert not errors
 
 
+def test_a_closed_window_is_inert_before_qt_deletes_it(w):
+    """Without an event loop (a harness, a test) Qt never gets round to
+    deleting a closed window: closed, it must already have stopped hearing
+    the application's events and drawing anything for its pages."""
+    from PySide6.QtCore import SIGNAL
+    from calcforge.io import pdftiles
+    ready = SIGNAL("sheetReady(PyObject)")
+    before = pdftiles.TILES.receivers(ready)
+    other = w.open_new_window()
+    settle()
+    assert pdftiles.TILES.receivers(ready) > before
+    other.confirm_discard = lambda: True
+    other.act_quit.trigger()                     # File ▸ Exit, nothing processed after
+    assert shiboken6.isValid(other) and other.isHidden()
+    assert other not in MainWindow._windows
+    assert not other._filters_the_application
+    assert pdftiles.TILES.receivers(ready) == before             # its canvas and thumbnails
+    running = [t.objectName() or repr(t) for t in other.findChildren(QTimer) if t.isActive()]
+    assert not running, running
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert not shiboken6.isValid(other)          # and Qt takes it down when it can
+
+
+def test_switching_tools_leaves_no_stray_windows(w):
+    """Each tool picked rebuilt the Markup Styles bar, and QToolBar.clear()
+    left every button and title of the old one as a hidden window of its
+    own, half owned, until the window went: hundreds over a session, and
+    taking a closed window down with them crashed the gate's worker."""
+    def strays():
+        return [t for t in QApplication.topLevelWidgets()
+                if t.objectName().startswith(("markupStyle", "markupStylesTitle"))
+                or type(t).__name__ == "StyleButton"]
+    for k in (Qt.Key_R, Qt.Key_E, Qt.Key_L, Qt.Key_V) * 3:       # Rectangle, Ellipse, Line, Select
+        key(w, k)
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    settle()
+    assert not strays()
+    key(w, Qt.Key_R)
+    assert "Rectangle" in w.markup_styles.bar.title.text()        # the bar still works
+    key(w, Qt.Key_V)
+    w.markup_styles.bar.title.text()                              # and its title is alive
+
+
 def test_a_new_window_does_not_restyle_the_application(w, monkeypatch):
     calls = []
     app = QApplication.instance()

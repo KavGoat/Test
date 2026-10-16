@@ -242,11 +242,32 @@ class MarkupStylesBar(QToolBar):
         self.setToolTip("")
         self.buttons: list = []          # [Default, 1, 2, ...]
         self.add_button: Optional[QToolButton] = None
-        self.title = QLabel("")
+        self.title = self._no_title = QLabel("", self)   # not a window of its own
         self.title.setObjectName("markupStylesTitle")
+        self.title.hide()
         self._shown_key = object()
         self._dirty = True
         self.visibilityChanged.connect(self._shown)
+
+    def _clear_for_good(self) -> None:
+        """Empty the bar, and let go of what was on it.
+
+        QToolBar.clear only takes the buttons off: each one is left as a
+        hidden window of its own, with no parent in Qt but still the bar's
+        in PySide's book-keeping, until the bar itself goes. One more set
+        every time the tool in hand changed, and when a closed window was
+        taken down they went with it the second way too — a crash later in
+        whatever looked at the application's windows (the full gate at
+        f78d03c)."""
+        from PySide6.QtWidgets import QWidgetAction
+        made_here = [action for action in self.actions()
+                     if isinstance(action, QWidgetAction) and action.parent() is self]
+        widgets = [self.widgetForAction(action) for action in made_here]
+        self.clear()                     # (which deletes the actions it made)
+        for widget in widgets:
+            if widget is not None:
+                widget.hide()
+                widget.deleteLater()
 
     def _shown(self, shown: bool) -> None:
         if shown and self._dirty:
@@ -266,10 +287,11 @@ class MarkupStylesBar(QToolBar):
         if state == self._shown_key and not force:
             return
         self._shown_key = state
-        self.clear()
+        self._clear_for_good()
         self.buttons = []
         self.add_button = None
         if key is None:
+            self.title = self._no_title          # the last one has gone with the bar
             # a greyed button, not a label: just as tall as the style buttons
             # it stands in for, so the rows below don't move when a markup is
             # picked (the page jumped by 21 px)

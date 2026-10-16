@@ -1479,23 +1479,39 @@ def close_strays(win) -> list[str]:
         except Exception:  # noqa: BLE001
             pass
         pump()
-    for widget in QtWidgets.QApplication.topLevelWidgets():
-        if widget is win or not shiboken6.isValid(widget) or not widget.isVisible():
-            continue
-        if widget is toplevel(win):
-            continue
+    def a_stray():
+        for widget in QtWidgets.QApplication.topLevelWidgets():
+            if widget is win or not shiboken6.isValid(widget) or not widget.isVisible():
+                continue
+            if widget is toplevel(win) or isinstance(widget, QtWidgets.QDockWidget):
+                continue
+            if isinstance(widget, MainWindow) or (
+                    widget.isWindow() and not isinstance(widget, QtWidgets.QMenu)
+                    and type(widget).__name__ not in ("QToolTip", "QTipLabel")):
+                return widget
+        return None
+
+    # One at a time, the list asked for again after each: closing a window
+    # can free other top-level widgets there and then (its canvas is taken
+    # apart as it closes), and a list taken before still holds them. Going on
+    # down it crashed the worker in this loop (gate f78d03c at "Cut cells";
+    # again at "Cut" with three runs side by side).
+    for _ in range(12):
+        widget = a_stray()
+        if widget is None:
+            break
         if isinstance(widget, MainWindow):
             widget.confirm_discard = lambda: True
             widget.document.modified = False
             closed.append("second window")
             widget.close()
             widget.deleteLater()
-        elif isinstance(widget, QtWidgets.QDockWidget):
-            continue
-        elif widget.isWindow() and not isinstance(widget, QtWidgets.QMenu) and \
-                type(widget).__name__ not in ("QToolTip", "QTipLabel"):
+        else:
             closed.append(f"window {type(widget).__name__} {widget.windowTitle()}")
             widget.close()
+            if widget.isVisible():
+                widget.hide()             # one that will not close is not asked twice
+        pump()
     pump()
     return closed
 
