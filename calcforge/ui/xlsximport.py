@@ -275,9 +275,10 @@ def choose_sheets(window, imported) -> bool:
     return True
 
 
-def insert_workbook(window, path: Optional[str] = None, index: Optional[int] = None) -> bool:
-    """Insert ▸ Excel workbook…: its worksheets as spreadsheet pages after the
-    current page, one undo step."""
+def insert_workbook(window, path: Optional[str] = None, index: Optional[int] = None,
+                    before: bool = False) -> bool:
+    """Insert ▸ Excel workbook…: its worksheets as spreadsheet pages after (or
+    *before*) the current page, one undo step."""
     from ..sheet.xlsx import read_workbook
     from .sheetpages import safe_target
 
@@ -299,7 +300,15 @@ def insert_workbook(window, path: Optional[str] = None, index: Optional[int] = N
         return False
     document = window.document
     which = window.page_index(index)
-    target = safe_target(document, which + 1)
+    if before:
+        # in front of the page, or of the whole spreadsheet run it is part of
+        target = which
+        pages_now = document.pages
+        while target > 0 and pages_now[target].sheet is not None \
+                and pages_now[target - 1].sheet == pages_now[target].sheet:
+            target -= 1
+    else:
+        target = safe_target(document, which + 1)
     base = document.pages[which].setup
     pages = pages_for(imported, base)
 

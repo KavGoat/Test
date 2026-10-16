@@ -247,7 +247,17 @@ def test_the_page_tab_and_sheet_tab_menus(w):
                    "Rotate Pages", "Rename Page Label", "Reset All Page Labels",
                    "Print Pages…", "Flatten…"):
         assert wanted in labels
-    assert labels.index("Flatten…") < labels.index("Spreadsheet After"), \
+    # every way of putting pages in sits together, each Before or After
+    inserts = ["Insert Blank Page", "Insert Spreadsheet Page", "Insert Pages",
+               "Insert Image Page", "Insert Excel Workbook"]
+    at = labels.index(inserts[0])
+    assert labels[at:at + len(inserts)] == inserts, labels
+    menu = w.page_menu(0)
+    for title in inserts:
+        sub = next(a.menu() for a in menu.actions() if a.text() == title)
+        assert [a.text().rstrip("…") for a in sub.actions()] == ["Before", "After"], title
+    assert "Spreadsheet After" not in labels
+    assert labels.index("Flatten…") < labels.index("Go to Page"), \
         "CalcForge's own come after Revu's"
     menu = QMenu()
     w._tab_context_menu(w.document_tabs.tabRect(0).center(), menu)

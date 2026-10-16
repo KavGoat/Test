@@ -171,6 +171,19 @@ def test_insert_excel_asks_which_worksheets(w, tmp_path):
     assert len(w.document.pages) == pages
 
 
+def test_an_excel_workbook_can_go_before_or_after_a_page(w, tmp_path):
+    """The page menu's Insert Excel Workbook ▸ Before / After (the user,
+    2026-10-16: every insert sits together, each Before or After)."""
+    from PySide6.QtWidgets import QApplication
+    path = a_workbook(str(tmp_path / "beams.xlsx"))
+    w.choose_workbook_sheets = lambda names: ["Beams"]
+    plain = w.document.pages[0]
+    assert w.insert_workbook(path, 0, before=True)
+    QApplication.processEvents()
+    assert w.document.pages[0].sheet is not None, "the workbook is in front"
+    assert w.document.pages[-1] is plain, "the page it went in front of follows it"
+
+
 def test_the_sheet_chooser_warns_of_a_sheet_read_but_left_out(qapp, tmp_path, monkeypatch):
     """Beams reads Load Cases ('Load Cases'!B2); Load Cases reads Beams through
     the name Loads. Leaving either out is said at once, and on OK the reader

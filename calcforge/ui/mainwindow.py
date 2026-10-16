@@ -1132,7 +1132,7 @@ class MainWindow(QMainWindow):
 
         self._act("add_page", "Blank Page…", lambda: self.add_page(),
                   tip="Insert Blank Page: the size, how many, and where they go")
-        self._act("add_sheet_page", "Spreadsheet page", lambda: self.insert_sheet_page(),
+        self._act("add_sheet_page", "Spreadsheet Page", lambda: self.insert_sheet_page(),
                   tip="A page of spreadsheet cells; pages next to each other are one sheet")
         self._act("sheet_page_setup", "Sheet Layout…", lambda: self.sheet_page_setup(),
                   tip="Print area, titles, fit to page width, centring, gridlines and headings")
@@ -3974,10 +3974,11 @@ class MainWindow(QMainWindow):
         from .chartdialog import insert_chart
         return insert_chart(self.view.tables, kind, lines, markers)
 
-    def insert_workbook(self, path: Optional[str] = None, index: Optional[int] = None) -> bool:
+    def insert_workbook(self, path: Optional[str] = None, index: Optional[int] = None,
+                        before: bool = False) -> bool:
         """Insert ▸ Excel workbook: its worksheets as spreadsheet pages."""
         from .xlsximport import insert_workbook
-        return insert_workbook(self, path, index)
+        return insert_workbook(self, path, index, before)
 
     def insert_sheet_page(self, index: Optional[int] = None, before: bool = False) -> None:
         """A page of spreadsheet cells (ui/sheetpages.py)."""
@@ -4634,22 +4635,36 @@ class MainWindow(QMainWindow):
         paste.setEnabled(waiting is not None)
         menu.addSeparator()
         # -- insert, delete, rotate, label -------------------------------------------
-        blank = menu.addMenu("Insert Blank Page")
-        blank.addAction("Before…", lambda: self.add_page_before(index)).setToolTip(
-            "Insert Blank Page, placed before this page")
-        blank.addAction("After…", lambda: self.add_page(index)).setToolTip(
-            "Insert Blank Page, placed after this page")
-        pages = menu.addMenu("Insert Pages")
-        pages.addAction("Before…", lambda: self.insert_pdf(index, before=True)).setToolTip(
-            "Insert Pages from a PDF, placed before this page")
-        pages.addAction("After…", lambda: self.insert_pdf(index)).setToolTip(
-            "Insert Pages from a PDF, placed after this page")
-        pages.addSeparator()
-        pages.addAction("Image Before…",
-                        lambda: self.insert_image_page(index, before=True)).setToolTip(
-            "Insert an image page before this page")
-        pages.addAction("Image After…", lambda: self.insert_image_page(index)).setToolTip(
-            "Insert an image page after this page")
+        # Every way of putting pages in, together and the same shape: each
+        # one Before or After this page (the user, 2026-10-16: "Spreadsheet
+        # After" sat in another group from Insert Pages, and Excel had none).
+        def inserting(title, before, after, tip):
+            sub = menu.addMenu(title)
+            sub.addAction("Before…" if before[1] else "Before", before[0]).setToolTip(
+                f"{tip}, placed before this page")
+            sub.addAction("After…" if after[1] else "After", after[0]).setToolTip(
+                f"{tip}, placed after this page")
+            return sub
+        inserting("Insert Blank Page", (lambda: self.add_page_before(index), True),
+                  (lambda: self.add_page(index), True), "A blank page")
+        inserting("Insert Spreadsheet Page",
+                  (lambda: self.insert_sheet_page(index, before=True), False),
+                  (lambda: self.insert_sheet_page(index), False), "A page of spreadsheet cells")
+        inserting("Insert Pages", (lambda: self.insert_pdf(index, before=True), True),
+                  (lambda: self.insert_pdf(index), True), "Pages from a PDF")
+        inserting("Insert Image Page",
+                  (lambda: self.insert_image_page(index, before=True), True),
+                  (lambda: self.insert_image_page(index), True), "An image as a page")
+        inserting("Insert Excel Workbook",
+                  (lambda: self.insert_workbook(None, index, before=True), True),
+                  (lambda: self.insert_workbook(None, index), True),
+                  "An Excel workbook's sheets as spreadsheet pages")
+        if page.sheet is not None:
+            menu.addAction("Add Sheet Page", lambda: self.insert_sheet_page(index)).setToolTip(
+                "Another page for this spreadsheet's cells")
+        duplicate = menu.addAction("Duplicate Pages" if several else "Duplicate Page",
+                                   lambda: self.duplicate_page(index))
+        duplicate.setToolTip(f"Duplicate {these}")
         extract = menu.addAction("Extract Pages…", lambda: self._extract_from_menu(index))
         extract.setToolTip(f"Save {these} as a new PDF")
         delete = menu.addAction("Delete Pages…", lambda: self.delete_page(index))
@@ -4688,15 +4703,9 @@ class MainWindow(QMainWindow):
         up.setEnabled(first > 0)
         down = menu.addAction("Move Down", lambda: self.move_page(first, first + 1, len(acting)))
         down.setEnabled(last < len(self.document.pages) - 1)
-        sheet_page = menu.addAction("Spreadsheet After", lambda: self.insert_sheet_page(index))
-        sheet_page.setToolTip("Insert a page of spreadsheet cells after this page")
         if page.sheet is not None:
-            sheet_page.setText("Add Sheet Page")
             layout = menu.addAction("Sheet Layout…", lambda: self.sheet_page_setup(index))
             layout.setToolTip("Print area, titles, fit to page width, centring, gridlines")
-        duplicate = menu.addAction("Duplicate Pages" if several else "Duplicate Page",
-                                   lambda: self.duplicate_page(index))
-        duplicate.setToolTip(f"Duplicate {these}")
         from . import calcsections
         calcsections.add_menu(self, menu, index)
         grid = menu.addAction("Page Grid")
