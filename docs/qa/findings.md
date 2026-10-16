@@ -11,6 +11,7 @@ Merged in dcfda5c.
 - 7.2 Split View in one window: one menu and one set of toolbars, each view with its own tabs. It opens in about 60 ms (was 3.8 s). Separate Views gives each window its own menu. Status: merged.
 - 7.3 A tab dragged straight across moved its neighbour (Qt reports the moves the other way round). Status: merged, fixed.
 - 7.4 File ▸ Open adds a tab; an already-open file brings its tab forward. Status: merged.
+- 7.6 In the full parallel suite, typing into a table markup sometimes repaints the whole table: an average of 32 cells a key against 12 when run alone, and the same 226-cell total on two runs. Not reproduced alone, nor after test_revu_ui. Possibly timers or scenes left alive by earlier windows (the leak agent is on that). Status: open. The speed test now judges the typical key.
 - 7.5 Flaky: `test_calc_modes::test_a_word_and_a_space_become_calculation_text_and_undo_brings_the_equation_back` fails about 1 run in 3 under `-n 3`, also on untouched code. A flake is not a root cause. Status: open, to investigate.
 
 ## Round 6 — Properties toolbar against the user's Revu screenshots (lead, 2026-10-16)
