@@ -1090,18 +1090,17 @@ class TableEditing:
             if _alive(other):
                 self._point_at(drag[1], self._cell_near(other, other.mapFromScene(scene_pos)), other)
         elif kind in ("col_size", "row_size"):
-            scale = 1.0
-            delta = (scene_pos - drag[2])
+            # in the sheet's own points, so the edge stays under the pointer
+            # on a sheet or table drawn at another scale
+            delta = item.mapFromScene(scene_pos) - item.mapFromScene(drag[2])
             moved = delta.x() if kind == "col_size" else delta.y()
-            size = max(0.0, drag[3] + moved / scale)
-            wb = item.sheet.workbook
-            # dragged to nothing it is hidden, as in Excel (QA, 2026-10-15)
-            wb.drag_size(item.sheet, "col" if kind == "col_size" else "row", drag[4], size, drag[5])
-            item.layout_changed()
-            self._show_selection()
-            what = "Width" if kind == "col_size" else "Height"
-            self.view.statusMessage.emit(f"{what}: {size:.1f} pt ({round(size * 96 / 72)} px)"
-                                         if size > 0 else f"{what}: 0 (hidden)")
+            size = max(0.0, drag[3] + moved)
+            # Excel: while the edge is dragged a dashed line shows where it
+            # will go and a tip gives the size; the column (row) changes when
+            # it is let go. Laid out again on every move, a sheet's rows were
+            # drawn afresh each time: 25-60 ms a move (findings 5.3)
+            self.drag = drag[:6] + (size,)
+            self._show_size_guide(item, kind, drag[1], size)
         elif kind == "fill":
             src = drag[1]
             self.drag = ("fill", src, self._fill_target(src, cell), drag[3])
@@ -1226,6 +1225,13 @@ class TableEditing:
                 old = drag[1] if drag[1] in (options(item.sheet).get("col_breaks") or []) else None
                 sheetlayout.move_break(self.view.window, item, old, drag[2], across=True)
             return True
+        if kind in ("col_size", "row_size"):
+            self._hide_size_guide(item)
+            if len(drag) > 6:              # let go: now the size is set
+                axis = "col" if kind == "col_size" else "row"
+                # dragged to nothing it is hidden, as in Excel (QA, 2026-10-15)
+                item.sheet.workbook.drag_size(item.sheet, axis, drag[4], drag[6], drag[5])
+                item.layout_changed()
         if kind in ("col_size", "row_size", "grow"):
             self.view.commit_snapshot({"col_size": "Column width", "row_size": "Row height",
                                        "grow": "Resize table"}[kind])
@@ -1760,12 +1766,66 @@ class TableEditing:
         self._result_unit.open(item, self.active, got[1])
         return True
 
+    # -- a heading's edge being dragged (Excel's guide line and size tip) ------------------
+    size_guide: Optional[tuple] = None     # ("col" | "row", x or y in the item)
+
+    def _guide_strip(self, item) -> Optional[QRectF]:
+        guide = self.size_guide
+        if guide is None:
+            return None
+        box = item.local_rect()
+        axis, at = guide
+        pad = 3.0
+        if axis == "col":
+            return QRectF(at - pad, -HEADING_H, 2 * pad, box.bottom() + HEADING_H + pad)
+        return QRectF(-ROWNUM_W, at - pad, box.right() + ROWNUM_W + pad, 2 * pad)
+
+    def _show_size_guide(self, item, kind: str, index: int, size: float) -> None:
+        from PySide6.QtWidgets import QToolTip
+        xs, ys = item.edges()
+        axis = "col" if kind == "col_size" else "row"
+        start = (xs if axis == "col" else ys)[index]
+        old = self._guide_strip(item)
+        self.size_guide = (axis, start + size)
+        for strip in (old, self._guide_strip(item)):
+            if strip is not None:
+                item.update(strip)         # only the two thin strips are drawn again
+        what = "Width" if axis == "col" else "Height"
+        pixels = round(size * 96 / 72)
+        tip = (f"{what}: {size:.2f} pt ({pixels} pixels)" if size > 0
+               else f"{what}: 0 (hidden)")
+        QToolTip.showText(QCursor.pos(), tip, self.view)
+        self.view.statusMessage.emit(tip)
+
+    def _hide_size_guide(self, item) -> None:
+        from PySide6.QtWidgets import QToolTip
+        strip = self._guide_strip(item)
+        self.size_guide = None
+        if strip is not None:
+            item.update(strip)
+        QToolTip.hideText()
+
+    def _paint_size_guide(self, painter: QPainter, item) -> None:
+        guide = self.size_guide
+        if guide is None:
+            return
+        axis, at = guide
+        box = item.local_rect()
+        pen = QPen(QColor("#202020"), 1, Qt.DashLine)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        if axis == "col":
+            painter.drawLine(QPointF(at, -HEADING_H), QPointF(at, box.bottom()))
+        else:
+            painter.drawLine(QPointF(-ROWNUM_W, at), QPointF(box.right(), at))
+
     def _paint_overlay(self, painter: QPainter) -> None:
         """The references of the formula being typed, each in its colour on
         its cells, as Excel shows them; and the copied block's dashed edge."""
         item = self._item
         if item is None:
             return
+        self._paint_size_guide(painter, item)
         drag = self.drag
         if drag is not None and drag[0] == "fill" and drag[2] is not None:
             box = item.block_rect(*drag[2]).united(item.block_rect(*drag[1]))
@@ -1913,6 +1973,13 @@ class TableEditing:
         rows, cols = item.size
         arrows = {Qt.Key_Up: (-1, 0), Qt.Key_Down: (1, 0), Qt.Key_Left: (0, -1), Qt.Key_Right: (0, 1)}
         if key == Qt.Key_Escape:
+            drag = self.drag
+            if drag is not None and drag[0] in ("col_size", "row_size"):
+                # Esc while an edge is dragged: left as it was (Excel)
+                self.drag = None
+                self._hide_size_guide(item)
+                self.view.commit_snapshot("Column width" if drag[0] == "col_size" else "Row height")
+                return True
             if self.copied is not None:
                 self.copied = None
                 item.update()

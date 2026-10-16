@@ -684,3 +684,83 @@ def test_a_cells_menu_starts_with_its_variable_name_and_global(w):
     click(w, cell_scene(t, "B2"))
     menu = w.view.tables.cell_menu()
     assert [a for a in menu.actions() if a.isVisible()][1].isChecked()
+
+
+# -- findings 5.3: a heading's edge, dragged as in Excel -------------------------------------------
+def press_move(w, start, moves):
+    """Press at *start* (scene), move through *moves*, not let go yet."""
+    from PySide6.QtCore import QEvent
+    from tests.test_usability import _mouse
+    vp = w.view.viewport()
+    QApplication.sendEvent(vp, _mouse(w.view, QEvent.MouseButtonPress, start.x(), start.y()))
+    for p in moves:
+        QApplication.sendEvent(vp, _mouse(w.view, QEvent.MouseMove, p.x(), p.y(),
+                                          Qt.NoButton, Qt.LeftButton))
+        pump()
+
+
+def let_go(w, at):
+    from PySide6.QtCore import QEvent
+    from tests.test_usability import _mouse
+    QApplication.sendEvent(w.view.viewport(),
+                           _mouse(w.view, QEvent.MouseButtonRelease, at.x(), at.y()))
+    pump()
+
+
+def test_a_column_edge_drag_shows_a_guide_and_sizes_on_release(w):
+    from PySide6.QtWidgets import QToolTip
+    run = a_sheet(w)
+    sheet = the_run(w).sheet
+    xs, ys = run.edges()
+    width = sheet.width(1)
+    edge = run.mapToScene(QPointF(xs[2], ys[0] - 6))       # B's right edge, in its heading
+    end = QPointF(edge.x() + 30, edge.y())
+    press_move(w, edge, [QPointF(edge.x() + 10, edge.y()), end])
+    te = w.view.tables
+    moved = run.mapFromScene(end).x() - run.mapFromScene(edge).x()     # in the sheet's points
+    assert sheet.width(1) == width, "Excel: nothing moves until the edge is let go"
+    axis, at = te.size_guide
+    # (to a screen pixel: the pointer's place is a whole pixel)
+    assert axis == "col" and at == pytest.approx(xs[1] + width + moved, abs=1.0), \
+        "the dashed line, under the pointer"
+    wanted = at - xs[1]
+    assert QToolTip.text() == f"Width: {wanted:.2f} pt ({round(wanted * 96 / 72)} pixels)"
+    let_go(w, end)
+    assert the_run(w).sheet.width(1) == pytest.approx(wanted) and te.size_guide is None
+    w.undo_stack.undo()
+    assert the_run(w).sheet.width(1) == pytest.approx(width), "one undo step"
+    # Esc while dragging leaves it as it was
+    run = the_run(w)
+    xs, ys = run.edges()
+    edge = run.mapToScene(QPointF(xs[2], ys[0] - 6))
+    press_move(w, edge, [QPointF(edge.x() + 25, edge.y())])
+    QTest.keyClick(w.view, Qt.Key_Escape)
+    pump()
+    let_go(w, QPointF(edge.x() + 25, edge.y()))
+    assert the_run(w).sheet.width(1) == pytest.approx(width) and te.size_guide is None
+    # dragged to nothing: hidden, as before
+    run = the_run(w)
+    xs, ys = run.edges()
+    edge = run.mapToScene(QPointF(xs[2], ys[0] - 6))
+    press_move(w, edge, [QPointF(edge.x() - width - 10, edge.y())])
+    assert QToolTip.text() == "Width: 0 (hidden)"
+    let_go(w, QPointF(edge.x() - width - 10, edge.y()))
+    assert 1 in the_run(w).sheet.hidden_cols
+
+
+def test_a_row_edge_drag_in_a_table_shows_a_guide_and_sizes_on_release(w):
+    table = loads(w)
+    click(w, cell_scene(table, "A1"))
+    xs, ys = table.edges()
+    height = table.sheet.height(1)
+    edge = table.mapToScene(QPointF(-ROWNUM_W / 2, ys[2]))  # row 2's lower edge
+    end = QPointF(edge.x(), edge.y() + 12)
+    moved = table.mapFromScene(end).y() - table.mapFromScene(edge).y()
+    press_move(w, edge, [end])
+    te = w.view.tables
+    assert table.sheet.height(1) == height
+    axis, at = te.size_guide
+    # (to a screen pixel: the pointer's place is a whole pixel)
+    assert axis == "row" and at == pytest.approx(ys[1] + height + moved, abs=1.0)
+    let_go(w, end)
+    assert tables(w)[0].sheet.height(1) == pytest.approx(height + moved, abs=1.0)

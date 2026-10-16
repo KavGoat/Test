@@ -758,7 +758,7 @@ class Workbook:
                 cells.append((target.id, top, left))
             else:
                 blocks.append((target.id, top, left, bottom, right))
-        from .functions import FUNCTIONS
+        FUNCTIONS = _functions()
         # a call to no Excel function may be a defined name holding a LAMBDA
         called = [f for f in cell.parsed.functions if f not in FUNCTIONS]
         names = [n.lower() for n in cell.parsed.names] + [f.lower() for f in called]
@@ -1046,8 +1046,7 @@ class Workbook:
         return order, loops
 
     def _compute(self, key) -> None:
-        from .evaluate import evaluate_cell
-
+        evaluate_cell = _evaluate_cell()
         sheet = self.sheet_by_id(key[0])
         cell = sheet.cells.get(key[1:]) if sheet else None
         if cell is None:
@@ -1740,6 +1739,28 @@ class Workbook:
                     if dst is not sheet and state[0].startswith("="):
                         state = ("=" + _qualify_for(state[0][1:], sheet, dst), state[1], state[2])
                     self._set_state(dst, row + i, col + j, state)
+
+
+# imported once, not on every cell read or worked out (an import inside a
+# function costs a few microseconds each time under PySide6's import hook:
+# 30 000 of them opening a 3000-row workbook, findings 5.5)
+_LATE: dict = {}
+
+
+def _functions():
+    got = _LATE.get("functions")
+    if got is None:
+        from .functions import FUNCTIONS as got
+        _LATE["functions"] = got
+    return got
+
+
+def _evaluate_cell():
+    got = _LATE.get("evaluate_cell")
+    if got is None:
+        from .evaluate import evaluate_cell as got
+        _LATE["evaluate_cell"] = got
+    return got
 
 
 def _shift_ranges(rule: dict, axis: str, at: int, delta: int):

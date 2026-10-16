@@ -5,6 +5,8 @@ numbers shown are Excel's (column 0 is "A", row 0 is "1").
 """
 from __future__ import annotations
 
+import functools
+
 import re
 from dataclasses import dataclass, replace
 from typing import Optional
@@ -154,6 +156,7 @@ def is_cell_name(text: str) -> bool:
     return parse_cell(text) is not None
 
 
+@functools.lru_cache(maxsize=65536)
 def parse_range(text: str) -> Optional[RangeRef | CellRef]:
     """A1, A1:B5, A:C, 3:7, with an optional Sheet! or 'Sheet name'! in front."""
     sheet = None
