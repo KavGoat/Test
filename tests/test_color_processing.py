@@ -301,7 +301,7 @@ def test_page_colour_change_is_the_drawings_and_a_group_is_how_markups_change(wi
     a.setSelected(True)
     window.view.scene().selectionChanged.emit()
     menu = window.build_context_menu(a, a.sceneBoundingRect().center())
-    assert "Change Colors…" in [x.text() for x in menu.actions()]
+    assert "Change Colours…" in [x.text() for x in menu.actions()]
     changer = ChangeColorsDialog(window, [a, b])
     changer.set_source("#ff0000")
     changer.set_destination("#0000ff")

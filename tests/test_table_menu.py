@@ -76,7 +76,7 @@ def test_every_table_command(w, caught):
     table = make_table(w, width=48 * 3, height=15 * 6)
     fill(table)
     names = click_through(w, table, caught, lambda tabs: tabs.select((1, 0), (3, 1)))
-    assert ("Rename Table…",) in names and ("Insert Chart", "XY Scatter") in names
+    assert ("Rename Table…",) in names and ("Insert", "Chart", "XY Scatter") in names
     assert w.undo_stack.count() > 20
     while w.undo_stack.canUndo():
         w.undo_stack.undo()
@@ -90,4 +90,4 @@ def test_every_spreadsheet_page_command(w, caught):
     (run,) = [i for i in w.view.scene().items() if isinstance(i, SheetRunItem)]
     fill(run)
     names = click_through(w, run, caught, lambda tabs: tabs.select((2, 0), (3, 1)))
-    assert ("Page Layout", "Insert Page Break") in names and ("Rename Sheet…",) in names
+    assert ("Insert", "Insert Page Break") in names and ("Rename Sheet…",) in names

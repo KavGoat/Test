@@ -315,7 +315,7 @@ def test_the_page_menu_has_revus_entries(win):
                    "Previous Page", "Select All", "Print…", "Search",
                    # and ours, kept
                    "Paste in Place", "Paste Here…", "Insert Here", "Page Setup…",
-                   "Page Scale…"):
+                   "Set Scale…"):
         assert wanted in labels, f"{wanted} is missing from the page menu"
     # Revu's order: the adds, then the page keys, then Select All, Print and Search
     assert labels.index("Paste") < labels.index("Add Note") < labels.index("Add Bookmark") \

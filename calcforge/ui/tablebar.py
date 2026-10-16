@@ -91,7 +91,7 @@ class TableControls:
         merge.setPopupMode(QToolButton.InstantPopup)
         merge.setAutoRaise(True)
         menu = QMenu(merge)
-        for label, how in (("Merge && Center", "center"), ("Merge Across", "across"),
+        for label, how in (("Merge && Centre", "center"), ("Merge Across", "across"),
                            ("Merge Cells", "cells"), ("Unmerge Cells", "unmerge")):
             menu.addAction(label, lambda h=how: self._tables().merge(h))
         merge.setMenu(menu)

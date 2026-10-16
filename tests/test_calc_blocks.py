@@ -397,7 +397,7 @@ def test_a_blocks_menu_and_properties_offer_what_applies_to_it(v):
     for wanted in ("Self-Contained", "Select Its Equations", "Remove Block, Keep Equations",
                    "Delete", "Properties"):
         assert wanted in texts, wanted
-    for gone in ("Set as Default", "Format Painter", "Hide", "Flatten Selection", "Apply to Pages…"):
+    for gone in ("Set as Default", "Format Painter", "Hide", "Flatten", "Flatten Selection", "Apply to Pages…"):
         assert gone not in texts, gone
     v.view.scene().clearSelection()
     block.setSelected(True)

@@ -88,7 +88,7 @@ def fill_menu(menu: QMenu, tables) -> None:
     for label, colour in (("Blue", "#638ec6"), ("Green", "#63c384"), ("Red", "#ff555a"),
                           ("Orange", "#ffb628"), ("Purple", "#d6007b")):
         bars.addAction(label, lambda c=colour: add_rule(tables, {"type": "databar", "color": c}))
-    scales = cf.addMenu("Color Scales")
+    scales = cf.addMenu("Colour Scales")
     for label, colours in (("Green - Yellow - Red", ["#63be7b", "#ffeb84", "#f8696b"]),
                            ("Red - Yellow - Green", ["#f8696b", "#ffeb84", "#63be7b"]),
                            ("White - Red", ["#ffffff", "#f8696b"]), ("White - Green", ["#ffffff", "#63be7b"]),
