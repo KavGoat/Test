@@ -4,6 +4,17 @@ Kept by the lead agent (docs/AGENT_PROMPT.md §5). One line per finding, newest
 round at the top. Status: open · fixing (who) · merged · pushed · decision
 (waiting on the user) · not a bug.
 
+## Round 6 — Properties toolbar against the user's Revu screenshots (lead, 2026-10-16)
+
+Merged in 6260296 (a9cdcd2). The lead compared the bars type by type
+(scratchpad qa/round5/compare_revu_vs_calcforge.png). Still open:
+- 6.1 Area/rectangle: no Line colour swatch after "Line:". Revu has one. Status: open.
+- 6.2 Area/rectangle: no Hatch ▾. Measurements don't support hatch yet; Revu's rectangle and area do. Status: open.
+- 6.3 Callout: Revu's "A" (text box style) button is missing. Find out what it does in Revu (likely Text Box Properties / autosize) before adding it. Status: open.
+- 6.4 Cloud: Revu shows the scallop pattern in the line-style box and an intensity ▾. CalcForge has a plain style plus an intensity spin. Status: open, small.
+- 6.5 Units ▾ sets the page's units (CalcForge has no per-measurement units). Caption ▾ has no per-value choices. Status: open, a design decision for the user.
+- 6.6 Not in CalcForge: strikethrough, superscript, subscript, line-style Manage…, separate line-end sizes. Status: open, backlog.
+
 ## Round 5 — spreadsheet speed (performance agent, 2026-10-16)
 
 Merged in cbacfa6. Medians in ms, before → after:
