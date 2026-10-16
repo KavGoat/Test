@@ -8761,90 +8761,86 @@ def test_window_close_checks_inactive_documents(window, monkeypatch):
     assert window.document is second
 
 
+def _pane_markups(window, pane):
+    """The markups on the first page of the document a pane shows."""
+    if pane is window._active_pane:
+        document = window.document
+    else:
+        document = pane.documents[pane.active]["document"]
+    return document.pages[0].frame.markups()
+
+
 def test_split_panes_edit_independently_and_route_shortcuts(window):
+    """Split View is one window: its controls act on the view last clicked."""
     from PySide6.QtTest import QTest
+    window.show()
+    window.activateWindow()
+    QTest.qWaitForWindowActive(window)
     first = window.document
     window.open_in_new_tab()
     second_document = window.document
-    host = window.split_document(0)
-    other = host.panes[1]
-    other.confirm_discard = lambda: True
-    try:
-        QApplication.processEvents()
-        assert other.document is first
-        assert window.document is second_document
-        assert window.view.isVisible() and other.view.isVisible()
-        assert window.window() is other.window()
-        other.view.setFocus()
-        QTest.keyClick(other.view.viewport(), Qt.Key_L)
-        assert other.view.tool_key == "line"
-        assert window.view.tool_key == "select"
-        drag(other.view, 100, 100, 200, 200)
-        assert other.view.frame().markups()
-        assert not window.view.frame().markups()
-        QTest.keyClick(other.view.viewport(), Qt.Key_Escape)
-        assert other.view.tool_key == "select"
-        before = other.view.zoom()
-        QTest.keyClick(other.view.viewport(), Qt.Key_Plus, Qt.ControlModifier)
-        QApplication.processEvents()
-        assert other.view.zoom() > before
-        window.view.setFocus()
-        QTest.keyClick(window.view.viewport(), Qt.Key_L)
-        assert window.view.tool_key == "line"
-        assert other.view.tool_key == "select"
-    finally:
-        host.separate()
-        other.close()
-        other.deleteLater()
-        QApplication.processEvents()
+    pane = window.split_document(0)
+    left = window._panes[0]
+    QApplication.processEvents()
+    assert window.view is pane.view and window.document is first
+    assert left.documents[left.active]["document"] is second_document
+    assert left.view.isVisible() and pane.view.isVisible()
+    QTest.keyClick(pane.view.viewport(), Qt.Key_L)
+    assert pane.view.tool_key == "line"
+    assert left.view.tool_key == "select"
+    drag(pane.view, 100, 100, 200, 200)
+    assert _pane_markups(window, pane)
+    assert not _pane_markups(window, left)
+    QTest.keyClick(pane.view.viewport(), Qt.Key_Escape)
+    assert pane.view.tool_key == "select"
+    before = pane.view.zoom()
+    QTest.keyClick(pane.view.viewport(), Qt.Key_Plus, Qt.ControlModifier)
+    QApplication.processEvents()
+    assert pane.view.zoom() > before
+    click(left.view, 300, 300)                     # the other view, clicked
+    assert window.view is left.view and window.document is second_document
+    QTest.keyClick(left.view.viewport(), Qt.Key_L)
+    assert left.view.tool_key == "line"
+    assert pane.view.tool_key == "select"
 
 
 def test_split_views_share_edits_but_new_document_keeps_other_undo(window):
-    host = window.split_document()
-    other = host.panes[1]
-    other.confirm_discard = lambda: True
-    try:
-        QApplication.processEvents()
-        _a_rectangle(window)
-        assert other.scene is window.scene
-        assert other.undo_stack is window.undo_stack
-        count = other.undo_stack.count()
-        window.new_document(confirm=False)
-        assert other.document is not window.document
-        assert other.undo_stack.count() == count
-        assert other.view.frame().markups()
-        assert not window.view.frame().markups()
-    finally:
-        host.separate()
-        other.close()
-        other.deleteLater()
-        QApplication.processEvents()
+    left = window._panes[0]
+    pane = window.split_document()
+    QApplication.processEvents()
+    _a_rectangle(window)
+    assert pane.view.scene() is left.view.scene()
+    assert window.undo_stack is left.documents[0]["undo_stack"]
+    count = window.undo_stack.count()
+    window.new_document(confirm=False)               # in the right-hand view
+    held = left.documents[left.active]
+    assert held["document"] is not window.document
+    assert held["undo_stack"].count() == count
+    assert _pane_markups(window, left)
+    assert not _pane_markups(window, pane)
 
 
 def test_closing_a_split_panes_tab_turns_the_split_off(window):
-    host = window.split_document()
-    other = host.panes[1]
-    other.confirm_discard = lambda: True
+    window.split_document()
     QApplication.processEvents()
     assert window.act_split_view.isChecked()
-    other.close_document_tab(0)
+    window.close_document_tab(0)                     # the right view's only tab
     QApplication.processEvents()
-    assert window._split_host is None
+    assert not window.is_split
     assert window.isWindow()
     assert not window.act_split_view.isChecked()
 
 
 def test_split_view_action_turns_the_split_off(window):
     window.open_in_new_tab()
-    host = window.split_document(0)
-    other = host.panes[1]
-    other.confirm_discard = lambda: True
+    pane = window.split_document(0)
     QApplication.processEvents()
+    window.new_document(confirm=False)               # the right view gets a third document
     window.act_split_view.trigger()
     QApplication.processEvents()
-    assert window._split_host is None
+    assert not window.is_split
     # The other pane's document came back as a tab rather than being lost.
-    assert len(window._open_documents) == 2
+    assert len(window._open_documents) == 3
 
 
 def test_check_spelling_walks_every_text_markup(window, monkeypatch):

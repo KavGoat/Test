@@ -347,8 +347,21 @@ class DetachableTabBar(QTabBar):
         self.tabMoved.connect(self._track_dragged_tab)
 
     def _track_dragged_tab(self, before, after):
-        if getattr(self, "_dragged_tab", -1) == before:
-            self._dragged_tab = after
+        """Keep hold of the dragged tab as the tabs are moved. A tab dragged
+        past another is reported either way round — as itself moving, or as
+        the other moving past it — so every move shifts the index; following
+        only the first kind lost the tab and moved its neighbour instead
+        (QA, 2026-10-16)."""
+        dragged = getattr(self, "_dragged_tab", -1)
+        if dragged < 0:
+            return
+        if dragged == before:
+            dragged = after
+        elif before < dragged <= after:
+            dragged -= 1
+        elif after <= dragged < before:
+            dragged += 1
+        self._dragged_tab = dragged
 
     def mousePressEvent(self, event) -> None:
         self._press_position = event.position().toPoint()
@@ -434,123 +447,29 @@ def forget_recent_files(path: str = "") -> None:
     app_settings().setValue("files/recent", kept)
 
 
-class SplitDocumentWindow(QSplitter):
-    """Two complete editing panes, with independent controls and keyboard focus."""
+class ViewPane:
+    """One view in the window: its document tabs over its canvas.
 
-    def __init__(self, first, second):
-        super().__init__(Qt.Horizontal)
-        self.setWindowTitle(APP_NAME)
-        self.setChildrenCollapsible(False)
-        self.setAttribute(Qt.WA_DeleteOnClose)
-        self.panes = [first, second]
-        self.setGeometry(first.geometry())
-        self.resize(max(first.width(), 1500), first.height())
-        for pane in self.panes:
-            pane._split_host = self
-            pane._before_split = (pane.saveState(), pane.statusBar().isVisible())
-            # Start with room for the drawings. Panels remain available on
-            # each pane's rails, and the complete layout returns on separation.
-            for dock in pane.panels:
-                dock.hide()
-            pane.statusBar().hide()
-            pane.menuBar().setNativeMenuBar(False)
-            if getattr(pane, "window_buttons", None) is not None:
-                pane.window_buttons.hide()        # the split window has its own frame
-            pane.setParent(self, Qt.Widget)
-            self.addWidget(pane)
-            # Window shortcuts would be ambiguous between the two editors.
-            # Each pane owns its actions, so focus chooses which one answers.
-            for action in pane.findChildren(QAction):
-                pane.addAction(action)
-                action.setShortcutContext(Qt.WidgetWithChildrenShortcut)
-            pane.show()
-        self.setSizes([self.width() // 2, self.width() // 2])
+    A window has one of these, or two side by side in Split View (the user,
+    2026-10-16: "if solo in one window then one; if split in two then two;
+    each window has one menu"). The window's menus, toolbars and panels act
+    on the pane last clicked: the active pane's view, tab bar and documents
+    are the window's own `view`, `document_tabs` and `_open_documents`, and
+    the other pane keeps its tabs' states here until it is clicked.
+    """
 
-    def separate(self):
-        """Return both editors to windows without closing any document."""
-        for offset, pane in enumerate(self.panes):
-            pane._split_host = None
-            pane.setParent(None, Qt.Window)
-            from . import titlebar
-            if titlebar.OWN_TITLE_BAR:
-                pane.setWindowFlag(Qt.FramelessWindowHint, True)
-            if getattr(pane, "window_buttons", None) is not None:
-                pane.window_buttons.show()
-            state, status_visible = pane._before_split
-            pane.restoreState(state)
-            pane.statusBar().setVisible(status_visible)
-            pane.menuBar().setNativeMenuBar(NATIVE_MENU_BAR)
-            for action in pane.findChildren(QAction):
-                action.setShortcutContext(Qt.WindowShortcut)
-            pane.setGeometry(self.geometry().adjusted(36 * offset, 36 * offset,
-                                                       36 * offset, 36 * offset))
-            pane.act_split_view.blockSignals(True)
-            pane.act_split_view.setChecked(False)
-            pane.act_split_view.blockSignals(False)
-            pane.show()
-        self.panes = []
-        self.close()
+    def __init__(self, widget, layout, view, tabs, sheet_tabs):
+        self.widget = widget          # the pane: tabs over the canvas
+        self.layout = layout
+        self.view = view
+        self.tabs = tabs
+        self.sheet_tabs = sheet_tabs
+        #: its tabs' states, and which is showing, while it is not active
+        self.documents: list = []
+        self.active = 0
 
-    def unsplit(self, keep, carry_over: bool = True):
-        """Turn the split off: *keep* becomes an ordinary window again.
-
-        The other pane goes. With *carry_over*, any document it held that is
-        not already open in *keep* moves across as a tab, so turning the split
-        off never closes somebody's work.
-        """
-        if keep not in self.panes:
-            return
-        leaving = next(pane for pane in self.panes if pane is not keep)
-        if carry_over:
-            held = {id(state["document"]) for state in keep._open_documents}
-            held.add(id(keep.document))
-            states = (list(leaving._open_documents)
-                      if leaving._open_documents
-                      else [leaving._current_document_state()])
-            if leaving._open_documents and 0 <= leaving._active_tab < len(states):
-                states[leaving._active_tab] = leaving._current_document_state()
-            for state in states:
-                if id(state["document"]) in held:
-                    continue
-                held.add(id(state["document"]))
-                where = keep.open_in_new_tab()
-                keep._open_documents[where] = dict(state)
-                keep._adopt_document_state(dict(state))
-                keep.document_tabs.setTabText(
-                    where, keep._tab_title(state["document"]))
-        self.panes = []
-        # The leaving pane still thinks it is split while it closes, so it
-        # does not write its trimmed-down split layout over the saved one.
-        leaving._closing_confirmed = True
-        leaving.close()
-        leaving._closing_confirmed = False
-        leaving._split_host = None
-        keep._split_host = None
-        keep.setParent(None, Qt.Window)
-        state, status_visible = keep._before_split
-        keep.restoreState(state)
-        keep.statusBar().setVisible(status_visible)
-        keep.menuBar().setNativeMenuBar(NATIVE_MENU_BAR)
-        for action in keep.findChildren(QAction):
-            action.setShortcutContext(Qt.WindowShortcut)
-        keep.setGeometry(self.geometry())
-        keep.show()
-        keep.act_split_view.blockSignals(True)
-        keep.act_split_view.setChecked(False)
-        keep.act_split_view.blockSignals(False)
-        self.close()
-
-    def closeEvent(self, event):
-        # Ask before closing either pane, so Cancel leaves both available.
-        for pane in self.panes:
-            if not pane.confirm_all_documents():
-                event.ignore()
-                return
-        for pane in self.panes:
-            pane._closing_confirmed = True
-            pane.close()
-            pane._closing_confirmed = False
-        event.accept()
+    def documents_held(self) -> list:
+        return [state["document"] for state in self.documents]
 
 
 def _stretch(parent) -> QWidget:
@@ -680,7 +599,6 @@ class MainWindow(QMainWindow):
         # document needs no tab bar.
         self._open_documents: list[dict] = []
         self._active_tab = -1
-        self._split_host = None
         self.toolbars: list = []
         # toolbars a row break was put before because their row had no room
         # for them (_wrap_toolbar_rows): not the user's, never saved
@@ -702,8 +620,8 @@ class MainWindow(QMainWindow):
         self._build_docks()
         self._build_menus()
         self._build_status()
-        from . import titlebar
-        titlebar.install(self)                    # one row: icon, menus, window buttons
+        from . import nativeframe
+        nativeframe.install(self)                 # Windows: the menus in its own title bar
         self._connect()
         self.apply_shortcuts()
         from . import preferences as _prefs
@@ -780,20 +698,7 @@ class MainWindow(QMainWindow):
         # own document, canvas, undo history and page, and switching hands the
         # view a different canvas — so nothing has to be re-wired, and nothing
         # of one document can reach into another.
-        self.document_tabs = DetachableTabBar()
-        self.document_tabs.setDocumentMode(True)
-        self.document_tabs.setExpanding(False)
-        self.document_tabs.setTabsClosable(True)
-        self.document_tabs.setMovable(True)
-        self.document_tabs.setDrawBase(False)
-        self.document_tabs.setVisible(True)
-        self.document_tabs.currentChanged.connect(self.switch_to_document)
-        self.document_tabs.tabCloseRequested.connect(self.close_document_tab)
-        self.document_tabs.tabMoved.connect(self._tab_moved)
-        self.document_tabs.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.document_tabs.customContextMenuRequested.connect(self._tab_context_menu)
-        self.document_tabs.detachRequested.connect(self.tear_off_document)
-        layout.addWidget(self.document_tabs)
+        self.document_tabs = self._make_document_tabs()
 
         # The markups list sits under the canvas, as Bluebeam's does: a bar
         # that is dragged up to open the list and down to close it again.
@@ -801,24 +706,28 @@ class MainWindow(QMainWindow):
         self.bottom_split.setObjectName("markupsSplit")
         self.bottom_split.setChildrenCollapsible(True)
         self.bottom_split.setHandleWidth(7)
+        # Split View puts a second pane beside this one, in the same window
+        # (ViewPane): one set of menus, toolbars and panels for both
+        self.view_split = QSplitter(Qt.Horizontal)
+        self.view_split.setObjectName("viewSplit")
+        self.view_split.setChildrenCollapsible(False)
         # the canvas with Excel's sheet tabs along its foot (ui/sheettabs.py)
         from .sheettabs import SheetTabs
-        canvas = QWidget()
-        canvas_layout = QVBoxLayout(canvas)
-        canvas_layout.setContentsMargins(0, 0, 0, 0)
-        canvas_layout.setSpacing(0)
-        canvas_layout.addWidget(self.view, 1)
         self.sheet_tabs = SheetTabs(self)
         # Excel's place for them: left of the horizontal scroll bar, one row
         self.view.addScrollBarWidget(self.sheet_tabs, Qt.AlignLeft)
-        self.bottom_split.addWidget(canvas)
+        pane = self._make_pane(self.view, self.document_tabs, self.sheet_tabs)
+        self._panes = [pane]
+        self._active_pane = pane
+        self.bottom_split.addWidget(self.view_split)
         self.bottom_split.setCollapsible(0, False)
         self.bottom_split.splitterMoved.connect(self._markups_list_moved)
-        # Excel's formula bar, over the canvas while a table is open
+        # Excel's formula bar, over the canvas while a table is open; it goes
+        # with the pane being worked in
         from .tableedit import FormulaBar
         self.formula_bar = FormulaBar(self.view.tables)
         self.view.tables.bar = self.formula_bar
-        layout.addWidget(self.formula_bar)
+        pane.layout.insertWidget(pane.layout.indexOf(pane.tabs) + 1, self.formula_bar)
         layout.addWidget(self.bottom_split, 1)
         self.setCentralWidget(central)
 
@@ -831,6 +740,62 @@ class MainWindow(QMainWindow):
         self.right_rail_bar = RailBar(self.right_rail, self)
         self.addToolBar(Qt.LeftToolBarArea, self.left_rail_bar)
         self.addToolBar(Qt.RightToolBarArea, self.right_rail_bar)
+
+    def _make_document_tabs(self) -> "DetachableTabBar":
+        tabs = DetachableTabBar()
+        tabs.setDocumentMode(True)
+        tabs.setExpanding(False)
+        tabs.setTabsClosable(True)
+        tabs.setMovable(True)
+        tabs.setDrawBase(False)
+        tabs.setVisible(True)
+
+        def mine(slot):
+            # a split window has a tab bar per view: each speaks only while
+            # its view is the one in hand (a press on it makes it so first)
+            return lambda *args: slot(*args) if self.document_tabs is tabs else None
+
+        tabs.currentChanged.connect(mine(self.switch_to_document))
+        tabs.tabCloseRequested.connect(mine(self.close_document_tab))
+        tabs.tabMoved.connect(mine(self._tab_moved))
+        tabs.setContextMenuPolicy(Qt.CustomContextMenu)
+        tabs.customContextMenuRequested.connect(mine(self._tab_context_menu))
+        tabs.detachRequested.connect(mine(self.tear_off_document))
+        return tabs
+
+    def _make_pane(self, view, tabs, sheet_tabs) -> ViewPane:
+        """A pane of the window: its document tabs over its canvas."""
+        widget = QWidget()
+        widget.setObjectName("viewPane")
+        column = QVBoxLayout(widget)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        # Split View: a line over the view in hand, so which one the
+        # menus and panels act on is never a guess
+        marker = QWidget()
+        marker.setObjectName("activeViewMarker")
+        marker.setFixedHeight(2)
+        marker.setAutoFillBackground(True)
+        marker.hide()
+        column.addWidget(marker)
+        column.addWidget(tabs)
+        column.addWidget(view, 1)
+        self.view_split.addWidget(widget)
+        pane = ViewPane(widget, column, view, tabs, sheet_tabs)
+        pane.marker = marker
+        return pane
+
+    def _mark_active_pane(self) -> None:
+        from PySide6.QtGui import QPalette
+        from ..app import current_theme
+        from ..theme import tokens
+        accent = QColor(tokens(current_theme())["accent"])
+        for pane in self._panes:
+            pane.marker.setVisible(self.is_split)
+            palette = pane.marker.palette()
+            palette.setColor(QPalette.Window,
+                             accent if pane is self._active_pane else QColor(0, 0, 0, 0))
+            pane.marker.setPalette(palette)
 
     def give_icon(self, action, name: str):
         """Put an icon on an action and remember which, for the next theme.
@@ -1128,11 +1093,11 @@ class MainWindow(QMainWindow):
         self._act("font_decrease", "Decrease Font Size",
                   lambda: self.format_content(font_delta=-1.0), "Ctrl+Alt+Down")
 
-        self._act("zoom_in", "Zoom In", self.view.zoom_in, "Ctrl++", "zoom_in")
-        self._act("zoom_out", "Zoom Out", self.view.zoom_out, "Ctrl+-", "zoom_out")
-        self._act("fit_page", "Fit Page", self.view.fit_page, "Ctrl+0", "fit")
-        self._act("fit_width", "Fit Width", self.view.fit_width, "Ctrl+1")
-        self._act("zoom_sel", "Zoom to Selection", self.view.zoom_to_selection, "Ctrl+2",
+        self._act("zoom_in", "Zoom In", lambda: self.view.zoom_in(), "Ctrl++", "zoom_in")
+        self._act("zoom_out", "Zoom Out", lambda: self.view.zoom_out(), "Ctrl+-", "zoom_out")
+        self._act("fit_page", "Fit Page", lambda: self.view.fit_page(), "Ctrl+0", "fit")
+        self._act("fit_width", "Fit Width", lambda: self.view.fit_width(), "Ctrl+1")
+        self._act("zoom_sel", "Zoom to Selection", lambda: self.view.zoom_to_selection(), "Ctrl+2",
                   tip="Zoom to the selected markups")
         # Turning the view is a way of looking at the page, not a change to
         # it: for reading a drawing that came in sideways. Rotating the page
@@ -1146,7 +1111,7 @@ class MainWindow(QMainWindow):
                   tip="Turn the page on screen the other way — the page "
                       "itself is not changed")
         self._act("turn_view_reset", "Reset Rotation",
-                  self.view.reset_view_rotation,
+                  lambda: self.view.reset_view_rotation(),
                   tip="Put the view back the way up the page is")
         # Bare Page Up/Down scroll a screenful, as they do in any reader; with
         # Ctrl they jump a whole page.
@@ -1750,8 +1715,8 @@ class MainWindow(QMainWindow):
 
     def _fit_menu_corner(self) -> None:
         """Narrow the search field before the menus have to go behind the
-        menu bar's » — and never so far that the window buttons are pushed
-        off the row.
+        menu bar's » — and never so far that the room kept for Windows'
+        caption buttons is pushed off the row.
 
         The menu bar lays its right-hand corner out at the width it asks for,
         whatever room there is: with a 260 px search field the corner asked
@@ -2192,7 +2157,7 @@ class MainWindow(QMainWindow):
         self.status_fit.setAutoRaise(True)
         self.status_fit.setText("Fit width")
         self.status_fit.setToolTip("Fit the page across the window")
-        self.status_fit.clicked.connect(self.view.fit_width)
+        self.status_fit.clicked.connect(lambda: self.view.fit_width())
         status.addPermanentWidget(self.status_fit)
 
         self.status_scroll = QToolButton()
@@ -2314,19 +2279,27 @@ class MainWindow(QMainWindow):
                                self.act_sticky):
                     menu.addAction(action)
 
+    def _wire_view(self, view) -> None:
+        """The window listens to a view of its own — only while it is the
+        view being worked in, when the window is split in two."""
+        def active(slot):
+            return lambda *args: slot(*args) if self.view is view else None
+
+        view.statusMessage.connect(active(self.status_hint.setText))
+        view.cursorMoved.connect(active(self._show_position))
+        view.zoomChanged.connect(active(self._show_zoom))
+        view.zoomChanged.connect(active(lambda _zoom: self._sync_other_windows(True)))
+        view.selectionChanged.connect(active(self._selection_changed_on_the_canvas))
+        view.toolFinished.connect(active(self.select_tool))
+        view.documentEdited.connect(active(self.mark_modified))
+        view.pageChanged.connect(active(self.follow_scrolled_page))
+        view.horizontalScrollBar().valueChanged.connect(
+            active(lambda _value: self._sync_other_windows(False)))
+        view.verticalScrollBar().valueChanged.connect(
+            active(lambda _value: self._sync_other_windows(False)))
+
     def _connect(self) -> None:
-        self.view.statusMessage.connect(self.status_hint.setText)
-        self.view.cursorMoved.connect(self._show_position)
-        self.view.zoomChanged.connect(self._show_zoom)
-        self.view.zoomChanged.connect(lambda _zoom: self._sync_other_windows(True))
-        self.view.selectionChanged.connect(self._selection_changed_on_the_canvas)
-        self.view.toolFinished.connect(self.select_tool)
-        self.view.documentEdited.connect(self.mark_modified)
-        self.view.pageChanged.connect(self.follow_scrolled_page)
-        self.view.horizontalScrollBar().valueChanged.connect(
-            lambda _value: self._sync_other_windows(False))
-        self.view.verticalScrollBar().valueChanged.connect(
-            lambda _value: self._sync_other_windows(False))
+        self._wire_view(self.view)
         # Tool keys have to fall silent while somebody is typing, and a
         # shortcut fires before the key ever reaches the editor — so they are
         # headed off at the one point that sees every keystroke.
@@ -2509,6 +2482,17 @@ class MainWindow(QMainWindow):
         """Move a tab into a new independent application window."""
         if not (0 <= index < len(self._open_documents)):
             return
+        pane = self.other_pane()
+        if pane is not None and not global_point.isNull():
+            # onto the other pane of the split: its tab bar or its canvas
+            bar = pane.tabs
+            if bar.rect().contains(bar.mapFromGlobal(global_point)):
+                self.move_document_to_pane(index, pane,
+                                           bar.tabAt(bar.mapFromGlobal(global_point)))
+                return
+            if pane.widget.rect().contains(pane.widget.mapFromGlobal(global_point)):
+                self.move_document_to_pane(index, pane)
+                return
         for other in type(self)._windows:
             if other is self or not other.isVisible():
                 continue
@@ -2566,34 +2550,215 @@ class MainWindow(QMainWindow):
             elif after <= self._active_tab < before:
                 self._active_tab += 1
 
-    def split_document(self, index=None):
-        if self._split_host is not None:
-            return self._split_host
-        # Splitting an inactive tab puts that document beside the current one.
-        # Splitting the current document opens another view of the same pages.
+    # -- Split View: two panes in one window (ViewPane) ----------------------
+    @property
+    def is_split(self) -> bool:
+        return len(self._panes) > 1
+
+    def other_pane(self) -> Optional[ViewPane]:
+        return next((pane for pane in self._panes if pane is not self._active_pane), None)
+
+    def pane_of(self, widget) -> Optional[ViewPane]:
+        """The pane *widget* is in, if it is in one."""
+        for pane in self._panes:
+            if widget is pane.widget or pane.widget.isAncestorOf(widget):
+                return pane
+        return None
+
+    def split_document(self, index=None) -> ViewPane:
+        """View ▸ Split View: a second pane beside this one, in this window.
+
+        Splitting an inactive tab puts that document beside the current one;
+        splitting the current document opens another view of the same pages.
+        Only a view and a tab bar are made, so it is immediate (a whole second
+        window took 3.8 s, QA 2026-10-16).
+        """
+        if self.is_split:
+            return self.other_pane()
         state = dict(self._state_for_tab(index))
-        second = type(self)()
-        second.interactive_prompts = self.interactive_prompts
-        second._adopt_document_state(state)
-        host = SplitDocumentWindow(self, second)
-        for pane in host.panes:
-            pane.act_split_view.blockSignals(True)
-            pane.act_split_view.setChecked(True)
-            pane.act_split_view.blockSignals(False)
-        host.show()
-        second.view.setFocus(Qt.OtherFocusReason)
-        return host
+        state["tool"] = "select"
+        view = PageView(self)
+        view.use_the_graphics_card(self.view.gpu)
+        from .sheettabs import SheetTabs
+        sheet_tabs = SheetTabs(self)
+        view.addScrollBarWidget(sheet_tabs, Qt.AlignLeft)
+        tabs = self._make_document_tabs()
+        tabs.addTab(self._tab_title(state["document"]))
+        pane = self._make_pane(view, tabs, sheet_tabs)
+        pane.documents = [state]
+        pane.active = 0
+        view.tables.bar = self.formula_bar
+        self._wire_view(view)
+        styles = getattr(self, "markup_styles", None)
+        if styles is not None:
+            view.toolChanged.connect(
+                lambda key, v=view: styles._tool_changed(key) if self.view is v else None)
+            view.markupStyleChanged.connect(
+                lambda n, v=view: styles._style_changed(n) if self.view is v else None)
+            view.selectionChanged.connect(
+                lambda v=view: styles._selection_changed() if self.view is v else None)
+        self._panes.append(pane)
+        view.rulers.show(self.act_rulers.isChecked())
+        view.crosshair.show(self.act_crosshair.isChecked())
+        half = max(1, self.view_split.width() // 2)
+        self.view_split.setSizes([half, half])
+        self._check_split_action(True)
+        self.activate_pane(pane)
+        view.setFocus(Qt.OtherFocusReason)
+        return pane
+
+    def _check_split_action(self, on: bool) -> None:
+        self.act_split_view.blockSignals(True)
+        self.act_split_view.setChecked(on)
+        self.act_split_view.blockSignals(False)
+
+    def activate_pane(self, pane: ViewPane) -> None:
+        """Make *pane* the one the menus, toolbars and panels act on."""
+        if pane is self._active_pane or pane not in self._panes \
+                or getattr(self, "_activating", False):
+            return
+        self._activating = True
+        try:
+            self._activate_pane(pane)
+        finally:
+            self._activating = False
+
+    def _activate_pane(self, pane: ViewPane) -> None:
+        leaving = self._active_pane
+        held = self.view.tool_key
+        self.view.escape_everything()
+        if 0 <= self._active_tab < len(self._open_documents):
+            self._open_documents[self._active_tab] = self._current_document_state(held)
+        leaving.documents = self._open_documents
+        leaving.active = self._active_tab
+        self._active_pane = pane
+        self.view = pane.view
+        self.document_tabs = pane.tabs
+        self.sheet_tabs = pane.sheet_tabs
+        self._open_documents = pane.documents
+        self._active_tab = pane.active
+        shown = not self.formula_bar.isHidden()
+        pane.layout.insertWidget(pane.layout.indexOf(pane.tabs) + 1, self.formula_bar)
+        self.formula_bar.setVisible(shown)
+        self.formula_bar.tables = pane.view.tables
+        if 0 <= self._active_tab < len(self._open_documents):
+            state = self._open_documents[self._active_tab]
+            # the view may have been scrolled or zoomed (the wheel, Window
+            # Sync) while it was not the one in hand: it is where it is
+            view = pane.view
+            if view.scene() is state["scene"] and state["scene"] is not None:
+                state["zoom"] = view.zoom()
+                state["hscroll"] = view.horizontalScrollBar().value()
+                state["vscroll"] = view.verticalScrollBar().value()
+                state["index"] = view.visible_page_index()
+            self._adopt_document_state(state)
+        self._show_zoom(self.view.zoom())
+        self.sheet_tabs.refresh()
+        self._mark_active_pane()
+
+    def unsplit(self, keep: Optional[ViewPane] = None, carry_over: bool = True) -> None:
+        """Turn the split off: *keep* (the pane being worked in) stays.
+
+        With *carry_over*, any document the other pane held that *keep* has
+        not got moves across as a tab, so turning the split off never closes
+        somebody's work.
+        """
+        if not self.is_split:
+            return
+        keep = keep if keep in self._panes else self._active_pane
+        self.activate_pane(keep)
+        leaving = self.other_pane()
+        if carry_over:
+            here = self._active_tab
+            if 0 <= here < len(self._open_documents):
+                # what the tab shows now (New or Open may have replaced it)
+                self._open_documents[here] = self._current_document_state()
+            held = {id(state["document"]) for state in self._open_documents}
+            for state in leaving.documents:
+                if id(state["document"]) in held:
+                    continue
+                held.add(id(state["document"]))
+                self.add_tab_for_state(state)
+            self.switch_to_document(here)
+        self._panes.remove(leaving)
+        leaving.view.escape_everything()
+        leaving.view.setScene(None)
+        leaving.widget.setParent(None)
+        leaving.widget.deleteLater()
+        leaving.documents = []
+        self._mark_active_pane()
+        self._check_split_action(False)
+        self.view.setFocus(Qt.OtherFocusReason)
 
     def toggle_split_view(self, on: bool = True):
         """Split this window in two, or turn an existing split off."""
-        if self._split_host is not None:
-            self._split_host.unsplit(self)
+        if self.is_split:
+            self.unsplit()
             return None
         return self.split_document()
 
-    def separate_views(self):
-        if self._split_host is not None:
-            self._split_host.separate()
+    def separate_views(self) -> Optional["MainWindow"]:
+        """Window ▸ Separate Views: the other pane becomes a window of its
+        own, with its own menus."""
+        if not self.is_split:
+            return None
+        states = list(self.other_pane().documents)
+        self.unsplit(carry_over=False)
+        window = self.open_new_window()
+        window.interactive_prompts = self.interactive_prompts
+        for number, state in enumerate(states):
+            if number == 0:
+                window._open_documents[0] = dict(state)
+                window._adopt_document_state(dict(state))
+                window.document_tabs.setTabText(0, window._tab_title(state["document"]))
+            else:
+                window.add_tab_for_state(state)
+            if all(state["undo_stack"] is not held["undo_stack"]
+                   for held in self._open_documents):
+                state["undo_stack"].setParent(window)
+        return window
+
+    def add_tab_for_state(self, state: dict, before: int = -1) -> int:
+        """Show a document already open somewhere (its canvas, history and
+        place) in a new tab of this pane."""
+        held = self.view.tool_key
+        self.view.escape_everything()
+        if 0 <= self._active_tab < len(self._open_documents):
+            self._open_documents[self._active_tab] = self._current_document_state(held)
+        state = dict(state)
+        self._connect_undo_stack(state["undo_stack"])
+        self._open_documents.append(state)
+        self.document_tabs.blockSignals(True)
+        where = self.document_tabs.addTab(self._tab_title(state["document"]))
+        if 0 <= before < where:
+            self.document_tabs.moveTab(where, before)
+            self._open_documents.insert(before, self._open_documents.pop(where))
+            where = before
+        self.document_tabs.setCurrentIndex(where)
+        self.document_tabs.blockSignals(False)
+        self._active_tab = where
+        self._adopt_document_state(state)
+        return where
+
+    def move_document_to_pane(self, index: int, pane: ViewPane, before: int = -1) -> None:
+        """A tab dragged onto the other pane: its document goes there."""
+        if pane is self._active_pane or pane not in self._panes \
+                or not 0 <= index < len(self._open_documents):
+            return
+        state = dict(self._state_for_tab(index))
+        showing = next((i for i, held in enumerate(pane.documents)
+                        if held["document"] is state["document"]), -1)
+        if len(self._open_documents) == 1:
+            # the pane's last tab going is the split going
+            self.unsplit(keep=pane, carry_over=False)
+        else:
+            self.close_document_tab(index, moving=True)
+            self.activate_pane(pane)
+        if showing >= 0:
+            self.switch_to_document(showing)
+        else:
+            self.add_tab_for_state(state, before)
+        self.view.setFocus(Qt.OtherFocusReason)
 
     def switch_to_document(self, index: int) -> None:
         """Store the view by tab identity, even when two tabs share a PDF."""
@@ -2616,14 +2781,9 @@ class MainWindow(QMainWindow):
         target = self._state_for_tab(index)
         shared = any(state["document"] is target["document"]
                      for i, state in enumerate(self._open_documents) if i != index)
-        host = self._split_host
-        if host is not None:
-            for pane in host.panes:
-                if pane is not self and (
-                        pane.document is target["document"]
-                        or any(state["document"] is target["document"]
-                               for state in pane._open_documents)):
-                    shared = True
+        other = self.other_pane()
+        if other is not None and target["document"] in other.documents_held():
+            shared = True
         if not moving and not shared:
             previous = self._active_tab
             self.switch_to_document(index)
@@ -2631,13 +2791,11 @@ class MainWindow(QMainWindow):
                 self.switch_to_document(previous)
                 return
             self.switch_to_document(previous)
-        if len(self._open_documents) == 1 and host is not None:
+        if len(self._open_documents) == 1 and other is not None:
             # The pane's last tab going (closed, or dragged away) is the split
-            # going: the other pane carries on as an ordinary window.
-            other = next((pane for pane in host.panes if pane is not self), None)
-            if other is not None:
-                host.unsplit(other, carry_over=False)
-                return
+            # going: the other pane carries on as the window's one view.
+            self.unsplit(keep=other, carry_over=False)
+            return
         if len(self._open_documents) == 1:
             self.new_document(confirm=False)
             self._open_documents[0] = self._current_document_state()
@@ -2659,11 +2817,23 @@ class MainWindow(QMainWindow):
             self._adopt_document_state(self._open_documents[self._active_tab])
 
     def confirm_all_documents(self) -> bool:
-        """Include inactive tabs in the close/save decision, once per PDF."""
+        """Include inactive tabs — and the other view's, in Split View — in
+        the close/save decision, once per PDF."""
+        seen = set()
+        if not self.is_split:
+            return self._confirm_pane_documents(seen)
+        here = self._active_pane
+        for pane in [p for p in self._panes if p is not here] + [here]:
+            self.activate_pane(pane)
+            if not self._confirm_pane_documents(seen):
+                self.activate_pane(here)
+                return False
+        return True
+
+    def _confirm_pane_documents(self, seen: set) -> bool:
         if not self._open_documents:
             return self.confirm_discard()
         previous = self._active_tab
-        seen = set()
         for index in range(len(self._open_documents)):
             document = self._state_for_tab(index)["document"]
             if id(document) in seen:
@@ -2776,20 +2946,55 @@ class MainWindow(QMainWindow):
         self.refresh_scale_label()
 
     def open_document(self) -> None:
-        if not self.confirm_discard():
-            return
+        """File ▸ Open: the file in a tab of its own, as Revu opens it."""
         from .xlsximport import OPEN_FILTER
         path, _ = QFileDialog.getOpenFileName(self, "Open document", "", OPEN_FILTER)
         if not path:
             return
         self._open_chosen(path)
 
+    def _tab_showing(self, path: str):
+        """(pane, tab) of this window showing the file at *path*, or None."""
+        wanted = os.path.normcase(os.path.abspath(path))
+        for pane in self._panes:
+            states = self._open_documents if pane is self._active_pane else pane.documents
+            for index, state in enumerate(states):
+                if pane is self._active_pane and index == self._active_tab:
+                    document = self.document
+                else:
+                    document = state["document"]
+                if document.path and os.path.normcase(os.path.abspath(document.path)) == wanted:
+                    return pane, index
+        return None
+
+    def _untouched(self) -> bool:
+        """The document in view is a blank Untitled nobody has worked on."""
+        return (not self.document.path and not self.document.modified
+                and self.undo_stack.count() == 0)
+
     def _open_chosen(self, path: str) -> None:
+        """Open *path* in a new tab — or bring forward the tab that already
+        shows it. A blank, untouched Untitled is replaced rather than kept."""
+        showing = self._tab_showing(path)
+        if showing is not None:
+            pane, index = showing
+            self.activate_pane(pane)
+            self.switch_to_document(index)
+            self.status_hint.setText(f"{os.path.basename(path)} is already open")
+            return
+        new_tab = not self._untouched()
+        if new_tab:
+            previous = self._active_tab
+            self.open_in_new_tab()
         try:
-            if self.open_path(path) is False:
-                return
+            opened = self.open_path(path) is not False
         except Exception as exc:  # noqa: BLE001
+            opened = False
             QMessageBox.critical(self, "Open document", f"Could not open the file:\n{exc}")
+        if not opened:
+            if new_tab:
+                self.close_document_tab(self._active_tab, moving=True)
+                self.switch_to_document(previous)
             return
         self.undo_stack.clear()
         self.current_index = 0
@@ -2821,8 +3026,6 @@ class MainWindow(QMainWindow):
             forget_recent_files(path)
             QMessageBox.information(self, "Open Recent",
                                     f"“{os.path.basename(path)}” is no longer there:\n{path}")
-            return
-        if not self.confirm_discard():
             return
         self._open_chosen(path)
 
@@ -3214,11 +3417,16 @@ class MainWindow(QMainWindow):
         self._auto_breaks = set()
         self._wrap_toolbar_rows_soon()
 
-    def changeEvent(self, event) -> None:
-        super().changeEvent(event)
-        if event.type() == QEvent.WindowStateChange:
-            from . import titlebar
-            titlebar.window_state_changed(self)
+    if sys.platform == "win32":
+        def nativeEvent(self, event_type, message):
+            """Windows' messages for the frame: the menus sit in its title
+            bar (nativeframe). Only defined on Windows, where it is needed."""
+            frame = getattr(self, "_native_frame", None)
+            if frame is not None:
+                answer = frame.native_event(message)
+                if answer is not None:
+                    return answer
+            return super().nativeEvent(event_type, message)
 
     def keyPressEvent(self, event) -> None:
         """Escape works wherever the keyboard happens to be.
@@ -3443,6 +3651,21 @@ class MainWindow(QMainWindow):
                     other._syncing_view = False
                 except RuntimeError:
                     pass
+        # the other view of a split window, when it shows the same document
+        pane = self.other_pane()
+        if pane is not None and pane.documents:
+            state = pane.documents[pane.active]
+            if state["document"] is self.document and pane.view.scene() is self.scene:
+                index = self.current_index if mode == 2 else state["index"]
+                self._syncing_view = True
+                try:
+                    pane.view.set_zoom(self.view.zoom())
+                    pane.view.horizontalScrollBar().setValue(
+                        self.view.horizontalScrollBar().value())
+                    pane.view.verticalScrollBar().setValue(
+                        round(pane.view._page_top_value(index) + page_offset))
+                finally:
+                    self._syncing_view = False
 
     def eventFilter(self, watched, event) -> bool:
         """Let the editor keep keys that would otherwise run global commands.
@@ -3456,8 +3679,16 @@ class MainWindow(QMainWindow):
         """
         # This application-wide filter also sees every paint/layout/timer
         # event. Only input handled below needs a walk up the widget tree.
-        if event.type() not in (QEvent.ShortcutOverride, QEvent.KeyPress,
-                                QEvent.MouseButtonPress):
+        kind = event.type()
+        if (kind in (QEvent.MouseButtonPress, QEvent.FocusIn) and len(self._panes) > 1
+                and isinstance(watched, QWidget)):
+            # Split View: a click (or the keyboard) in a pane makes it the
+            # one the menus, toolbars and panels act on
+            pane = self.pane_of(watched)
+            if pane is not None and pane is not self._active_pane:
+                self.activate_pane(pane)
+        if kind not in (QEvent.ShortcutOverride, QEvent.KeyPress,
+                        QEvent.MouseButtonPress):
             return super().eventFilter(watched, event)
         owner = watched if isinstance(watched, QWidget) else None
         on_canvas = False
@@ -3701,8 +3932,6 @@ class MainWindow(QMainWindow):
         self.save_layout()
 
     def save_layout(self) -> None:
-        if self._split_host is not None:
-            return
         # A direct save consumes any delayed save already waiting. Otherwise
         # that stale timer can fire after a second window has restored a newer
         # arrangement and overwrite it with this older window's state.
@@ -3717,6 +3946,7 @@ class MainWindow(QMainWindow):
         settings.setValue("window/stamp", stamp)
         self._layout_stamp = stamp
         settings.setValue("window/geometry", self.saveGeometry())
+        settings.setValue("window/frame", "native")
         settings.setValue("window/maximised", self.isMaximized())
         settings.setValue("window/state", self.saveState())
         settings.setValue("toolbars/rows", self.TOOLBAR_ROWS_VERSION)
@@ -3740,6 +3970,10 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             self._layout_stamp = 0
         geometry = settings.value("window/geometry")
+        if sys.platform != "darwin" and settings.value("window/frame") != "native":
+            # saved by a window that drew its own frame (before 2026-10-16):
+            # its size and place would land the native frame askew
+            geometry = None
         state = settings.value("window/state")
         if geometry is not None:
             self.restoreGeometry(geometry)
@@ -5448,7 +5682,12 @@ class MainWindow(QMainWindow):
                 "maximized": self.isMaximized(),
                 "rulers": self.view.rulers.on,
                 "bars": [(bar, bar.isVisible()) for bar in self.toolbars],
+                # Split View: only the view in hand is presented
+                "panes": [pane.widget for pane in self._panes
+                          if pane is not self._active_pane],
             }
+            for widget in self._presenting["panes"]:
+                widget.hide()
             for toolbar in self.toolbars:
                 toolbar.hide()
             for dock in self.panels:
@@ -5471,6 +5710,10 @@ class MainWindow(QMainWindow):
             self.menuBar().setVisible(was["menu"])
             self.statusBar().setVisible(was["status"])
             self.document_tabs.setVisible(was["tabs"])
+            from shiboken6 import isValid
+            for widget in was.get("panes", []):
+                if isValid(widget):
+                    widget.show()
             self.restoreState(was["state"])
             for toolbar, shown in was["bars"]:
                 toolbar.setVisible(shown)
@@ -9306,6 +9549,9 @@ class MainWindow(QMainWindow):
         application = QApplication.instance()
         if application is not None:
             apply_theme(application, theme)
+        from . import nativeframe
+        nativeframe.follow_theme()           # Windows' caption buttons too
+        self._mark_active_pane()
         if self.scene is not None:
             self.scene.set_canvas_colour(CANVAS[theme])
         self.refresh_icons()
