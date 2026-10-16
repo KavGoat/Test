@@ -76,6 +76,10 @@ def proxy(menu: QMenu, action: QAction, text: Optional[str] = None,
         entry.setShortcut(shown)
         entry.setShortcutContext(Qt.WidgetShortcut)
     entry.triggered.connect(lambda _checked=False: action.trigger())
+    # the same command as *action*, for Keyboard Shortcuts (bindable.py)
+    command = action.property("cf_command")
+    if command:
+        entry.setProperty("cf_command", command)
     menu.addAction(entry)
     return entry
 

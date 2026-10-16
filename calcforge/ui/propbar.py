@@ -490,6 +490,7 @@ def build(window) -> QToolBar:
     w.caption_button.setToolTip("Caption: whether the value is written on the drawing")
     caption_menu = QMenu(w.caption_button)
     caption_menu.setObjectName("captionMenu")
+    caption_menu.setProperty("cf_context", "propbar.caption")
     w.caption_show_action = caption_menu.addAction("Show Caption")
     w.caption_show_action.setCheckable(True)
     w.caption_show_action.toggled.connect(lambda on: w._measure_setting(
@@ -537,6 +538,7 @@ def build(window) -> QToolBar:
     w.totals_button.setToolTip("The selected measurements added up")
     w.totals_button.popup_menu = QMenu(w.totals_button)
     w.totals_button.popup_menu.setObjectName("totalsMenu")
+    w.totals_button.popup_menu.setProperty("cf_data", True)      # the totals themselves
     put(TOTALS, w.totals_button)
 
     w.style_bar = bar

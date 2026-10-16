@@ -623,6 +623,7 @@ def clear_filter(tables) -> None:
 def filter_menu(tables, col: int, global_pos) -> QMenu:
     """The drop-down of a filtered column: sort, values to show, conditions."""
     menu = QMenu(tables.view)
+    menu.setProperty("cf_context", "filter")
     menu.addAction("Sort A to Z", lambda: _sort_filtered(tables, col, True))
     menu.addAction("Sort Z to A", lambda: _sort_filtered(tables, col, False))
     menu.addSeparator()

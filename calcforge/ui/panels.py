@@ -310,6 +310,8 @@ class PagesPanel(QWidget):
             button.clicked.connect(slot)
             if key in family:
                 choice = QMenu(button)
+                # the same Before / After as Document ▸ Insert's (bindable.py)
+                choice.setProperty("cf_context", f"insert.{key}")
                 self.window.fill_insert_choice(choice, family[key])
                 button.setMenu(choice)
                 button.setPopupMode(QToolButton.MenuButtonPopup)
@@ -1229,6 +1231,7 @@ class MarkupsPanel(QWidget):
                          self.all_rows(self.window.document)})
         allowed = self.column_filters.get(column, set(values))
         menu = QMenu(self)
+        menu.setProperty("cf_data", True)          # the column's values: data, not commands
         menu.setTitle(f"Filter {self.COLUMNS[column]}")
         every = menu.addAction("(All)")
         every.triggered.connect(lambda: self.set_column_filter(column, None))
@@ -1351,6 +1354,7 @@ class MarkupsPanel(QWidget):
     # -- changing several at once -------------------------------------------
     def _row_menu(self, point) -> QMenu:
         menu = QMenu(self)
+        menu.setProperty("cf_context", "markuprow")
         chosen = self.selected_markups()
         if not chosen:
             return menu
@@ -1762,6 +1766,7 @@ class _SetHeader(QWidget):
         line.setSpacing(4)
         self.chevron = QToolButton()
         self.chevron.setObjectName("toolSetChevron")
+        self.chevron.setProperty("cf_data", True)     # one set's: not a command of its own
         self.chevron.setAutoRaise(True)
         self.chevron.clicked.connect(self._toggle)
         line.addWidget(self.chevron)
@@ -1770,6 +1775,7 @@ class _SetHeader(QWidget):
         line.addWidget(self.title, 1)
         self.gear = QToolButton()
         self.gear.setObjectName("toolSetGear")
+        self.gear.setProperty("cf_data", True)        # its menu's entries are the commands
         self.gear.setAutoRaise(True)
         self.gear.setIcon(icon("gear", 16))
         self.gear.setToolTip(f"“{group.name}”: its view, its tools, its name")
@@ -1881,6 +1887,7 @@ class ToolSetsPanel(QWidget):
 
         # Bluebeam's "Tool Chest ▾": the sets, and making or bringing in one
         self.chest_button = QToolButton()
+        self.chest_button.setProperty("cf_data", True)   # its menu's entries are the commands
         self.chest_button.setObjectName("toolChestMenu")
         self.chest_button.setText("Tool Sets ▾")
         self.chest_button.setPopupMode(QToolButton.InstantPopup)
@@ -2274,6 +2281,7 @@ class ToolSetsPanel(QWidget):
     def build_set_menu(self) -> QMenu:
         """A set's gear: Symbol, List or Detail, and what the right-click offers."""
         menu = QMenu(self)
+        menu.setProperty("cf_context", "chesttool")
         group = self.current_set()
         if group is not None:
             for view in (SYMBOL, LIST, DETAIL):
@@ -2291,8 +2299,10 @@ class ToolSetsPanel(QWidget):
         """Revu's Tool Chest menu: a tick for each set the chest shows, then
         managing, making and bringing in sets."""
         menu = QMenu(self)
+        menu.setProperty("cf_context", "chest")
         for group in self.groups:
             shown = menu.addAction(group.name)
+            shown.setProperty("cf_data", True)     # a set's name: data, not a command
             shown.setCheckable(True)
             shown.setChecked(not group.hidden)
             shown.toggled.connect(lambda on, n=group.name: self.set_shown(n, on))
@@ -2331,6 +2341,7 @@ class ToolSetsPanel(QWidget):
         from . import toolsets
 
         menu = QMenu(self)
+        menu.setProperty("cf_context", "chesttool")
         entry = self.current_entry()
         group = self.current_set()
         if entry is not None:
@@ -3613,6 +3624,7 @@ class PropertiesPanel(QScrollArea):
         add.setPopupMode(QToolButton.MenuButtonPopup)
         add.setToolButtonStyle(Qt.ToolButtonTextOnly)
         menu = QMenu(add)
+        menu.setProperty("cf_data", True)          # the tool sets' names
         for group in toolsets.load_toolsets():
             menu.addAction(group.name, lambda name=group.name: self.window.add_to_toolset(
                 first, into=name, ask=False))

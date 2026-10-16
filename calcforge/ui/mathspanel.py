@@ -44,6 +44,7 @@ class MathsSection(QWidget):
         lay.setSpacing(2)
         self.header = QToolButton()
         self.header.setObjectName("mathsSectionHeader")
+        self.header.setProperty("cf_data", True)    # opens and closes: not a command
         self.header.setText(title)
         self.header.setCheckable(True)
         self.header.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)

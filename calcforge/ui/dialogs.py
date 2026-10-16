@@ -1231,36 +1231,51 @@ class ShortcutEdit(QLineEdit):
     """Press the keys you want; it records them.
 
     Two kinds of binding live in one box. A keystroke that produces a printable
-    character with no Ctrl or Alt — ``m``, ``"`` — is stored as that character,
-    because those act when they are typed straight onto the page. Anything with
-    a modifier is stored as a key sequence, which works from the menu bar as
-    well. Backspace clears the row; Escape puts back what was there.
+    character with no Ctrl or Alt — ``m``, ``"``, ``7`` — is stored as that
+    character, because those act when they are typed straight onto the page.
+    Anything else — a key with Ctrl, Alt, Shift or Meta, an F-key up to F24,
+    Insert, Delete, Home, End, Page Up and Down, an arrow — is stored as a key
+    sequence. Backspace clears the box; Escape puts back what was there; Tab
+    moves on.
     """
 
     changed = Signal()
+    focused = Signal()
 
     def __init__(self, text: str = "", parent=None):
         super().__init__(text, parent)
         self._original = text
         self.setReadOnly(True)             # every key is captured, not typed
-        self.setPlaceholderText("press a key")
+        self.prompt = "press a key"
         self.setClearButtonEnabled(False)
+
+    def setPlaceholderText(self, text: str) -> None:
+        self.prompt = text
+        super().setPlaceholderText(text)
+
+    def event(self, event) -> bool:
+        # Every key belongs to this box while it has the focus: none of them
+        # is the dialog's (Enter, F1) or the window's to act on.
+        if event.type() == QEvent.ShortcutOverride:
+            event.accept()
+            return True
+        return super().event(event)
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
         if key in (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta,
-                   Qt.Key_AltGr, Qt.Key_unknown):
+                   Qt.Key_AltGr, Qt.Key_unknown, Qt.Key_CapsLock, Qt.Key_NumLock):
             return
-        modifiers = event.modifiers()
+        modifiers = event.modifiers() & ~Qt.KeypadModifier
         if key == Qt.Key_Escape and not modifiers:
             self.setText(self._original)
             self.changed.emit()
             return
-        if key in (Qt.Key_Backspace, Qt.Key_Delete) and not modifiers:
+        if key == Qt.Key_Backspace and not modifiers:
             self.setText("")
             self.changed.emit()
             return
-        if key == Qt.Key_Tab and not modifiers:
+        if key in (Qt.Key_Tab, Qt.Key_Backtab) and not modifiers & ~Qt.ShiftModifier:
             super().keyPressEvent(event)   # let the focus move on
             return
         chord = modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
@@ -1270,7 +1285,8 @@ class ShortcutEdit(QLineEdit):
         # matches); a character that needs Shift to type, " or @, stays one
         shifted = bool(modifiers & Qt.ShiftModifier) and (
             key == Qt.Key_Space or (len(text) == 1 and text.isalpha()))
-        if text and text.isprintable() and not chord and not shifted:
+        if text and text.isprintable() and not text.isspace() and not chord \
+                and not shifted:
             self.setText(text)
         else:
             sequence = QKeySequence(QKeyCombination(modifiers, Qt.Key(key)))
@@ -1279,17 +1295,45 @@ class ShortcutEdit(QLineEdit):
 
     def focusInEvent(self, event) -> None:
         self._original = self.text()
+        # "press a key" in the box being set, not in seven hundred at once
+        QLineEdit.setPlaceholderText(self, self.prompt)
         super().focusInEvent(event)
+        self.focused.emit()
+
+    def focusOutEvent(self, event) -> None:
+        if self.objectName() == "shortcutEditor":
+            QLineEdit.setPlaceholderText(self, "")
+        super().focusOutEvent(event)
+
+
+def _key_of(text: str) -> str:
+    """A binding's key, spelt one way, for comparing two."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    return QKeySequence(text).toString(QKeySequence.PortableText).lower() or text.lower()
 
 
 class ShortcutManagerDialog(QDialog):
-    """Change any binding by pressing the keys for it."""
+    """Every command, and the key for it (the user, 2026-10-16: "Whatever
+    features you add should show up in the shortcuts manager as a feature,
+    and then the user can add whatever shortcuts they want").
+
+    Grouped as the menus are, each with where it is offered. Click a
+    command's key box and press the keys; the key works at once, and is
+    remembered. A key that already does something where this one would act
+    is said in the bar under the list, with the choice to give it to this
+    command instead.
+    """
 
     def __init__(self, manager, parent=None):
         super().__init__(parent)
+        from .shortcuts import SCOPE_NAMES
         self.setWindowTitle("Keyboard Shortcuts")
+        self.setObjectName("shortcutManager")
         self.manager = manager
-        self.resize(780, 640)
+        self.window_ = parent
+        self.resize(1040, 700)
         outer = QVBoxLayout(self)
         self.tabs = QTabWidget()
         outer.addWidget(self.tabs, 1)
@@ -1299,89 +1343,185 @@ class ShortcutManagerDialog(QDialog):
         layout = QVBoxLayout(keys)
 
         note = QLabel(
-            "Click a shortcut and <b>press the keys you want</b>. "
-            "A single character — <b>m</b>, <b>\"</b>, <b>\\</b> — acts when you type it "
-            "straight onto the page; anything with Ctrl or Alt works from the menus too. "
-            "Backspace clears one, Escape puts it back.<br>"
-            "Tool keys are deliberately silent while you are typing into a "
-            "markup. Symbols are the other way round: they type themselves in "
-            "wherever the cursor is.")
+            "Every command is here, grouped as the menus are. Click a command's "
+            "<b>Shortcut</b> box and <b>press the keys you want</b> — Ctrl, Alt, Shift "
+            "or Meta with a key, F1–F24, Insert, Delete, Home, End, Page Up/Down, an "
+            "arrow, or a single letter or digit. It works at once and is remembered. "
+            "Backspace clears the box, Escape puts it back.<br>"
+            "No key acts while you are typing into a text box, a cell or an equation; "
+            "a single character acts when it is typed straight onto the page.")
         note.setWordWrap(True)
         layout.addWidget(note)
 
+        search = QHBoxLayout()
         self.filter = QLineEdit()
-        self.filter.setPlaceholderText("Filter…")
+        self.filter.setObjectName("shortcutSearch")
+        self.filter.setPlaceholderText("Search commands by name, place or key…")
         self.filter.setClearButtonEnabled(True)
-        self.filter.textChanged.connect(self._apply_filter)
-        layout.addWidget(self.filter)
+        self.filter.textChanged.connect(lambda _text: self._apply_filter())
+        search.addWidget(self.filter, 3)
+        search.addWidget(QLabel("Key:"))
+        self.key_search = ShortcutEdit("")
+        self.key_search.setObjectName("shortcutKeySearch")
+        self.key_search.setPlaceholderText("press a key to find it")
+        self.key_search.setToolTip("Press a key to list the commands on it")
+        self.key_search.changed.connect(self._apply_filter)
+        search.addWidget(self.key_search, 1)
+        self.group_filter = QComboBox()
+        self.group_filter.setObjectName("shortcutGroup")
+        search.addWidget(self.group_filter)
+        layout.addLayout(search)
 
+        bindings = manager.bindings()
+        self._by_id = {b.action_id: b for b in bindings}
+        order = []
+        for binding in bindings:
+            if binding.category not in order:
+                order.append(binding.category)
+        self.group_filter.addItem("All groups", "")
+        for category in order:
+            self.group_filter.addItem(category, category)
+        self.group_filter.currentIndexChanged.connect(lambda _i: self._apply_filter())
+
+        places = self._places_of()
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Group", "Command", "Shortcut", "Default", "Where"])
+        self.table.setObjectName("shortcutTable")
+        self.table.setHorizontalHeaderLabels(["Command", "Shortcut", "Default", "Acts",
+                                              "Where"])
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setWordWrap(False)
         layout.addWidget(self.table, 1)
 
         self.editors: dict[str, ShortcutEdit] = {}
         self.rows: dict[str, int] = {}
-        for binding in manager.bindings():
+        self._row_ids: dict[int, str] = {}
+        self._headers: dict[str, int] = {}
+        self._places: dict[str, str] = {}
+        bold = QFont()
+        bold.setBold(True)
+        acts_tip = ("Where the key acts. One key may do two things only where they "
+                    "can never both act: Calc and Markup mode, inside an equation and "
+                    "outside it, or in an open table or spreadsheet and outside it.")
+        self.table.setUpdatesEnabled(False)
+        for category in order:
             row = self.table.rowCount()
             self.table.insertRow(row)
-            self.rows[binding.action_id] = row
-            group = QTableWidgetItem(binding.category)
-            group.setFlags(Qt.ItemIsEnabled)
-            self.table.setItem(row, 0, group)
-            label = QTableWidgetItem(binding.label)
-            label.setFlags(Qt.ItemIsEnabled)
-            self.table.setItem(row, 1, label)
-            editor = ShortcutEdit(manager.sequence(binding.action_id))
-            editor.changed.connect(self._check)
-            self.table.setCellWidget(row, 2, editor)
-            self.editors[binding.action_id] = editor
-            default = QTableWidgetItem(binding.default or "—")
-            default.setFlags(Qt.ItemIsEnabled)
-            self.table.setItem(row, 3, default)
-            from .shortcuts import SCOPE_NAMES
-            where = QTableWidgetItem(SCOPE_NAMES.get(binding.scope, ""))
-            where.setFlags(Qt.ItemIsEnabled)
-            where.setToolTip("Where the key acts. One key may do two things only where "
-                             "they can never both act: Calc and Markup mode, inside "
-                             "an equation and outside it, or in an open table or "
-                             "spreadsheet and outside it.")
-            self.table.setItem(row, 4, where)
-        self.table.resizeColumnsToContents()
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+            header = QTableWidgetItem(category)
+            header.setFont(bold)
+            header.setFlags(Qt.ItemIsEnabled)
+            self.table.setItem(row, 0, header)
+            self.table.setSpan(row, 0, 1, 5)
+            self._headers[category] = row
+            for binding in (b for b in bindings if b.category == category):
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                self.rows[binding.action_id] = row
+                self._row_ids[row] = binding.action_id
+                label = QTableWidgetItem("   " + binding.label)
+                label.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                label.setToolTip(binding.label)
+                self.table.setItem(row, 0, label)
+                editor = ShortcutEdit(manager.sequence(binding.action_id))
+                editor.setObjectName("shortcutEditor")
+                QLineEdit.setPlaceholderText(editor, "")
+                editor.changed.connect(lambda i=binding.action_id: self._edited(i))
+                editor.focused.connect(lambda r=row: self.table.selectRow(r))
+                self.table.setCellWidget(row, 1, editor)
+                self.editors[binding.action_id] = editor
+                default = QTableWidgetItem(binding.default or "—")
+                default.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                self.table.setItem(row, 2, default)
+                acts = QTableWidgetItem(SCOPE_NAMES.get(binding.scope, ""))
+                acts.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                acts.setToolTip(acts_tip)
+                self.table.setItem(row, 3, acts)
+                where = " · ".join(places.get(binding.action_id, []))
+                self._places[binding.action_id] = where
+                place = QTableWidgetItem(where)
+                place.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                place.setToolTip(where.replace(" · ", "\n"))
+                self.table.setItem(row, 4, place)
+        self.table.setUpdatesEnabled(True)
+        head = self.table.horizontalHeader()
+        head.setSectionResizeMode(0, QHeaderView.Interactive)
+        head.setSectionResizeMode(4, QHeaderView.Stretch)
+        self.table.setColumnWidth(0, 330)
+        self.table.setColumnWidth(1, 150)
+        self.table.setColumnWidth(2, 110)
+        self.table.setColumnWidth(3, 120)
+        self.table.verticalHeader().setDefaultSectionSize(
+            max(26, self.fontMetrics().height() + 14))
+
+        # a key already in use, and what to do about it
+        self.conflict = QWidget()
+        self.conflict.setObjectName("shortcutConflict")
+        bar = QHBoxLayout(self.conflict)
+        bar.setContentsMargins(0, 0, 0, 0)
+        self.conflict_text = QLabel("")
+        self.conflict_text.setWordWrap(True)
+        bar.addWidget(self.conflict_text, 1)
+        self.reassign_button = QPushButton("Reassign")
+        self.reassign_button.setToolTip("Take the key from the other command and give it "
+                                        "to this one")
+        self.reassign_button.clicked.connect(lambda _checked=False: self.reassign())
+        bar.addWidget(self.reassign_button)
+        self.keep_button = QPushButton("Cancel")
+        self.keep_button.setToolTip("Leave the key where it was")
+        self.keep_button.clicked.connect(lambda _checked=False: self.cancel_pending())
+        bar.addWidget(self.keep_button)
+        self.conflict.setVisible(False)
+        layout.addWidget(self.conflict)
+        self._pending = None            # (command, key, the commands it clashes with)
 
         self.warning = QLabel("")
         self.warning.setWordWrap(True)
         layout.addWidget(self.warning)
 
         buttons = QHBoxLayout()
-        clear_row = QPushButton("Clear")
-        clear_row.clicked.connect(lambda: self._set_current(""))
-        reset_row = QPushButton("Reset one")
-        reset_row.setToolTip("Reset the selected shortcut")
-        reset_row.clicked.connect(self._reset_row)
-        reset_all = QPushButton("Reset all")
-        reset_all.clicked.connect(self._reset_all)
-        for button in (clear_row, reset_row, reset_all):
+        self.clear_button = QPushButton("Clear")
+        self.clear_button.setToolTip("Take the selected command's key away")
+        self.clear_button.clicked.connect(lambda: self._set_current(""))
+        self.reset_button = QPushButton("Reset one")
+        self.reset_button.setToolTip("Put the selected command's own key back")
+        self.reset_button.clicked.connect(self._reset_row)
+        self.reset_all_button = QPushButton("Reset all")
+        self.reset_all_button.setToolTip("Put every command's own key back")
+        self.reset_all_button.clicked.connect(self._reset_all)
+        for button in (self.clear_button, self.reset_button, self.reset_all_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
+        self.count_label = QLabel("")
+        buttons.addWidget(self.count_label)
         layout.addLayout(buttons)
-        outer.addWidget(_buttons(self))
+        box = QDialogButtonBox(QDialogButtonBox.Close)
+        box.rejected.connect(self.accept)
+        box.accepted.connect(self.accept)
+        outer.addWidget(box)
         self._check()
+        self._apply_filter()
 
     # -- helpers -----------------------------------------------------------
+    def _places_of(self) -> dict:
+        commands = getattr(self.window_, "commands", None)
+        if commands is None:
+            return {}
+        try:
+            return commands.places_map()
+        except Exception:  # noqa: BLE001 - the list still works without places
+            return {}
+
     def _current_binding(self):
-        row = self.table.currentRow()
-        bindings = self.manager.bindings()
-        return bindings[row] if 0 <= row < len(bindings) else None
+        action_id = self._row_ids.get(self.table.currentRow())
+        return self._by_id.get(action_id) if action_id else None
 
     def _set_current(self, text: str) -> None:
         binding = self._current_binding()
         if binding is not None:
             self.editors[binding.action_id].setText(text)
-            self._check()
+            self._edited(binding.action_id)
 
     def _reset_row(self) -> None:
         binding = self._current_binding()
@@ -1389,21 +1529,114 @@ class ShortcutManagerDialog(QDialog):
             self._set_current(binding.default)
 
     def _reset_all(self) -> None:
+        self.cancel_pending(revert=False)
         for binding in self.manager.bindings():
-            self.editors[binding.action_id].setText(binding.default)
-        self._check()
+            if binding.action_id in self.editors:
+                self.editors[binding.action_id].setText(binding.default)
+        self._commit_all()
 
-    def _apply_filter(self, needle: str) -> None:
-        needle = needle.strip().lower()
-        for binding in self.manager.bindings():
-            row = self.rows[binding.action_id]
-            haystack = f"{binding.category} {binding.label} " \
-                       f"{self.editors[binding.action_id].text()}".lower()
-            self.table.setRowHidden(row, bool(needle) and needle not in haystack)
+    def _apply_filter(self, *_args) -> None:
+        needle = self.filter.text().strip().lower()
+        wanted_key = _key_of(self.key_search.text())
+        group = self.group_filter.currentData() or ""
+        shown_in = {category: 0 for category in self._headers}
+        shown = 0
+        for action_id, row in self.rows.items():
+            binding = self._by_id[action_id]
+            key = self.editors[action_id].text()
+            haystack = f"{binding.category} {binding.label} {key} " \
+                       f"{self._places.get(action_id, '')}".lower()
+            hide = (bool(needle) and not all(word in haystack for word in needle.split())) \
+                or (bool(wanted_key) and _key_of(key) != wanted_key) \
+                or (bool(group) and binding.category != group)
+            self.table.setRowHidden(row, hide)
+            if not hide:
+                shown_in[binding.category] += 1
+                shown += 1
+        for category, row in self._headers.items():
+            self.table.setRowHidden(row, shown_in[category] == 0)
+        self.count_label.setText(f"{shown} of {len(self.rows)} commands")
 
     def assignments(self) -> dict[str, str]:
-        return {binding.action_id: self.editors[binding.action_id].text().strip()
-                for binding in self.manager.bindings()}
+        return {action_id: editor.text().strip() for action_id, editor in self.editors.items()}
+
+    def _others_on(self, action_id: str, text: str) -> list[str]:
+        """The commands already on *text* where *action_id*'s key would act."""
+        from .shortcuts import scopes_overlap
+        wanted = _key_of(text)
+        if not wanted:
+            return []
+        scope = self._by_id[action_id].scope
+        return [other for other, editor in self.editors.items()
+                if other != action_id and _key_of(editor.text()) == wanted
+                and scopes_overlap(scope, self._by_id[other].scope)]
+
+    # -- changing a key --------------------------------------------------------
+    def _edited(self, action_id: str) -> None:
+        """A key was pressed into *action_id*'s box (or cleared, or reset):
+        it acts at once, unless another command has it there already."""
+        editor = self.editors[action_id]
+        text = editor.text().strip()
+        if self._pending is not None and self._pending[0] != action_id:
+            self.cancel_pending()
+        others = self._others_on(action_id, text)
+        if others:
+            names = ", ".join(f"“{self._by_id[o].label}”" for o in others)
+            mine = self._by_id[action_id].label
+            self.conflict_text.setText(
+                f"⚠ <b>{html.escape(text)}</b> is already {html.escape(names)}. "
+                f"Give it to “{html.escape(mine)}” instead?")
+            self.conflict.setVisible(True)
+            self._pending = (action_id, text, others)
+            self._check()
+            return
+        self.conflict.setVisible(False)
+        self._pending = None
+        self._commit(action_id, text)
+
+    def reassign(self) -> None:
+        """The key in question goes to the command it was pressed for; the
+        others lose it."""
+        if self._pending is None:
+            return
+        action_id, text, others = self._pending
+        self._pending = None
+        self.conflict.setVisible(False)
+        for other in others:
+            self.editors[other].setText("")
+            self.manager.set_sequence(other, "")
+        self._commit(action_id, text)
+
+    def cancel_pending(self, revert: bool = True) -> None:
+        """Leave the key where it was."""
+        if self._pending is None:
+            return
+        action_id, _text, _others = self._pending
+        self._pending = None
+        self.conflict.setVisible(False)
+        if revert:
+            self.editors[action_id].setText(self.manager.sequence(action_id))
+        self._check()
+
+    def _commit(self, action_id: str, text: str) -> None:
+        if self.manager.sequence(action_id) != text:
+            self.manager.set_sequence(action_id, text)
+        self._applied()
+
+    def _commit_all(self) -> None:
+        for action_id, text in self.assignments().items():
+            if self.manager.sequence(action_id) != text:
+                self.manager.set_sequence(action_id, text)
+        self._applied()
+
+    def _applied(self) -> None:
+        """The window's keys follow at once."""
+        apply = getattr(self.window_, "apply_shortcuts", None)
+        if callable(apply):
+            apply()
+        self._check()
+        if self.key_search.text():
+            self._apply_filter()
 
     def _check(self) -> None:
         """Flag anything bound twice, on the rows themselves and in a line.
@@ -1417,17 +1650,18 @@ class ShortcutManagerDialog(QDialog):
         clashing = {action_id for ids in found.values() for action_id in ids}
         clashes = []
         for text, ids in found.items():
+            if self._pending is not None and self._pending[0] in ids:
+                continue                   # the bar above is asking about it
             labels = [BY_ID[i].label if i in BY_ID else i for i in ids]
-            clashes.append(f"{labels[0]} and {', '.join(labels[1:])} are both on {text}")
-        for binding in self.manager.bindings():
-            editor = self.editors[binding.action_id]
-            editor.setStyleSheet("border: 1px solid #c0392b;"
-                                 if binding.action_id in clashing else "")
-        for binding in self.manager.bindings():
-            if not self.editors[binding.action_id].text().strip():
-                self.editors[binding.action_id].setStyleSheet("")
+            shown = QKeySequence(text).toString(QKeySequence.NativeText) or text
+            clashes.append(f"{labels[0]} and {', '.join(labels[1:])} are both on {shown}")
+        for action_id, editor in self.editors.items():
+            red = action_id in clashing and bool(editor.text().strip())
+            style = "border: 1px solid #c0392b;" if red else ""
+            if editor.styleSheet() != style:
+                editor.setStyleSheet(style)
         self.warning.setText("⚠ " + "; ".join(clashes) if clashes else "")
-        self.warning.setStyleSheet("color:#b3261e;" if clashes else "")
+        self.warning.setStyleSheet("color:#d9534f;" if clashes else "")
 
     def clashes(self) -> list[str]:
         """Keys bound to more than one thing that could both act."""
@@ -1435,7 +1669,8 @@ class ShortcutManagerDialog(QDialog):
         return list(clashes_in(self.assignments()))
 
     def accept(self) -> None:
-        """Refuse to save a key that would mean two different things."""
+        """Refuse to close on a key that would mean two different things."""
+        self.cancel_pending()
         clashes = self.clashes()
         if clashes:
             QMessageBox.warning(
@@ -1447,8 +1682,11 @@ class ShortcutManagerDialog(QDialog):
         super().accept()
 
     def apply(self) -> None:
+        """Every box's key into the bindings (the boxes already apply as they
+        change; this is for anything set on them directly)."""
         for action_id, text in self.assignments().items():
-            self.manager.set_sequence(action_id, text)
+            if self.manager.sequence(action_id) != text:
+                self.manager.set_sequence(action_id, text)
 
 
 class AboutDialog(QDialog):

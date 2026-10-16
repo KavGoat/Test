@@ -1884,7 +1884,12 @@ class TableEditing:
             return True
         command = self._bound_command(event)
         if command is not None:
-            SHEET_COMMANDS[command](self)
+            if command.startswith("menu:"):
+                # a cell's right-click entry, or the Style bar's, given a key
+                # in Keyboard Shortcuts (bindable.py)
+                self.view.window.commands.run(command[5:])
+            else:
+                SHEET_COMMANDS[command](self)
             return True
         if key in arrows:
             dr, dc = arrows[key]
@@ -1967,7 +1972,11 @@ class TableEditing:
         if shortcuts is None:
             return None
         binding = shortcuts.binding_for_event(event, (TABLE,))
-        if binding is None or binding.payload not in SHEET_COMMANDS:
+        if binding is None:
+            return None
+        if binding.kind == "menu":
+            return "menu:" + binding.action_id
+        if binding.payload not in SHEET_COMMANDS:
             return None
         return binding.payload
 
@@ -2486,6 +2495,7 @@ class TableEditing:
         item = self.item
         window = self.view.window
         menu = QMenu(self.view)
+        menu.setProperty("cf_context", "cell")
         self._clipboard_entries(menu)
         menu.addSeparator()
         # Insert ▸ and Delete ▸ use the names the Style bar's Rows & Columns
@@ -2581,6 +2591,7 @@ class TableEditing:
             else:
                 self.select((0, index), (rows - 1, index), (0, index))
         menu = QMenu(self.view)
+        menu.setProperty("cf_context", f"heading.{axis}")
         self._clipboard_entries(menu)
         menu.addSeparator()
         if row:

@@ -183,6 +183,7 @@ class SheetTabs(QWidget):
         left out: a sheet cannot be copied as a sheet yet, nor coloured.)"""
         from . import menutidy
         menu = QMenu(self)
+        menu.setProperty("cf_context", "sheettab")
         menu.addAction("Insert Sheet", self.new_sheet).setToolTip(
             "A new sheet: a spreadsheet page at the end")
         if index >= 0:

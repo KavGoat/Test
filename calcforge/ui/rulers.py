@@ -74,12 +74,17 @@ class Ruler(QWidget):
         self.setToolTip("Right-click to choose the ruler's units")
 
     def contextMenuEvent(self, event) -> None:
+        self.build_menu().exec(event.globalPos())
+
+    def build_menu(self) -> QMenu:
+        """The ruler's units, one ticked."""
         menu = QMenu(self)
+        menu.setProperty("cf_context", "ruler")
         for key, (_points, name) in UNITS.items():
             action = menu.addAction(name, lambda k=key: self.rulers.set_unit(k))
             action.setCheckable(True)
             action.setChecked(key == self.rulers.unit)
-        menu.exec(event.globalPos())
+        return menu
 
     # -- where things are, in this ruler's pixels ----------------------------------------------
     def _along(self, scene: QPointF) -> float:

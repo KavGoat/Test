@@ -91,6 +91,7 @@ class TableControls:
         merge.setPopupMode(QToolButton.InstantPopup)
         merge.setAutoRaise(True)
         menu = QMenu(merge)
+        menu.setProperty("cf_context", "tablebar.merge")
         for label, how in (("Merge && Centre", "center"), ("Merge Across", "across"),
                            ("Merge Cells", "cells"), ("Unmerge Cells", "unmerge")):
             menu.addAction(label, lambda h=how: self._tables().merge(h))
@@ -101,6 +102,7 @@ class TableControls:
         borders.setPopupMode(QToolButton.InstantPopup)
         borders.setAutoRaise(True)
         menu = QMenu(borders)
+        menu.setProperty("cf_context", "tablebar.borders")
         for label, which in (("All Borders", "all"), ("Outside Borders", "outside"),
                              ("Inside Borders", "inside"), ("Thick Box Border", "thick_box"),
                              ("Top Border", "top"), ("Bottom Border", "bottom"), ("Left Border", "left"),
@@ -116,8 +118,10 @@ class TableControls:
         self.number.setToolTip("Number format")
         self.number.activated.connect(self._number_chosen)
         add(self.number)
+        decimals = {}
         for text, step, tip in (("←.0", -1, "Fewer decimal places"), (".00→", 1, "More decimal places")):
             b = QToolButton()
+            decimals[b] = "tablebar.fewer_decimals" if step < 0 else "tablebar.more_decimals"
             b.setText(text)
             b.setAutoRaise(True)
             b.setToolTip(tip)
@@ -134,6 +138,7 @@ class TableControls:
         cells.setPopupMode(QToolButton.InstantPopup)
         cells.setAutoRaise(True)
         menu = QMenu(cells)
+        menu.setProperty("cf_context", "tablebar.rows_and_columns")
         t = self._tables
         menu.addAction("Insert Rows Above", lambda: t().insert_rows())
         menu.addAction("Insert Rows Below", lambda: t().insert_rows(below=True))
@@ -165,6 +170,17 @@ class TableControls:
         fmt.setToolTip("Format Cells (Ctrl+1)")
         fmt.clicked.connect(window.format_cells_dialog)
         add(fmt)
+        # each a command of its own in Keyboard Shortcuts (bindable.py): the
+        # spreadsheet's own where it has one
+        named = {self.buttons["bold"]: "sheet.bold", self.buttons["italic"]: "sheet.italic",
+                 self.buttons["underline"]: "sheet.underline",
+                 self.align["left"]: "tablebar.align_left",
+                 self.align["center"]: "tablebar.centre",
+                 self.align["right"]: "tablebar.align_right", self.wrap: "tablebar.wrap",
+                 self.painter: "tablebar.format_painter", fmt: "sheet.format_cells"}
+        named.update(decimals)
+        for button, command_id in named.items():
+            window.commands.bind_button(button, command_id)
         for action in self.actions:
             action.setVisible(False)
 
