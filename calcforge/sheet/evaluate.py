@@ -7,6 +7,7 @@ walk only the cells that hold something.
 """
 from __future__ import annotations
 
+import bisect
 import math
 import re
 from dataclasses import dataclass
@@ -57,6 +58,37 @@ class RefValue:
                 yield row, col, wb.value(sheet, row, col)
             else:
                 yield row, col, cells[(row, col)].value
+
+    def filled_values(self) -> list:
+        """The values of filled(), in its order, as one list: what SUM and
+        the like read, walked without a generator per cell (a column of
+        running totals reads its column again for every row)."""
+        sheet = self.sheet
+        wb = sheet.workbook
+        cells = sheet.cells
+        pending = wb._dirty if wb._in_pass else None
+        sid = sheet.id
+        top, bottom = self.top, self.bottom
+        by_col = sheet._rows_in_col
+        left, right = self.left, self.right
+        if right - left + 1 > len(by_col):
+            wanted = sorted(c for c in by_col if left <= c <= right)
+        else:
+            wanted = [c for c in range(left, right + 1) if c in by_col]
+        out = []
+        for col in wanted:
+            rows = by_col[col]
+            i = bisect.bisect_left(rows, top)
+            j = bisect.bisect_right(rows, bottom)
+            if not pending:
+                out.extend([cells[(row, col)].value for row in rows[i:j]])
+                continue
+            for row in rows[i:j]:
+                if (sid, row, col) in pending:
+                    out.append(wb.value(sheet, row, col))
+                else:
+                    out.append(cells[(row, col)].value)
+        return out
 
     def bounded(self) -> "RefValue":
         """Whole columns and rows cut down to what the sheet uses."""

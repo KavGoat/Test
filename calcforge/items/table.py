@@ -13,13 +13,13 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QLineF, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsItem
 
 from ..core.typography import page_font
 from ..sheet.condfmt import looks_for
-from ..sheet.numfmt import format_value
+from ..sheet.numfmt import format_value, unit_runs
 from ..sheet.refs import col_letters
 from ..sheet.style import Border, Style
 from ..sheet.values import BLANK, ErrorValue, Qty
@@ -60,6 +60,9 @@ def cell_font(st: Style) -> QFont:
 
 _METRICS: dict = {}
 _COLOURS: dict = {}
+#: what a number too wide for its cell shows (TableItem._fitted), by value,
+#: format, font and room
+_FITTED: dict = {}
 
 
 def _metrics(st: Style) -> QFontMetricsF:
@@ -134,7 +137,6 @@ class Drawn:
         self.metrics = metrics or _font_metrics(font)
         if runs is None:
             if unit and text.endswith(unit):
-                from ..sheet.numfmt import unit_runs
                 runs = [(text[:len(text) - len(unit)], "")]
                 runs += [(t, "sup" if raised else "unit") for t, raised in unit_runs(unit)]
             else:
@@ -180,7 +182,7 @@ class Drawn:
         if self.plain:
             painter.drawText(QPointF(x, y), self.runs[0][0])
             return
-        from ..ui.cellunits import UNIT_BLUE
+        UNIT_BLUE = _unit_blue()
         font = self.font
         for t, kind in self.runs:
             if not t:
@@ -196,6 +198,37 @@ class Drawn:
             x += self._advance(t, kind)
         painter.setFont(font)
         painter.setPen(ink)
+
+
+_UNIT_BLUE: list = []
+
+
+def _unit_blue() -> QColor:
+    """SMath's unit blue (ui/cellunits.py), found once: it was imported
+    afresh for every number with a unit drawn."""
+    if not _UNIT_BLUE:
+        from ..ui.cellunits import UNIT_BLUE
+        _UNIT_BLUE.append(UNIT_BLUE)
+    return _UNIT_BLUE[0]
+
+
+_LINES: dict = {}
+
+
+def _line(text: str, unit: Optional[str], st: Style, metrics: QFontMetricsF) -> Drawn:
+    """Drawn(text, unit, cell_font(st), metrics), made once for each text,
+    unit and font: a screenful of cells was a thousand of them made afresh
+    for every picture of the sheet drawn. (Its own copy of the font: the
+    one a cell shrinks to fit is changed where it is drawn.)"""
+    key = (text, unit, st.font or DEFAULT_FONT, st.size or DEFAULT_SIZE, bool(st.bold),
+           bool(st.italic), bool(st.underline), bool(st.strike))
+    got = _LINES.get(key)
+    if got is None or got.metrics is not metrics:
+        got = Drawn(text, unit, cell_font(st), metrics)
+        if len(_LINES) > 20000:
+            _LINES.clear()
+        _LINES[key] = got
+    return got
 
 
 def drawn_value(shown, st: Style, font: Optional[QFont] = None) -> Drawn:
@@ -238,6 +271,8 @@ class TableItem(MarkupItem):
         self.overlay = None                          # callable(painter): reference colours...
         self._turn_while_open = None                 # its rotation, while shown upright to type in
         self.setZValue(-0.5)
+        # told what part is being repainted (paint): only those rows are drawn
+        self.setFlag(QGraphicsItem.ItemUsesExtendedStyleOption, True)
 
     # -- the sheet behind it ---------------------------------------------------------
     def _page_frame(self):
@@ -553,28 +588,38 @@ class TableItem(MarkupItem):
         sheet = self.sheet
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, False)
+        # Only the cells that can draw a fill or a border are walked: one
+        # with nothing in it and no style has neither, unless conditional
+        # formatting colours it or it is part of a merged cell. (Walking
+        # every place of the grid in view was a thousand style look-ups for
+        # a screenful of a mostly empty sheet.) Row by row, as before.
+        if sheet.cond_rules:
+            grid = [(r, c) for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)]
+        else:
+            held = set(sheet.positions_in(r0, c0, r1, c1))
+            held.update(p for p in covered if r0 <= p[0] <= r1 and c0 <= p[1] <= c1)
+            grid = sorted(held)
         # fills
-        for r in range(r0, r1 + 1):
-            for c in range(c0, c1 + 1):
-                m = covered.get((r, c))
-                if m is not None and (r, c) != (m[0], m[1]):
-                    continue
-                st = self._shown_style(r, c)
-                look = self._looks(r, c) if sheet.cond_rules else {}
-                fill = st.fill if (look.get("format") or {}).get("fill") else (look.get("scale") or st.fill)
-                if fill:
-                    painter.fillRect(self.cell_rect(r, c), QColor(fill))
-                bar = look.get("bar")
-                if bar is not None:
-                    rect = self.cell_rect(r, c).adjusted(1, 1.5, -1, -1.5)
-                    rect.setWidth(rect.width() * bar[0])
-                    from PySide6.QtGui import QLinearGradient
-                    grad = QLinearGradient(rect.topLeft(), rect.topRight())
-                    grad.setColorAt(0, QColor(bar[1]))
-                    end = QColor(bar[1])
-                    end.setAlpha(60)
-                    grad.setColorAt(1, end)
-                    painter.fillRect(rect, grad)
+        for r, c in grid:
+            m = covered.get((r, c))
+            if m is not None and (r, c) != (m[0], m[1]):
+                continue
+            st = self._shown_style(r, c)
+            look = self._looks(r, c) if sheet.cond_rules else {}
+            fill = st.fill if (look.get("format") or {}).get("fill") else (look.get("scale") or st.fill)
+            if fill:
+                painter.fillRect(self.cell_rect(r, c), QColor(fill))
+            bar = look.get("bar")
+            if bar is not None:
+                rect = self.cell_rect(r, c).adjusted(1, 1.5, -1, -1.5)
+                rect.setWidth(rect.width() * bar[0])
+                from PySide6.QtGui import QLinearGradient
+                grad = QLinearGradient(rect.topLeft(), rect.topRight())
+                grad.setColorAt(0, QColor(bar[1]))
+                end = QColor(bar[1])
+                end.setAlpha(60)
+                grad.setColorAt(1, end)
+                painter.fillRect(rect, grad)
         # gridlines, on screen only (Excel's default)
         if self._gridlines_shown(printing):
             pen = QPen(GRIDLINE, 0)
@@ -613,28 +658,29 @@ class TableItem(MarkupItem):
             self._paint_text(painter, r, c, cell, rows, cols, covered)
         # borders
         painter.setRenderHint(QPainter.Antialiasing, False)
-        for r in range(r0, r1 + 1):
-            for c in range(c0, c1 + 1):
-                m = covered.get((r, c))
-                own = self._style(r, c)
-                if m is None and not (own.top or own.bottom or own.left or own.right):
-                    continue
-                st = self._style(m[0], m[1]) if m else own
-                rect = QRectF(xs[c], ys[r], xs[c + 1] - xs[c], ys[r + 1] - ys[r])
-                for side, a, b in (("top", rect.topLeft(), rect.topRight()),
-                                   ("bottom", rect.bottomLeft(), rect.bottomRight()),
-                                   ("left", rect.topLeft(), rect.bottomLeft()),
-                                   ("right", rect.topRight(), rect.bottomRight())):
-                    border = getattr(own, side)
-                    if m is not None:
-                        inside = (side == "top" and r > m[0]) or (side == "bottom" and r < m[2]) or \
-                                 (side == "left" and c > m[1]) or (side == "right" and c < m[3])
-                        if inside:
-                            continue
-                        border = border or getattr(st, side)
-                    if border is None:
+        lines = _BorderLines(painter)
+        for r, c in grid:
+            m = covered.get((r, c))
+            own = self._style(r, c)
+            if m is None and not (own.top or own.bottom or own.left or own.right):
+                continue
+            st = self._style(m[0], m[1]) if m else own
+            rect = QRectF(xs[c], ys[r], xs[c + 1] - xs[c], ys[r + 1] - ys[r])
+            for side, a, b in (("top", rect.topLeft(), rect.topRight()),
+                               ("bottom", rect.bottomLeft(), rect.bottomRight()),
+                               ("left", rect.topLeft(), rect.bottomLeft()),
+                               ("right", rect.topRight(), rect.bottomRight())):
+                border = getattr(own, side)
+                if m is not None:
+                    inside = (side == "top" and r > m[0]) or (side == "bottom" and r < m[2]) or \
+                             (side == "left" and c > m[1]) or (side == "right" and c < m[3])
+                    if inside:
                         continue
-                    _draw_border(painter, border, a, b, side)
+                    border = border or getattr(st, side)
+                if border is None:
+                    continue
+                lines.add(border, a, b, side)
+        lines.flush()
         painter.restore()
 
     def _paint_text(self, painter, r, c, cell, rows, cols, covered) -> None:
@@ -669,7 +715,7 @@ class TableItem(MarkupItem):
         painter.setFont(font)
         painter.setPen(colour)
         v = {"top": Qt.AlignTop, "center": Qt.AlignVCenter}.get(st.v_align, Qt.AlignBottom)
-        line = Drawn(text, shown.unit, font, metrics)
+        line = _line(text, shown.unit, st, metrics)
         if st.rotation:
             self._paint_turned(painter, rect, line, st, v, colour)
             return
@@ -687,7 +733,7 @@ class TableItem(MarkupItem):
         width = line.width
         if numeric and width > inner.width() and not st.shrink:
             text = self._fitted(value, st, metrics, inner.width())
-            line = Drawn(text, shown.unit, font, metrics)
+            line = _line(text, shown.unit, st, metrics)
             width = line.width
         if numeric and width > inner.width() and not st.shrink:
             # Excel: a number that doesn't fit shows ####
@@ -847,14 +893,30 @@ class TableItem(MarkupItem):
         Excel each character of the number takes at least a digit's width
         (a default column shows 0.333333, not 0.3333333); a unit after it
         takes its own width."""
+        # (worked out once for each value, look and width: finding the fit
+        # measures the number a dozen times over, and a screenful of narrow
+        # cells was most of the time a sheet took to draw)
+        font_key = (st.font or DEFAULT_FONT, st.size or DEFAULT_SIZE, bool(st.bold),
+                    bool(st.italic), bool(st.underline), bool(st.strike))
+        key = None
+        if _METRICS.get(font_key) is metrics:          # (measured with the cell's own font)
+            key = (repr(value), st.number_format, st.unit, font_key, room)
+            got = _FITTED.get(key)
+            if got is not None:
+                return got
         digit = metrics.horizontalAdvance("0")
 
         def width(text: str) -> float:
             number, space, unit = text.partition(" ")
             return sum(max(metrics.horizontalAdvance(ch), digit) for ch in number) + \
                 (metrics.horizontalAdvance(space + unit) if space else 0.0)
-        return format_value(value, st.number_format, st.unit,
-                            fit=lambda t: width(t) <= room).text
+        got = format_value(value, st.number_format, st.unit,
+                           fit=lambda t: width(t) <= room).text
+        if key is not None:
+            if len(_FITTED) > 20000:
+                _FITTED.clear()
+            _FITTED[key] = got
+        return got
 
     def _paint_turned(self, painter, rect, line: "Drawn", st, v, colour) -> None:
         painter.save()
@@ -875,10 +937,33 @@ class TableItem(MarkupItem):
         cell = self.sheet.cells.get((r, c))
         return cell is None or cell.value is BLANK or cell.value == ""
 
+    def _exposed_rows(self, option) -> Optional[tuple]:
+        """The rows a repaint of part of the table needs, as _range: those
+        under the part, every column (a long text runs over its neighbours),
+        from the top of any merged cell reaching into them. None for all."""
+        exposed = getattr(option, "exposedRect", None)
+        if exposed is None or self.sheet is None or exposed.isEmpty():
+            return None
+        import bisect
+        xs, ys = self.edges()
+        rows, cols = self.size
+        r0 = max(0, bisect.bisect_right(ys, exposed.top()) - 2)
+        r1 = min(rows - 1, bisect.bisect_right(ys, exposed.bottom()) + 1)
+        if r0 <= 0 and r1 >= rows - 1:
+            return None
+        r0 = min([r0] + [m[0] for m in self.sheet.merges if m[0] < r0 <= m[2]])
+        return (r0, r1, 0, cols - 1)
+
     def paint(self, painter: QPainter, option, widget=None) -> None:
-        super().paint(painter, option, widget)
         frame = self._page_frame()
         printing = bool(getattr(frame, "print_mode", False))
+        # on screen, a repaint of part of the table draws only the rows
+        # under it (a key typed or a cell picked repaints a few cells)
+        self._range = None if printing else self._exposed_rows(option)
+        try:
+            super().paint(painter, option, widget)
+        finally:
+            self._range = None
         if self.sheet is not None and (printing or not (self.opened or self.isSelected())):
             # the table's name above its top-left corner (printed); while it
             # is picked or open its tab says it instead
@@ -1125,6 +1210,41 @@ class TableItem(MarkupItem):
                              "new": True}
         return data
 
+    def restore_in_place(self, data: dict) -> bool:
+        """Undo or redo: become the recorded table without being rebuilt,
+        when it is this same table with only its cells, sizes or rules
+        different (PageFrame.load_items). False when it must be rebuilt."""
+        sheet = self.sheet
+        table = data.get("table") or {}
+        if sheet is None or data.get("type") != self.TYPE or table.get("new") \
+                or "names" not in table:
+            return False
+        current = self.serialize()
+        now = current.get("table") or {}
+        if any(data.get(k) != v for k, v in current.items() if k != "table") or \
+                any(k not in current for k in data):
+            return False                   # moved, turned, restyled...: rebuilt
+        if any(table.get(k) != now.get(k) for k in ("name", "kind", "names")):
+            return False
+        if table == now:
+            return True
+        from ..sheet.store import restore_sheet
+        laid_out = restore_sheet(sheet, table, now)
+        self._restored(laid_out)
+        return True
+
+    def _restored(self, laid_out: bool) -> None:
+        """After restore_in_place: drawn again, and the open table's formula
+        bar and selection shown afresh (as a rebuilt one is)."""
+        if laid_out:
+            self.layout_changed()
+        self.update()
+        scene = self.scene()
+        for view in (scene.views() if scene is not None else ()):
+            tables = getattr(view, "tables", None)
+            if tables is not None and tables._item is self:
+                tables._show_selection()
+
     def deserialize(self, data: dict) -> None:
         table = data.get("table") or {}
         if table.get("new"):
@@ -1173,6 +1293,39 @@ def _count_fitting(length: float, size, current: int, default: float) -> int:
         n += 1
         if n > 5000:
             return n
+
+
+class _BorderLines:
+    """Cell borders drawn in order, each run of solid lines with the same
+    pen as one drawLines call (a table with every cell bordered drew
+    thousands of lines one call at a time). Dashed, dotted and double lines
+    are drawn one by one, as before: their dash patterns start afresh on
+    each line."""
+
+    __slots__ = ("painter", "pen", "lines")
+
+    def __init__(self, painter):
+        self.painter = painter
+        self.pen = None
+        self.lines = []
+
+    def add(self, border: Border, a: QPointF, b: QPointF, side: str) -> None:
+        if border.style in ("dashed", "dotted", "double"):
+            self.flush()
+            _draw_border(self.painter, border, a, b, side)
+            return
+        pen = border_pen(border)
+        if pen is not self.pen:
+            self.flush()
+            self.pen = pen
+        self.lines.append(QLineF(a, b))
+
+    def flush(self) -> None:
+        if self.lines:
+            self.painter.setPen(self.pen)
+            self.painter.drawLines(self.lines)
+            self.lines = []
+        self.pen = None
 
 
 def _draw_border(painter, border: Border, a: QPointF, b: QPointF, side: str) -> None:

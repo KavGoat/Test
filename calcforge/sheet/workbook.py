@@ -921,6 +921,51 @@ class Workbook:
                     return a
             return None
 
+        # The dirty cells by sheet and column, rows in order, and the dirty
+        # formulas that spill: a block read is looked up in these rather than
+        # walked cell by cell. Walking them made a column of running totals
+        # (=SUM($D$1:D2), =SUM($D$1:D3), ...) square in its length to order
+        # -- seconds for one value typed above 3000 of them (2026-10-16).
+        dirty_rows: dict = {}             # (sheet id, col) -> sorted rows
+        dirty_cols: dict = {}             # sheet id -> sorted columns with dirty rows
+        for sid, row, col in dirty:
+            sheet = sheets.get(sid)
+            if sheet is not None and (row, col) in sheet.cells:
+                dirty_rows.setdefault((sid, col), []).append(row)
+        for (sid, col), rows in dirty_rows.items():
+            rows.sort()
+            dirty_cols.setdefault(sid, []).append(col)
+        for cols in dirty_cols.values():
+            cols.sort()
+        spilling: dict = {}               # sheet id -> [(anchor key, its spilled block)]
+        for sid, sheet in sheets.items():
+            for (row, col), (h, w) in sheet.spills.items():
+                if (sid, row, col) in dirty:
+                    spilling.setdefault(sid, []).append(
+                        ((sid, row, col), (row, col, row + h - 1, col + w - 1)))
+
+        def in_block(sid, top, left, bottom, right):
+            cols = dirty_cols.get(sid)
+            if cols:
+                i = bisect.bisect_left(cols, left)
+                j = bisect.bisect_right(cols, right)
+                for col in cols[i:j]:
+                    rows = dirty_rows[(sid, col)]
+                    a = bisect.bisect_left(rows, top)
+                    b = bisect.bisect_right(rows, bottom)
+                    for row in rows[a:b]:
+                        yield (sid, row, col)
+            # a spilled cell in the block is calculated by the formula it
+            # spilled from
+            for anchor, (t, l, b, r) in spilling.get(sid, ()):
+                if t <= bottom and b >= top and l <= right and r >= left and \
+                        not (top <= t <= bottom and left <= l <= right):
+                    sheet = sheets[sid]
+                    if any(sheet.cells.get(p) is not None and sheet.cells[p].spill_from == anchor[1:]
+                           for p in sheet.positions_in(max(t, top), max(l, left),
+                                                       min(b, bottom), min(r, right))):
+                        yield anchor
+
         def precedents(key):
             cells, blocks = self._precedents.get(key, ((), ()))
             for k in cells:
@@ -931,17 +976,8 @@ class Workbook:
                     if a is not None:
                         yield a
             for sid, top, left, bottom, right in blocks:
-                sheet = sheets.get(sid)
-                if sheet is None:
-                    continue
-                for row, col in sheet.positions_in(top, left, bottom, right):
-                    k = (sid, row, col)
-                    if k in dirty:
-                        yield k
-                    else:
-                        a = anchor_of(k)
-                        if a is not None:
-                            yield a
+                if sid in sheets:
+                    yield from in_block(sid, top, left, bottom, right)
 
         for start in list(dirty):
             if start in state:

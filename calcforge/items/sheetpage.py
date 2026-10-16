@@ -180,6 +180,16 @@ class SheetRunItem(TableItem):
     def layout_changed(self) -> None:
         self.relayout()
 
+    def _restored(self, laid_out: bool) -> None:
+        # its pages take their slices again (what is typed decides how many
+        # pages it needs); the markups were put back where they were
+        # recorded, so they stay where they are
+        self._anchors = {}
+        self.relayout()
+        if self._anchors == {}:
+            self._anchors = None             # (not laid out yet: held for its pages)
+        super()._restored(False)
+
     def _values_changed(self, keys: set) -> None:
         sheet = self.sheet
         if sheet is None:

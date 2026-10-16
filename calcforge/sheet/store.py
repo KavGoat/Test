@@ -109,25 +109,7 @@ def load_sheet(sheet, data: dict) -> None:
                 comment = entry[4] if len(entry) > 4 else None
                 style = styles[index] if 0 <= index < len(styles) else 0
                 wb._set_state(sheet, int(row), int(col), (text, style, comment))
-            size = data.get("size")
-            sheet.size = tuple(size) if size else None
-            sheet.widths = {int(k): float(v) for k, v in data.get("widths", {}).items()}
-            sheet.heights = {int(k): float(v) for k, v in data.get("heights", {}).items()}
-            sheet.hidden_rows = set(data.get("hidden_rows", []))
-            sheet.hidden_cols = set(data.get("hidden_cols", []))
-            sheet.merges = [tuple(m) for m in data.get("merges", [])]
-            sheet.default_width = float(data.get("default_width", sheet.default_width))
-            sheet.default_height = float(data.get("default_height", sheet.default_height))
-            sheet.show_gridlines = bool(data.get("gridlines", sheet.show_gridlines))
-            sheet.show_headings = bool(data.get("headings", sheet.show_headings))
-            import copy as _copy
-            sheet.cond_rules = _copy.deepcopy(data.get("cond_rules", []))
-            sheet.validations = _copy.deepcopy(data.get("validations", []))
-            sheet.filter = _copy.deepcopy(data.get("filter"))
-            if sheet.filter is not None:
-                sheet.filter["criteria"] = {int(k): v for k, v in sheet.filter.get("criteria", {}).items()}
-            sheet.filtered_rows = set(data.get("filtered_rows", []))
-            sheet.page = _copy.deepcopy(data.get("page", {}))
+            _put_layout(sheet, data)
             for entry in data.get("names", []):
                 name, refers_to = entry[0], entry[1]
                 local = bool(entry[2]) if len(entry) > 2 else False
@@ -140,3 +122,63 @@ def load_sheet(sheet, data: dict) -> None:
                     wb._name_dirty(key[0])
     finally:
         wb.journal = journal
+
+
+#: What a sheet's record holds besides its cells and their styles.
+_LAYOUT_KEYS = ("size", "widths", "heights", "hidden_rows", "hidden_cols", "merges",
+                "default_width", "default_height", "gridlines", "headings", "cond_rules",
+                "validations", "filter", "filtered_rows", "page")
+
+
+def restore_sheet(sheet, data: dict, now: dict) -> bool:
+    """Put a recorded sheet back into ``sheet`` as load_sheet does, but
+    changing only what differs from *now* (``sheet_to_dict(sheet)``): the
+    cells that are the same keep their values, and only what reads the cells
+    that changed is calculated again. True when anything but its cells
+    changed (its sizes, merges, page...)."""
+    wb = sheet.workbook
+    journal, wb.journal = wb.journal, False
+    other = any(data.get(key) != now.get(key) for key in _LAYOUT_KEYS)
+    try:
+        with wb.transaction("Load"):
+            if data.get("cells") != now.get("cells") or data.get("styles") != now.get("styles"):
+                styles = [wb.styles.add(style_from_dict(s)) for s in data.get("styles", [{}])] or [0]
+                states = {}
+                for entry in data.get("cells", []):
+                    row, col, text, index = entry[:4]
+                    comment = entry[4] if len(entry) > 4 else None
+                    style = styles[index] if 0 <= index < len(styles) else 0
+                    states[(int(row), int(col))] = (text, style, comment)
+                for (row, col), cell in sorted(sheet.cells.items()):
+                    if (row, col) not in states and not cell.empty():
+                        wb._set_state(sheet, row, col, ("", 0, None))
+                for (row, col), state in states.items():
+                    wb._set_state(sheet, row, col, state)
+            if other:
+                _put_layout(sheet, data)
+    finally:
+        wb.journal = journal
+    return other
+
+
+def _put_layout(sheet, data: dict) -> None:
+    """A recorded sheet's sizes, merges, rules and page, put into ``sheet``."""
+    import copy as _copy
+    size = data.get("size")
+    sheet.size = tuple(size) if size else None
+    sheet.widths = {int(k): float(v) for k, v in data.get("widths", {}).items()}
+    sheet.heights = {int(k): float(v) for k, v in data.get("heights", {}).items()}
+    sheet.hidden_rows = set(data.get("hidden_rows", []))
+    sheet.hidden_cols = set(data.get("hidden_cols", []))
+    sheet.merges = [tuple(m) for m in data.get("merges", [])]
+    sheet.default_width = float(data.get("default_width", sheet.default_width))
+    sheet.default_height = float(data.get("default_height", sheet.default_height))
+    sheet.show_gridlines = bool(data.get("gridlines", sheet.show_gridlines))
+    sheet.show_headings = bool(data.get("headings", sheet.show_headings))
+    sheet.cond_rules = _copy.deepcopy(data.get("cond_rules", []))
+    sheet.validations = _copy.deepcopy(data.get("validations", []))
+    sheet.filter = _copy.deepcopy(data.get("filter"))
+    if sheet.filter is not None:
+        sheet.filter["criteria"] = {int(k): v for k, v in sheet.filter.get("criteria", {}).items()}
+    sheet.filtered_rows = set(data.get("filtered_rows", []))
+    sheet.page = _copy.deepcopy(data.get("page", {}))

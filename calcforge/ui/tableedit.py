@@ -26,7 +26,7 @@ import datetime
 import re
 from typing import Callable, Optional
 
-from PySide6.QtCore import QEvent, QMimeData, QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QEvent, QMimeData, QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QFont, QKeySequence, QPainter, QPen
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QLineEdit, QMenu,
                                QWidget)
@@ -571,10 +571,22 @@ class TableEditing:
         headings = getattr(self.view, "sheet_headings", None)
         if headings is not None and getattr(item, "SHEET_RUN", False):
             headings.refresh_soon()
+        before = (item.selection, item.active)
         item.selection = self.selection()
         item.active = self.active
         item.overlay = self._paint_overlay
-        item.update()
+        # Only where the selection was and is now is drawn again, when
+        # nothing else drawn over the cells has changed since (a click or an
+        # arrow key redrew the whole table, every cell of it, as markups
+        # are not: they redraw what moved).
+        look = self._look_now(item)
+        if look == self._look_shown and None not in before:
+            area = self._selection_area(item, *before).united(
+                self._selection_area(item, item.selection, item.active))
+            item.update(area)
+        else:
+            item.update()
+        self._look_shown = look
         self._update_bar()
         controls = getattr(self.view.window, "table_controls", None)
         if controls is not None:
@@ -588,6 +600,46 @@ class TableEditing:
         if why:
             self.view.statusMessage.emit(f"{col_letters(self.active[1])}{self.active[0] + 1}: {why}")
         self._scroll_to(self.active)
+
+    #: what the open table showed over its cells besides the selection when
+    #: it was last drawn (see _look_now)
+    _look_shown = None
+
+    def _look_now(self, item) -> tuple:
+        """Everything the open table draws over its cells but the selection:
+        while it is the same, a new selection repaints only the cells it
+        covers."""
+        editor = self.editor
+        return (id(item), item.opened, editor is not None,
+                self._drawn_refs if editor is not None else None,
+                self.drag[0] if self.drag is not None and self.drag[0] in ("fill", "move") else None,
+                self.point, self.copied,
+                repr(self.highlight_ranges), self._result_unit_open(),
+                repr(getattr(item, "circles", ())), item.size,
+                self.view.transform().m11(), self.view.transform().m12())
+
+    def _selection_area(self, item, selection, active) -> QRectF:
+        """What a selection draws, in the table's coordinates: its box and
+        fill handle, the active cell with its list button and unit box, a
+        dynamic array's frame, and the row and column headings it lights."""
+        scale = max(abs(self.view.transform().m11()) + abs(self.view.transform().m12()), 0.05)
+        pad = 6.0 / scale                   # the cosmetic pens and the fill handle
+        top, left, bottom, right = selection
+        box = item.block_rect(top, left, bottom, right)
+        area = box.adjusted(-pad, -pad, pad, pad)
+        cell = item.cell_rect(*active)
+        # (the list button and SMath's unit box sit just past the cell's right)
+        area = area.united(cell.adjusted(-pad, -pad, pad + 40.0, pad))
+        sheet = item.sheet
+        if sheet is not None:
+            block = sheet.workbook.spill_block(sheet, *active)
+            if block is not None:
+                area = area.united(item.block_rect(*block).adjusted(-pad, -pad, pad, pad))
+        heads = HEADING_H + pad
+        area = area.united(QRectF(box.left() - pad, -heads, box.width() + 2 * pad, heads))
+        area = area.united(QRectF(-ROWNUM_W - pad, box.top() - pad, ROWNUM_W + pad,
+                                  box.height() + 2 * pad))
+        return area
 
     @staticmethod
     def error_text(item, row: int, col: int) -> Optional[str]:
@@ -1110,6 +1162,10 @@ class TableEditing:
             self.select((src[0] + dr, src[1] + dc), (src[2] + dr, src[3] + dc))
         elif kind == "select" and self.held_format is not None:
             self._paint_held_format()
+        elif kind in ("select", "cols", "rows", "point", "point_other") and \
+                item.selection is not None and item.active is not None:
+            # nothing was drawn for the drag but the selection itself
+            item.update(self._selection_area(item, item.selection, item.active))
         else:
             item.update()
         return True
@@ -1278,6 +1334,7 @@ class TableEditing:
             self.editor = editor
         self.editing_cell = cell
         self.enter_mode = enter_mode
+        self._drawn_refs = False            # drawn afresh: the copied block's edge has gone
         editor.setText(current if text is None else text)
         editor.setCursorPosition(len(editor.text()))
         self._place_editor()
@@ -1300,23 +1357,37 @@ class TableEditing:
         font.setPixelSize(max(6, int(round((st.size or 11.0) * scale))))
         font.setBold(st.bold)
         font.setItalic(st.italic)
-        editor.setFont(font)
         # (the window's style sheet sets every text box's font size: this
         # one's follows the zoom)
-        editor.setStyleSheet(
+        sheet_text = (
             "QLineEdit { background: white; color: black; border: 2px solid #217346; "
             f"padding: 0px 1px; font-size: {font.pixelSize()}px; "
             f"font-family: '{font.family()}'; font-weight: {700 if st.bold else 400}; "
             f"font-style: {'italic' if st.italic else 'normal'}; }}")
+        # Only what has changed is set again. This runs on every repaint of
+        # the canvas (it follows the cell as the view scrolls), and setting a
+        # style sheet repaints the box -- which repainted the canvas under
+        # it, which set the style sheet again: the canvas was redrawn without
+        # end while a cell was being typed in (2026-10-16).
+        if getattr(editor, "_cell_look", None) != sheet_text:
+            editor.setFont(font)
+            editor.setStyleSheet(sheet_text)
+            editor._cell_look = sheet_text
         width = max(bottom_right.x() - top_left.x() + 2, editor.fontMetrics().horizontalAdvance(
             editor.text() + "  ") + 6)
         height = max(bottom_right.y() - top_left.y() + 2, editor.fontMetrics().height() + 4)
-        editor.setGeometry(int(top_left.x()) - 1, int(top_left.y()) - 1, int(width), int(height))
+        box = QRect(int(top_left.x()) - 1, int(top_left.y()) - 1, int(width), int(height))
+        if editor.geometry() != box:
+            editor.setGeometry(box)
 
     def view_moved(self) -> None:
         """The canvas scrolled or zoomed: the text box follows its cell."""
         if self.editor is not None and self.editor.isVisible():
             self._place_editor()
+
+    #: what the open table last drew for the text being typed: the
+    #: references of a formula (each outlined in its colour on its cells)
+    _drawn_refs = None
 
     def _typed(self, text: str) -> None:
         if self.bar is not None and self.bar.edit.text() != text:
@@ -1325,7 +1396,16 @@ class TableEditing:
         self._refresh_point()
         item = self.item
         if item is not None:
-            item.update()
+            # the table is drawn again only when what it shows of the typing
+            # changes: the references outlined (a value typed in shows
+            # nothing until Enter, and redrawing the sheet for every key was
+            # most of the time a key took)
+            refs = None
+            if text.startswith("="):
+                refs = tuple(repr(ref) for _s, _e, ref in F.reference_spans(text[1:]))
+            if refs != self._drawn_refs:
+                self._drawn_refs = refs
+                item.update()
         widget = self._typing_widget()
         if widget is not None:
             self.help.update(widget)
@@ -2075,21 +2155,26 @@ class TableEditing:
         item = self.item
         sheet = item.sheet
         wb = sheet.workbook
-        from PySide6.QtGui import QFontMetricsF
+        from ..items.table import _metrics
         from ..sheet.numfmt import format_value
+        from ..sheet.refs import MAX_COLS, MAX_ROWS
 
         sizes = {}
         for i in indexes:
             best = 0.0
-            for (r, c), cell in sheet.cells.items():
-                if (c if axis == "col" else r) != i or cell.value is None:
+            # the cells of that column (or row) only, not every cell of the sheet
+            line = sheet.positions_in(0, i, MAX_ROWS - 1, i) if axis == "col" else \
+                sheet.positions_in(i, 0, i, MAX_COLS - 1)
+            for r, c in list(line):
+                cell = sheet.cells[(r, c)]
+                if cell.value is None:
                     continue
                 if sheet.merge_at(r, c):
                     continue
                 st = wb.styles.get(cell.style)
                 shown = format_value(cell.value, st.number_format, st.unit)
                 text = shown.text
-                metrics = QFontMetricsF(cell_font(st))
+                metrics = _metrics(st)
                 if axis == "col":
                     # as drawn: a quantity's unit with its powers raised
                     width = shown_width(shown, st) if shown.unit and "\n" not in text \
