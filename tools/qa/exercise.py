@@ -128,6 +128,10 @@ STATE_BY_NAME = {
     "duplicate page": "two_pages", "delete pages": "two_pages", "extract pages": "two_pages",
     "split document": "two_pages", "crop pages": "fresh",
     "sheet layout": "sheet_open", "color processing": "pdf_page",
+    "remove page break": "sheet_break", "reset all page breaks": "sheet_break",
+    "insert page break": "sheet_open", "set print area": "sheet_open",
+    "clear print area": "sheet_open", "page layout": "sheet_open",
+    "reset page label": "two_pages_labelled", "reset all page labels": "two_pages_labelled",
     "table of contents": "bookmarked",
     # Calc
     "calculate": "equations", "solve": "equation", "calculate selection": "equation",
@@ -152,6 +156,8 @@ CONTEXT_TARGETS = [
     ("Canvas, Polyline / Rectangle", "rect", "item"),
     ("Canvas, Rectangle / Ellipse", "rect", "item"),
     ("Canvas, Link", "link", "item"),
+    ("Canvas, Hyperlink", "link", "item"),
+    ("Canvas, 26 kinds (Pen", "rect", "item"),
     ("Canvas, Text box / Callout / Cloud+ / calculation text", "textbox", "item"),
     ("Canvas, Text box / Callout / Cloud+", "textbox", "item"),
     ("Canvas, Callout / Cloud+", "callout", "item"),
@@ -178,6 +184,22 @@ CONTEXT_TARGETS = [
 ALSO_ON = {"Canvas, any item": [("equation", "item"), ("calc_block", "item"),
                                 ("table_closed", "item")]}
 
+# the Properties bar's kind combos ("Pen — Subject, and more") -> the fixture
+# that picks a markup of that kind, so its row of controls is on screen
+KIND_STATE = {
+    "Nothing selected": "fresh", "Pen": "pen", "Highlighter": "highlighter", "Line": "line",
+    "Arrow": "arrow", "Arc": "arc", "Polyline": "polyline", "Rectangle": "rect",
+    "Ellipse": "ellipse", "Polygon": "polygon", "Cloud": "cloud", "Highlight": "highlight",
+    "Redaction": "redact", "Link": "link", "Hyperlink": "link", "Text box": "textbox",
+    "Text Box": "textbox", "Callout": "callout", "Cloud+": "cloudplus", "Note": "note",
+    "Stamp": "stamp", "Flag": "flag", "Contents": "contents", "Length": "length",
+    "Dimension": "dimension", "Polyline length": "polylength", "Polylength": "polylength",
+    "Area": "area", "Perimeter": "perimeter", "Volume": "volume", "Angle": "angle",
+    "Radius": "radius", "Centre Radius": "radius", "Diameter": "diameter", "Count": "counts",
+    "Image": "image", "Equation": "equation", "Calculation block": "calc_block",
+    "Calculation text": "calc_text", "Table": "table_closed",
+}
+
 # toolbar rows that need something picked first
 STYLE_STATE = [
     (("line ending", "end size"), "line"),
@@ -189,6 +211,9 @@ STYLE_STATE = [
 
 # dialogs reached only through code: the command a person uses to open them
 DIALOG_OPENERS = {
+    "dialogs.scale_dialog()": ("fresh", ["menu", ["Tools", "Measure", "Set Scale…"]]),
+    "datatools.top10_dialog()": ("table_filtered", ["context", "filter_button", ["Top 10…"]]),
+    "mainwindow.bookmark_page()": ("two_pages", ["context", "thumbnail", ["Add Bookmark"]]),
     "cfmanager.edit()": ("table_open", ["context", "cell", ["Conditional Formatting", "New Rule…"]]),
     "cfmanager.rules_manager()": ("table_open", ["context", "cell",
                                                  ["Conditional Formatting", "Manage Rules…"]]),
@@ -219,11 +244,11 @@ DIALOG_OPENERS = {
                                                                          "Data Validation…"]]),
     "datatools.values_dialog()": ("table_filtered", ["context", "filter_button",
                                                      ["Choose Values…"]]),
-    "dialogs.choose_count_subject()": ("count_tool", ["toolbar", "Style", "Count subject…"]),
-    "dialogs.add_viewport()": ("fresh", ["menu", ["Document", "Viewports…"]]),
-    "hatchpatterns.manage_hatches()": ("rect", ["toolbar", "Style", "Hatch pattern, drawn over the fill in its own colour",
+    "dialogs.choose_count_subject()": ("count_tool", ["toolbar", "Properties", "Count subject…"]),
+    "dialogs.add_viewport()": ("fresh", ["menu", ["Tools", "Measure", "Viewports…"]]),
+    "hatchpatterns.manage_hatches()": ("rect", ["toolbar", "Properties", "Hatch pattern, drawn over the fill in its own colour",
                                                 {"choose": "Manage…"}]),
-    "hatchpatterns.new_pattern()": ("rect", ["toolbar", "Style", "Hatch pattern, drawn over the fill in its own colour",
+    "hatchpatterns.new_pattern()": ("rect", ["toolbar", "Properties", "Hatch pattern, drawn over the fill in its own colour",
                                              {"choose": "Manage…",
                                               "inside": {"title": "Hatch Patterns",
                                                          "click": "New…"}}]),
@@ -235,7 +260,8 @@ DIALOG_OPENERS = {
                                                        "click": "New…"}}]),
     "panels.rename()": ("bookmarked", ["panel", "Bookmarks", "Rename"]),
     "panels.rename_set()": ("toolchest", ["call", "rename_set"]),
-    "sheetlayout.sheet_page_setup()": ("sheet_open", ["menu", ["Document", "Sheet Layout…"]]),
+    "sheetlayout.sheet_page_setup()": ("sheet_open", ["menu", ["Calculation", "Page Layout",
+                                                                "Sheet Layout…"]]),
     "tableedit._ask_name()": ("table_open", ["context", "cell", ["Names", "Define Name…"]]),
     "tableedit.rename()": ("table_open", ["context", "cell", ["Rename Table…"]]),
     "view.edit_note()": ("note", ["mouse", "note | Double-click"]),
@@ -261,7 +287,7 @@ DIALOG_OPENERS = {
                                                           "Manage Tool Sets…"],
                                                  {"inside": {"title": "Manage Tool Sets",
                                                              "click": "Add…"}}]),
-    "dialogs.save_preset()": ("fresh", ["menu", ["Document", "Page Scale…"],
+    "dialogs.save_preset()": ("fresh", ["menu", ["Tools", "Measure", "Set Scale…"],
                                         {"inside": {"title": "Set Scale",
                                                     "click": "+ Add Preset"}}]),
     "(no opener found)": ("two_pages", ["context", "thumbnail", ["Insert Pages", "After…"]]),
@@ -280,20 +306,45 @@ SAFE_OK = ("Insert Blank Page", "Page Setup", "Rectangle Size", "Multiply", "Add
 # can't be driven headless at all: why (printing is driven: its dialog is opened
 # and cancelled; Exit is driven: the window closes and a fresh one is built)
 HEADLESS = {
-    ("Menu-bar corner", "Minimise"): "the frameless window's own buttons are hidden on the "
-                                     "offscreen platform (no window manager)",
-    ("Menu-bar corner", "Maximise"): "the frameless window's own buttons are hidden on the "
-                                     "offscreen platform (no window manager)",
-    ("Menu-bar corner", "Close"): "the frameless window's own buttons are hidden on the "
-                                  "offscreen platform (no window manager)",
+    # (the drawn Minimise / Maximise / Close are gone: the window has its
+    # native frame since 11324c9, which the offscreen platform does not draw)
 }
 
 
 def context_target(where: str):
     for prefix, state, target in CONTEXT_TARGETS:
-        if where.startswith(prefix):
-            return state, target, prefix
+        if where.casefold().startswith(prefix.casefold()):   # "Text box" became "Text Box"
+            return state, target, where[:len(prefix)]
+    # "Canvas, 28 kinds (Pen, Highlight, …)": a menu several kinds share, tried
+    # on the first kind it names (the count changes as kinds are added)
+    shared = re.match(r"Canvas, \d+ kinds \(([^,)]+)[^)]*\)", where)
+    if shared:
+        listed = [k.strip() for k in shared.group(0).split("(", 1)[1].rstrip(")").split(",")]
+        first = "Rectangle" if "Rectangle" in listed else listed[0]   # the shape most offer
+        return KIND_STATE.get(first, "rect"), "item", shared.group(0)
+    single = re.match(r"Canvas, ([A-Za-z+ ]+?)(?= ▸|$)", where)
+    if single and single.group(1) in KIND_STATE:
+        return KIND_STATE[single.group(1)], "item", single.group(0)
     return None
+
+
+def job_keys(commands) -> dict:
+    """(command id, entry index) -> a key that survives renumbering: where the
+    command is, its name and the way in. Ids (M0123) shift whenever a line is
+    added above; known_failures.json is keyed by these instead."""
+    keys, seen = {}, defaultdict(int)
+    for command in commands:
+        for index, entry in enumerate(command["entries"]):
+            way = entry.get("path") or entry.get("keys") or entry.get("label") or \
+                entry.get("gesture") or entry.get("tip") or entry.get("button") or ""
+            if isinstance(way, list):
+                way = " ▸ ".join(way)
+            extra = entry.get("target") or entry.get("state") or ""
+            key = f"{command['where']} | {command['name']} | {entry['via']} {way}"
+            key += f" @{extra}" if extra else ""
+            seen[key] += 1
+            keys[(command["id"], index)] = key if seen[key] == 1 else f"{key} #{seen[key]}"
+    return keys
 
 
 def state_for_name(name: str, default="fresh") -> str:
@@ -316,6 +367,8 @@ def build_commands(path: str) -> list[dict]:
     commands = []
     counter = defaultdict(int)
     menu_state = {}
+    properties_kind = None
+    panel_buttons = set()
     for row in rows:
         area, where, name, note, shortcut = (row["area"], row["where"], row["name"],
                                              row["note"], row["shortcut"])
@@ -365,7 +418,19 @@ def build_commands(path: str) -> list[dict]:
                     entries.append(dict(via="key", keys=shortcut.split(" / ")[0]))
                 state = "fresh"
                 lowered = label.casefold()
-                if "shown with a table open" in note:
+                kind = re.match(r"(.+?) — Subject, and more$", label)
+                if bar == "Properties" and kind:
+                    # Revu's Properties bar: one row of controls per markup kind,
+                    # headed by that kind's combo; the rows below it are its own
+                    properties_kind = KIND_STATE.get(kind.group(1)) or (
+                        f"tool:{tools[norm(kind.group(1))]}" if norm(kind.group(1)) in tools
+                        else "rect")
+                if bar == "Properties" and (kind or "shown with a markup selected" in note) \
+                        and properties_kind:
+                    state = properties_kind
+                elif bar == "Properties" and "spreadsheet page" in note:
+                    state = "sheet_open"
+                elif "shown with a table open" in note:
                     state = "table_open"
                 elif "shown with a markup selected" in note:
                     state = "rect"
@@ -373,9 +438,9 @@ def build_commands(path: str) -> list[dict]:
                         if any(n == lowered or (len(n) > 1 and n in lowered)
                                for n in needles):
                             state = st
-                elif bar == "Style" and button:
+                elif bar in ("Style", "Properties") and button:
                     state = "table_open"
-                elif bar == "Style":
+                elif bar in ("Style", "Properties"):
                     # restyles the picked markup; Set default shows with none picked
                     state = "fresh" if label == "Set default" else "rect"
                 elif bar == "Calculation":
@@ -395,6 +460,8 @@ def build_commands(path: str) -> list[dict]:
                 if container == "Status bar" and label in ("Previous Page", "Next Page",
                                                            "First Page", "Last Page"):
                     state = "three_pages"
+                if "disabled" in note or label.startswith(("(no ", "No ", "Nothing ")):
+                    entries[-1]["expect_disabled"] = True     # a greyed placeholder
         elif area == "Right-click menus":
             target = context_target(where)
             if target is None:
@@ -429,6 +496,8 @@ def build_commands(path: str) -> list[dict]:
                     state = "table_filtered"
                 if label in ("Delete Comment",):
                     state = "table_commented"
+                if label in ("Reset Page Label", "Reset All Page Labels"):
+                    state = "two_pages_labelled"
                 if label == "Calc Section Break Above This Page" and tgt == "paper":
                     state = "calc_page2"
                 if tgt == "cell" and (label == "Paste" or "Paste Special" in path_parts):
@@ -457,11 +526,19 @@ def build_commands(path: str) -> list[dict]:
             elif rest.endswith("Add to Tool Chest"):
                 entries.append(dict(via="panel_menu", panel=panel, button="Add to Tool Chest",
                                     path=[label]))
+            elif (panel, rest) in panel_buttons:
+                # a row under a panel's button: an item of that button's menu
+                # (Thumbnails ▸ + ▸ Before…)
+                entries.append(dict(via="panel_menu", panel=panel, button=rest, path=[label]))
             else:
                 entries.append(dict(via="panel", panel=panel, group=rest, label=label,
                                     kind=note.split(",")[0]))
-            if panel == "Page Setup" and rest == "Viewports":
+                if note.startswith("button") and not rest:
+                    panel_buttons.add((panel, label))
+            if panel in ("Page Setup", "Page") and rest == "Viewports":
                 state = "viewport"
+            if panel == "Page" and rest == "Scale" and label == "Y scale":
+                entries[-1]["expect_disabled"] = True   # greyed until "Separate Y scale"
             if panel == "Properties":
                 state = "rect" if "Calc mode" not in note else "rect"
                 if label == "Bookmark":
@@ -781,6 +858,11 @@ def settle(ms: int = 30) -> None:
     pump()
 
 
+# What app() changed in the process, so shutdown() can put it back: inside the
+# test suite the same QApplication goes on to run every other test file.
+_RESTORE: dict = {}
+
+
 def app():
     global APP
     if APP is None:
@@ -790,14 +872,73 @@ def app():
         if APP is None:
             from calcforge.app import build_application
             APP = build_application([])
+        _RESTORE["quit_on_last"] = APP.quitOnLastWindowClosed()
+        _RESTORE["excepthook"] = sys.excepthook
+        _RESTORE["palette"] = APP.palette()
+        _RESTORE["style_sheet"] = APP.styleSheet()
         APP.setQuitOnLastWindowClosed(False)
         import faulthandler
-        import signal
-        faulthandler.register(signal.SIGUSR1, all_threads=True)
+        _RESTORE["faulthandler"] = faulthandler.is_enabled()
         faulthandler.enable()
         install_recorders()
         Watch.start()
     return APP
+
+
+def shutdown() -> None:
+    """Leave the process as app() found it: no dialog-closing timers, no
+    recorders, no window, no clipboard, no tool sets or settings written by
+    the commands, the application's own palette. Safe to call twice."""
+    global APP, WIN, BASELINE
+    if APP is None:
+        return
+    QtCore, QtGui, QtWidgets = qt()[0], qt()[1], qt()[2]
+    import shiboken6
+    for timer in (Watch.modal_timer, Watch.popup_timer):
+        if timer is not None and shiboken6.isValid(timer):
+            timer.stop()
+            timer.deleteLater()
+    Watch.modal_timer = Watch.popup_timer = None
+    Watch.reset()
+    close_popups()
+    if WIN is not None and shiboken6.isValid(WIN):
+        try:
+            set_theme(WIN, "light")
+            close_strays(WIN)
+        except Exception:  # noqa: BLE001 - teardown only
+            pass
+        dispose(WIN)
+    WIN = BASELINE = None
+    from calcforge.ui.mainwindow import MainWindow
+    for widget in QtWidgets.QApplication.topLevelWidgets():
+        if not shiboken6.isValid(widget):
+            continue
+        if isinstance(widget, MainWindow):
+            dispose(widget)                    # New Window's, Exit's, any left
+        elif widget.isVisible() and widget.isWindow():
+            widget.close()
+    pump(3)
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+    pump()
+    APP.clipboard().clear()
+    QtCore.qInstallMessageHandler(_RESTORE.get("message_handler"))
+    sys.excepthook = _RESTORE.get("excepthook", sys.__excepthook__)
+    APP.setQuitOnLastWindowClosed(_RESTORE.get("quit_on_last", True))
+    import faulthandler
+    if not _RESTORE.get("faulthandler", True):
+        faulthandler.disable()        # the suite runs without it (pytest.ini)
+    if "palette" in _RESTORE:
+        APP.setPalette(_RESTORE["palette"])
+        APP.setStyleSheet(_RESTORE["style_sheet"])
+    try:
+        from calcforge.settings import app_settings
+        settings = app_settings()
+        settings.clear()
+        settings.sync()
+    except Exception:  # noqa: BLE001
+        pass
+    CURRENT.clear()
+    APP = None
 
 
 def new_window():
@@ -815,27 +956,52 @@ def new_window():
 
 
 def dispose(window) -> None:
+    """Close and delete a window, whatever state it is in. Each step stands
+    alone: a window that File ▸ Exit closed has already let go of its undo
+    stack, and a failed first step must not leave the window alive — a live
+    MainWindow filters every event in the application, other tests' included."""
     QtCore = qt()[0]
+    import shiboken6
+    if window is None or not shiboken6.isValid(window):
+        return
+    steps = (
+        lambda: setattr(window, "confirm_discard", lambda: True),
+        lambda: setattr(window.document, "modified", False),
+        lambda: window.undo_stack.clear(),
+        lambda: window.view.setScene(None),
+        lambda: [setattr(page, "frame", None) for page in window.document.pages],
+        lambda: window.close(),
+        lambda: window.setParent(None),
+        lambda: window.deleteLater(),
+    )
+    for step in steps:
+        try:
+            step()
+        except Exception:  # noqa: BLE001 - teardown only
+            pass
+    pump(3)
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+    pump()
+
+
+def window_gone(win) -> bool:
+    """Closed (File ▸ Exit, Close Window) or already deleted with its history."""
+    import shiboken6
+    if win is None or not shiboken6.isValid(win):
+        return True
     try:
-        window.document.modified = False
-        window.undo_stack.clear()
-        window.view.setScene(None)
-        for page in window.document.pages:
-            page.frame = None
-        window.close()
-        window.setParent(None)
-        window.deleteLater()
-        pump(3)
-        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
-        pump()
-    except Exception:          # noqa: BLE001 - teardown only
-        pass
+        stack = getattr(win, "undo_stack", None)
+        return win.isHidden() or (stack is not None and not shiboken6.isValid(stack))
+    except RuntimeError:
+        return True
 
 
 def window():
     global WIN, BASELINE
     import shiboken6
-    if WIN is None or not shiboken6.isValid(WIN):
+    if WIN is None or window_gone(WIN):
+        if WIN is not None and shiboken6.isValid(WIN):
+            dispose(WIN)
         WIN = new_window()
         BASELINE = chrome_state(WIN)
     return WIN
@@ -870,7 +1036,7 @@ def install_recorders() -> None:
                  QtCore.QtMsgType.QtFatalMsg: "fatal"}.get(mode)
         if level and "qt_messages" in CURRENT:
             CURRENT["qt_messages"].append(f"{level}: {message}")
-    QtCore.qInstallMessageHandler(handler)
+    _RESTORE["message_handler"] = QtCore.qInstallMessageHandler(handler)
 
 
 class Watch:
@@ -1144,6 +1310,10 @@ def describe_dialog(dialog) -> dict:
 # pictures
 # ---------------------------------------------------------------------------
 SHOTS = {"dir": None, "n": 0, "prefix": ""}
+# Before/after pictures and their diff: the contact sheets need them, the
+# test suite (which judges only exceptions, hangs and undo) does not, and they
+# are a third of a run's time.
+PICTURES = True
 
 
 def save_shot(image, tag: str) -> str:
@@ -1252,7 +1422,12 @@ def restore_chrome(win) -> list[str]:
             if action is not None:
                 moved.append(name)
                 try:
-                    action.setChecked(was)
+                    # as a person flips it, so what listens to triggered hears it too
+                    group = action.actionGroup()
+                    if group is None or not group.isExclusive() or was:
+                        action.trigger()
+                    if action.isChecked() != was:
+                        action.setChecked(was)
                 except Exception:  # noqa: BLE001
                     pass
     import shiboken6
@@ -1325,6 +1500,34 @@ def close_strays(win) -> list[str]:
     return closed
 
 
+def forget_settings(win) -> list[str]:
+    """Every command starts from the shipped settings, as each test does under
+    the suite's conftest: what an earlier command saved (a tool set made or
+    hidden, a default style, Name Tags) is wiped, and the Tool Chest, which
+    reads its sets from the settings, is redrawn from them."""
+    from calcforge.settings import app_settings
+    from calcforge.ui import toolsets
+    settings = app_settings()
+    notes = []
+    if settings.allKeys():
+        settings.clear()
+        settings.sync()
+        notes.append("settings")
+    # the chest holds its sets in memory too: under the test suite the settings
+    # are wiped before each test, so compare what it shows with what is stored
+    panel = getattr(win, "toolsets_panel", None)
+    if panel is not None:
+        try:
+            shown = [group.to_dict() for group in getattr(panel, "groups", [])]
+            stored = [group.to_dict() for group in toolsets.load_toolsets()]
+            if shown != stored:
+                panel.rebuild()
+                notes.append("tool sets")
+        except Exception:  # noqa: BLE001
+            pass
+    return notes
+
+
 def reset(win) -> list[str]:
     """A fresh document in a window the way it started."""
     notes = close_strays(win)
@@ -1334,6 +1537,7 @@ def reset(win) -> list[str]:
     except Exception as error:  # noqa: BLE001
         notes.append(f"closing tabs: {error!r}")
     notes += restore_chrome(win)
+    notes += forget_settings(win)
     if win.isFullScreen() or win.isMaximized() or win.isMinimized():
         win.showNormal()
         notes.append("window state")
@@ -1654,6 +1858,16 @@ def fx_two_pages(win, current=0, picked=False, count=2):
     return dict(point=page_point(win, 420, 560, current), page=current)
 
 
+def fx_two_pages_labelled(win):
+    """Two pages, both renamed (S-101, S-102): what the label resets undo."""
+    ctx = fx_two_pages(win)
+    win.set_page_label(0, "S-101")
+    win.set_page_label(1, "S-102")
+    pump()
+    win.go_to_page(0)
+    return ctx
+
+
 def fx_pages_copied(win):
     ctx = fx_two_pages(win)
     menu = win.page_menu(0)
@@ -1764,6 +1978,15 @@ def fx_sheet_open(win, a1="C5"):
     return dict(item=run, table=run, point=cell_scene(run, a1))
 
 
+def fx_sheet_break(win):
+    """A spreadsheet page with a manual page break above row 3, the active
+    cell on it: what Remove Page Break takes away."""
+    ctx = fx_sheet_open(win, "A3")
+    win.insert_page_break()
+    pump()
+    return ctx
+
+
 def fx_calc_mode(win):
     from tests.test_usability import click
     look_at(win)
@@ -1792,10 +2015,15 @@ def fx_equations(win):
 
 
 def fx_matrix_eq(win):
+    """An equation being typed, the caret after its operand: what Invert,
+    Determinant and Solve work on (they act on the selection or the operand
+    under the caret, so a picked but closed equation gives them nothing)."""
+    from tests.test_calc_modes import into_calc_mode, typed
     look_at(win)
-    item = an_equation(win, "M:2")
-    pick(win, [item])
-    return dict(item=item, point=centre_of(item))
+    into_calc_mode(win, 100, 140)
+    typed(win, "M:4")
+    pump()
+    return dict(point=page_point(win, 420, 560))
 
 
 def fx_two_equations(win):
@@ -1877,14 +2105,16 @@ def fx_bookmarked(win):
     win.add_page()
     pump()
     win.go_to_page(0)
-    try:
-        from calcforge.core.document import Bookmark
-        win.document.bookmarks.append(Bookmark("Beams", 0) if _takes_two(Bookmark) else
-                                      Bookmark(title="Beams", page=0))
-        win.bookmarks_panel.refresh()
-    except Exception:  # noqa: BLE001
-        pass
+    # the way Add Bookmark files one, without its name prompt
+    win.document.add_bookmark("Beams", 0, 0.0)
+    win.document.add_bookmark("Joists", 1, 0.0)
+    win.bookmarks_changed()
     show_dock(win, "Bookmarks")
+    pump()
+    panel = getattr(win, "bookmarks_panel", None)
+    tree = getattr(panel, "tree", None) if panel is not None else None
+    if tree is not None and tree.topLevelItemCount():
+        tree.setCurrentItem(tree.topLevelItem(0))   # Rename / Delete act on a picked one
     look_at(win)
     return dict(point=page_point(win, 420, 560))
 
@@ -2041,6 +2271,8 @@ FIXTURES = {
     "counts": fx_counts,
     "misspelt": fx_misspelt,
     "two_pages": fx_two_pages,
+    "two_pages_labelled": fx_two_pages_labelled,
+    "sheet_break": fx_sheet_break,
     "two_pages_second": lambda w: fx_two_pages(w, current=1),
     "two_pages_picked": lambda w: fx_two_pages(w, picked=True),
     "three_pages": lambda w: fx_two_pages(w, current=1, count=3),
@@ -2095,6 +2327,7 @@ FIXTURES = {
     "cloudplus": _one("cloud_callout", text="Cloud words"),
     "contents": _one("contents"),
     "pen": _one("pen"),
+    "highlighter": _one("highlighter"),
 }
 FIXTURES["auto"] = fx_fresh
 FALLBACK_STATES = ["fresh", "rect", "two_rects", "textbox", "two_pages", "equation",
@@ -2176,29 +2409,86 @@ def walk_popup(path, outcome, each_index=None):
                 close_popups()
                 return False
             rect = menu.actionGeometry(action)
+            if not point_at(menu, action):
+                outcome["error"] = f"the pointer never rested on '{label}'"
+                close_popups()
+                return False
             if last and outcome.get("open_only"):
-                QTest.mouseMove(menu, rect.center())
-                settle(250)
-                sub = QtWidgets.QApplication.activePopupWidget()
-                if sub is not menu and isinstance(sub, QtWidgets.QMenu):
-                    remember_menu(sub, outcome)
-                    outcome["popup_shot"] = save_shot(sub.grab().toImage(), "submenu")
+                sub = action.menu()
+                if sub is not None:
+                    wait_for(sub.isVisible, 1.0)
+                    if sub.isVisible():
+                        remember_menu(sub, outcome)
+                        outcome["popup_shot"] = save_shot(sub.grab().toImage(), "submenu")
                 close_popups()
                 return True
             if last:
                 Watch.navigating = False
                 outcome["t0"] = CURRENT["t0"] = time.perf_counter()
-                click_at(menu, rect.center())
+                QTest.mouseClick(menu, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier,
+                                 rect.center())
                 return True
-            QTest.mouseMove(menu, rect.center())
-            click_at(menu, rect.center())
-            settle(20)
-            sub = QtWidgets.QApplication.activePopupWidget()
-            if sub is menu or sub is None:
-                settle(250)                    # the submenu's open delay
+            sub = action.menu()
+            if sub is not None and not sub.isVisible():
+                QTest.mouseClick(menu, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier,
+                                 rect.center())
+            if sub is not None and not wait_for(sub.isVisible, 1.5):
+                outcome["error"] = f"{label} ▸ did not open"
+                close_popups()
+                return False
         return True
     finally:
         Watch.navigating = False
+
+
+def wait_for(condition, limit=2.0) -> bool:
+    """Process events until *condition()* holds or *limit* seconds pass."""
+    deadline = time.perf_counter() + limit
+    while not condition():
+        if time.perf_counter() > deadline:
+            return False
+        APP.processEvents()
+        time.sleep(0.005)
+    return True
+
+
+def point_at(menu, action) -> bool:
+    """Glide the pointer onto *action* in small steps, as a hand does, and wait
+    until the menu has it under the pointer. QMenu takes a click only once the
+    pointer has moved since it opened (several moves, or more than the drag
+    distance): one jump could land too close to where an earlier command left
+    the pointer, and the click was ignored (tests/test_sheet_qa_round1.py has
+    the same finding, a7656be)."""
+    QtCore, QTest = qt()[0], qt()[3]
+    rect = menu.actionGeometry(action)
+    centre = rect.center()
+    for k in range(8, -1, -1):
+        QTest.mouseMove(menu, QtCore.QPoint(centre.x() - k * max(1, rect.width() // 20),
+                                            centre.y()))
+    return wait_for(lambda: menu.activeAction() is action, 1.0)
+
+
+def back_to_the_window(win, limit=3.0) -> bool:
+    """Wait until the keyboard is the window's again after a popup: none left
+    showing and the window active. The offscreen platform keeps a closed menu
+    as the active window for some events, so a key sent straight after goes
+    nowhere (tests/test_markup_interaction_round6.py has the same helper)."""
+    QtWidgets = qt()[2]
+    deadline = time.perf_counter() + limit
+    asked = False
+    while True:
+        APP.processEvents()
+        popup = QtWidgets.QApplication.activePopupWidget() or \
+            QtWidgets.QApplication.activeModalWidget()
+        if popup is None and QtWidgets.QApplication.activeWindow() is toplevel(win):
+            return True
+        if time.perf_counter() > deadline:
+            if asked:
+                return False
+            asked = True
+            activate(win)
+            deadline = time.perf_counter() + limit
+        time.sleep(0.005)
 
 
 def remember_menu(menu, outcome):
@@ -2241,6 +2531,15 @@ def via_menu(win, entry, outcome, each_index=None):
     if len(path) == 1:
         Watch.navigating = False
         return True
+    # a menu that is slow to build (Help ▸ Find Tools, on a loaded machine)
+    # is waited for, and clicked once more if the first click was lost
+    for attempt in range(12):
+        if isinstance(QtWidgets.QApplication.activePopupWidget(), QtWidgets.QMenu):
+            break
+        if attempt == 6:
+            activate(win)
+            click_at(bar, bar.actionGeometry(top).center())
+        settle(40)
     return walk_popup(path[1:], outcome, each_index)
 
 
@@ -2312,7 +2611,7 @@ def via_menu_keys(win, entry, outcome, each_index=None):
 def toolbar_named(win, title):
     QtWidgets = qt()[2]
     # the Style bar is Revu's Properties toolbar now (propbar.py, a9cdcd2);
-    # commands.json was built when it was still called Style
+    # a commands.json built when it was still called Style still finds it
     names = {title, {"Style": "Properties"}.get(title, title)}
     for bar in win.findChildren(QtWidgets.QToolBar):
         if bar.windowTitle() in names:
@@ -2382,18 +2681,7 @@ def press_widget(win, widget, outcome, kind=""):
             pump()
             break
         parent = parent.parentWidget()
-    if not widget.isVisible():
-        bar = widget.parentWidget()
-        while bar is not None and not isinstance(bar, QtWidgets.QToolBar):
-            bar = bar.parentWidget()
-        extension = bar.findChild(QtWidgets.QToolButton, "qt_toolbar_ext_button") \
-            if bar is not None else None
-        if extension is not None and extension.isVisible():
-            outcome["overflow"] = True             # behind the toolbar's » button
-            Watch.navigating = True                # its popup is ours, not a stray
-            click_at(extension, extension.rect().center())
-            settle(80)
-            QtCore.QTimer.singleShot(1500, lambda: setattr(Watch, "navigating", False))
+    show_from_overflow(widget, outcome)
     if not widget.isVisible():
         outcome["hidden"] = True
         raise NotReached("the control is not on screen (overflow or hidden)")
@@ -2523,12 +2811,41 @@ def via_overflow(win, bar, action, outcome):
     raise NotReached("not visible even in the » popup")
 
 
+def show_from_overflow(widget, outcome) -> None:
+    """A toolbar control that did not fit is behind the bar's » button: open
+    that, as a person would, so the control is on screen."""
+    QtCore, QtGui, QtWidgets, QTest = qt()
+    if widget.isVisible():
+        return
+    bar = widget.parentWidget()
+    while bar is not None and not isinstance(bar, QtWidgets.QToolBar):
+        bar = bar.parentWidget()
+    extension = bar.findChild(QtWidgets.QToolButton, "qt_toolbar_ext_button") \
+        if bar is not None else None
+    if extension is None:
+        return
+    pump()                                     # a bar still being laid out
+    for _ in range(3):                         # » toggles: open, or close and open
+        if widget.isVisible() or not extension.isVisible():
+            break
+        outcome["overflow"] = True             # behind the toolbar's » button
+        Watch.navigating = True                # its popup is ours, not a stray
+        click_at(extension, extension.rect().center())
+        for _wait in range(10):
+            settle(50)
+            if widget.isVisible():
+                break
+    QtCore.QTimer.singleShot(1500, lambda: setattr(Watch, "navigating", False))
+
+
 def menu_button(widget, outcome, path, each_index=None):
     """Open a button's own menu by clicking (its arrow), then walk *path*.
     A button's menu runs modally (QToolButton::showMenu is exec), so the walk
     is queued first and runs inside it."""
     QtCore, QtGui, QtWidgets, QTest = qt()
+    show_from_overflow(widget, outcome)
     if not widget.isVisible():
+        outcome["hidden"] = True
         raise NotReached("its button is not on screen")
     rect = widget.rect()
     if isinstance(widget, QtWidgets.QToolButton) and \
@@ -2592,6 +2909,9 @@ def via_toolbar_menu(win, entry, outcome, each_index=None):
                 text = clean(candidate.defaultAction().text()) or text
             if norm(text) == norm(entry["button"]):
                 return menu_button(candidate, outcome, entry["path"], each_index)
+    offering = button_offering(bar, entry["path"][0]) if entry.get("path") else None
+    if offering is not None:
+        return menu_button(offering, outcome, entry["path"], each_index)
     raise NotReached(f"no '{entry['button']}' button on toolbar {entry['bar']}")
 
 
@@ -2615,9 +2935,27 @@ def via_widget(win, entry, outcome):
     return press_widget(win, widget, outcome)
 
 
+def button_offering(container, item):
+    """The menu button in *container* whose menu holds *item*. Some buttons
+    are named after what they are set to (the page layout reads "Continuous"
+    or "Single Page"), so a person finds them by what they offer."""
+    QtWidgets = qt()[2]
+    want = norm(item)
+    for button in container.findChildren(QtWidgets.QToolButton) + \
+            container.findChildren(QtWidgets.QPushButton):
+        menu = button.menu()
+        if menu is None or not button.isVisible():
+            continue
+        if any(norm(clean(a.text())) == want for a in menu.actions()):
+            return button
+    return None
+
+
 def via_widget_menu(win, entry, outcome, each_index=None):
     container = container_of(win, entry["container"])
     widget = labelled(container, entry["button"])
+    if widget is None and entry.get("path"):
+        widget = button_offering(container, entry["path"][0])
     if widget is None:
         raise NotReached(f"no '{entry['button']}' in the {entry['container']}")
     return menu_button(widget, outcome, entry["path"], each_index)
@@ -2891,12 +3229,18 @@ def via_dock_button(win, entry, outcome):
 def via_panel_toggle(win, entry, outcome):
     """The panel's rail button (the icon at the window edge)."""
     QtWidgets = qt()[2]
+    want = norm(entry["panel"])
+    for button in win.findChildren(QtWidgets.QToolButton, "railButton"):
+        # the tip names the panel and its key: "Thumbnails  (Alt+T)"
+        names = (re.sub(r"\s*\(.*\)$", "", button.toolTip()), button.text())
+        if any(norm(n) == want for n in names if n) and button.isVisible():
+            return press_widget(win, button, outcome)
     for bar in win.findChildren(QtWidgets.QToolBar):
         if bar.windowTitle() not in ("Left panels", "Right panels"):
             continue
         inv = inventory()
         for widget in inv.controls(bar, only_visible=False):
-            if norm(inv.describe_widget(widget)[1]) == norm(entry["panel"]):
+            if norm(inv.describe_widget(widget)[1]) == want:
                 return press_widget(win, widget, outcome)
     dock = next((d for d in win.panels if d.windowTitle() == entry["panel"]), None)
     if dock is None:
@@ -3325,6 +3669,8 @@ def state_name(command, entry):
 
 def build_state(win, name):
     fixture = FIXTURES.get(name)
+    if fixture is None and name.startswith("tool:"):
+        fixture = _one(name[5:])               # one markup drawn with that tool, picked
     if fixture is None:
         raise NotReached(f"no fixture '{name}'")
     win.interactive_prompts = False
@@ -3332,7 +3678,8 @@ def build_state(win, name):
     ctx = fixture(win) or {}
     settle(20)
     activate(win)
-    if name not in ("equation_editing", "textbox_editing", "table_open", "sheet_open",
+    back_to_the_window(win, 1.0)               # a fixture's own menus have let go
+    if name not in ("equation_editing", "matrix_eq", "textbox_editing", "table_open", "sheet_open",
                     "table_range", "table_filtered") and not win.view.calc.editing():
         win.view.setFocus(qt()[0].Qt.MouseFocusReason)
     win.interactive_prompts = True
@@ -3423,7 +3770,11 @@ def run_one(win, command, entry, each_index=None, shots_dir=None, prefix="x"):
     CURRENT["errors"].clear()
     CURRENT["qt_messages"].clear()
     pump()
-    before_img, before = stable_picture(win)
+    if PICTURES:
+        before_img, before = stable_picture(win)
+    else:
+        settle(40)
+        before_img = before = None
     before_sig = doc_signature(win)
     before_sig_unscaled = doc_signature(win, skip_scale=True)
     before_doc = win.document
@@ -3459,6 +3810,8 @@ def run_one(win, command, entry, each_index=None, shots_dir=None, prefix="x"):
                 qt()[2].QApplication.activePopupWidget() is None:
             break
         settle(25)
+    if not window_gone(win) and qt()[2].QApplication.activeModalWidget() is None:
+        back_to_the_window(win, 1.0)           # so the undo key that follows lands
     t_ui = CURRENT.get("t_ui")
     stop = outcome.get("t_end_click") or t_done
     elapsed = ((t_ui if t_ui and t_ui < stop else stop) - t_trigger) * 1000
@@ -3471,16 +3824,18 @@ def run_one(win, command, entry, each_index=None, shots_dir=None, prefix="x"):
                 "fallback", "tool_used", "popup_shot", "picked"):
         if key in outcome:
             result[key] = outcome[key]
-    if win.isHidden():
+    if window_gone(win) or not PICTURES:
         after_img, after = before_img, before
     else:
         after_img, after = stable_picture(win, tries=4)
-    status = win.statusBar()
-    ignore = None
-    if status.isVisible():
-        top_left = status.mapTo(win, qt()[0].QPoint(0, 0))
-        ignore = (top_left.x(), top_left.y(), status.width(), status.height())
-    box, share = diff_box(before, after, ignore)
+    box, share = None, 0.0
+    if PICTURES:
+        status = win.statusBar()
+        ignore = None
+        if status.isVisible():
+            top_left = status.mapTo(win, qt()[0].QPoint(0, 0))
+            ignore = (top_left.x(), top_left.y(), status.width(), status.height())
+        box, share = diff_box(before, after, ignore)
     result["changed"] = box is not None
     result["change_box"] = box
     result["change_share"] = round(share, 4)
@@ -3493,9 +3848,11 @@ def run_one(win, command, entry, each_index=None, shots_dir=None, prefix="x"):
     result["qt_messages"] = CURRENT["qt_messages"][:]
     if fixture_errors:
         result["fixture_errors"] = fixture_errors
-    result["window_gone"] = win.isHidden()
-    # did the document change, and does one undo put it back?
-    same_doc = win.document is before_doc
+    gone = window_gone(win)
+    result["window_gone"] = gone
+    # did the document change, and does one undo put it back? (a window that
+    # was closed has let go of its document and history: nothing to undo)
+    same_doc = not gone and win.document is before_doc
     after_sig = doc_signature(win) if same_doc else None
     steps = (win.undo_stack.index() - before_index) if same_doc else None
     result["doc_changed"] = same_doc and after_sig != before_sig
@@ -3517,18 +3874,19 @@ def run_one(win, command, entry, each_index=None, shots_dir=None, prefix="x"):
             result["undo_restores"] = undone_sig == before_cmp
             if not result["undo_restores"]:
                 result["undo_diff"] = first_difference(before_cmp, undone_sig)
-            undone = as_array(win.grab().toImage())
-            vp = win.view.viewport()
-            corner = vp.mapTo(win, qt()[0].QPoint(0, 0))
-            y0, x0 = max(0, corner.y()), max(0, corner.x())
-            ubox, ushare = diff_box(before[y0:y0 + vp.height(), x0:x0 + vp.width()],
-                                    undone[y0:y0 + vp.height(), x0:x0 + vp.width()])
-            if ubox is not None:
-                ubox = (ubox[0] + x0, ubox[1] + y0, ubox[2], ubox[3])
-            result["undo_pixels_left"] = round(ushare, 4)
-            result["undo_box"] = ubox
-            if SHOTS["dir"] and ubox is not None and ushare > 0.0005:
-                result["undo_shot"] = save_shot(win.grab().toImage(), "undone")
+            if PICTURES:
+                undone = as_array(win.grab().toImage())
+                vp = win.view.viewport()
+                corner = vp.mapTo(win, qt()[0].QPoint(0, 0))
+                y0, x0 = max(0, corner.y()), max(0, corner.x())
+                ubox, ushare = diff_box(before[y0:y0 + vp.height(), x0:x0 + vp.width()],
+                                        undone[y0:y0 + vp.height(), x0:x0 + vp.width()])
+                if ubox is not None:
+                    ubox = (ubox[0] + x0, ubox[1] + y0, ubox[2], ubox[3])
+                result["undo_pixels_left"] = round(ushare, 4)
+                result["undo_box"] = ubox
+                if SHOTS["dir"] and ubox is not None and ushare > 0.0005:
+                    result["undo_shot"] = save_shot(win.grab().toImage(), "undone")
         elif result["doc_changed"] and steps == 0:
             result["undo_restores"] = None
             result["no_undo_step"] = first_difference(before_sig, after_sig)
@@ -3545,7 +3903,8 @@ def run_with_fallback(win, command, entry, each_index=None, shots_dir=None, pref
     """Run; if the command was disabled in its state, find a state where a
     person could use it (and say so)."""
     result = run_one(win, command, entry, each_index, shots_dir, prefix)
-    if result.get("reached") or not result.get("disabled") or entry.get("expect_disabled"):
+    if result.get("reached") or not result.get("disabled") or entry.get("expect_disabled") \
+            or result.get("window_gone"):
         return result
     tried = [result["state"]]
     for state in FALLBACK_STATES:
@@ -3656,7 +4015,7 @@ def worker(out_dir, start, stop, theme, ids_file=None):
             result["entry_index"] = index
             results.write(json.dumps(result, ensure_ascii=False, default=str) + "\n")
             results.flush()
-            if WIN is not None and (WIN.isHidden() or result.get("window_gone")):
+            if WIN is not None and (window_gone(WIN) or result.get("window_gone")):
                 dispose(WIN)
                 WIN = None
                 win = window()
@@ -4044,7 +4403,7 @@ def write_sheets(rows, folder, index, per=ROWS_PER_SHEET):
     return written
 
 
-EDITING_STATES = ("equation_editing", "textbox_editing")
+EDITING_STATES = ("equation_editing", "textbox_editing", "matrix_eq")
 
 
 def outcome_of(result):
