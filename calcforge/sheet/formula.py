@@ -56,8 +56,29 @@ _ERROR_RE = re.compile(r"#(?:DIV/0!|N/A|NAME\?|NULL!|NUM!|REF!|VALUE!|SPILL!|CAL
 _OPS = ("<>", "<=", ">=", "+", "-", "*", "/", "^", "&", "=", "<", ">", "%", ":")
 
 
+_TOKENS: dict = {}
+
+
+def _tokens(text: str) -> list[Token]:
+    """tokenize(text), kept by its text and shared: only for readers that
+    leave the tokens as they are (parse). Moving rows passes each formula
+    through here three times (findings 5.1)."""
+    got = _TOKENS.get(text)
+    if got is None:
+        got = _tokenize(text)
+        if len(_TOKENS) > 50000:
+            _TOKENS.clear()
+        _TOKENS[text] = got
+    return got
+
+
 def tokenize(text: str) -> list[Token]:
-    """Tokens of a formula without its leading "="."""
+    """Tokens of a formula without its leading "=" (fresh ones: the caller
+    may change them)."""
+    return [Token(t.kind, t.text, t.lead, t.pos, t.ref) for t in _tokens(text)]
+
+
+def _tokenize(text: str) -> list[Token]:
     out: list[Token] = []
     i, n = 0, len(text)
     while i < n:
@@ -695,7 +716,7 @@ def _rel_text(ref: CellRef, row: int, col: int) -> str:
 def parse(text: str, row: int = 0, col: int = 0) -> Parsed:
     """The tree of a formula (text without "=") written in cell (row, col).
     Raises FormulaError."""
-    tokens = tokenize(text)
+    tokens = _tokens(text)
     sig = _signature(tokens, row, col)
     hit = _by_signature.get(sig)
     if hit is not None:

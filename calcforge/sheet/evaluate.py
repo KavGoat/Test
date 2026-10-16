@@ -90,6 +90,39 @@ class RefValue:
                     out.append(cells[(row, col)].value)
         return out
 
+    def float_values(self) -> Optional[list]:
+        """The plain numbers in the block, as SUM reads them (text, TRUE,
+        FALSE and blanks passed over), or None when something else is there
+        (a quantity, an error, a cell not worked out yet) and the slow way
+        must be taken. Only while calculating: each column's values are
+        gathered once a pass, so a column of =SUM($D$2:D9) running totals
+        slices one list instead of walking its block for every row
+        (findings 5.2: 3000 of them took two seconds)."""
+        sheet = self.sheet
+        wb = sheet.workbook
+        if not wb._in_pass or sheet.spills or sheet.wanted:
+            return None
+        by_col = sheet._rows_in_col
+        left, right = self.left, self.right
+        if right - left + 1 > len(by_col):
+            wanted = sorted(c for c in by_col if left <= c <= right)
+        else:
+            wanted = [c for c in range(left, right + 1) if c in by_col]
+        out = []
+        for col in wanted:
+            got = _column(wb, sheet, col)
+            rows = got.rows
+            i = bisect.bisect_left(rows, self.top)
+            j = bisect.bisect_right(rows, self.bottom)
+            if j > got.upto:
+                got.extend(j)
+                if j > got.upto:
+                    return None            # a cell in it is still to be worked out
+            if got.special[j] != got.special[i]:
+                return None
+            out.extend(got.floats[got.fpos[i]:got.fpos[j]])
+        return out
+
     def bounded(self) -> "RefValue":
         """Whole columns and rows cut down to what the sheet uses."""
         used = self.sheet.used_area()
@@ -106,6 +139,56 @@ class RefValue:
         for r in range(ref.top, ref.bottom + 1):
             rows.append(tuple(wb.value(self.sheet, r, c) for c in range(ref.left, ref.right + 1)))
         return Array(tuple(rows))
+
+
+class _Column:
+    """One column's values during a pass, in row order, as far as they are
+    final (worked out, or not formulas): the plain numbers among them, and
+    running counts of numbers and of what SUM can't skip (quantities,
+    errors), so any run of rows is two lookups and a slice."""
+
+    __slots__ = ("sheet", "col", "rows", "serial", "upto", "floats", "fpos", "special")
+
+    def __init__(self, sheet, col):
+        self.sheet, self.col = sheet, col
+        self.rows = sheet._rows_in_col.get(col, [])
+        self.serial = sheet.cells_serial
+        self.upto = 0
+        self.floats: list = []
+        self.fpos = [0]
+        self.special = [0]
+
+    def extend(self, to: int) -> None:
+        sheet = self.sheet
+        pending = sheet.workbook._dirty
+        cells = sheet.cells
+        sid, col, rows = sheet.id, self.col, self.rows
+        floats, fpos, special = self.floats, self.fpos, self.special
+        n_special = special[-1]
+        k = self.upto
+        while k < to:
+            row = rows[k]
+            if (sid, row, col) in pending:
+                break
+            v = cells[(row, col)].value
+            t = type(v)
+            if t is float:
+                floats.append(v)
+            elif t is not str and t is not bool and v is not BLANK:
+                n_special += 1             # a quantity, an error, anything else
+            fpos.append(len(floats))
+            special.append(n_special)
+            k += 1
+        self.upto = k
+
+
+def _column(wb, sheet, col) -> _Column:
+    key = (sheet.id, col)
+    got = wb._columns.get(key)
+    if got is None or got.serial != sheet.cells_serial or \
+            got.rows is not sheet._rows_in_col.get(col, got.rows):
+        got = wb._columns[key] = _Column(sheet, col)
+    return got
 
 
 class Ctx:

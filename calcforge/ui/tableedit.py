@@ -201,6 +201,28 @@ def _now(fmt: str) -> str:
     return datetime.datetime.now().strftime(fmt)
 
 
+def clipboard_formats() -> dict:
+    """What the clipboard holds, as {MIME type: bytes}; {} when it holds
+    nothing. QClipboard.mimeData() is None on an empty clipboard on some
+    platforms, so every reader goes through here (QA F-03)."""
+    mime = QApplication.clipboard().mimeData()
+    if mime is None:
+        return {}
+    formats = {}
+    for kind in mime.formats():
+        formats[kind] = bytes(mime.data(kind))
+    if mime.hasText() and "text/plain" not in formats:
+        formats["text/plain"] = (mime.text() or "").encode("utf-8")
+    return {kind: data for kind, data in formats.items() if data}
+
+
+def clipboard_has_something() -> bool:
+    """Whether there is anything on the clipboard to paste, without reading
+    it all (a menu being opened asks; a big picture there is not copied out)."""
+    mime = QApplication.clipboard().mimeData()
+    return mime is not None and bool(mime.formats())
+
+
 def _cols(te) -> list:
     _top, first, _bottom, last = te.selection()
     return list(range(first, last + 1))
@@ -483,6 +505,7 @@ class TableEditing:
         self._typed(text)
 
     def close(self) -> None:
+        self.settle_result_unit()
         item = self.item
         self._hide_help()
         if self.editor is not None:
@@ -533,6 +556,7 @@ class TableEditing:
         item = self.item
         if item is None:
             return
+        self.settle_result_unit()
         if not self._keep_tab:
             self.tab_start = None
         rows, cols = item.size
@@ -749,6 +773,10 @@ class TableEditing:
         view = self.view
         if event.button() not in (Qt.LeftButton, Qt.RightButton):
             return False
+        # a click anywhere else on the canvas leaves SMath's unit box (the
+        # canvas never takes the focus from it, so it stayed, "=" and all,
+        # over whatever came there next: the user, 2026-10-16)
+        self.settle_result_unit()
         headings = getattr(view, "sheet_headings", None)
         hit = headings.hit(event.position()) if headings is not None else None
         if hit is not None and view.tool_key == "select":
@@ -1706,6 +1734,15 @@ class TableEditing:
         box = self._result_unit
         return box is not None and box.isVisible()
 
+    def settle_result_unit(self) -> None:
+        """The unit box after a cell's result, if it is open, finished as
+        leaving it finishes it: what was typed is taken (or refused, and
+        why said) and the box goes. Done before anything else happens to
+        the cells, so it is never left over other cells or another page."""
+        box = self._result_unit
+        if box is not None and not box._done:
+            box.finish(True)
+
     def _press_result_unit(self, item, local: QPointF) -> bool:
         """A click on SMath's unit box after the active cell's result (or
         on its unit): the box is typed into."""
@@ -2062,6 +2099,7 @@ class TableEditing:
 
     # -- changing the table (each one undo step) ------------------------------------------------------
     def _change(self, label: str, change: Callable) -> None:
+        self.settle_result_unit()
         item = self.item
         if item is None or item.sheet is None:
             return
@@ -2186,21 +2224,55 @@ class TableEditing:
         self._change("Delete columns", lambda wb, sheet: wb.delete_cols(sheet, l, r - l + 1))
         self.select((t, min(l, self.item.size[1] - 1)))
 
-    def insert_cells(self) -> None:
+    def _whole(self) -> Optional[str]:
+        """"row" when whole rows are selected, "col" for whole columns, else None."""
         t, l, b, r = self.selection()
         rows, cols = self.item.size
         if l == 0 and r == cols - 1:
-            self.insert_rows()
-        else:
-            self.insert_cols()
+            return "row"
+        if t == 0 and b == rows - 1:
+            return "col"
+        return None
 
-    def delete_cells(self) -> None:
+    def insert_cells(self):
+        """Excel's Ctrl++ (Insert…): whole rows or columns selected are
+        inserted at once; otherwise the Insert dialog asks how (QA F-13)."""
+        whole = self._whole()
+        if whole is not None:
+            self.insert_or_delete(whole, True)
+            return None
+        from . import datatools
+        return datatools.cells_dialog(self, True)
+
+    def delete_cells(self):
+        """Excel's Ctrl+- (Delete…): as Insert, the Delete dialog for cells."""
+        whole = self._whole()
+        if whole is not None:
+            self.insert_or_delete(whole, False)
+            return None
+        from . import datatools
+        return datatools.cells_dialog(self, False)
+
+    def insert_or_delete(self, how: str, insert: bool) -> None:
+        """What the Insert or Delete dialog chose: "row" or "col" for whole
+        ones, "down"/"right" (insert) or "up"/"left" (delete) to shift the
+        cells beside the selection."""
+        if how == "row":
+            (self.insert_rows if insert else self.delete_rows)()
+            return
+        if how == "col":
+            (self.insert_cols if insert else self.delete_cols)()
+            return
         t, l, b, r = self.selection()
-        rows, cols = self.item.size
-        if l == 0 and r == cols - 1:
-            self.delete_rows()
-        else:
-            self.delete_cols()
+        axis = "row" if how in ("down", "up") else "col"
+        wb = self.item.sheet.workbook
+        if wb.merges_in_the_way(self.item.sheet, t, l, b, r, axis):
+            self.view.statusMessage.emit("Cells can't be shifted through merged cells: "
+                                         "unmerge them first")   # Excel refuses too
+            return
+        self._change("Insert cells" if insert else "Delete cells",
+                     lambda wb, sheet: wb.shift_cells(sheet, t, l, b, r, axis, insert))
+        self.select((t, l), (b, r), (t, l))
 
     def hide(self, axis: str, hidden: bool) -> None:
         t, l, b, r = self.selection()
@@ -2408,12 +2480,7 @@ class TableEditing:
         item = self.item
         if item is None or self.editor is not None:
             return False
-        mime = QApplication.clipboard().mimeData()
-        formats = {}
-        for kind in mime.formats():
-            formats[kind] = bytes(mime.data(kind))
-        if mime.hasText() and "text/plain" not in formats:
-            formats["text/plain"] = mime.text().encode("utf-8")
+        formats = clipboard_formats()
         t, l, b, r = self.selection()
         copied = self.copied
         if copied is not None and copied[2] and what == "all":
@@ -2435,8 +2502,14 @@ class TableEditing:
                 h, w = block[2] - block[0], block[3] - block[1]
                 self.select((t, l), (t + h, l + w), (t, l))
                 return True
-        data = clip.from_clipboard(formats)
-        if data is None:
+        try:
+            data = clip.from_clipboard(formats) if formats else None
+        except (ValueError, KeyError, TypeError, IndexError, AttributeError):
+            data = None                    # another program's clipboard we can't read
+        if not data or not data.get("rows"):
+            # Excel does nothing when there is nothing to paste; it is said
+            # here, as the menu's Paste is greyed then (QA F-03)
+            self.view.statusMessage.emit("Nothing to paste: copy some cells first")
             return False
         if what == "transpose":
             data, what = clip.transposed(data), "all"
@@ -2482,12 +2555,14 @@ class TableEditing:
     def _clipboard_entries(self, menu) -> None:
         menu.addAction("Cut", lambda: self.copy(cut=True), QKeySequence.Cut)
         menu.addAction("Copy", self.copy, QKeySequence.Copy)
-        menu.addAction("Paste", self.paste, QKeySequence.Paste)
+        # greyed while the clipboard holds nothing, as Excel's are (QA F-03)
+        something = clipboard_has_something()
+        menu.addAction("Paste", self.paste, QKeySequence.Paste).setEnabled(something)
         special = menu.addMenu("Paste Special")
-        special.addAction("Values", lambda: self.paste("values"))
-        special.addAction("Formulas", lambda: self.paste("formulas"))
-        special.addAction("Formats", lambda: self.paste("formats"))
-        special.addAction("Transpose", lambda: self.paste("transpose"))
+        special.menuAction().setEnabled(something)
+        for label, what in (("Values", "values"), ("Formulas", "formulas"),
+                            ("Formats", "formats"), ("Transpose", "transpose")):
+            special.addAction(label, lambda w=what: self.paste(w)).setEnabled(something)
 
     def cell_menu(self) -> QMenu:
         """The cells' right-click menu, grouped and named as Excel's (QA round 4)."""
@@ -2496,6 +2571,11 @@ class TableEditing:
         window = self.view.window
         menu = QMenu(self.view)
         menu.setProperty("cf_context", "cell")
+        # first, as a measurement's: the name the calculations read the
+        # cells by, and whether later calc sections read them (the user,
+        # 2026-10-16)
+        self._name_entries(menu)
+        menu.addSeparator()
         self._clipboard_entries(menu)
         menu.addSeparator()
         # Insert ▸ and Delete ▸ use the names the Style bar's Rows & Columns
@@ -2506,6 +2586,7 @@ class TableEditing:
         ins.addAction("Insert Rows Below", lambda: self.insert_rows(below=True))
         ins.addAction("Insert Columns Left", self.insert_cols)
         ins.addAction("Insert Columns Right", lambda: self.insert_cols(right=True))
+        ins.addAction("Insert Cells…", self.insert_cells, QKeySequence("Ctrl++"))
         if _is_run(item):
             ins.addSeparator()
             brk = ins.addAction("Insert Page Break",
@@ -2521,6 +2602,7 @@ class TableEditing:
         dele = menu.addMenu("Delete")
         dele.addAction("Delete Rows", self.delete_rows)
         dele.addAction("Delete Columns", self.delete_cols)
+        dele.addAction("Delete Cells…", self.delete_cells, QKeySequence("Ctrl+-"))
         if _is_run(item) and sheetlayout.has_break(item, row, col):
             dele.addSeparator()
             dele.addAction("Remove Page Break",
@@ -2561,17 +2643,105 @@ class TableEditing:
                              QKeySequence("Ctrl+Shift+F3"))
         if _is_run(item):
             self._page_layout_menu(menu, item)
-        # CalcForge's own, after Excel's
+        # CalcForge's own, after Excel's (Global is at the top, by the name)
         menu.addSeparator()
-        # calculation sections (2026-10-11): cells read by every later section
-        from . import calcsections
-        area = list(self.selection())
-        on = calcsections.cells_global(item.sheet, area)
-        made = menu.addAction("Make Local" if on else "Make Global",
-                              lambda: calcsections.set_cells_global(window, item, area, not on))
-        made.setToolTip("Global cells are read by every later calc section (past its breaks)")
         menu.addAction("Rename Sheet…" if _is_run(item) else "Rename Table…", self.rename)
         return menutidy.tidy(menu)
+
+    def selection_name(self):
+        """The defined name that refers to exactly the selected cell or
+        block, or None (what the right-click's Variable box shows)."""
+        item = self.item
+        if item is None or item.sheet is None:
+            return None
+        t, l, b, r = self.selection()
+        wanted = f"{item.name}!{col_letters(l)}{t + 1}"
+        if (t, l) != (b, r):
+            wanted += f":{col_letters(r)}{b + 1}"
+
+        def plain(text):
+            return text.lstrip("=").replace("$", "").replace("'", "").lower()
+        for dn in item.sheet.workbook.names.values():
+            if plain(dn.refers_to) == plain(wanted):
+                return dn
+        return None
+
+    def name_selection(self, text: str) -> bool:
+        """The Variable box: name the selection *text* (Excel's defined
+        name, through the Name Manager's own define and delete), rename it,
+        or with nothing typed take its name away. One undo step."""
+        from . import names
+        text = text.strip()
+        old = self.selection_name()
+        if old is not None and text == old.name:
+            return True
+        if not text:
+            if old is None:
+                return True
+            problem = names.delete(self, old)
+        else:
+            item = self.item
+            from ..sheet.refs import quote_sheet
+            t, l, b, r = self.selection()
+            ref = f"{quote_sheet(item.name)}!${col_letters(l)}${t + 1}"
+            if (t, l) != (b, r):
+                ref += f":${col_letters(r)}${b + 1}"
+            problem = names.define(self, text, ref, replacing=old)
+        if problem:
+            self.view.statusMessage.emit(problem)
+            return False
+        return True
+
+    def _name_entries(self, menu) -> None:
+        """Variable [box] and Global, at the top of the cells' menu: the
+        measurement's Variable row (mainwindow._variable_field), for a cell."""
+        from PySide6.QtWidgets import QWidget, QWidgetAction
+        from . import calcsections
+        item = self.item
+        window = self.view.window
+        holder = QWidget(menu)
+        holder.setObjectName("cellVariableRow")
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(24, 3, 10, 3)
+        row.setSpacing(6)
+        row.addWidget(QLabel("Variable"))
+        named = self.selection_name()
+        field = QLineEdit(named.name if named is not None else "")
+        field.setObjectName("cellVariable")
+        field.setPlaceholderText("W_total")
+        field.setToolTip("Name these cells for the equations and formulas: W_total "
+                         "(a defined name, in the Name Manager), empty for none · Enter to set")
+        field.setMinimumWidth(110)
+        row.addWidget(field, 1)
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(holder)
+        menu.addAction(action)
+        done = {"set": False}
+
+        def commit():
+            if done["set"] or self.item is not item:
+                return
+            done["set"] = True
+            now = self.selection_name()
+            if field.text().strip() != (now.name if now is not None else ""):
+                self.name_selection(field.text())
+
+        def on_enter():
+            commit()
+            menu.close()
+        field.returnPressed.connect(on_enter)
+        menu.aboutToHide.connect(commit)
+        # the box takes the keys as soon as the menu opens, as the measurement's
+        menu.aboutToShow.connect(lambda: field.setFocus(Qt.PopupFocusReason))
+        self.name_field = field
+        # calculation sections (2026-10-11): cells read by every later section
+        area = list(self.selection())
+        on = calcsections.cells_global(item.sheet, area)
+        made = menu.addAction("Global (Read by Later Calc Sections)",
+                              lambda: calcsections.set_cells_global(window, item, area, not on))
+        made.setCheckable(True)
+        made.setChecked(on)
+        made.setToolTip("Global cells are read by every later calc section (past its breaks)")
 
     def heading_menu(self, axis: str, index: int) -> QMenu:
         """Excel's row (or column) heading menu: the short one (QA round 4).

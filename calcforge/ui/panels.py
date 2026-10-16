@@ -732,6 +732,9 @@ class PagesPanel(QWidget):
 
     def rebuild(self, document, current: int) -> None:
         self._suppress = True
+        # a slot line belongs to the strip it was drawn on: pages pasted then
+        # undone leave no line behind at their old place (QA F-26)
+        self.list.set_external_drop_row(None)
         live = {id(page) for page in document.pages}
         for gone in [key for key in self._thumbnails if key not in live]:
             del self._thumbnails[gone]
@@ -814,6 +817,39 @@ class PagesPanel(QWidget):
         entry = self.list.item(current)
         if entry is not None and 0 <= current < len(document.pages):
             entry.setIcon(self._thumbnail(document.pages[current], document))
+
+    #: The longest and shortest wait after an edit before the thumbnails
+    #: catch up, in milliseconds.
+    LONGEST_WAIT = 400
+    SHORTEST_WAIT = 40
+
+    def refresh_soon(self) -> None:
+        """An edit was made: the thumbnails it changed are drawn again once
+        the edits stop. The wait is a few times what drawing them took last,
+        so an ordinary page catches up at once (an Undo, a cell typed in a
+        table: QA F-26) while a page of a thousand markups still waits for
+        the drag to end rather than drawing on every move (2026-10-05)."""
+        timer = getattr(self, "_refresh_timer", None)
+        if timer is None:
+            timer = self._refresh_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._refresh_changed)
+        cost = getattr(self, "_refresh_cost", 0.0)
+        timer.start(int(max(self.SHORTEST_WAIT, min(self.LONGEST_WAIT, cost * 4))))
+
+    def _refresh_changed(self) -> None:
+        """Every thumbnail in view whose page changed — not only the current
+        one: an Undo can change a page that is not the one shown."""
+        import time
+        start = time.perf_counter()
+        document = getattr(self.window, "document", None)
+        current = getattr(self.window, "current_index", -1)
+        if document is not None:
+            self.refresh_current(document, current)
+            self._draw_what_is_on_screen()
+        took = (time.perf_counter() - start) * 1000
+        if took > 2.0:                     # a picture was drawn, not only looked up
+            self._refresh_cost = took
 
     @staticmethod
     def _with_markups(sheet, page):
@@ -912,6 +948,18 @@ class PagesPanel(QWidget):
 # ---------------------------------------------------------------------------
 # Markups list
 # ---------------------------------------------------------------------------
+
+def _comment_of(item) -> str:
+    """The Markups list's Comment column, as Revu's Comments: the comment
+    typed for the markup, or a text markup's own words — never its size or
+    measurement, which are the Value column's (QA F-25)."""
+    said = (getattr(item, "comment", "") or "").replace("\n", " ").strip()
+    if said:
+        return said[:160]
+    if hasattr(item, "doc"):               # text box, callout: what it says
+        return item.summary()
+    return ""
+
 
 def _natural_key(text: str) -> tuple:
     """"Page 10" after "Page 9", "12.5" after "9": numbers compared as numbers."""
@@ -1114,7 +1162,7 @@ class MarkupsPanel(QWidget):
                 style.font_family if text_like else "",
                 f"{style.font_size:g}" if text_like else "",
                 getattr(item, "value_text", ""), item.author,
-                item.modified[:10], item.summary()]
+                item.modified[:10], _comment_of(item)]
 
     def _shown(self, row: list[str], needle: str) -> bool:
         if needle and not any(needle in str(cell).lower() for cell in row):

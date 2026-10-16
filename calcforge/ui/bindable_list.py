@@ -81,6 +81,10 @@ ALIASES: dict[str, str] = {
     "bookmarks.contents": "command.contents",
     "variables.make_local": "variables.make_global",
     "cell.make_local": "cell.make_global",
+    # the Variable row's Global tick replaced Make Global / Local (2026-10-16)
+    "cell.global_read_by_later_calc_sections": "cell.make_global",
+    "cell.insert.insert_cells": "sheet.insert_cells",
+    "cell.delete.delete_cells": "sheet.delete_cells",
     # a cell's menu: the spreadsheet's own keys (shortcuts.SHEET_KEYS)
     "cell.cut": "sheet.cut", "cell.copy": "sheet.copy", "cell.paste": "sheet.paste",
     "cell.paste_special.values": "sheet.paste_values",

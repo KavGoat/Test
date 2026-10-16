@@ -257,6 +257,16 @@ def rebuild(si: float, dims, unit, p: float = 1.0):
 # -- maths ----------------------------------------------------------------------------------
 @fn("SUM", least=1)
 def SUM(*args):
+    # blocks of plain numbers: summed from the pass's column lists (findings 5.2)
+    if all(isinstance(a, RefValue) for a in args):
+        quick = []
+        for a in args:
+            got = a.float_values()
+            if got is None:
+                break
+            quick.extend(got)
+        else:
+            return math.fsum(quick)
     nums = numbers(args)
     if all(type(n) is float for n in nums):
         return math.fsum(nums)

@@ -14076,8 +14076,8 @@
    "id": "R0240",
    "area": "Right-click menus",
    "where": "Table cell (open table)",
-   "name": "Make Global",
-   "note": "",
+   "name": "Global (Read by Later Calc Sections)",
+   "note": "toggle",
    "shortcut": "",
    "state": "table_open",
    "entries": [
@@ -14085,7 +14085,7 @@
      "via": "context",
      "target": "cell",
      "path": [
-      "Make Global"
+      "Global (Read by Later Calc Sections)"
      ],
      "kind": "item"
     }
@@ -25829,7 +25829,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Row heading (open table)",
    "name": "Paste",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "table_open",
    "entries": [
@@ -25839,7 +25839,8 @@
      "path": [
       "Paste"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -25848,7 +25849,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Row heading (open table) ▸ Paste Special",
    "name": "Values",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "table_open",
    "entries": [
@@ -25859,7 +25860,8 @@
       "Paste Special",
       "Values"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -25868,7 +25870,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Row heading (open table) ▸ Paste Special",
    "name": "Formulas",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "table_open",
    "entries": [
@@ -25879,7 +25881,8 @@
       "Paste Special",
       "Formulas"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -25888,7 +25891,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Row heading (open table) ▸ Paste Special",
    "name": "Formats",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "table_open",
    "entries": [
@@ -25899,7 +25902,8 @@
       "Paste Special",
       "Formats"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -25908,7 +25912,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Row heading (open table) ▸ Paste Special",
    "name": "Transpose",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "table_open",
    "entries": [
@@ -25919,7 +25923,8 @@
       "Paste Special",
       "Transpose"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26137,7 +26142,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Column heading (open table)",
    "name": "Paste",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "table_open",
    "entries": [
@@ -26147,7 +26152,8 @@
      "path": [
       "Paste"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26156,7 +26162,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Column heading (open table) ▸ Paste Special",
    "name": "Values",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "table_open",
    "entries": [
@@ -26167,7 +26173,8 @@
       "Paste Special",
       "Values"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26176,7 +26183,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Column heading (open table) ▸ Paste Special",
    "name": "Formulas",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "table_open",
    "entries": [
@@ -26187,7 +26194,8 @@
       "Paste Special",
       "Formulas"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26196,7 +26204,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Column heading (open table) ▸ Paste Special",
    "name": "Formats",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "table_open",
    "entries": [
@@ -26207,7 +26215,8 @@
       "Paste Special",
       "Formats"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26216,7 +26225,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Column heading (open table) ▸ Paste Special",
    "name": "Transpose",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "table_open",
    "entries": [
@@ -26227,7 +26236,8 @@
       "Paste Special",
       "Transpose"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26445,7 +26455,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Row heading (spreadsheet page)",
    "name": "Paste",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "sheet_open",
    "entries": [
@@ -26455,7 +26465,8 @@
      "path": [
       "Paste"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26464,7 +26475,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Row heading (spreadsheet page) ▸ Paste Special",
    "name": "Values",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "sheet_open",
    "entries": [
@@ -26475,7 +26486,8 @@
       "Paste Special",
       "Values"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26484,7 +26496,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Row heading (spreadsheet page) ▸ Paste Special",
    "name": "Formulas",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "sheet_open",
    "entries": [
@@ -26495,7 +26507,8 @@
       "Paste Special",
       "Formulas"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26504,7 +26517,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Row heading (spreadsheet page) ▸ Paste Special",
    "name": "Formats",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "sheet_open",
    "entries": [
@@ -26515,7 +26528,8 @@
       "Paste Special",
       "Formats"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26524,7 +26538,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Row heading (spreadsheet page) ▸ Paste Special",
    "name": "Transpose",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "sheet_open",
    "entries": [
@@ -26535,7 +26549,8 @@
       "Paste Special",
       "Transpose"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26772,7 +26787,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Column heading (spreadsheet page)",
    "name": "Paste",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "sheet_open",
    "entries": [
@@ -26782,7 +26797,8 @@
      "path": [
       "Paste"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26791,7 +26807,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Column heading (spreadsheet page) ▸ Paste Special",
    "name": "Values",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "sheet_open",
    "entries": [
@@ -26802,7 +26818,8 @@
       "Paste Special",
       "Values"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26811,7 +26828,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Column heading (spreadsheet page) ▸ Paste Special",
    "name": "Formulas",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "sheet_open",
    "entries": [
@@ -26822,7 +26839,8 @@
       "Paste Special",
       "Formulas"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26831,7 +26849,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Column heading (spreadsheet page) ▸ Paste Special",
    "name": "Formats",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "sheet_open",
    "entries": [
@@ -26842,7 +26860,8 @@
       "Paste Special",
       "Formats"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },
@@ -26851,7 +26870,7 @@
    "area": "Extra (not in the inventory)",
    "where": "Column heading (spreadsheet page) ▸ Paste Special",
    "name": "Transpose",
-   "note": "",
+   "note": "disabled here",
    "shortcut": "",
    "state": "sheet_open",
    "entries": [
@@ -26862,7 +26881,8 @@
       "Paste Special",
       "Transpose"
      ],
-     "kind": "item"
+     "kind": "item",
+     "expect_disabled": true
     }
    ]
   },

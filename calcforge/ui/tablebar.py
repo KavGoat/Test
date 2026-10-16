@@ -11,7 +11,6 @@ from __future__ import annotations
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QComboBox, QFontComboBox, QLabel, QMenu, QToolButton)
 
-from ..sheet.numfmt import is_date_format
 from .widgets import ColorButton
 
 NUMBER_FORMATS = [("General", None), ("Number", "0.00"), ("Currency", "$#,##0.00"),
@@ -144,9 +143,11 @@ class TableControls:
         menu.addAction("Insert Rows Below", lambda: t().insert_rows(below=True))
         menu.addAction("Insert Columns Left", lambda: t().insert_cols())
         menu.addAction("Insert Columns Right", lambda: t().insert_cols(right=True))
+        menu.addAction("Insert Cells…", lambda: t().insert_cells())
         menu.addSeparator()
         menu.addAction("Delete Rows", lambda: t().delete_rows())
         menu.addAction("Delete Columns", lambda: t().delete_cols())
+        menu.addAction("Delete Cells…", lambda: t().delete_cells())
         menu.addSeparator()
         menu.addAction("Distribute Rows Evenly", lambda: t().distribute("row"))
         menu.addAction("Distribute Columns Evenly", lambda: t().distribute("col"))
@@ -324,23 +325,26 @@ class TableControls:
                 b.setChecked(st.h_align == key)
             self.valign.setCurrentIndex({"bottom": 0, "center": 1, "top": 2}.get(st.v_align, 0))
             self.wrap.setChecked(st.wrap)
-            code = st.number_format
-            index = 0
-            for i, (_label, c) in enumerate(NUMBER_FORMATS):
-                if c == code:
-                    index = i
-                    break
-            else:
-                if code and "%" in code:
-                    index = 3
-                elif code and is_date_format(code):
-                    index = 6
-                elif code:
-                    index = 1
-            self.number.setCurrentIndex(index)
+            self.number.setCurrentIndex(format_index(st.number_format))
             self.unit.setText(st.unit or "")
         finally:
             self._syncing = False
+
+
+def format_index(code) -> int:
+    """Which entry of the format box a number format shows as: its own, or
+    its Format Cells category ("General" is General, "h:mm AM/PM" is Time,
+    QA F-30). A custom format shows as Number, the nearest the box has."""
+    from .celldialog import category_of
+
+    for i, (_label, c) in enumerate(NUMBER_FORMATS):
+        if c == code:
+            return i
+    category = category_of(code)
+    label = {"Percentage": "Percent", "Accounting": "Currency",
+             "Custom": "Number"}.get(category, category)
+    labels = [name for name, _c in NUMBER_FORMATS]
+    return labels.index(label) if label in labels else 1
 
 
 def _with_decimals(code: str, step: int):

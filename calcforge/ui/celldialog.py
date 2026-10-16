@@ -20,6 +20,42 @@ CATEGORIES = ["General", "Number", "Currency", "Accounting", "Date", "Time", "Pe
               "Fraction", "Scientific", "Text", "Custom"]
 DATES = ["d/mm/yyyy", "d-mmm-yy", "d mmmm yyyy", "dddd, d mmmm yyyy", "yyyy-mm-dd", "mmm-yy", "d/mm/yyyy h:mm"]
 TIMES = ["h:mm", "h:mm:ss", "h:mm AM/PM", "[h]:mm", "mm:ss.0"]
+def is_time_code(code: str) -> bool:
+    """A date-kind format that shows only a time of day or a duration
+    (h:mm, h:mm AM/PM, [h]:mm:ss, mm:ss.0): no day, month or year in it."""
+    import re
+    plain = re.sub(r'"[^"]*"|\\.', "", code or "")
+    plain = re.sub(r"\[(?![hms]+\])[^\]]*\]", "", plain, flags=re.I).lower()
+    plain = plain.replace("am/pm", "").replace("a/p", "")
+    if "d" in plain or "y" in plain:
+        return False
+    return "h" in plain or "s" in plain
+
+
+def category_of(code) -> str:
+    """The Format Cells category a number format belongs to, as Excel names
+    it (the table bar's format box shows the same, QA F-30)."""
+    from ..sheet.numfmt import is_date_format
+
+    code = code or "General"
+    if code == "General":
+        return "General"
+    if "%" in code:
+        return "Percentage"
+    if "E+" in code.upper():
+        return "Scientific"
+    if "/" in code and "?" in code:
+        return "Fraction"
+    if is_date_format(code):
+        return "Time" if code in TIMES or is_time_code(code) else "Date"
+    if code == "@":
+        return "Text"
+    if any(sym in code for sym in "$€£¥"):
+        return "Currency"
+    plain = code.replace(",", "").replace("#", "").replace("0", "").replace(".", "")
+    return "Number" if plain == "" else "Custom"
+
+
 FRACTIONS = ["# ?/?", "# ??/??", "# ???/???", "# ?/2", "# ?/4", "# ?/8", "# ?/16", "# ?/10", "# ?/100"]
 LINE_STYLES = ["thin", "medium", "thick", "dashed", "dotted", "double", "hair"]
 
@@ -125,23 +161,7 @@ class FormatCellsDialog(QDialog):
 
     @staticmethod
     def _category_of(code: str) -> int:
-        from ..sheet.numfmt import is_date_format
-
-        if code in ("General", ""):
-            return 0
-        if "%" in code:
-            return CATEGORIES.index("Percentage")
-        if "E+" in code.upper():
-            return CATEGORIES.index("Scientific")
-        if "/" in code and "?" in code:
-            return CATEGORIES.index("Fraction")
-        if is_date_format(code):
-            return CATEGORIES.index("Time") if code in TIMES else CATEGORIES.index("Date")
-        if code == "@":
-            return CATEGORIES.index("Text")
-        if any(sym in code for sym in "$€£¥"):
-            return CATEGORIES.index("Currency")
-        return CATEGORIES.index("Custom") if not code.replace(",", "").replace("#", "").replace("0", "").replace(".", "") == "" else CATEGORIES.index("Number")
+        return CATEGORIES.index(category_of(code))
 
     def _category_chosen(self, name: str) -> None:
         self.types.blockSignals(True)

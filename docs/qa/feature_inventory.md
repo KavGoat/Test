@@ -674,7 +674,7 @@ All 45 are in the last section.
 | Table cell (open table) | Comment ▸ |  | ≈ test_data_tools_session.py::test_the_menu_holds_every_tool (+1) |
 | Table cell (open table) | Find & Replace… |  | UNTESTED |
 | Table cell (open table) | Names ▸ |  | UNTESTED |
-| Table cell (open table) | Make Global |  | UNTESTED |
+| Table cell (open table) | Global (Read by Later Calc Sections) *(toggle)* |  | UNTESTED |
 | Table cell (open table) | Rename Table… |  | ≈ test_table_menu.py::test_every_table_command |
 | Spreadsheet cell (entries beyond the table cell menu) ▸ Insert | Insert Page Break |  | test_sheet_pages.py::test_manual_breaks_and_a_dragged_automatic_break (+1) |
 | Spreadsheet cell (entries beyond the table cell menu) ▸ Page Layout | Reset All Page Breaks |  | test_sheet_pages.py::test_manual_breaks_and_a_dragged_automatic_break (+1) |

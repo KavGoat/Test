@@ -4034,13 +4034,7 @@ class MainWindow(QMainWindow):
         # The page's thumbnail is drawn again once the edits stop: drawn on
         # every one, a page of a thousand markups cost a sixth of a second
         # each time one was let go of (2026-10-05).
-        timer = getattr(self, "_thumbnail_timer", None)
-        if timer is None:
-            timer = self._thumbnail_timer = QTimer(self)
-            timer.setSingleShot(True)
-            timer.timeout.connect(
-                lambda: self.pages_panel.refresh_current(self.document, self.current_index))
-        timer.start(400)
+        self.pages_panel.refresh_soon()
 
     # ==================================================================
     # pages
