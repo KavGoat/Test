@@ -28,9 +28,23 @@ from tests.test_tables import click, make_table
 
 
 def idle():
+    """The events of the moment handled, and the page's drawing tiles all in.
+
+    A tile arriving repaints what lies over it, the table included, so a
+    count of cells drawn taken while tiles were still coming (a loaded
+    machine, the full suite in parallel) counted the tiles, not the key."""
+    import time
+    from calcforge.io import pdftiles
     app = QApplication.instance()
-    for _ in range(4):
-        app.processEvents()
+    deadline = time.monotonic() + 10
+    while True:
+        for _ in range(4):
+            app.processEvents()
+        if not pdftiles.TILES._waiting and not pdftiles.TILES.held():
+            break
+        if time.monotonic() > deadline:
+            break
+        time.sleep(0.02)
 
 
 @pytest.fixture
