@@ -2773,11 +2773,14 @@ class TableEditing:
         row.setSpacing(6)
         row.addWidget(QLabel("Variable"))
         named = self.selection_name()
-        field = QLineEdit(named.name if named is not None else "")
+        # typed and drawn as SMath writes a name, as the measurement's is
+        from .namebox import SMathNameEdit
+        field = SMathNameEdit(named.name if named is not None else "")
         field.setObjectName("cellVariable")
-        field.setPlaceholderText("W_total")
-        field.setToolTip("Name these cells for the equations and formulas: W_total "
-                         "(a defined name, in the Name Manager), empty for none · Enter to set")
+        field.setPlaceholderText("name")
+        field.setToolTip("Name these cells for the equations and formulas, as in an equation: "
+                         "W . total gives W with a subscript (a defined name, in the Name "
+                         "Manager); empty for none · Enter to set")
         field.setMinimumWidth(110)
         row.addWidget(field, 1)
         action = QWidgetAction(menu)

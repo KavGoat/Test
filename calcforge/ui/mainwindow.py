@@ -6853,11 +6853,15 @@ class MainWindow(QMainWindow):
         row.setContentsMargins(24, 3, 10, 3)
         row.setSpacing(6)
         row.addWidget(QLabel("Variable"))
-        field = QLineEdit(item.variable)
+        # typed and drawn as SMath writes a name: L . beam is L with "beam"
+        # under it (the user, 2026-10-16)
+        from .namebox import SMathNameEdit
+        field = SMathNameEdit(item.variable)
         field.setObjectName("measureVariable")
-        field.setPlaceholderText("L.beam")
-        field.setToolTip("Name this measurement for the calculations: L.beam for a "
-                         "subscript, empty for none · Enter to set")
+        field.setPlaceholderText("name")
+        field.setToolTip("Name this measurement for the calculations, as in an equation: "
+                         "L . beam gives L with a subscript, Ctrl+Alt+F φ; empty for none "
+                         "· Enter to set")
         field.setMinimumWidth(110)
         row.addWidget(field, 1)
         action = QWidgetAction(menu)

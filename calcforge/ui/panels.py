@@ -3653,7 +3653,8 @@ class PropertiesPanel(QScrollArea):
             form.addRow("Depth:", depth)
 
         if len(self._items) == 1 and item.kind != "calibrate":
-            variable = QLineEdit(item.variable)
+            from .namebox import SMathNameEdit
+            variable = SMathNameEdit(item.variable)     # as SMath writes a name
             variable.setObjectName("measureVariable")
             variable.setPlaceholderText("a name, e.g. L.beam")
             variable.setToolTip("Give it a name and the calculations can use it: it is "
