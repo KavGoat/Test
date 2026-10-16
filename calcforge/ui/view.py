@@ -497,6 +497,10 @@ class PageView(QGraphicsView):
     itemActivated = Signal(object)
     documentEdited = Signal()
     pageChanged = Signal(int)
+    # The tool in hand changed (markupstyles.py follows it), and the numbered
+    # markup style the next markup is drawn in (0: the tool's default).
+    toolChanged = Signal(str)
+    markupStyleChanged = Signal(int)
 
     def __init__(self, window):
         super().__init__()
@@ -566,6 +570,9 @@ class PageView(QGraphicsView):
         # properties for the next thing drawn.
         self._pending_stamp = None
         self._pending_properties: Optional[dict] = None
+        # Which numbered markup style those properties are (markupstyles.py):
+        # 0 when they are not one.
+        self.markup_style = 0
         self._label_editor: Optional[QLineEdit] = None
         self._label_proxy: Optional[QGraphicsProxyWidget] = None
         self._label_item = None
@@ -810,11 +817,14 @@ class PageView(QGraphicsView):
             self.cancel_marquee()
         if self._draft is not None:
             self.cancel_draft()
+        if self.markup_style:
+            self.set_markup_style(0, None)  # a tool picked again starts on its default
         self.tool_key = key if key in TOOL_MAP else "select"
         self._preview_key = None            # the preview belongs to the old tool
         tool = self.current_tool()
         self.setCursor(self._cursor_for_tool(tool))
         self.statusMessage.emit(tool.hint or tool.label)
+        self.toolChanged.emit(self.tool_key)
 
     def begin_arrow_leader(self, item) -> None:
         """Arm a click that says where a new arrow leader points.
@@ -900,6 +910,10 @@ class PageView(QGraphicsView):
 
     def finish_tool(self) -> None:
         self.forget_snap()
+        if self.markup_style:
+            # A markup drawn in a numbered style: the next one is the default
+            # again unless its number is pressed again (the user, 2026-10-15).
+            self.set_markup_style(0, None)
         if self.tool_key == "count":
             self.statusMessage.emit(
                 "Count: click to place the next marker — Esc to finish")
@@ -3416,6 +3430,20 @@ class PageView(QGraphicsView):
     def set_pending_properties(self, payload: Optional[dict]) -> None:
         """The next markup drawn wears these properties."""
         self._pending_properties = dict(payload) if payload else None
+        self._preview_key = None
+        if self.markup_style:
+            self.markup_style = 0
+            self.markupStyleChanged.emit(0)
+
+    def set_markup_style(self, number: int, payload: Optional[dict]) -> None:
+        """Draw the next markup in numbered style *number* — the Tool Chest's
+        properties, kept as a style of the tool (markupstyles.py). 0 with no
+        payload goes back to the tool's default."""
+        self._pending_properties = dict(payload) if (number and payload) else None
+        self.markup_style = int(number) if self._pending_properties else 0
+        self._preview_key = None
+        self.viewport().update()
+        self.markupStyleChanged.emit(self.markup_style)
 
     def set_pending_stamp(self, entry) -> None:
         """The next click puts this markup down, exactly as it was kept."""
@@ -3427,6 +3455,9 @@ class PageView(QGraphicsView):
         had = self._pending_stamp is not None or self._pending_properties is not None
         self._pending_stamp = None
         self._pending_properties = None
+        if self.markup_style:
+            self.markup_style = 0
+            self.markupStyleChanged.emit(0)
         if had:
             self.setCursor(self._cursor_for_tool(self.current_tool()))
         return had
@@ -4926,6 +4957,10 @@ class PageView(QGraphicsView):
             return None
         item = CalloutItem("")
         self.window.apply_default_style(item)
+        if self._pending_properties:
+            # as it will be placed: a Tool Chest tool's or a markup style's look
+            from . import toolsets
+            toolsets.apply_properties(item, self._pending_properties)
         item.set_local_rect(QRectF(0, 0, box.width(), box.height()))
         item.setPos(box.topLeft())
         if self._pending_cloud:
@@ -5203,6 +5238,14 @@ class PageView(QGraphicsView):
 
         if key in (Qt.Key_Delete, Qt.Key_Backspace) and self.scene().selectedItems():
             self.window.delete_selection()
+            event.accept()
+            return
+
+        # Markup styles (markupstyles.py): with a drawing tool in hand, 1 to 9
+        # draw the next markup in that tool's numbered style, and 0 or the
+        # tool's own letter go back to its default.
+        styles = getattr(self.window, "markup_styles", None)
+        if styles is not None and styles.key_press(event):
             event.accept()
             return
 

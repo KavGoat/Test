@@ -71,6 +71,10 @@ class Preferences:
     recover_flattened: bool = True
     """Keep source item data when content is flattened into the page."""
 
+    markup_style_keys: bool = True
+    """Whether 1 to 9, with a markup tool in hand, draw the next markup in
+    that tool's numbered style (markupstyles.py)."""
+
     page_thumbnails: float = 1.0
     """How big the pictures in the page list are, as a multiple of their
     ordinary size. Ctrl and the wheel over the list changes it."""
