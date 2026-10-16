@@ -3,6 +3,21 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-16 — rounds 2–4 merged and gated (pushed at dbc632f)
+
+- Split View: a tab dragged to the other pane opens no copy and leaves no blank tab, and the emptied pane ends the split (tests/test_split_tabs.py).
+- Right-click on a cell moves the selection there first (Excel), so Insert Page Break lands where the pointer is.
+- Markups List: double-click its handle bar to hide or show it.
+- Equations: ")" closes the bracket ((1+2)*3=9); name(1,2)= always evaluates; max/min/sum take any number of arguments; atan2 and lg.
+- Cells: equation variables keep their unit (35 kN·m); units in blue with real superscripts, on screen and in print; incompatible units refused with a reason.
+- Excel: General shortens to fit the column; var(X) reads the equations' X before Excel's VAR; errors say why; hidden columns; dates.
+- Markup Styles toolbar: tool key then 1–9; back to the default after each markup; styles edited like Revu's Properties Mode; app-wide; Preferences tick for the keys.
+- Window: resizes to 800×600; the status bar drops controls into »; toolbar rows wrap; a Measure toolbar; clouds without the hook.
+- Revu Flatten Markups (types, scope, Allow Markup Recovery, Pages) and Set Scale (presets, Custom with Calibrate, Separate Y, Precision).
+- Every right-click menu regrouped (docs/qa/findings.md round 4).
+- The page no longer jumps when a markup is picked (the Markup Styles hint matches its buttons' height).
+- QA: docs/qa/feature_inventory.md (1181 features, 435 untested, 86 placement smells), docs/qa/revu_audit.md, docs/qa/QA_PLAN.md.
+
 ## 2026-09-27 report — implementation evidence
 
 Full offscreen Qt suite (`QT_QPA_PLATFORM=offscreen python -m pytest`) was run
