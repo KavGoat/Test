@@ -676,7 +676,7 @@ def open_via_dialog(H, w, path, log):
 
 
 def tab_names(pane):
-    bar = pane.document_tabs
+    bar = pane.document_tabs if hasattr(pane, "document_tabs") else pane.tabs
     return [bar.tabText(i) for i in range(bar.count())] if bar.isVisible() else \
         ["(no tab bar) " + pane.document.title]
 
@@ -706,29 +706,27 @@ def t8(H, log):
     log.note("split entries: %s" % H.menu_search(w, "split"))
     H.use_menu(w, log, "View > Split View")
     H.pump(5)
-    host = w._split_host
-    if host is None:
+    if not w.is_split:
         log.confused("View > Split View made no split")
         return
-    panes = list(host.panes)
-    log.note("panes: %s" % [tab_names(p) for p in panes])
-    host.resize(1400, 860)
+    w.resize(1400, 860)
     H.pump(3)
-    H.widget_shot(host, "t8_split")
-    left, right = panes
-    bar = left.document_tabs
-    log.note("left tab bar visible: %s; right tab bar visible: %s" % (
-        bar.isVisible(), right.document_tabs.isVisible()))
+    H.shot(w, "t8_split")
+    left, right = w._panes
+
+    def names(pane):
+        return [pane.tabs.tabText(i) for i in range(pane.tabs.count())]
+
+    log.note("panes: %s" % [names(p) for p in (left, right)])
     # drag the first tab of the left pane onto the right pane's tab bar
+    H.click(left.view, 300, 300)
+    bar = left.tabs
     src = bar.tabRect(0).center()
-    dst_bar = right.document_tabs
-    target_global = dst_bar.mapToGlobal(dst_bar.rect().center()) if dst_bar.isVisible() \
-        else right.view.viewport().mapToGlobal(right.view.viewport().rect().center())
-    dst = bar.mapFromGlobal(target_global)
+    dst_bar = right.tabs
+    dst = bar.mapFromGlobal(dst_bar.mapToGlobal(dst_bar.rect().center()))
     moved_name = bar.tabText(0)
     route = os.environ.get("NOVICE_T8_ROUTE", "straight")
-    log.note("drag route: %s; left tabs before: %s; active %d" % (
-        route, tab_names(left), left._active_tab))
+    log.note("drag route: %s; left tabs before: %s" % (route, names(left)))
     QTest.mousePress(bar, Qt.LeftButton, Qt.NoModifier, src)
     if route == "straight":
         points = [src + (dst - src) * f for f in (0.1, 0.3, 0.6, 1.0)]
@@ -742,30 +740,22 @@ def t8(H, log):
     QTest.mouseRelease(bar, Qt.LeftButton, Qt.NoModifier, dst)
     H.pump(5)
     log.step("drag tab '%s' to the right pane" % moved_name, clicks=1)
-    host = w._split_host or right._split_host
-    now = [tab_names(p) for p in (host.panes if host else [])]
-    log.note("after drag: %s; windows: %d" % (now, len([t for t in H.QApplication.topLevelWidgets()
-                                                         if t.isVisible() and type(t).__name__ in ("MainWindow", "SplitDocumentWindow")])))
-    if host:
-        H.widget_shot(host, "t8_after_drag")
-    dragged = bool(now) and moved_name in sum(now[1:], []) and moved_name not in now[0]
+    now = [names(p) for p in w._panes]
+    log.note("after drag: %s" % now)
+    H.shot(w, "t8_after_drag")
+    dragged = moved_name in sum(now[1:], []) and moved_name not in now[0] if len(now) > 1 \
+        else moved_name in now[0]
     if not dragged:
         log.confused("dragging a tab onto the other pane did not move it: %s" % now)
-    # unsplit: View > Split View again (it is a toggle)
-    from shiboken6 import isValid
-    alive = [p for p in (left, right) if isValid(p) and p.isVisible()]
-    keep = next((p for p in alive if p._split_host), alive[0] if alive else None)
-    if keep is None:
-        log.confused("no window left after the drag")
-        return
-    if keep._split_host is None:
+    if not w.is_split:
         log.confused("the split ended by itself when the tab was dragged across")
-    H.use_menu(keep, log, "View > Split View")
-    H.pump(5)
-    still = keep._split_host
-    log.note("after unsplit: split=%s tabs=%s" % (still is not None, tab_names(keep)))
-    H.shot(keep, "t8_unsplit")
-    log.success = dragged and still is None
+    else:
+        # unsplit: View > Split View again (it is a toggle)
+        H.use_menu(w, log, "View > Split View")
+        H.pump(5)
+    log.note("after unsplit: split=%s tabs=%s" % (w.is_split, names(w._active_pane)))
+    H.shot(w, "t8_unsplit")
+    log.success = dragged and not w.is_split
 
 @task(9)
 def t9(H, log):

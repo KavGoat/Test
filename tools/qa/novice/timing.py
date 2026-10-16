@@ -101,8 +101,7 @@ def main():
         H.pump(3)
 
     def unsplit(i):
-        host = w._split_host
-        if host is not None:
+        if w.is_split:
             act = H.menu_action(w, "View > Split View")
             act.trigger()
             H.pump(3)

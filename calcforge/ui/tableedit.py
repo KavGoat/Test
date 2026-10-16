@@ -147,9 +147,11 @@ class FormulaBar(QWidget):
         layout.addWidget(fx)
         self.edit = UnitText()
         self.edit.setToolTip("What is typed in the cell: its formula, or its value")
-        self.edit.textEdited.connect(tables._typed_in_bar)
-        self.edit.cursorPositionChanged.connect(lambda *_: tables._caret_moved())
-        self.edit.returnPressed.connect(lambda: tables.commit(move=(1, 0), enter=True))
+        # through self.tables: in Split View the bar serves whichever view is
+        # in hand, and is handed that view's tables
+        self.edit.textEdited.connect(lambda text: self.tables._typed_in_bar(text))
+        self.edit.cursorPositionChanged.connect(lambda *_: self.tables._caret_moved())
+        self.edit.returnPressed.connect(lambda: self.tables.commit(move=(1, 0), enter=True))
         self.edit.installEventFilter(self)
         layout.addWidget(self.edit, 1)
         # SMath's unit box after the value, as in an equation (ui/unitbox.py);

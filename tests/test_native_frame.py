@@ -105,15 +105,13 @@ def test_full_screen_comes_and_goes_with_the_ordinary_frame(window):
 def test_split_and_unsplit_keep_the_ordinary_frame(window):
     window.show()
     window.open_in_new_tab()
-    host = window.split_document(0)
-    other = host.panes[1]
-    other.confirm_discard = lambda: True
+    window.split_document(0)
     _settle()
-    assert not window.isWindow()
-    assert not host.windowFlags() & Qt.FramelessWindowHint
+    assert window.is_split and window.isWindow()
+    assert not window.windowFlags() & Qt.FramelessWindowHint
     window.act_split_view.trigger()
     _settle()
-    assert window._split_host is None and window.isWindow()
+    assert not window.is_split and window.isWindow()
     assert not window.windowFlags() & Qt.FramelessWindowHint
     assert len(window._open_documents) == 2
 
@@ -173,7 +171,7 @@ def test_the_title_row_answers_as_a_title_bar(window, title_row):
     assert hit(QPointF(window.width() / 2, title.bottom() + 40)) == HTCLIENT
 
 
-def test_the_title_row_steps_aside_in_full_screen_and_in_the_split(window, title_row):
+def test_the_title_row_steps_aside_in_full_screen_and_stays_in_the_split(window, title_row):
     window.act_full_screen.trigger()
     _settle()
     title_row.refresh()
@@ -183,14 +181,11 @@ def test_the_title_row_steps_aside_in_full_screen_and_in_the_split(window, title
     title_row.refresh()
     assert title_row.gap.width() > 0
     window.open_in_new_tab()
-    host = window.split_document(0)
-    host.panes[1].confirm_discard = lambda: True
+    window.split_document(0)
     _settle()
     title_row.refresh()
-    assert title_row.gap.width() == 0           # the split window has the ordinary frame
+    assert title_row.gap.width() > 0            # still one window, one title bar
     window.act_split_view.trigger()
-    _settle()
-    window.show()
     _settle()
     title_row.refresh()
     assert title_row.gap.width() > 0
