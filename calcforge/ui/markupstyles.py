@@ -276,6 +276,7 @@ class MarkupStylesBar(QToolBar):
             hint = QToolButton()
             hint.setText("Markup Styles: pick a markup tool")
             hint.setObjectName("markupStylesHint")
+            hint.setProperty("cf_data", True)          # it only says what to do
             hint.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             hint.setIconSize(ICON_SIZE)
             blank = QPixmap(ICON_SIZE)
@@ -627,6 +628,7 @@ class MarkupStyles(QObject):
         key = self.tool_key()
         count = len(styles_for(key)) if key else 0
         menu = QMenu(self.bar)
+        menu.setProperty("cf_context", "styles")
 
         def entry(text, command, *args):
             action = menu.addAction(text)

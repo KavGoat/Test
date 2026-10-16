@@ -22,6 +22,7 @@ COMMAND = "command"
 SYMBOL = "symbol"
 SMATH = "smath"          # a key inside an equation (calcedit.py handles it)
 SHEET = "sheet"          # a key in an open table or spreadsheet (tableedit.py handles it)
+MENU = "menu"            # a menu entry or panel button (bindable.CommandRouter runs it)
 
 # Where a binding acts (decisions 5 and 6). A key may mean two things only
 # when its two meanings can never both be live: Calc and Markup mode are
@@ -319,7 +320,8 @@ class ShortcutManager(QObject):
         self.load()
 
     def register(self, action_id: str, label: str, default: str,
-                 category: str = "Document", payload: str = "", scope: str = ALWAYS) -> str:
+                 category: str = "Document", payload: str = "", scope: str = ALWAYS,
+                 kind: str = COMMAND) -> str:
         """Add a binding the window owns, and give back the key to use.
 
         Called once per action as the window is built. A binding that has been
@@ -327,7 +329,7 @@ class ShortcutManager(QObject):
         """
         known = BY_ID.get(action_id)
         if known is None:
-            binding = Binding(action_id, label, default, COMMAND, category, payload, scope)
+            binding = Binding(action_id, label, default, kind, category, payload, scope)
             BY_ID[action_id] = binding
             self._extra.append(binding)
         elif not any(b.action_id == action_id for b in self._extra) \
@@ -345,9 +347,40 @@ class ShortcutManager(QObject):
             self._sequences[action_id] = default if stored is None else str(stored)
         return self._sequences[action_id]
 
+    def recategorise(self, action_id: str, category: str) -> None:
+        """File a registered binding under *category* (the window's actions
+        go where their menu is, once the menus are built)."""
+        from dataclasses import replace
+        known = BY_ID.get(action_id)
+        if known is None or known.category == category or known in DEFAULT_BINDINGS:
+            return
+        moved = replace(known, category=category)
+        BY_ID[action_id] = moved
+        self._extra = [moved if b.action_id == action_id else b for b in self._extra]
+
+    def register_many(self, entries) -> None:
+        """register() for many at once — (id, label, category, scope, kind)
+        each, with no key of their own — reading the settings once."""
+        settings = self._settings()
+        settings.beginGroup(self.SETTINGS_GROUP)
+        stored = {key: settings.value(key) for key in settings.childKeys()}
+        settings.endGroup()
+        for action_id, label, category, scope, kind in entries:
+            known = BY_ID.get(action_id)
+            if known is None:
+                known = Binding(action_id, label, "", kind, category, "menu", scope)
+                BY_ID[action_id] = known
+                self._extra.append(known)
+            elif known not in DEFAULT_BINDINGS and all(
+                    b.action_id != action_id for b in self._extra):
+                self._extra.append(known)
+            if action_id not in self._sequences:
+                value = stored.get(action_id)
+                self._sequences[action_id] = "" if value is None else str(value)
+
     # -- access ------------------------------------------------------------
     def bindings(self) -> list[Binding]:
-        return list(DEFAULT_BINDINGS) + list(self._extra)
+        return list(DEFAULT_BINDINGS) + [BY_ID.get(b.action_id, b) for b in self._extra]
 
     def sequence(self, action_id: str) -> str:
         return self._sequences.get(action_id, "")
@@ -440,7 +473,7 @@ class ShortcutManager(QObject):
             # it, never M's (Caps Lock gives capitals without Shift, and
             # those still mean M)
             wanted = "shift+" + text.lower()
-            for binding in DEFAULT_BINDINGS:
+            for binding in self.bindings():
                 if binding.scope not in (mode, ALWAYS, TYPING) or binding.kind == SMATH:
                     continue
                 sequence = self._sequences.get(binding.action_id, "")
@@ -448,7 +481,9 @@ class ShortcutManager(QObject):
                         QKeySequence.PortableText).lower() == wanted:
                     return binding
             return None
-        for binding in DEFAULT_BINDINGS:
+        # the built-in ones first, then the window's commands and the menus'
+        # entries, which any single character can be given too
+        for binding in self.bindings():
             if binding.scope not in (mode, ALWAYS, TYPING) or binding.kind == SMATH:
                 continue
             sequence = self._sequences.get(binding.action_id, "")

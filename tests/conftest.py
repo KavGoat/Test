@@ -47,6 +47,18 @@ def settings_sandbox(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def fresh_shortcuts():
+    """No test inherits a key another one rebound: Keyboard Shortcuts saves
+    a change the moment it is made."""
+    yield
+    from calcforge.settings import app_settings
+    settings = app_settings()
+    if "shortcuts" in settings.childGroups():
+        settings.remove("shortcuts")
+        settings.sync()
+
+
+@pytest.fixture(autouse=True)
 def fresh_clipboard(qapp):
     """No test inherits what the one before it copied."""
     yield

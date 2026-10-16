@@ -16,7 +16,8 @@ from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont, QFontInfo, QIma
                            QKeySequence, QPainter, QTextBlockFormat,
                            QTextCharFormat, QTextCursor, QTransform, QUndoStack)
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
-from PySide6.QtWidgets import (QTabBar, QApplication, QComboBox, QDoubleSpinBox, QFontComboBox,
+from PySide6.QtWidgets import (QAbstractButton, QTabBar, QApplication, QComboBox,
+                               QDoubleSpinBox, QFontComboBox,
                                QFileDialog, QGraphicsItem, QHBoxLayout,
                                QInputDialog, QLabel, QLineEdit, QMainWindow,
                                QMenu, QMessageBox, QSizePolicy, QSpinBox,
@@ -42,6 +43,7 @@ from ..items.text import (CalloutItem, FlagItem, NoteItem, StampItem,
 from ..settings import app_settings
 from . import dialogs
 from .commands import DocumentStructureCommand
+from . import bindable
 from .icons import icon
 from .panels import (_hatch_icon, _line_style_icon, fill_hatch_combo, hatch_index,
                      BookmarksPanel, MarkupsPanel, PagesPanel, PropertiesPanel, ToolSetsPanel)
@@ -525,11 +527,11 @@ _SHORTCUT_GROUPS = {
     "group": "Markup", "ungroup": "Markup", "autosize": "Markup",
     "format_painter": "Markup", "hide": "Markup", "show_hidden": "Markup",
     "flatten": "Markup", "forget_defaults": "Markup",
-    "add_page": "Page", "crop_page": "Page", "extract_pages": "Page",
-    "split_pages": "Page", "duplicate_page": "Page", "delete_page": "Page",
-    "page_setup": "Page", "scale": "Page", "viewports": "Page", "header_footer": "Page",
-    "bookmark": "Page", "contents": "Page", "doc_props": "Page",
-    "rotate_pages_cw": "Page", "rotate_pages_acw": "Page",
+    "add_page": "Pages", "crop_page": "Pages", "extract_pages": "Pages",
+    "split_pages": "Pages", "duplicate_page": "Pages", "delete_page": "Pages",
+    "page_setup": "Pages", "scale": "Pages", "viewports": "Pages", "header_footer": "Pages",
+    "bookmark": "Pages", "contents": "Pages", "doc_props": "Pages",
+    "rotate_pages_cw": "Pages", "rotate_pages_acw": "Pages",
     "insert_page_break": "Spreadsheet", "remove_page_break": "Spreadsheet",
     "reset_page_breaks": "Spreadsheet", "set_print_area": "Spreadsheet",
     "clear_print_area": "Spreadsheet", "sheet_page_setup": "Spreadsheet",
@@ -624,6 +626,10 @@ class MainWindow(QMainWindow):
         self.current_index = 0
         self.default_style = Style()
         self.shortcuts = ShortcutManager(self)
+        # Every menu entry and panel button a person can click is a named
+        # command that any key can be given (the user, 2026-10-16)
+        from .bindable import CommandRouter
+        self.commands = CommandRouter(self)
         # Which binding each action carries, so a rebinding can find it again.
         self.action_ids: dict[str, str] = {}
         self.second_key_ids: dict[str, str] = {}
@@ -663,6 +669,7 @@ class MainWindow(QMainWindow):
         from . import nativeframe
         nativeframe.install(self)                 # Windows: the menus in its own title bar
         self._connect()
+        self._file_commands_by_menu()
         self.apply_shortcuts()
         from . import preferences as _prefs
         self.view.use_the_graphics_card(_prefs.current().gpu_drawing)
@@ -877,23 +884,25 @@ class MainWindow(QMainWindow):
         action = QAction(text, self)
         if icon_name:
             self.give_icon(action, icon_name)
+        # Every command goes in the shortcut list, with a key or without one,
+        # so it can be seen in one place and given any key (the user,
+        # 2026-10-16). What is registered is the default; a binding already
+        # changed keeps the change.
+        already = _ALREADY_BOUND.get(key)
+        if already:
+            # This command is already in the list under its own name; a
+            # second entry for the same key would read as a clash with
+            # itself.
+            shortcut = self.shortcuts.sequence(already) or shortcut
+            self.action_ids[key] = already
+        else:
+            shortcut = self.shortcuts.register(
+                f"command.{key}", (name or text).rstrip("…"), shortcut,
+                _SHORTCUT_GROUPS.get(key, ""),
+                scope=_SHORTCUT_SCOPES.get(key, "always"))
+            self.action_ids[key] = f"command.{key}"
+        action.setProperty(bindable.COMMAND, self.action_ids[key])
         if shortcut:
-            # Every key the application answers to goes in the shortcut list,
-            # so it can be seen in one place and changed. What is registered
-            # is the default; a binding already changed keeps the change.
-            already = _ALREADY_BOUND.get(key)
-            if already:
-                # This command is already in the list under its own name; a
-                # second entry for the same key would read as a clash with
-                # itself.
-                shortcut = self.shortcuts.sequence(already) or shortcut
-                self.action_ids[key] = already
-            else:
-                shortcut = self.shortcuts.register(
-                    f"command.{key}", (name or text).rstrip("…"), shortcut,
-                    _SHORTCUT_GROUPS.get(key, "Document"),
-                    scope=_SHORTCUT_SCOPES.get(key, "always"))
-                self.action_ids[key] = f"command.{key}"
             action.setShortcut(QKeySequence(shortcut))
         action.setCheckable(checkable)
         action.setToolTip(tip or text)
@@ -1033,6 +1042,7 @@ class MainWindow(QMainWindow):
             "command.undo", "Undo", "Ctrl+Z", "Edit")))
         self.give_icon(self.act_undo, "undo")
         self.action_ids["undo"] = "command.undo"
+        self.act_undo.setProperty(bindable.COMMAND, "command.undo")
         self.act_redo = QAction("Redo", self)
         self.act_redo.triggered.connect(self.redo_something)
         self.undo_stack.canRedoChanged.connect(self._refresh_undo_actions)
@@ -1040,6 +1050,7 @@ class MainWindow(QMainWindow):
             "command.redo", "Redo", "Ctrl+Shift+Z", "Edit")))
         self.give_icon(self.act_redo, "redo")
         self.action_ids["redo"] = "command.redo"
+        self.act_redo.setProperty(bindable.COMMAND, "command.redo")
 
         self._act("cut", "Cut", self.cut_selection, "Ctrl+X")
         self._act("copy", "Copy", self.copy_selection, "Ctrl+C")
@@ -1456,6 +1467,7 @@ class MainWindow(QMainWindow):
                 self.tool_group.addAction(action)
                 bar.addAction(action)
                 self.tool_actions[tool.key] = action
+                action.setProperty(bindable.COMMAND, f"tool.{tool.key}")
         tool_bar.addSeparator()
         tool_bar.addAction(self.act_sticky)
         # The Calculation bar's Table is the Tools bar's Table — one button
@@ -2004,6 +2016,7 @@ class MainWindow(QMainWindow):
             action = getattr(self, f"act_{entry[0]}")
             sub = QMenu(action.text(), self)
             sub.setObjectName(f"menuInsert_{entry[0]}")
+            bindable.set_context(sub, f"insert.{entry[0]}")
             self.fill_insert_choice(sub, entry)
             after = sub.actions()[-1]
 
@@ -2018,6 +2031,9 @@ class MainWindow(QMainWindow):
         """A menu entry that picks up tool *key*, under the tool's own name."""
         tool = TOOL_MAP[key]
         entry = self.give_icon(QAction(tool.label, self), tool.icon)
+        # the tool's own binding: its key is shown here and works everywhere
+        entry.setProperty(bindable.COMMAND, f"tool.{key}")
+        entry.setProperty(bindable.SHOWN, True)
         entry.setToolTip(tool.hint)
         entry.setStatusTip(tool.hint)
         if key == "table":
@@ -2186,6 +2202,7 @@ class MainWindow(QMainWindow):
         # CalcForge's own, together at the end
         self.current_page_menu = page_menu.addMenu("Current Page")
         self.current_page_menu.setObjectName("menuCurrentPage")
+        bindable.set_context(self.current_page_menu, "page")
         self.current_page_menu.aboutToShow.connect(self._rebuild_current_page_menu)
         fill(page_menu, (self.act_duplicate_page, self.act_bookmark, self.act_contents))
 
@@ -2222,6 +2239,7 @@ class MainWindow(QMainWindow):
                 tools_menu.addAction(self._tool_entry(tool.key))
         tools_menu.addSeparator()
         self.selection_menu = tools_menu.addMenu("Selected Markups")
+        bindable.set_context(self.selection_menu, "canvas")
         self.selection_menu.aboutToShow.connect(self._rebuild_selection_menu)
         fill(tools_menu, (self.act_autosize, self.act_sticky, self.act_renumber_counts,
                           self.act_forget_defaults, None))
@@ -2482,11 +2500,19 @@ class MainWindow(QMainWindow):
         self._status_icon_buttons[self.status_more] = "overflow"
         self.status_more.setToolTip("The status bar controls there is no room for")
         self.status_more.setPopupMode(QToolButton.InstantPopup)
-        more_menu = QMenu(self.status_more)
+        more_menu = bindable.data_menu(QMenu(self.status_more))
         more_menu.aboutToShow.connect(lambda: self._fill_status_overflow(more_menu))
         self.status_more.setMenu(more_menu)
         status.addPermanentWidget(self.status_more)
         self._refresh_status_icons()
+        # the status bar's buttons, each the command it is a shortcut to, or a
+        # command of its own, in Keyboard Shortcuts (bindable.py)
+        for button, command_id in (
+                (self.status_grid, "page.page_grid"), (self.status_scale, "command.scale"),
+                (self.status_fit, "command.fit_width"), (self.status_size, "command.page_setup"),
+                (self.page_back, "command.prev_page"), (self.page_forward, "command.next_page"),
+                (self.page_first, "status.first_page"), (self.page_last, "status.last_page")):
+            self.commands.bind_button(button, command_id)
         status.set_droppable([self.status_position, self.status_size, self.window_sync,
                               self.status_snap, self.status_scroll, self.status_fit,
                               self.status_scale, self.status_dimmer, self.status_toggles],
@@ -2737,7 +2763,7 @@ class MainWindow(QMainWindow):
             return None
         from . import menutidy
         supplied = menu is not None
-        menu = menu or QMenu(self.document_tabs)
+        menu = bindable.set_context(menu or QMenu(self.document_tabs), "doctab")
         # Revu's tab menu (QA round 4): Close, Close All, Close Others | Save,
         # Save As… | New Window, Split | and CalcForge's Duplicate Tab. Each
         # acts on the tab clicked, which is brought forward first where the
@@ -3440,7 +3466,8 @@ class MainWindow(QMainWindow):
             return
         for number, path in enumerate(files, 1):
             name = os.path.basename(path)
-            action = menu.addAction(f"&{number % 10}  {name}", lambda p=path: self.open_recent(p))
+            action = bindable.data_entry(
+                menu.addAction(f"&{number % 10}  {name}", lambda p=path: self.open_recent(p)))
             action.setToolTip(path)
             action.setStatusTip(path)
         menu.addSeparator()
@@ -4123,6 +4150,16 @@ class MainWindow(QMainWindow):
         # widget tree.
         kind = event.type()
         if kind not in _FILTERED_INPUT and kind != QEvent.FocusIn:
+            if kind == QEvent.Show:
+                # every menu as it opens, every button as it is shown: each
+                # entry's command id, and the key bound to it shown beside it
+                # (bindable.py)
+                if isinstance(watched, QMenu):
+                    if bindable.owning_window(watched) is self:
+                        self.commands.decorate(watched)
+                elif isinstance(watched, QAbstractButton) and not watched.property(
+                        bindable.BUTTON) and bindable.owning_window(watched) is self:
+                    self.commands.tag_one(watched)
             return False
         if (kind in (QEvent.MouseButtonPress, QEvent.FocusIn) and len(self._panes) > 1
                 and isinstance(watched, QWidget)):
@@ -4193,6 +4230,15 @@ class MainWindow(QMainWindow):
             if binding is not None and binding.kind != COMMAND:
                 event.accept()
                 return True
+            # and a bare character starts an equation, whatever it has been
+            # bound to elsewhere (Keyboard Shortcuts takes any key, 2026-10-16)
+            text = event.text()
+            if (text and text.isprintable() and not text.isspace()
+                    and not event.modifiers() & (Qt.ControlModifier | Qt.AltModifier
+                                                 | Qt.MetaModifier)
+                    and (watched is self.view or self.view.isAncestorOf(watched))):
+                event.accept()
+                return True
         if event.type() == QEvent.ShortcutOverride and self.view.is_editing():
             sequence = QKeySequence(event.keyCombination())
             binding = self.shortcuts.binding_for(sequence)
@@ -4250,6 +4296,9 @@ class MainWindow(QMainWindow):
             live = (scope == "calc") == calc_on
             action.setShortcuts(self._keys_for(key, self.shortcuts.sequence(action_id))
                                 if live else [])
+        commands = getattr(self, "commands", None)
+        if commands is not None:
+            commands.apply()
 
     def lock_toolbars(self, locked: bool) -> None:
         for bar in self.toolbars:
@@ -5292,7 +5341,7 @@ class MainWindow(QMainWindow):
         several = len(acting) > 1
         these = f"these {len(acting)} pages" if several else "page"
         page = self.document.pages[index]
-        menu = menu or QMenu(self)
+        menu = bindable.set_context(menu or QMenu(self), "page")
 
         def here(run):
             """*run* on this page: the page goes in view first, as the
@@ -5898,6 +5947,41 @@ class MainWindow(QMainWindow):
         for action_id, action in getattr(self, "symbol_actions", {}).items():
             action.setShortcut(QKeySequence(self.shortcuts.sequence(action_id)))
         self._apply_mode_keys()
+        self.commands.refresh_buttons()
+
+    #: Where a command with no group of its own is filed in Keyboard
+    #: Shortcuts: under the menu it is on.
+    MENU_CATEGORIES = {"CalcForge": "File", "File": "File", "Edit": "Edit", "View": "View",
+                       "Document": "Document", "Batch": "Document", "Tools": "Markup",
+                       "Calculation": "Calculation", "Window": "Window", "Help": "Help"}
+    SUBMENU_CATEGORIES = {("Tools", "Measure"): "Measure", ("Tools", "Toolbars"): "Window",
+                          ("Tools", "Tool Chest"): "Panels", ("Window", "Panels"): "Panels",
+                          ("Document", "Insert"): "Pages", ("Document", "Rotate Pages"): "Pages",
+                          ("Edit", "Order"): "Order", ("Edit", "Alignment"): "Order",
+                          ("Edit", "Text"): "Text", ("Calculation", "Page Layout"): "Spreadsheet"}
+
+    def _file_commands_by_menu(self) -> None:
+        """Give each command registered without a group the group of the
+        menu it is on, so the shortcut list reads like the menu bar."""
+        from .shortcuts import BY_ID
+        for key, action_id in self.action_ids.items():
+            binding = BY_ID.get(action_id)
+            if binding is None or binding.category:
+                continue
+            action = getattr(self, f"act_{key}", None)
+            category = ""
+            for owner in (action.associatedObjects() if action is not None else []):
+                if isinstance(owner, QMenu):
+                    path = self.commands.menu_path(owner)
+                    if path:
+                        category = (self.SUBMENU_CATEGORIES.get(tuple(path[:2]))
+                                    or self.MENU_CATEGORIES.get(path[0], ""))
+                        if category:
+                            break
+                elif isinstance(owner, QToolBar) and not category:
+                    category = {"Calculation": "Calculation", "Measure": "Measure",
+                                "Properties": "Markup"}.get(owner.windowTitle(), "")
+            self.shortcuts.recategorise(action_id, category or "Other")
 
     def insert_symbol(self, text: str) -> None:
         """Put a symbol in at the cursor, wherever the cursor is."""
@@ -5923,22 +6007,35 @@ class MainWindow(QMainWindow):
             self.select_tool(binding.payload)
             return True
         if binding.kind == COMMAND:
-            method = getattr(self, binding.payload, None)
+            method = getattr(self, binding.payload, None) if binding.payload else None
             if callable(method):
                 method()
                 return True
+            # a window command given a single character as its key
+            for key, action_id in self.action_ids.items():
+                action = getattr(self, f"act_{key}", None)
+                if action_id == binding.action_id and action is not None:
+                    if action.isEnabled():
+                        action.trigger()
+                    return True
+        if binding.kind == "menu":
+            # a menu entry's or a button's (bindable.py)
+            self.commands.run(binding.action_id)
+            return True
         if binding.kind == TYPED_SYMBOL:
             self.insert_symbol(binding.payload)
             return True
         return False
 
     def edit_shortcuts(self) -> None:
+        """Keyboard Shortcuts: every command, each key working as it is set."""
         dialog = dialogs.ShortcutManagerDialog(self.shortcuts, self)
-        if dialog.exec() == dialogs.QDialog.Accepted:
-            dialog.apply()
-            self.shortcuts.save()
-            self.apply_shortcuts()
-            self.status_hint.setText("Shortcuts updated")
+        dialog.exec()
+        dialog.apply()
+        self.shortcuts.save()
+        self.apply_shortcuts()
+        self.status_hint.setText("Shortcuts updated")
+        dialog.deleteLater()
 
     def renumber_counts(self) -> None:
         """Close the gaps left in each count subject after deletions."""
@@ -6142,7 +6239,7 @@ class MainWindow(QMainWindow):
             return
         for index in range(done - 1, max(-1, done - 41), -1):
             text = stack.text(index) or "Change"
-            menu.addAction(text, lambda i=index: self.undo_to(i))
+            bindable.data_entry(menu.addAction(text, lambda i=index: self.undo_to(i)))
 
     def undo_to(self, index: int) -> None:
         """Undo the change at *index* in the history and every one after it."""
@@ -9076,7 +9173,7 @@ class MainWindow(QMainWindow):
         mark.toggled.connect(lambda on: self.set_text_bookmark(item, on))
         fields = menu.addMenu("Insert Field")
         fields.setObjectName("menuInsertField")
-        variables = fields.addMenu("Variable")
+        variables = bindable.data_menu(fields.addMenu("Variable"))      # their names
         names = self.variable_names()
         for name in names[:60]:
             variables.addAction(name, lambda n=name: self.insert_text_field(item, "{=" + n + "}"))
@@ -10349,7 +10446,7 @@ class MainWindow(QMainWindow):
         same way (bug hunt E14, E16–E18).
         """
         from . import menutidy
-        menu = menu or QMenu(self)
+        menu = bindable.set_context(menu or QMenu(self), "canvas")
         menu.setSeparatorsCollapsible(True)
         if item is None:
             self._fill_page_context_menu(menu, scene_pos)
@@ -10485,8 +10582,8 @@ class MainWindow(QMainWindow):
         add_tool = menu.addMenu("Add to Tool Chest")
         add_tool.setToolTip("Keep this markup in a tool set to use again")
         for group in toolsets.load_toolsets():
-            add_tool.addAction(group.name, lambda n=group.name: self.add_to_toolset(
-                item, into=n, ask=False))
+            bindable.data_entry(add_tool.addAction(
+                group.name, lambda n=group.name: self.add_to_toolset(item, into=n, ask=False)))
         add_tool.addSeparator()
         add_tool.addAction("Choose a Tool Set…", lambda: self.add_to_toolset(item))
         styles = getattr(self, "markup_styles", None)

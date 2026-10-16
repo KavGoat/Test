@@ -354,16 +354,27 @@ class VariablesPanel(QWidget):
 
     # -- global or not (calc sections) ------------------------------------------------------
     def _menu(self, pos) -> None:
-        row = self.row_of(self.tree.itemAt(pos))
+        node = self.tree.itemAt(pos)
+        if node is not None:
+            self.tree.setCurrentItem(node)
+        menu = self.build_menu(node)
+        if menu is not None:
+            menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def build_menu(self, node=None) -> Optional[QMenu]:
+        """A row's right-click menu: of *node*, or of the current row."""
+        node = node if node is not None else self.tree.currentItem()
+        row = self.row_of(node)
         if row is None:
-            return
+            return None
         menu = QMenu(self)
-        menu.addAction("Go to", lambda: self.go_to(self.tree.itemAt(pos)))
+        menu.setProperty("cf_context", "variables")
+        menu.addAction("Go to", lambda: self.go_to(node))
         if row.source != "Measurement":
             act = menu.addAction("Make Local" if row.is_global else "Make Global",
                                  lambda: self.set_global(row, not row.is_global))
             act.setToolTip("A global variable or cell is read by every later calc section")
-        menu.exec(self.tree.viewport().mapToGlobal(pos))
+        return menu
 
     def set_global(self, row: VariableRow, on: bool) -> None:
         """Make a variable's equation, or a table's cells, global (or not)."""

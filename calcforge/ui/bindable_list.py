@@ -1,0 +1,749 @@
+"""Every command id the menus and buttons give (bindable.py), with what
+Keyboard Shortcuts calls it, the group it is filed under and where its key
+acts; and the entries that are another place for a command already known.
+
+``tests/test_every_command_is_bindable.py`` walks the live window and fails
+for any entry or button whose id is not here (or a window action's, a
+tool's, a spreadsheet key's). When it fails for something new, add a line:
+the id is the context and the entry's words, as the failure prints it.
+"""
+from __future__ import annotations
+
+# ---------------------------------------------------------------------------
+# another place for a command already known under its own id: one key for
+# both, and the key is shown in both
+# ---------------------------------------------------------------------------
+ALIASES: dict[str, str] = {
+    # Document ▸ Insert's Before / After: After is the command's own key
+    "insert.add_page.after": "command.add_page",
+    "insert.add_sheet_page.after": "command.add_sheet_page",
+    "insert.insert_pdf.after": "command.insert_pdf",
+    "insert.insert_image_page.after": "command.insert_image_page",
+    "insert.insert_workbook.after": "command.insert_workbook",
+    # a page's menu (a thumbnail's right-click, Document ▸ Current Page)
+    "page.page_setup": "command.page_setup",
+    "page.set_scale": "command.scale",
+    "page.duplicate_page": "command.duplicate_page",
+    "page.extract_pages": "command.extract_pages",
+    "page.split_document": "command.split_pages",
+    "page.delete_pages": "command.delete_page",
+    "page.crop_pages": "command.crop_page",
+    "page.rotate_pages.clockwise": "command.rotate_pages_cw",
+    "page.rotate_pages.anticlockwise": "command.rotate_pages_acw",
+    "page.colour_processing": "command.color_processing",
+    "page.add_bookmark": "command.bookmark",
+    "page.header_per_footer.headers_footers": "command.header_footer",
+    "page.insert_blank_page.before": "insert.add_page.before",
+    "page.insert_blank_page.after": "command.add_page",
+    "page.insert_spreadsheet_page.before": "insert.add_sheet_page.before",
+    "page.insert_spreadsheet_page.after": "command.add_sheet_page",
+    "page.insert_pages.before": "insert.insert_pdf.before",
+    "page.insert_pages.after": "command.insert_pdf",
+    "page.insert_image_page.before": "insert.insert_image_page.before",
+    "page.insert_image_page.after": "command.insert_image_page",
+    "page.insert_excel_workbook.before": "insert.insert_workbook.before",
+    "page.insert_excel_workbook.after": "command.insert_workbook",
+    # the Thumbnails panel's buttons
+    "thumbnails.insert_blank_page": "command.add_page",
+    "thumbnails.insert_spreadsheet_page": "command.add_sheet_page",
+    "thumbnails.duplicate_page": "command.duplicate_page",
+    "thumbnails.delete_pages": "command.delete_page",
+    # a document tab's menu: the tab clicked is brought forward first
+    "doctab.close": "command.close_tab",
+    "doctab.save": "command.save",
+    "doctab.save_as": "command.save_as",
+    # the Tool Chest's menus
+    "chest.manage_tool_sets": "command.manage_toolsets",
+    "chest.import_tool_set": "command.import_toolset",
+    "chesttool.import_tool_set": "command.import_toolset",
+    "chesttool.new_tool_set": "chest.new_tool_set",
+    "menu.tools.tool_chest.import_tool_set": "command.import_toolset",
+    # a markup's menu and its Properties
+    "properties.add_to_tool_chest": "canvas.add_to_tool_chest.choose_a_tool_set",
+    "properties.set_as_default": "canvas.set_as_default",
+    "properties.exact_size": "canvas.exact_size",
+    "properties.calibrate": "command.scale",
+    "properties.edit_cells": "canvas.edit_table",
+    "properties.remove_block_keep_equations": "canvas.remove_block_keep_equations",
+    "properties.bold": "command.bold",
+    "properties.italic": "command.italic",
+    "properties.underline": "command.underline",
+    "properties.change_colours": "canvas.change_colours",
+    "propbar.bold": "command.bold",
+    "propbar.italic": "command.italic",
+    "propbar.underline": "command.underline",
+    "pagepanel.calibrate": "command.scale",
+    "pagepanel.insert_break": "command.insert_page_break",
+    "pagepanel.reset_breaks": "command.reset_page_breaks",
+    "bookmarks.add": "command.bookmark",
+    "styles.save_the_current_look_as_a_new_style": "styles.add",
+    "canvas.calc_section_break_above_this_page": "page.calc_section_break_above_this_page",
+    "bookmarks.contents": "command.contents",
+    "variables.make_local": "variables.make_global",
+    "cell.make_local": "cell.make_global",
+    # a cell's menu: the spreadsheet's own keys (shortcuts.SHEET_KEYS)
+    "cell.cut": "sheet.cut", "cell.copy": "sheet.copy", "cell.paste": "sheet.paste",
+    "cell.paste_special.values": "sheet.paste_values",
+    "cell.paste_special.formulas": "sheet.paste_formulas",
+    "cell.paste_special.formats": "sheet.paste_formats",
+    "cell.paste_special.transpose": "sheet.paste_transpose",
+    "cell.insert.insert_rows_above": "sheet.insert_rows",
+    "cell.insert.insert_columns_left": "sheet.insert_cols",
+    "cell.delete.delete_rows": "sheet.delete_rows",
+    "cell.delete.delete_columns": "sheet.delete_cols",
+    "cell.clear.clear_contents": "sheet.clear_contents",
+    "cell.clear.clear_formats": "sheet.clear_formats",
+    "cell.clear.clear_all": "sheet.clear_all",
+    "cell.merge.merge_centre": "sheet.merge_center",
+    "cell.merge.unmerge_cells": "sheet.unmerge",
+    "cell.rows_columns.autofit_column_width": "sheet.autofit_cols",
+    "cell.rows_columns.autofit_row_height": "sheet.autofit_rows",
+    "cell.rows_columns.hide_rows": "sheet.hide_rows",
+    "cell.rows_columns.unhide_rows": "sheet.unhide_rows",
+    "cell.rows_columns.hide_columns": "sheet.hide_cols",
+    "cell.rows_columns.unhide_columns": "sheet.unhide_cols",
+    "cell.format_cells": "sheet.format_cells",
+    "cell.conditional_formatting.manage_rules": "sheet.conditional",
+    "cell.data.sort_a_to_z": "sheet.sort_ascending",
+    "cell.data.sort_z_to_a": "sheet.sort_descending",
+    "cell.data.custom_sort": "sheet.sort",
+    "cell.data.filter": "sheet.filter",
+    "cell.data.remove_duplicates": "sheet.remove_duplicates",
+    "cell.data.text_to_columns": "sheet.text_to_columns",
+    "cell.data.goal_seek": "sheet.goal_seek",
+    "cell.data.data_validation": "sheet.validation",
+    "cell.comment.new_comment": "sheet.note",
+    "cell.find_replace": "sheet.replace",
+    "cell.names.define_name": "sheet.define_name",
+    "cell.names.name_manager": "sheet.name_manager",
+    "cell.names.create_from_selection": "sheet.create_names",
+    "cell.rename_table": "sheet.rename",
+    "cell.rename_sheet": "sheet.rename",
+    "sheettab.rename": "sheet.rename",
+    "cell.insert.insert_page_break": "command.insert_page_break",
+    "cell.page_layout.breaks.insert_page_break": "command.insert_page_break",
+    "cell.page_layout.breaks.remove_page_break": "command.remove_page_break",
+    "cell.page_layout.breaks.reset_all_page_breaks": "command.reset_page_breaks",
+    "cell.page_layout.print_area.set_print_area": "command.set_print_area",
+    "cell.page_layout.print_area.clear_print_area": "command.clear_print_area",
+    "cell.page_layout.sheet_layout": "command.sheet_page_setup",
+    # a row's or a column's heading: the cells' commands
+    **{f"heading.{axis}.{name}": target for axis in ("row", "col") for name, target in (
+        ("cut", "sheet.cut"), ("copy", "sheet.copy"), ("paste", "sheet.paste"),
+        ("paste_special.values", "sheet.paste_values"),
+        ("paste_special.formulas", "sheet.paste_formulas"),
+        ("paste_special.formats", "sheet.paste_formats"),
+        ("paste_special.transpose", "sheet.paste_transpose"),
+        ("insert_rows_above", "sheet.insert_rows"),
+        ("insert_rows_below", "cell.insert.insert_rows_below"),
+        ("insert_columns_left", "sheet.insert_cols"),
+        ("insert_columns_right", "cell.insert.insert_columns_right"),
+        ("delete_rows", "sheet.delete_rows"), ("delete_columns", "sheet.delete_cols"),
+        ("clear_contents", "sheet.clear_contents"), ("format_cells", "sheet.format_cells"),
+        ("row_height", "cell.rows_columns.row_height"),
+        ("column_width", "cell.rows_columns.column_width"),
+        ("autofit_row_height", "sheet.autofit_rows"),
+        ("autofit_column_width", "sheet.autofit_cols"))},
+    "heading.row.hide": "sheet.hide_rows", "heading.row.unhide": "sheet.unhide_rows",
+    "heading.col.hide": "sheet.hide_cols", "heading.col.unhide": "sheet.unhide_cols",
+    "heading.row.insert_page_break": "command.insert_page_break",
+    "heading.col.insert_page_break": "command.insert_page_break",
+    "heading.row.remove_page_break": "command.remove_page_break",
+    "heading.col.remove_page_break": "command.remove_page_break",
+    # the Style bar's table menus
+    "tablebar.merge.merge_centre": "sheet.merge_center",
+    "tablebar.merge.merge_across": "cell.merge.merge_across",
+    "tablebar.merge.merge_cells": "cell.merge.merge_cells",
+    "tablebar.merge.unmerge_cells": "sheet.unmerge",
+    "tablebar.borders.all_borders": "sheet.border_all",
+    "tablebar.borders.outside_borders": "sheet.border_outline",
+    "tablebar.borders.no_border": "sheet.border_none",
+    "tablebar.rows_and_columns.insert_rows_above": "sheet.insert_rows",
+    "tablebar.rows_and_columns.insert_rows_below": "cell.insert.insert_rows_below",
+    "tablebar.rows_and_columns.insert_columns_left": "sheet.insert_cols",
+    "tablebar.rows_and_columns.insert_columns_right": "cell.insert.insert_columns_right",
+    "tablebar.rows_and_columns.delete_rows": "sheet.delete_rows",
+    "tablebar.rows_and_columns.delete_columns": "sheet.delete_cols",
+    "tablebar.rows_and_columns.distribute_rows_evenly":
+        "cell.rows_columns.distribute_rows_evenly",
+    "tablebar.rows_and_columns.distribute_columns_evenly":
+        "cell.rows_columns.distribute_columns_evenly",
+    "tablebar.rows_and_columns.autofit_column_width": "sheet.autofit_cols",
+    "tablebar.rows_and_columns.autofit_row_height": "sheet.autofit_rows",
+}
+
+# ---------------------------------------------------------------------------
+# id: (what Keyboard Shortcuts calls it, its group, where its key acts)
+# ---------------------------------------------------------------------------
+COMMANDS: dict[str, tuple[str, str, str]] = {
+    # -- canvas ----------------------------------------------------------------
+    'canvas.add_to_tool_chest.choose_a_tool_set':
+        ('Add to Tool Chest ▸ Choose a Tool Set', 'Markup', 'always'),
+    'canvas.save_as_markup_style': ('Save as Markup Style', 'Markup', 'always'),
+    'canvas.set_as_default': ('Set as Default', 'Markup', 'always'),
+    'canvas.apply_to_pages': ('Apply to Pages', 'Markup', 'always'),
+    'canvas.properties': ('Show Properties', 'Markup', 'always'),
+    'canvas.control_point.add_control_point':
+        ('Control Point ▸ Add Control Point', 'Markup', 'always'),
+    'canvas.control_point.insert_break': ('Control Point ▸ Insert Break', 'Markup', 'always'),
+    'canvas.add_note': ('Add Note', 'Markup', 'always'),
+    'canvas.add_flag': ('Add Flag', 'Markup', 'always'),
+    'canvas.insert_here.text_box': ('Insert Here ▸ Text Box', 'Markup', 'always'),
+    'canvas.insert_here.callout': ('Insert Here ▸ Callout', 'Markup', 'always'),
+    'canvas.insert_here.note': ('Insert Here ▸ Note', 'Markup', 'always'),
+    'canvas.insert_here.stamp': ('Insert Here ▸ Stamp', 'Markup', 'always'),
+    'canvas.insert_here.image': ('Insert Here ▸ Image', 'Markup', 'always'),
+    'canvas.control_point.subtract_control_point':
+        ('Control Point ▸ Subtract Control Point', 'Markup', 'always'),
+    'canvas.control_point.round_corner': ('Control Point ▸ Round Corner', 'Markup', 'always'),
+    'canvas.arc_segment': ('Arc Segment', 'Markup', 'always'),
+    'canvas.round_all_corners': ('Round All Corners', 'Markup', 'always'),
+    'canvas.convert_to_polygon': ('Convert to Polygon', 'Markup', 'always'),
+    'canvas.exact_size': ('Exact Size', 'Markup', 'always'),
+    'canvas.show_size': ('Show Size', 'Markup', 'always'),
+    'canvas.follow_link': ('Follow Link', 'Markup', 'always'),
+    'canvas.edit_link': ('Edit Link', 'Markup', 'always'),
+    'canvas.edit_text': ('Edit Text', 'Markup', 'always'),
+    'canvas.bookmark': ('Bookmark This Text', 'Markup', 'always'),
+    'canvas.insert_field.title': ('Insert Field ▸ Title', 'Markup', 'always'),
+    'canvas.insert_field.project': ('Insert Field ▸ Project', 'Markup', 'always'),
+    'canvas.insert_field.author': ('Insert Field ▸ Author', 'Markup', 'always'),
+    'canvas.insert_field.company': ('Insert Field ▸ Company', 'Markup', 'always'),
+    'canvas.insert_field.subject': ('Insert Field ▸ Subject', 'Markup', 'always'),
+    'canvas.insert_field.keywords': ('Insert Field ▸ Keywords', 'Markup', 'always'),
+    'canvas.insert_field.description': ('Insert Field ▸ Description', 'Markup', 'always'),
+    'canvas.insert_field.revision': ('Insert Field ▸ Revision', 'Markup', 'always'),
+    'canvas.insert_field.document_id': ('Insert Field ▸ Document id', 'Markup', 'always'),
+    'canvas.insert_field.file_name': ('Insert Field ▸ File name', 'Markup', 'always'),
+    'canvas.insert_field.page_number': ('Insert Field ▸ Page number', 'Markup', 'always'),
+    'canvas.insert_field.page_number_0001':
+        ('Insert Field ▸ Page number, 0001', 'Markup', 'always'),
+    'canvas.insert_field.number_of_pages': ('Insert Field ▸ Number of pages', 'Markup', 'always'),
+    'canvas.insert_field.page_n_of_m': ('Insert Field ▸ Page n of m', 'Markup', 'always'),
+    'canvas.insert_field.date_dd_mm_yyyy': ('Insert Field ▸ Date, DD.MM.YYYY', 'Markup', 'always'),
+    'canvas.insert_field.date_dd_per_mm_per_yyyy':
+        ('Insert Field ▸ Date, DD/MM/YYYY', 'Markup', 'always'),
+    'canvas.insert_field.date_yyyy_mm_dd': ('Insert Field ▸ Date, YYYY-MM-DD', 'Markup', 'always'),
+    'canvas.insert_field.date_dd_mmmm_yyyy':
+        ('Insert Field ▸ Date, DD MMMM YYYY', 'Markup', 'always'),
+    'canvas.insert_field.time_hh_mm': ('Insert Field ▸ Time, HH:mm', 'Markup', 'always'),
+    'canvas.insert_field.time_hh_mm_tt': ('Insert Field ▸ Time, hh:mm tt', 'Markup', 'always'),
+    'canvas.add_arrow_leader': ('Add Arrow Leader', 'Markup', 'always'),
+    'canvas.add_cloud_leader': ('Add Cloud Leader', 'Markup', 'always'),
+    'canvas.remove_leader': ('Remove Leader', 'Markup', 'always'),
+    'canvas.inline_text': ('Inline Text (measurement)', 'Markup', 'always'),
+    'canvas.change_colours': ('Change Colours', 'Markup', 'always'),
+    'canvas.edit_table': ('Edit Table', 'Spreadsheet', 'always'),
+    'canvas.rename_table': ('Rename Table (closed)', 'Spreadsheet', 'always'),
+    'canvas.insert_here.equation': ('Insert Here ▸ Equation', 'Calculation', 'always'),
+    'canvas.insert_here.calc_text': ('Insert Here ▸ Calc Text', 'Calculation', 'always'),
+    'canvas.insert_here.calculation_block':
+        ('Insert Here ▸ Calculation Block', 'Calculation', 'always'),
+    'canvas.insert_here.plot': ('Insert Here ▸ Plot', 'Calculation', 'always'),
+    'canvas.global_read_by_later_calc_sections':
+        ('Equation Global (Read by Later Calc Sections)', 'Calculation', 'always'),
+    'canvas.equation.display_input_data':
+        ('Equation ▸ Display input data', 'Calculation', 'always'),
+    'canvas.equation.go_to_definition': ('Equation ▸ Go to definition', 'Calculation', 'always'),
+    'canvas.equation.show_description': ('Equation ▸ Show description', 'Calculation', 'always'),
+    'canvas.equation.disable_evaluation':
+        ('Equation ▸ Disable evaluation', 'Calculation', 'always'),
+    'canvas.equation.ignore_units': ('Equation ▸ Ignore units', 'Calculation', 'always'),
+    'canvas.equation.optimization.symbolic':
+        ('Equation ▸ Optimization ▸ Symbolic', 'Calculation', 'always'),
+    'canvas.equation.optimization.numeric':
+        ('Equation ▸ Optimization ▸ Numeric', 'Calculation', 'always'),
+    'canvas.equation.optimization.none':
+        ('Equation ▸ Optimization ▸ None', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.trailing_zeros':
+        ('Equation ▸ Decimal places ▸ Trailing zeros', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.significant_figures_mode':
+        ('Equation ▸ Decimal places ▸ Significant figures mode', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.0': ('Equation ▸ Decimal places ▸ 0', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.1': ('Equation ▸ Decimal places ▸ 1', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.2': ('Equation ▸ Decimal places ▸ 2', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.3': ('Equation ▸ Decimal places ▸ 3', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.4': ('Equation ▸ Decimal places ▸ 4', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.5': ('Equation ▸ Decimal places ▸ 5', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.6': ('Equation ▸ Decimal places ▸ 6', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.7': ('Equation ▸ Decimal places ▸ 7', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.8': ('Equation ▸ Decimal places ▸ 8', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.9': ('Equation ▸ Decimal places ▸ 9', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.10':
+        ('Equation ▸ Decimal places ▸ 10', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.11':
+        ('Equation ▸ Decimal places ▸ 11', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.12':
+        ('Equation ▸ Decimal places ▸ 12', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.13':
+        ('Equation ▸ Decimal places ▸ 13', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.14':
+        ('Equation ▸ Decimal places ▸ 14', 'Calculation', 'always'),
+    'canvas.equation.decimal_places.15':
+        ('Equation ▸ Decimal places ▸ 15', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.0':
+        ('Equation ▸ Exponential threshold ▸ 0', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.1':
+        ('Equation ▸ Exponential threshold ▸ 1', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.2':
+        ('Equation ▸ Exponential threshold ▸ 2', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.3':
+        ('Equation ▸ Exponential threshold ▸ 3', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.4':
+        ('Equation ▸ Exponential threshold ▸ 4', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.5':
+        ('Equation ▸ Exponential threshold ▸ 5', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.6':
+        ('Equation ▸ Exponential threshold ▸ 6', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.7':
+        ('Equation ▸ Exponential threshold ▸ 7', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.8':
+        ('Equation ▸ Exponential threshold ▸ 8', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.9':
+        ('Equation ▸ Exponential threshold ▸ 9', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.10':
+        ('Equation ▸ Exponential threshold ▸ 10', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.11':
+        ('Equation ▸ Exponential threshold ▸ 11', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.12':
+        ('Equation ▸ Exponential threshold ▸ 12', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.13':
+        ('Equation ▸ Exponential threshold ▸ 13', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.14':
+        ('Equation ▸ Exponential threshold ▸ 14', 'Calculation', 'always'),
+    'canvas.equation.exponential_threshold.15':
+        ('Equation ▸ Exponential threshold ▸ 15', 'Calculation', 'always'),
+    'canvas.equation.fractions.decimal':
+        ('Equation ▸ Fractions ▸ Decimal', 'Calculation', 'always'),
+    'canvas.equation.fractions.fraction':
+        ('Equation ▸ Fractions ▸ Fraction', 'Calculation', 'always'),
+    'canvas.equation.fractions.auto': ('Equation ▸ Fractions ▸ Auto', 'Calculation', 'always'),
+    'canvas.equation.fractions.default':
+        ('Equation ▸ Fractions ▸ Default', 'Calculation', 'always'),
+    'canvas.equation.fractions.use_mixed_numbers':
+        ('Equation ▸ Fractions ▸ Use mixed numbers', 'Calculation', 'always'),
+    'canvas.equation.rounding.half_to_even':
+        ('Equation ▸ Rounding ▸ Half to even', 'Calculation', 'always'),
+    'canvas.equation.rounding.away_from_zero':
+        ('Equation ▸ Rounding ▸ Away from zero', 'Calculation', 'always'),
+    'canvas.equation.font.8_pt': ('Equation ▸ Font ▸ 8 pt', 'Calculation', 'always'),
+    'canvas.equation.font.9_pt': ('Equation ▸ Font ▸ 9 pt', 'Calculation', 'always'),
+    'canvas.equation.font.10_pt': ('Equation ▸ Font ▸ 10 pt', 'Calculation', 'always'),
+    'canvas.equation.font.11_pt': ('Equation ▸ Font ▸ 11 pt', 'Calculation', 'always'),
+    'canvas.equation.font.12_pt': ('Equation ▸ Font ▸ 12 pt', 'Calculation', 'always'),
+    'canvas.equation.font.14_pt': ('Equation ▸ Font ▸ 14 pt', 'Calculation', 'always'),
+    'canvas.equation.font.16_pt': ('Equation ▸ Font ▸ 16 pt', 'Calculation', 'always'),
+    'canvas.equation.font.18_pt': ('Equation ▸ Font ▸ 18 pt', 'Calculation', 'always'),
+    'canvas.equation.font.20_pt': ('Equation ▸ Font ▸ 20 pt', 'Calculation', 'always'),
+    'canvas.equation.font.24_pt': ('Equation ▸ Font ▸ 24 pt', 'Calculation', 'always'),
+    'canvas.equation.font.bold': ('Equation ▸ Font ▸ Bold', 'Calculation', 'always'),
+    'canvas.equation.font.italic': ('Equation ▸ Font ▸ Italic', 'Calculation', 'always'),
+    'canvas.equation.font.underline': ('Equation ▸ Font ▸ Underline', 'Calculation', 'always'),
+    'canvas.equation.colour': ('Equation ▸ Colour', 'Calculation', 'always'),
+    'canvas.equation.background': ('Equation ▸ Background', 'Calculation', 'always'),
+    'canvas.equation.border': ('Equation ▸ Border', 'Calculation', 'always'),
+    'canvas.equation.conditional_formatting':
+        ('Equation ▸ Conditional Formatting', 'Calculation', 'always'),
+    'canvas.self_contained': ('Self-Contained', 'Calculation', 'always'),
+    'canvas.select_its_equations': ('Select Its Equations', 'Calculation', 'always'),
+    'canvas.remove_block_keep_equations':
+        ('Remove Block, Keep Equations', 'Calculation', 'always'),
+    # -- menu ------------------------------------------------------------------
+    'menu.file.open_recent.clear_recent_files': ('Clear Recent Files', 'File', 'always'),
+    'menu.view.dimmer.0_pct': ('Dimmer 0%', 'View', 'always'),
+    'menu.view.dimmer.10_pct': ('Dimmer 10%', 'View', 'always'),
+    'menu.view.dimmer.20_pct': ('Dimmer 20%', 'View', 'always'),
+    'menu.view.dimmer.30_pct': ('Dimmer 30%', 'View', 'always'),
+    'menu.view.dimmer.40_pct': ('Dimmer 40%', 'View', 'always'),
+    'menu.view.dimmer.50_pct': ('Dimmer 50%', 'View', 'always'),
+    'menu.view.dimmer.60_pct': ('Dimmer 60%', 'View', 'always'),
+    'menu.view.dimmer.70_pct': ('Dimmer 70%', 'View', 'always'),
+    'menu.view.dimmer.80_pct': ('Dimmer 80%', 'View', 'always'),
+    'menu.view.dimmer.90_pct': ('Dimmer 90%', 'View', 'always'),
+    'menu.view.dimmer.100_pct': ('Dimmer 100%', 'View', 'always'),
+    'menu.tools.toolbars.main': ('Toolbar: Main', 'Window', 'always'),
+    'menu.tools.toolbars.calculation': ('Toolbar: Calculation', 'Window', 'always'),
+    'menu.tools.toolbars.measure': ('Toolbar: Measure', 'Window', 'always'),
+    'menu.tools.toolbars.tools': ('Toolbar: Tools', 'Window', 'always'),
+    'menu.tools.toolbars.markup_styles': ('Toolbar: Markup Styles', 'Window', 'always'),
+    'menu.tools.toolbars.properties': ('Toolbar: Properties', 'Window', 'always'),
+    # -- insert ----------------------------------------------------------------
+    'insert.insert_pdf.before': ('Insert Pages Before', 'Pages', 'always'),
+    'insert.insert_image_page.before': ('Insert Image Page Before', 'Pages', 'always'),
+    'insert.insert_workbook.before': ('Insert Excel Workbook Before', 'Pages', 'always'),
+    'insert.add_page.before': ('Insert Blank Page Before', 'Pages', 'always'),
+    'insert.add_sheet_page.before': ('Insert Spreadsheet Page Before', 'Pages', 'always'),
+    # -- page ------------------------------------------------------------------
+    'page.cut_pages': ('Cut Pages', 'Pages', 'always'),
+    'page.copy_pages': ('Copy Pages', 'Pages', 'always'),
+    'page.paste_pages.before': ('Paste Pages Before', 'Pages', 'always'),
+    'page.paste_pages.after': ('Paste Pages After', 'Pages', 'always'),
+    'page.move_up': ('Move Page Up', 'Pages', 'always'),
+    'page.move_down': ('Move Page Down', 'Pages', 'always'),
+    'page.rename_page_label': ('Rename Page Label', 'Pages', 'always'),
+    'page.reset_page_label': ('Reset Page Label', 'Pages', 'always'),
+    'page.reset_all_page_labels': ('Reset All Page Labels', 'Pages', 'always'),
+    'page.print_pages': ('Print Pages', 'Pages', 'always'),
+    'page.include_in_print_export': ('Include Page in Print & Export', 'Pages', 'always'),
+    'page.go_to_page': ('Go to Page', 'Pages', 'always'),
+    'page.calc_section_break_above_this_page':
+        ('Calc Section Break Above This Page', 'Pages', 'always'),
+    'page.page_grid': ('Page Grid (this page)', 'Pages', 'always'),
+    'page.header_per_footer.show_header': ('Show Header on This Page', 'Pages', 'always'),
+    'page.header_per_footer.show_footer': ('Show Footer on This Page', 'Pages', 'always'),
+    'page.paper_size.a0': ('Paper Size A0', 'Pages', 'always'),
+    'page.paper_size.a1': ('Paper Size A1', 'Pages', 'always'),
+    'page.paper_size.a2': ('Paper Size A2', 'Pages', 'always'),
+    'page.paper_size.a3': ('Paper Size A3', 'Pages', 'always'),
+    'page.paper_size.a4': ('Paper Size A4', 'Pages', 'always'),
+    'page.paper_size.a5': ('Paper Size A5', 'Pages', 'always'),
+    'page.paper_size.letter': ('Paper Size Letter', 'Pages', 'always'),
+    'page.paper_size.legal': ('Paper Size Legal', 'Pages', 'always'),
+    'page.paper_size.tabloid': ('Paper Size Tabloid', 'Pages', 'always'),
+    'page.paper_size.ansi_a': ('Paper Size ANSI A', 'Pages', 'always'),
+    'page.paper_size.ansi_b': ('Paper Size ANSI B', 'Pages', 'always'),
+    'page.paper_size.ansi_c': ('Paper Size ANSI C', 'Pages', 'always'),
+    'page.paper_size.ansi_d': ('Paper Size ANSI D', 'Pages', 'always'),
+    'page.paper_size.ansi_e': ('Paper Size ANSI E', 'Pages', 'always'),
+    'page.paper_size.arch_d': ('Paper Size ARCH D', 'Pages', 'always'),
+    'page.paper_size.arch_e': ('Paper Size ARCH E', 'Pages', 'always'),
+    'page.make_this_page_s_markups_editable':
+        ("Make This Page's Markups Editable", 'Pages', 'always'),
+    # -- markuprow -------------------------------------------------------------
+    'markuprow.colour': ('Markups List: Colour', 'Panels', 'always'),
+    'markuprow.fill': ('Markups List: Fill', 'Panels', 'always'),
+    'markuprow.no_fill': ('Markups List: No fill', 'Panels', 'always'),
+    'markuprow.width.0_25_pt': ('Markups List: Width ▸ 0.25 pt', 'Panels', 'always'),
+    'markuprow.width.0_5_pt': ('Markups List: Width ▸ 0.5 pt', 'Panels', 'always'),
+    'markuprow.width.1_pt': ('Markups List: Width ▸ 1 pt', 'Panels', 'always'),
+    'markuprow.width.1_5_pt': ('Markups List: Width ▸ 1.5 pt', 'Panels', 'always'),
+    'markuprow.width.2_pt': ('Markups List: Width ▸ 2 pt', 'Panels', 'always'),
+    'markuprow.width.3_pt': ('Markups List: Width ▸ 3 pt', 'Panels', 'always'),
+    'markuprow.width.5_pt': ('Markups List: Width ▸ 5 pt', 'Panels', 'always'),
+    'markuprow.line_style.solid': ('Markups List: Line style ▸ solid', 'Panels', 'always'),
+    'markuprow.line_style.dash': ('Markups List: Line style ▸ dash', 'Panels', 'always'),
+    'markuprow.line_style.dot': ('Markups List: Line style ▸ dot', 'Panels', 'always'),
+    'markuprow.line_style.dashdot': ('Markups List: Line style ▸ dashdot', 'Panels', 'always'),
+    'markuprow.line_style.dashdotdot':
+        ('Markups List: Line style ▸ dashdotdot', 'Panels', 'always'),
+    'markuprow.line_style.long_dash': ('Markups List: Line style ▸ long dash', 'Panels', 'always'),
+    'markuprow.line_style.centre': ('Markups List: Line style ▸ centre', 'Panels', 'always'),
+    'markuprow.line_style.phantom': ('Markups List: Line style ▸ phantom', 'Panels', 'always'),
+    'markuprow.line_style.hidden': ('Markups List: Line style ▸ hidden', 'Panels', 'always'),
+    'markuprow.line_style.short_dash':
+        ('Markups List: Line style ▸ short dash', 'Panels', 'always'),
+    'markuprow.line_style.dense_dot': ('Markups List: Line style ▸ dense dot', 'Panels', 'always'),
+    'markuprow.line_style.sparse_dot':
+        ('Markups List: Line style ▸ sparse dot', 'Panels', 'always'),
+    'markuprow.line_style.long_dash_dot':
+        ('Markups List: Line style ▸ long dash dot', 'Panels', 'always'),
+    'markuprow.line_style.long_dash_dot_dot':
+        ('Markups List: Line style ▸ long dash dot dot', 'Panels', 'always'),
+    'markuprow.line_style.border': ('Markups List: Line style ▸ border', 'Panels', 'always'),
+    'markuprow.line_style.divide': ('Markups List: Line style ▸ divide', 'Panels', 'always'),
+    'markuprow.line_style.double_dash':
+        ('Markups List: Line style ▸ double dash', 'Panels', 'always'),
+    'markuprow.line_style.dash_long_gap':
+        ('Markups List: Line style ▸ dash long gap', 'Panels', 'always'),
+    'markuprow.font_size.6_pt': ('Markups List: Font size ▸ 6 pt', 'Panels', 'always'),
+    'markuprow.font_size.8_pt': ('Markups List: Font size ▸ 8 pt', 'Panels', 'always'),
+    'markuprow.font_size.10_pt': ('Markups List: Font size ▸ 10 pt', 'Panels', 'always'),
+    'markuprow.font_size.12_pt': ('Markups List: Font size ▸ 12 pt', 'Panels', 'always'),
+    'markuprow.font_size.14_pt': ('Markups List: Font size ▸ 14 pt', 'Panels', 'always'),
+    'markuprow.font_size.18_pt': ('Markups List: Font size ▸ 18 pt', 'Panels', 'always'),
+    'markuprow.font_size.24_pt': ('Markups List: Font size ▸ 24 pt', 'Panels', 'always'),
+    'markuprow.opacity.100_pct': ('Markups List: Opacity ▸ 100%', 'Panels', 'always'),
+    'markuprow.opacity.75_pct': ('Markups List: Opacity ▸ 75%', 'Panels', 'always'),
+    'markuprow.opacity.50_pct': ('Markups List: Opacity ▸ 50%', 'Panels', 'always'),
+    'markuprow.opacity.25_pct': ('Markups List: Opacity ▸ 25%', 'Panels', 'always'),
+    'markuprow.lock_per_unlock': ('Markups List: Lock / unlock', 'Panels', 'always'),
+    'markuprow.hide': ('Markups List: Hide', 'Panels', 'always'),
+    'markuprow.delete': ('Markups List: Delete', 'Panels', 'always'),
+    # -- chest -----------------------------------------------------------------
+    'chest.new_tool_set': ('Tool Chest: New Tool Set', 'Panels', 'always'),
+    # -- doctab ----------------------------------------------------------------
+    'doctab.close_others': ('Document tab: Close Others', 'Window', 'always'),
+    'doctab.new_window': ('Document tab: New Window for It', 'Window', 'always'),
+    'doctab.open_in_split_view': ('Document tab: Open in Split View', 'Window', 'always'),
+    'doctab.duplicate_tab': ('Document tab: Duplicate Tab', 'Window', 'always'),
+    # -- ruler -----------------------------------------------------------------
+    'ruler.inches': ('Ruler units: Inches', 'View', 'always'),
+    'ruler.centimeters': ('Ruler units: Centimeters', 'View', 'always'),
+    'ruler.millimeters': ('Ruler units: Millimeters', 'View', 'always'),
+    'ruler.points': ('Ruler units: Points', 'View', 'always'),
+    'ruler.picas': ('Ruler units: Picas', 'View', 'always'),
+    # -- bookmarks -------------------------------------------------------------
+    'bookmarks.rename': ('Bookmarks: Rename', 'Panels', 'always'),
+    'bookmarks.delete': ('Bookmarks: Delete', 'Panels', 'always'),
+    # -- search ----------------------------------------------------------------
+    'search.find': ('Search: Find', 'Panels', 'always'),
+    'search.replace': ('Search: Replace', 'Panels', 'always'),
+    'search.replace_all': ('Search: Replace all', 'Panels', 'always'),
+    # -- pagepanel -------------------------------------------------------------
+    'pagepanel.add': ('Page panel: Add Viewport', 'Panels', 'always'),
+    'pagepanel.edit': ('Page panel: Edit Viewport', 'Panels', 'always'),
+    'pagepanel.delete': ('Page panel: Delete Viewport', 'Panels', 'always'),
+    # -- maths -----------------------------------------------------------------
+    'maths.positive_infinity': ('Maths: Positive infinity ∞', 'Calculation', 'calc'),
+    'maths.number_pi': ("Maths: Number 'Pi' π", 'Calculation', 'calc'),
+    'maths.imaginary_unit': ('Maths: Imaginary unit i', 'Calculation', 'calc'),
+    'maths.plus_per_minus': ('Maths: Plus/minus ±', 'Calculation', 'calc'),
+    'maths.vector_element': ('Maths: Vector element xₙ', 'Calculation', 'calc'),
+    'maths.backspace': ('Maths: Backspace ←', 'Calculation', 'calc'),
+    'maths.7': ('Maths: 7', 'Calculation', 'calc'),
+    'maths.8': ('Maths: 8', 'Calculation', 'calc'),
+    'maths.9': ('Maths: 9', 'Calculation', 'calc'),
+    'maths.addition': ('Maths: Addition +', 'Calculation', 'calc'),
+    'maths.brackets': ('Maths: Brackets ( )', 'Calculation', 'calc'),
+    'maths.power': ('Maths: Power xʸ', 'Calculation', 'calc'),
+    'maths.4': ('Maths: 4', 'Calculation', 'calc'),
+    'maths.5': ('Maths: 5', 'Calculation', 'calc'),
+    'maths.6': ('Maths: 6', 'Calculation', 'calc'),
+    'maths.subtraction': ('Maths: Subtraction −', 'Calculation', 'calc'),
+    'maths.square_root': ('Maths: Square root √', 'Calculation', 'calc'),
+    'maths.n_th_root': ('Maths: N-th root ⁿ√', 'Calculation', 'calc'),
+    'maths.1': ('Maths: 1', 'Calculation', 'calc'),
+    'maths.2': ('Maths: 2', 'Calculation', 'calc'),
+    'maths.3': ('Maths: 3', 'Calculation', 'calc'),
+    'maths.multiplication': ('Maths: Multiplication ×', 'Calculation', 'calc'),
+    'maths.arguments_separator': ('Maths: Arguments separator ,', 'Calculation', 'calc'),
+    'maths.symbolic_evaluation': ('Maths: Symbolic evaluation →', 'Calculation', 'calc'),
+    'maths.decimal_symbol': ('Maths: Decimal symbol .', 'Calculation', 'calc'),
+    'maths.0': ('Maths: 0', 'Calculation', 'calc'),
+    'maths.factorial': ('Maths: Factorial !', 'Calculation', 'calc'),
+    'maths.division': ('Maths: Division /', 'Calculation', 'calc'),
+    'maths.definition': ('Maths: Definition ≔', 'Calculation', 'calc'),
+    'maths.numeric_evaluation': ('Maths: Numeric evaluation =', 'Calculation', 'calc'),
+    'maths.insert_matrix': ('Maths: Insert matrix [⋮]', 'Calculation', 'calc'),
+    'maths.determinant': ('Maths: Determinant |M|', 'Calculation', 'calc'),
+    'maths.matrix_transpose': ('Maths: Matrix transpose Mᵀ', 'Calculation', 'calc'),
+    'maths.algebraic_addition_to_matrix':
+        ('Maths: Algebraic addition to matrix Aᵢⱼ', 'Calculation', 'calc'),
+    'maths.minor': ('Maths: Minor Mᵢⱼ', 'Calculation', 'calc'),
+    'maths.cross_product': ('Maths: Cross product ×', 'Calculation', 'calc'),
+    'maths.vectorize': ('Maths: Vectorize v⃗', 'Calculation', 'calc'),
+    'maths.range': ('Maths: Range a..b', 'Calculation', 'calc'),
+    'maths.range_with_step': ('Maths: Range with step a,b..', 'Calculation', 'calc'),
+    'maths.element': ('Maths: Element vᵢ', 'Calculation', 'calc'),
+    'maths.inverse': ('Maths: Inverse M⁻¹', 'Calculation', 'calc'),
+    'maths.tr': ('Maths: tr', 'Calculation', 'calc'),
+    'maths.boolean_equality': ('Maths: Boolean equality =', 'Calculation', 'calc'),
+    'maths.less_than': ('Maths: Less than <', 'Calculation', 'calc'),
+    'maths.greater_than': ('Maths: Greater than >', 'Calculation', 'calc'),
+    'maths.less_than_or_equal': ('Maths: Less than or equal ≤', 'Calculation', 'calc'),
+    'maths.greater_than_or_equal': ('Maths: Greater than or equal ≥', 'Calculation', 'calc'),
+    'maths.not_equal': ('Maths: Not equal ≠', 'Calculation', 'calc'),
+    'maths.not': ('Maths: Not ¬', 'Calculation', 'calc'),
+    'maths.and': ('Maths: And ∧', 'Calculation', 'calc'),
+    'maths.or': ('Maths: Or ∨', 'Calculation', 'calc'),
+    'maths.exclusive_or': ('Maths: Exclusive or ⊕', 'Calculation', 'calc'),
+    'maths.log': ('Maths: log', 'Calculation', 'calc'),
+    'maths.sign': ('Maths: sign', 'Calculation', 'calc'),
+    'maths.sin': ('Maths: sin', 'Calculation', 'calc'),
+    'maths.cos': ('Maths: cos', 'Calculation', 'calc'),
+    'maths.summation': ('Maths: Summation Σ', 'Calculation', 'calc'),
+    'maths.product': ('Maths: Product Π', 'Calculation', 'calc'),
+    'maths.ln': ('Maths: ln', 'Calculation', 'calc'),
+    'maths.arg': ('Maths: arg', 'Calculation', 'calc'),
+    'maths.tan': ('Maths: tan', 'Calculation', 'calc'),
+    'maths.cot': ('Maths: cot', 'Calculation', 'calc'),
+    'maths.definite_integral': ('Maths: Definite integral ∫', 'Calculation', 'calc'),
+    'maths.d_per_dx': ('Maths: d/dx', 'Calculation', 'calc'),
+    'maths.exp': ('Maths: exp', 'Calculation', 'calc'),
+    'maths.system': ('Maths: System {', 'Calculation', 'calc'),
+    'maths.all_functions': ('Maths: All functions…', 'Calculation', 'calc'),
+    'maths.plot_2d': ('Maths: Plot - 2D 2D', 'Calculation', 'calc'),
+    'maths.move': ('Maths: Move ✥', 'Calculation', 'calc'),
+    'maths.scale': ('Maths: Scale ⤢', 'Calculation', 'calc'),
+    'maths.points': ('Maths: Points ⁘', 'Calculation', 'calc'),
+    'maths.lines': ('Maths: Lines ∿', 'Calculation', 'calc'),
+    'maths.refresh': ('Maths: Refresh ⟳', 'Calculation', 'calc'),
+    'maths.if': ('Maths: if', 'Calculation', 'calc'),
+    'maths.for': ('Maths: for', 'Calculation', 'calc'),
+    'maths.try': ('Maths: try', 'Calculation', 'calc'),
+    'maths.line': ('Maths: line', 'Calculation', 'calc'),
+    'maths.while': ('Maths: while', 'Calculation', 'calc'),
+    'maths.cont': ('Maths: cont.', 'Calculation', 'calc'),
+    'maths.break': ('Maths: break', 'Calculation', 'calc'),
+    'maths.m': ("Maths: 'm m", 'Calculation', 'calc'),
+    'maths.mm': ('Maths: mm', 'Calculation', 'calc'),
+    'maths.cm': ('Maths: cm', 'Calculation', 'calc'),
+    'maths.km': ('Maths: km', 'Calculation', 'calc'),
+    'maths.m_superscript_two': ("Maths: 'm² m²", 'Calculation', 'calc'),
+    'maths.m_superscript_three': ("Maths: 'm³ m³", 'Calculation', 'calc'),
+    'maths.kg': ('Maths: kg', 'Calculation', 'calc'),
+    'maths.t': ("Maths: 't t", 'Calculation', 'calc'),
+    'maths.s': ("Maths: 's s", 'Calculation', 'calc'),
+    'maths.min': ('Maths: min', 'Calculation', 'calc'),
+    'maths.h': ("Maths: 'h h", 'Calculation', 'calc'),
+    'maths.n': ("Maths: 'N N", 'Calculation', 'calc'),
+    'maths.kn': ('Maths: kN', 'Calculation', 'calc'),
+    'maths.mn': ('Maths: MN', 'Calculation', 'calc'),
+    'maths.pa': ('Maths: Pa', 'Calculation', 'calc'),
+    'maths.kpa': ('Maths: kPa', 'Calculation', 'calc'),
+    'maths.mpa': ('Maths: MPa', 'Calculation', 'calc'),
+    'maths.gpa': ('Maths: GPa', 'Calculation', 'calc'),
+    'maths.j': ("Maths: 'J J", 'Calculation', 'calc'),
+    'maths.kj': ('Maths: kJ', 'Calculation', 'calc'),
+    'maths.w': ("Maths: 'W W", 'Calculation', 'calc'),
+    'maths.kw': ('Maths: kW', 'Calculation', 'calc'),
+    'maths.deg': ("Maths: '° °", 'Calculation', 'calc'),
+    'maths.rad': ('Maths: rad', 'Calculation', 'calc'),
+    'maths.deg_c': ("Maths: '°C °C", 'Calculation', 'calc'),
+    'maths.k': ("Maths: 'K K", 'Calculation', 'calc'),
+    'maths.l': ("Maths: 'L L", 'Calculation', 'calc'),
+    'maths.hz': ('Maths: Hz', 'Calculation', 'calc'),
+    'maths.all_units': ('Maths: All units…', 'Calculation', 'calc'),
+    'maths.g_e_gravitational_acceleration':
+        ("Maths: 'g.e - gravitational acceleration g", 'Calculation', 'calc'),
+    'maths.c_speed_of_light': ("Maths: 'c - speed of light c", 'Calculation', 'calc'),
+    'maths.h_planck_constant': ("Maths: 'h - Planck constant h", 'Calculation', 'calc'),
+    'maths.k_boltzmann_constant': ("Maths: 'k - Boltzmann constant k", 'Calculation', 'calc'),
+    'maths.n_a_avogadro_s_number': ("Maths: 'N.A - Avogadro's number Nᴀ", 'Calculation', 'calc'),
+    'maths.r_m_gas_constant': ("Maths: 'R.m - gas constant R", 'Calculation', 'calc'),
+    'maths.greek_small_letter_epsilon_0_vacuum_permittivity':
+        ("Maths: 'ε.0 - vacuum permittivity ε₀", 'Calculation', 'calc'),
+    'maths.greek_small_letter_mu_0_magnetic_constant':
+        ("Maths: 'μ.0 - magnetic constant μ₀", 'Calculation', 'calc'),
+    'maths.e_elementary_charge': ("Maths: 'e - elementary charge e⁻", 'Calculation', 'calc'),
+    'maths.m_e_electron_mass': ("Maths: 'm.e - electron mass mₑ", 'Calculation', 'calc'),
+    'maths.m_p_proton_mass': ("Maths: 'm.p - proton mass mₚ", 'Calculation', 'calc'),
+    'maths.u_atomic_mass_unit': ("Maths: 'u - atomic mass unit u", 'Calculation', 'calc'),
+    'maths.table_of_all_constants': ('Maths: Table of all constants…', 'Calculation', 'calc'),
+    # -- markupslist -----------------------------------------------------------
+    'markupslist.all': ('Markups List: Clear Column Filters (All)', 'Panels', 'always'),
+    'markupslist.csv': ('Markups List: Export CSV', 'Panels', 'always'),
+    # -- status ----------------------------------------------------------------
+    'status.first_page': ('First Page', 'View', 'always'),
+    'status.last_page': ('Last Page', 'View', 'always'),
+    # -- propbar ---------------------------------------------------------------
+    'propbar.highlight': ('Properties toolbar: Highlight', 'Markup', 'always'),
+    'propbar.fit_to_text': ('Properties toolbar: Fit to text', 'Markup', 'always'),
+    'propbar.add_a_cut_out': ('Properties toolbar: Add a cut-out', 'Markup', 'always'),
+    'propbar.count_subject': ('Properties toolbar: Count subject…', 'Markup', 'always'),
+    # -- styles ----------------------------------------------------------------
+    'styles.default': ('Markup style: Default', 'Markup', 'always'),
+    'styles.add': ('Markup style: Save Current Look as New Style', 'Markup', 'always'),
+    'styles.1': ('Markup Style 1', 'Markup', 'always'),
+    'styles.rename': ('Markup style: Rename', 'Markup', 'always'),
+    'styles.update_from_selected_markup':
+        ('Markup style: Update from Selected Markup', 'Markup', 'always'),
+    'styles.remove': ('Markup style: Remove', 'Markup', 'always'),
+    'styles.move_left': ('Markup style: Move Left', 'Markup', 'always'),
+    'styles.move_right': ('Markup style: Move Right', 'Markup', 'always'),
+    'styles.2': ('Markup Style 2', 'Markup', 'always'),
+    'styles.3': ('Markup Style 3', 'Markup', 'always'),
+    'styles.4': ('Markup Style 4', 'Markup', 'always'),
+    'styles.5': ('Markup Style 5', 'Markup', 'always'),
+    'styles.6': ('Markup Style 6', 'Markup', 'always'),
+    'styles.7': ('Markup Style 7', 'Markup', 'always'),
+    'styles.8': ('Markup Style 8', 'Markup', 'always'),
+    'styles.9': ('Markup Style 9', 'Markup', 'always'),
+    # -- cell ------------------------------------------------------------------
+    'cell.insert.insert_rows_below': ('Insert ▸ Insert Rows Below', 'Spreadsheet', 'table'),
+    'cell.insert.insert_columns_right': ('Insert ▸ Insert Columns Right', 'Spreadsheet', 'table'),
+    'cell.insert.chart.xy_scatter': ('Insert ▸ Chart ▸ XY Scatter', 'Spreadsheet', 'table'),
+    'cell.insert.chart.scatter_with_lines':
+        ('Insert ▸ Chart ▸ Scatter with Lines', 'Spreadsheet', 'table'),
+    'cell.insert.chart.line': ('Insert ▸ Chart ▸ Line', 'Spreadsheet', 'table'),
+    'cell.insert.chart.column': ('Insert ▸ Chart ▸ Column', 'Spreadsheet', 'table'),
+    'cell.merge.merge_across': ('Merge ▸ Merge Across', 'Spreadsheet', 'table'),
+    'cell.merge.merge_cells': ('Merge ▸ Merge Cells', 'Spreadsheet', 'table'),
+    'cell.rows_columns.distribute_rows_evenly':
+        ('Rows & Columns ▸ Distribute Rows Evenly', 'Spreadsheet', 'table'),
+    'cell.rows_columns.distribute_columns_evenly':
+        ('Rows & Columns ▸ Distribute Columns Evenly', 'Spreadsheet', 'table'),
+    'cell.rows_columns.row_height': ('Rows & Columns ▸ Row Height', 'Spreadsheet', 'table'),
+    'cell.rows_columns.column_width': ('Rows & Columns ▸ Column Width', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.highlight_cells_rules.greater_than':
+        ('Conditional Formatting ▸ Highlight Cells Rules ▸ Greater Than', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.highlight_cells_rules.less_than':
+        ('Conditional Formatting ▸ Highlight Cells Rules ▸ Less Than', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.highlight_cells_rules.between':
+        ('Conditional Formatting ▸ Highlight Cells Rules ▸ Between', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.highlight_cells_rules.equal_to':
+        ('Conditional Formatting ▸ Highlight Cells Rules ▸ Equal To', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.highlight_cells_rules.not_equal_to':
+        ('Conditional Formatting ▸ Highlight Cells Rules ▸ Not Equal To', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.highlight_cells_rules.text_that_contains':
+        ('Conditional Formatting ▸ Highlight Cells Rules ▸ Text that Contains', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.highlight_cells_rules.a_date_occurring':
+        ('Conditional Formatting ▸ Highlight Cells Rules ▸ A Date Occurring', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.highlight_cells_rules.duplicate_values':
+        ('Conditional Formatting ▸ Highlight Cells Rules ▸ Duplicate Values', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.top_per_bottom_rules.top_10_items':
+        ('Conditional Formatting ▸ Top/Bottom Rules ▸ Top 10 Items', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.top_per_bottom_rules.top_10_pct':
+        ('Conditional Formatting ▸ Top/Bottom Rules ▸ Top 10%', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.top_per_bottom_rules.bottom_10_items':
+        ('Conditional Formatting ▸ Top/Bottom Rules ▸ Bottom 10 Items', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.top_per_bottom_rules.above_average':
+        ('Conditional Formatting ▸ Top/Bottom Rules ▸ Above Average', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.top_per_bottom_rules.below_average':
+        ('Conditional Formatting ▸ Top/Bottom Rules ▸ Below Average', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.data_bars.blue':
+        ('Conditional Formatting ▸ Data Bars ▸ Blue', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.data_bars.green':
+        ('Conditional Formatting ▸ Data Bars ▸ Green', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.data_bars.red':
+        ('Conditional Formatting ▸ Data Bars ▸ Red', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.data_bars.orange':
+        ('Conditional Formatting ▸ Data Bars ▸ Orange', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.data_bars.purple':
+        ('Conditional Formatting ▸ Data Bars ▸ Purple', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.colour_scales.green_yellow_red':
+        ('Conditional Formatting ▸ Colour Scales ▸ Green - Yellow - Red', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.colour_scales.red_yellow_green':
+        ('Conditional Formatting ▸ Colour Scales ▸ Red - Yellow - Green', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.colour_scales.white_red':
+        ('Conditional Formatting ▸ Colour Scales ▸ White - Red', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.colour_scales.white_green':
+        ('Conditional Formatting ▸ Colour Scales ▸ White - Green', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.colour_scales.blue_white_red':
+        ('Conditional Formatting ▸ Colour Scales ▸ Blue - White - Red', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.icon_sets.3_arrows':
+        ('Conditional Formatting ▸ Icon Sets ▸ 3 Arrows', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.icon_sets.3_traffic_lights':
+        ('Conditional Formatting ▸ Icon Sets ▸ 3 Traffic Lights', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.icon_sets.3_flags':
+        ('Conditional Formatting ▸ Icon Sets ▸ 3 Flags', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.icon_sets.3_symbols':
+        ('Conditional Formatting ▸ Icon Sets ▸ 3 Symbols', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.new_rule':
+        ('Conditional Formatting ▸ New Rule', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.clear_rules.from_selected_cells':
+        ('Conditional Formatting ▸ Clear Rules ▸ From Selected Cells', 'Spreadsheet', 'table'),
+    'cell.conditional_formatting.clear_rules.from_entire_table':
+        ('Conditional Formatting ▸ Clear Rules ▸ From Entire Table', 'Spreadsheet', 'table'),
+    'cell.data.clear_filter': ('Data ▸ Clear Filter', 'Spreadsheet', 'table'),
+    'cell.data.circle_invalid_data': ('Data ▸ Circle Invalid Data', 'Spreadsheet', 'table'),
+    'cell.data.clear_validation_circles':
+        ('Data ▸ Clear Validation Circles', 'Spreadsheet', 'table'),
+    'cell.comment.delete_comment': ('Comment ▸ Delete Comment', 'Spreadsheet', 'table'),
+    'cell.make_global': ('Make Cells Global / Local', 'Spreadsheet', 'table'),
+    # -- tablebar --------------------------------------------------------------
+    'tablebar.align_left': ('Align left ⯇', 'Spreadsheet', 'table'),
+    'tablebar.centre': ('Centre ≡', 'Spreadsheet', 'table'),
+    'tablebar.align_right': ('Align right ⯈', 'Spreadsheet', 'table'),
+    'tablebar.wrap': ('Wrap', 'Spreadsheet', 'table'),
+    'tablebar.fewer_decimals': ('Fewer decimal places ←.0', 'Spreadsheet', 'table'),
+    'tablebar.more_decimals': ('More decimal places .00→', 'Spreadsheet', 'table'),
+    'tablebar.format_painter': ('Format Painter (cells)', 'Spreadsheet', 'table'),
+    # -- filter ----------------------------------------------------------------
+    'filter.sort_a_to_z': ('Column filter: Sort A to Z', 'Spreadsheet', 'table'),
+    'filter.sort_z_to_a': ('Column filter: Sort Z to A', 'Spreadsheet', 'table'),
+    'filter.clear_filter_from_this_column':
+        ('Column filter: Clear Filter From This Column', 'Spreadsheet', 'table'),
+    'filter.choose_values': ('Column filter: Choose Values', 'Spreadsheet', 'table'),
+    'filter.number_per_text_filter': ('Column filter: Number/Text Filter', 'Spreadsheet', 'table'),
+    'filter.top_10': ('Column filter: Top 10', 'Spreadsheet', 'table'),
+    # -- sheettab --------------------------------------------------------------
+    'sheettab.insert_sheet': ('Sheet tab: Insert Sheet', 'Spreadsheet', 'table'),
+    'sheettab.delete': ('Sheet tab: Delete', 'Spreadsheet', 'table'),
+    'sheettab.go_to': ('Sheet tab: Go To', 'Spreadsheet', 'table'),
+    # -- properties ------------------------------------------------------------
+    'properties.document_default': ('Properties: Document default', 'Markup', 'always'),
+    # -- variables -------------------------------------------------------------
+    'variables.go_to': ('Variables: Go to', 'Panels', 'always'),
+    'variables.make_global': ('Variables: Make Global / Local', 'Panels', 'always'),
+}
