@@ -210,13 +210,18 @@ WORD_TOOLS = frozenset({"text", "callout", "cloud_callout", "typewriter"})
 
 
 #: The tools that ask for a page scale when the page has none: Revu's
-#: measurement tools, every one of them. Dimension (a markup carrying its own
-#: words), the cut-outs (taken out of an area already scaled) and Calibrate
-#: (which sets the scale) do not.
+#: measurement tools, every one of them — Dimension too, which writes the
+#: length it measures unless it is given words of its own (exercise round 1,
+#: F-19). The cut-outs (taken out of an area already scaled), Viewport (which
+#: asks for its own) and Calibrate (which sets the scale) do not.
 SCALE_PROMPT_TOOLS = frozenset({
-    "measure_length", "measure_polylength", "measure_area", "measure_perimeter",
+    "measure_length", "measure_dimension",
+    "measure_polylength", "measure_area", "measure_perimeter",
     "measure_volume", "measure_angle", "measure_radius", "measure_diameter",
-    "count"})
+    "count",
+    # Revu's Sketch to Scale shapes, drawn to a real size (the user,
+    # 2026-10-16); the plain Rectangle and Ellipse never ask
+    "sketch_rect", "sketch_ellipse"})
 
 
 class _SizeEdit(QLineEdit):
@@ -1943,6 +1948,16 @@ class PageView(QGraphicsView):
             return
 
         if (self._pending_arrow_leader is not None
+                and event.button() == Qt.LeftButton
+                and self._inside_its_box(self._pending_arrow_leader, scene_pos)):
+            # a leader points out of its box at something, never into its
+            # own words (exercise round 1, F-12): the click waits for a place
+            self.statusMessage.emit(
+                "Click outside the box, on what the arrow should point at "
+                "· Esc to cancel")
+            event.accept()
+            return
+        if (self._pending_arrow_leader is not None
                 and event.button() == Qt.LeftButton):
             item, self._pending_arrow_leader = self._pending_arrow_leader, None
             self.setCursor(self._cursor_for_tool(self.current_tool()))
@@ -2086,11 +2101,11 @@ class PageView(QGraphicsView):
                 detach(item)
 
     def _press_select(self, event: QMouseEvent, scene_pos: QPointF) -> None:
-        # 1. a selected group — or several markups selected together — owns
-        # one outer resize box (Revu: a dashed box with corner handles round
-        # a multi-selection). Check it before the modifier-specific reshape
-        # paths so Shift can release its ratio.
-        grouped = self._selection_box()
+        # 1. a selected group owns one outer resize box. Check it before the
+        # modifier-specific reshape paths so Shift can release its ratio.
+        # Several markups selected have no box of their own (Revu: each keeps
+        # its own control points, and a handle resizes only its own markup).
+        grouped = self._selected_group()
         if grouped is not None:
             members, box = grouped
             key = self._group_handle_at(scene_pos, box)
@@ -2110,9 +2125,11 @@ class PageView(QGraphicsView):
                 event.accept()
                 return
 
-        # With several things selected, their own control points are not
-        # offered: a press anywhere on any of them moves them all, and Shift
-        # or Ctrl on one is a click that adds or takes away (QA finding 1.7).
+        # With several things selected, each keeps its own control points —
+        # a press on one of them resizes or reshapes that markup alone, as in
+        # Revu — but a press anywhere else on any of them moves them all, and
+        # Shift or Ctrl on one is a click that adds or takes away (QA finding
+        # 1.7; the user, 2026-10-16: no group resize).
         many = self.scene().many_selected()
 
         # 3. Shift on a dimension's number takes hold of the number itself,
@@ -2154,8 +2171,9 @@ class PageView(QGraphicsView):
                 event.accept()
                 return
 
-        # 5. a resize handle on an already-selected item
-        for item in [] if many else self.scene().selectedItems():
+        # 5. a resize handle on an already-selected item — each of several
+        # selected markups has its own, and resizes only itself
+        for item in self.scene().selectedItems():
             if not isinstance(item, MarkupItem) or not self.editable(item):
                 continue
             if item.group:
@@ -2472,6 +2490,7 @@ class PageView(QGraphicsView):
             self._release_stale_mode()
         if (self._pending_anchor is not None or self._pending_stamp is not None
                 or self._pending_arrow_leader is not None
+                or self._pending_cloud_leader is not None
                 or self.current_tool().mode == CLICK):
             self.viewport().update()          # the leader, or the preview, follows
 
@@ -3004,7 +3023,7 @@ class PageView(QGraphicsView):
         if self._pending_cloud_leader is not None:
             self.setCursor(cloud_callout_cursor())
             return
-        grouped = self._selection_box()
+        grouped = self._selected_group()
         if grouped is not None:
             _members, box = grouped
             key = self._group_handle_at(scene_pos, box)
@@ -3042,7 +3061,7 @@ class PageView(QGraphicsView):
                 if rect is not None and rect.contains(scene_pos):
                     self.setCursor(Qt.IBeamCursor)
                     return
-        for item in [] if many else self.scene().selectedItems():
+        for item in self.scene().selectedItems():
             if isinstance(item, MarkupItem) and self.editable(item):
                 if item.group:
                     continue
@@ -3277,12 +3296,17 @@ class PageView(QGraphicsView):
 
         if self._mode == "draw_drag" and self._is_a_click(scene_pos) \
                 and isinstance(self._draft, TextItem):
-            # Revu's text box: one click puts down a box of the default size
-            # with the caret in it, ready to type; a drag still sizes it. It
-            # used to wait for a second corner, and the words typed meanwhile
-            # were lost (novice finding 6).
-            self._mode = "idle"
-            self.finish_draft(scene_pos)
+            # Revu's text box is dragged out: a click alone places nothing,
+            # and the tool stays in hand for the drag (the user, 2026-10-16).
+            # It used to wait for a second corner, and the words typed
+            # meanwhile were lost (novice finding 6); now the drag is the
+            # whole gesture and the caret is in the box when it ends.
+            self.cancel_draft()
+            self.forget_snapshot()
+            self.setCursor(self._cursor_for_tool(self.current_tool()))
+            self.statusMessage.emit(
+                f"{self.current_tool().label}: drag a box, then type in it "
+                "· Esc to put the tool away")
             event.accept()
             return
 
@@ -3427,7 +3451,7 @@ class PageView(QGraphicsView):
     # item creation
     # ------------------------------------------------------------------
     # -- typing on a measurement -------------------------------------------
-    def open_label_editor(self, item) -> bool:
+    def open_label_editor(self, item, prefill: bool = False) -> bool:
         """Type a measurement's own text where the text sits.
 
         A dimension carries whatever the author wants on it, and asking for
@@ -3439,7 +3463,11 @@ class PageView(QGraphicsView):
             return False
         self.close_label_editor(commit=False)
         editor = QLineEdit()
-        editor.setText(item.custom_label)
+        # *prefill* (Edit Text… on a measurement already there): what it says
+        # now, selected, so typing replaces it and Enter keeps it (exercise
+        # round 1, F-33: it opened an empty box and the value vanished). A
+        # new dimension still starts blank, its value shown as the hint.
+        editor.setText(item.custom_label or (item.measured_text if prefill else "") or "")
         editor.setPlaceholderText(item.measured_text or "text for this dimension")
         editor.setAlignment(Qt.AlignCenter)
         editor.setStyleSheet(
@@ -3483,6 +3511,8 @@ class PageView(QGraphicsView):
             if proxy.scene() is not None:
                 proxy.scene().removeItem(proxy)
             proxy.deleteLater()
+        if item is not None and text == (item.measured_text or "").strip():
+            text = ""                  # the measured value: it stays live
         if commit and item is not None and item.custom_label != text:
             self.begin_snapshot(self.involved_frames(item))
             item.custom_label = text
@@ -3713,7 +3743,7 @@ class PageView(QGraphicsView):
         self.selectionChanged.emit()
         self.commit_snapshot(f"Add {tool.label.lower()}")
         self.finish_tool()
-        self.begin_item_edit(item)
+        self.begin_item_edit(item, placed=True)
 
     def edit_note(self, note) -> bool:
         """Ask for a note's text. False when the author changed their mind."""
@@ -3875,13 +3905,15 @@ class PageView(QGraphicsView):
         if isinstance(draft, MeasureItem):
             if draft.kind != DIMENSION:
                 note_scale = True
+        if getattr(draft, "to_scale", False):
+            note_scale = True              # Sketch to Scale, as a measurement
         self.commit_snapshot(f"Add {tool.label.lower()}")
 
         if isinstance(draft, MeasureItem) and draft.kind == DIMENSION \
                 and self.window.interactive_prompts:
             self.open_label_editor(draft)
         elif isinstance(draft, (TextItem, CalloutItem)):
-            self.begin_item_edit(draft)
+            self.begin_item_edit(draft, placed=True)
         self.finish_tool()
         # Last word, so returning to the select tool does not wipe the notice.
         if note_scale:
@@ -4069,8 +4101,9 @@ class PageView(QGraphicsView):
         grid.setContentsMargins(5, 2, 5, 4)
         grid.setHorizontalSpacing(3)
         grid.setVerticalSpacing(0)
-        scale = self._draft_scale()
-        unit = scale.display_unit if scale.is_calibrated() else "mm"
+        # Sketch to Scale's shapes are typed in real units on a scaled page;
+        # a plain one is typed on the paper, in the rulers' units
+        unit = draft.size_unit(self.page()) if self.page() is not None else "mm"
         ellipse = draft.kind == "ellipse"
         fields = []
         for column, (caption, suffix, tip) in enumerate((
@@ -4171,14 +4204,22 @@ class PageView(QGraphicsView):
         if page is None:
             return
         draft.refresh(page=page)
-        scale = self._draft_scale()
-        digits = max(scale.precision, 0) if scale.is_calibrated() else 2
-        for box, value, typed in ((self._size_width, draft.width_value, self._typed_w),
-                                  (self._size_height, draft.height_value, self._typed_h)):
+        if draft.measures_real(page):
+            scale = self._draft_scale()
+            digits = max(scale.precision, 0)
+            shown = [None if v is None else float(v.magnitude)
+                     for v in (draft.width_value, draft.height_value)]
+        else:
+            from ..items.shapes import PAPER_UNITS, paper_number, paper_unit
+            digits = PAPER_UNITS[paper_unit()][2]
+            rect = draft.local_rect().normalized()
+            shown = [paper_number(rect.width()), paper_number(rect.height())]
+        for box, value, typed in ((self._size_width, shown[0], self._typed_w),
+                                  (self._size_height, shown[1], self._typed_h)):
             if box is None or value is None or typed is not None:
                 continue
             was = box.blockSignals(True)
-            box.setText(f"{float(value.magnitude):.{digits}f}")
+            box.setText(f"{value:.{digits}f}")
             if box is self._size_current:
                 box.selectAll()
             box.blockSignals(was)
@@ -4210,6 +4251,14 @@ class PageView(QGraphicsView):
         from ..core.units import parse_unit
 
         page = self.page()
+        draft = self._draft
+        if page is not None and isinstance(draft, RectItem) \
+                and not draft.measures_real(page):
+            # a plain shape — or a sketch on a page with no scale — is sized
+            # on the paper: a bare number is in the rulers' unit
+            from ..items.shapes import paper_points
+            points = paper_points(text)
+            return points if points is not None and points > 0 else None
         quantity = parse_unit(self._size_with_default_unit(text, self._size_unit))
         if quantity is None or page is None:
             return None
@@ -4311,7 +4360,11 @@ class PageView(QGraphicsView):
                 or self.calc.editing())
 
 
-    def begin_item_edit(self, item) -> None:
+    def begin_item_edit(self, item, placed: bool = False) -> None:
+        """Open *item*'s words for typing. *placed*: it was put down a moment
+        ago, and the step that added it is the last one on the undo stack —
+        what is typed now joins that step, so one Ctrl+Z takes back the box
+        and its words together (Revu; exercise round 1, F-05)."""
         if self._mode == "lasso":
             self.cancel_marquee()
         if self._editing_item is not None and self._editing_item is not item:
@@ -4331,6 +4384,12 @@ class PageView(QGraphicsView):
         item.setSelected(True)
         item.begin_edit()
         self._editing_item = item
+        self._placed_step = None
+        stack = self.window.undo_stack
+        if placed and stack.index() > 0 and stack.index() == stack.count():
+            added = stack.command(stack.index() - 1)
+            if isinstance(added, PageEditCommand):
+                self._placed_step = (added, stack.index())
 
 
     def place_caret(self, item, scene_pos: QPointF) -> None:
@@ -4376,8 +4435,33 @@ class PageView(QGraphicsView):
         # A text box left completely empty is an invisible click target; drop it.
         elif self._is_empty(item):
             detach(item)
+        placed, self._placed_step = getattr(self, "_placed_step", None), None
+        if placed is not None and self._join_the_placing(*placed):
+            self.documentEdited.emit()
+            return
         self.commit_snapshot("Edit text")
         self.documentEdited.emit()
+
+    def _join_the_placing(self, added, index: int) -> bool:
+        """The words typed into a box just put down belong to the step that
+        put it down. False when anything else was done in between, and the
+        typing is a step of its own as before."""
+        stack = self.window.undo_stack
+        if stack.index() != index or stack.count() != index \
+                or stack.command(index - 1) is not added:
+            return False
+        frame = added._live_frame()
+        if frame is None or frame.scene() is None:
+            return False
+        after = frame.serialize_items()
+        self._snapshot = []
+        if after == added.before:
+            # put down and left empty: nothing was added after all
+            added.setObsolete(True)
+            stack.undo()
+            return True
+        added.after = after
+        return True
 
     @staticmethod
     def _is_empty(item) -> bool:
@@ -4444,28 +4528,6 @@ class PageView(QGraphicsView):
             return None
         members = self.group_of(selected[0])
         if set(members) != set(selected):
-            return None
-        box = self.markup_box(members[0])
-        for member in members[1:]:
-            box = box.united(self.markup_box(member))
-        return members, box
-
-    def _selection_box(self):
-        """The box a selection is resized by, as (members, scene rectangle):
-        one complete group's, or — several markups selected — the box round
-        all of them, as Revu draws for a multi-selection. Equations and
-        tables are left out of it: they are as big as what they say."""
-        scene = self.scene()
-        if scene is None:
-            return None
-        grouped = self._selected_group()
-        if grouped is not None or not scene.many_selected():
-            return grouped
-        members = [item for item in scene.selectedItems()
-                   if isinstance(item, MarkupItem) and self.editable(item)
-                   and not getattr(item, "IS_CALC", False)
-                   and not isinstance(item, CalcTextItem)]
-        if not members:
             return None
         box = self.markup_box(members[0])
         for member in members[1:]:
@@ -4664,6 +4726,8 @@ class PageView(QGraphicsView):
                 self._draw_cloud_leader_preview(painter)
             else:
                 self._draw_marquee(painter)
+        elif self._pending_cloud_leader is not None:
+            self._draw_cloud_leader_preview(painter)       # before the drag (F-12)
         self._draw_group_boxes(painter)
         self.calc.draw_cross(painter)
         if self._pending_stamp is not None:
@@ -4916,16 +4980,12 @@ class PageView(QGraphicsView):
         """
         families: dict = {}
         scene = self.scene()
-        if scene is not None and scene.many_selected():
-            # Revu's multi-selection: one dashed box round everything picked
-            whole = self._selection_box()
-            if whole is not None:
-                families[""] = whole[0]
-        else:
-            for item in scene.selectedItems() if scene is not None else []:
-                name = getattr(item, "group", "")
-                if name:
-                    families.setdefault(name, []).append(item)
+        # Several markups selected get no box round them all (Revu): each
+        # shows its own control points instead.
+        for item in scene.selectedItems() if scene is not None else []:
+            name = getattr(item, "group", "")
+            if name:
+                families.setdefault(name, []).append(item)
         if not families:
             return
         painter.save()
@@ -4962,9 +5022,19 @@ class PageView(QGraphicsView):
         went either, so it jumped the moment the drag ended.
         """
         item = self._pending_cloud_leader
-        if item is None or len(self._marquee) < 2:
+        if item is None:
             return
-        rect = QRectF(self._marquee[0], self._marquee[-1]).normalized()
+        if len(self._marquee) < 2:
+            # not dragged yet: a cloud of a likely size at the pointer, joined
+            # to the note, so choosing Add Cloud Leader shows what it will do
+            # (F-12: it showed nothing until the drag)
+            at = self.snap_scene(self._last_scene_pos)
+            if self._inside_its_box(item, at):
+                return
+            reach = 30.0 / max(self._zoom, 0.05)
+            rect = QRectF(at.x() - reach, at.y() - reach * 0.7, 2 * reach, 1.4 * reach)
+        else:
+            rect = QRectF(self._marquee[0], self._marquee[-1]).normalized()
         if rect.width() < 1 or rect.height() < 1:
             return
         preview = self._a_copy_leading_to(item, cloud=rect)
@@ -4981,6 +5051,8 @@ class PageView(QGraphicsView):
         item = self._pending_arrow_leader
         if item is None or item.scene() is None:
             return
+        if self._inside_its_box(item, self._last_scene_pos):
+            return                  # never drawn through its own words (F-12)
         preview = self._a_copy_leading_to(
             item, point=self.snap_scene(self._last_scene_pos))
         if preview is None:
@@ -4990,6 +5062,14 @@ class PageView(QGraphicsView):
         painter.translate(item.mapToScene(QPointF(0, 0)))
         preview.paint_leader(painter)
         painter.restore()
+
+    @staticmethod
+    def _inside_its_box(item, scene_pos: QPointF) -> bool:
+        """Whether *scene_pos* is on a note's own box of words."""
+        try:
+            return item.local_rect().normalized().contains(item.mapFromScene(scene_pos))
+        except (AttributeError, RuntimeError):
+            return False
 
     def _a_copy_leading_to(self, item, point: Optional[QPointF] = None,
                            cloud: Optional[QRectF] = None):

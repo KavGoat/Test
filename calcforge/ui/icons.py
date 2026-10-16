@@ -312,6 +312,15 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
     elif name == "ellipse":
         _pen(painter, INK, 1.6)
         painter.drawEllipse(QRectF(3.5, 6, 17, 12))
+    elif name in ("sketch_rect", "sketch_ellipse"):
+        # Sketch to Scale: the shape over the ruler edge every measuring
+        # tool carries, so it reads as drawn to a size, not just a box
+        _ruler(painter)
+        _pen(painter, INK, 1.5)
+        if name == "sketch_rect":
+            painter.drawRect(QRectF(5.5, 3.5, 13, 10))
+        else:
+            painter.drawEllipse(QRectF(4.5, 3, 15, 11))
     elif name == "polygon":
         # An open-cornered polygon, the way Bluebeam draws its Polygon tool.
         _pen(painter, INK, 1.6)

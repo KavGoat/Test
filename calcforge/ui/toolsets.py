@@ -39,6 +39,9 @@ CONTENT_KEYS = frozenset({
     "text", "html", "sheet", "asset", "asset_key", "created", "modified", "subject",
     "comment", "label", "named_cells", "table_name", "series", "index",
     "custom_label", "value", "background_key", "title",
+    # which of Revu's two kinds a rectangle or ellipse is — plain or Sketch
+    # to Scale — comes from the tool that draws it, never from a look
+    "to_scale",
 })
 
 
@@ -53,7 +56,9 @@ def default_key(item) -> str:
     as the same tool, so the kind is part of the key.
     """
     kind = getattr(item, "kind", "") or getattr(item, "shape_kind", "")
-    return f"{item.TYPE}:{kind}" if kind else item.TYPE
+    key = f"{item.TYPE}:{kind}" if kind else item.TYPE
+    # Sketch to Scale's rectangle is a tool of its own, with its own default
+    return f"{key}:scale" if getattr(item, "to_scale", False) else key
 
 
 def properties_of(item) -> dict:
@@ -245,6 +250,9 @@ def entry_for(item, mode: str = COPY, label: str = "") -> ToolEntry:
         kind = getattr(item, "kind", "") or getattr(item, "shape_kind", "")
         if kind:
             payload.setdefault("kind", kind)
+        if getattr(item, "to_scale", False):
+            # drawn again with Sketch to Scale's tool, not the plain one
+            payload["to_scale"] = True
     return ToolEntry(label or describe(item), payload, mode, mm_per_pt=_kept_from(item))
 
 

@@ -1144,8 +1144,9 @@ def test_length_and_area_read_real_dimensions(window):
 
 
 def test_a_rectangle_reports_its_real_size_and_accepts_an_exact_one(window):
+    # Sketch to Scale's rectangle (round 7): the plain one is sized on paper
     page = scaled_page(window)
-    window.select_tool("rect")
+    window.select_tool("sketch_rect")
     drag(window.view, 100, 100, 236, 168)
     rect = only(window, RectItem)[0]
     assert "2.40 m" in rect.size_text
@@ -1160,7 +1161,7 @@ def test_one_ellipse_diameter_makes_a_circle_and_escape_cancels(window, qapp):
 
     scaled_page(window, 50)
     window.interactive_prompts = False
-    window.select_tool("ellipse")
+    window.select_tool("sketch_ellipse")
     click(window.view, 300, 120)
     width = window.view._size_width
     assert width.toolTip() == "Horizontal diameter"
@@ -1212,8 +1213,9 @@ def test_no_size_dialog_pops_up_once_a_rectangle_is_placed(window, monkeypatch):
                         lambda self: asked.append(True) or dialogs.QDialog.Rejected)
     window.interactive_prompts = True
     scaled_page(window)
-    window.select_tool("rect")
-    drag(window.view, 300, 100, 400, 180)
+    for tool in ("rect", "sketch_rect"):
+        window.select_tool(tool)
+        drag(window.view, 300, 100, 400, 180)
     assert asked == []
 
 
@@ -1223,7 +1225,7 @@ def test_a_rectangle_knows_its_paper_size_without_a_scale(window):
     rect = only(window, RectItem)[0]
     assert rect.width_value.to("mm").magnitude == pytest.approx(40, abs=0.5)
     assert rect.height_value.to("mm").magnitude == pytest.approx(20, abs=0.5)
-    assert "mm × " in rect.size_text
+    assert "cm × " in rect.size_text           # the rulers' unit (round 7)
 
 
 def test_an_exact_size_can_be_asked_for_from_the_right_click_menu(window, monkeypatch):
@@ -1242,18 +1244,28 @@ def test_an_exact_size_can_be_asked_for_from_the_right_click_menu(window, monkey
     monkeypatch.setattr(dialogs.RectangleSizeDialog, "values",
                         lambda self: ("50 mm", "25 mm"))
     window.set_rectangle_size(rect)
-    assert rect.size_text == "50.0 mm × 25.0 mm"
+    assert rect.size_text == "5.00 cm × 2.50 cm"     # in the rulers' cm
     assert rect.local_rect().width() == pytest.approx(50 * MM_TO_PT, rel=1e-6)
 
 
 def test_a_scale_turns_the_paper_size_into_a_real_one(window):
-    window.select_tool("rect")
+    # Sketch to Scale's rectangle drawn before the scale was set (round 7)
+    window.select_tool("sketch_rect")
     drag(window.view, 100, 100, 236, 168)
     rect = only(window, RectItem)[0]
-    assert "mm" in rect.size_text
+    assert "cm" in rect.size_text
     scaled_page(window)
     window.current_page().frame.refresh_items()
     assert "2.40 m" in rect.size_text
+
+
+def test_a_plain_rectangle_stays_on_the_paper_when_a_scale_is_set(window):
+    window.select_tool("rect")
+    drag(window.view, 100, 100, 236, 168)
+    rect = only(window, RectItem)[0]
+    scaled_page(window)
+    window.current_page().frame.refresh_items()
+    assert rect.size_text.endswith(" cm") and " m " not in rect.size_text
 
 
 # ---------------------------------------------------------------------------
@@ -1374,11 +1386,12 @@ def test_no_menu_mnemonic_shadows_a_tool_chord(window):
 
 
 def test_changing_the_page_scale_updates_the_takeoff_list(window, monkeypatch):
-    """A rectangle's size is in the markups list, so it has to be rebuilt."""
+    """A rectangle's size is in the markups list, so it has to be rebuilt —
+    Sketch to Scale's, which is sized to the scale (round 7)."""
     from calcforge.core.document import PageScale
     from calcforge.ui import dialogs
 
-    window.select_tool("rect")
+    window.select_tool("sketch_rect")
     drag(window.view, 100, 100, 236, 168)
     window.select_tool("select")
 
@@ -1389,7 +1402,7 @@ def test_changing_the_page_scale_updates_the_takeoff_list(window, monkeypatch):
                 for i in range(panel.tree.topLevelItem(0).childCount())]
 
     window.refresh_lists()
-    assert any("mm" in text for text in sizes())
+    assert any("cm" in text for text in sizes())         # on the paper, until scaled
 
     monkeypatch.setattr(dialogs.ScaleDialog, "exec",
                         lambda self: dialogs.QDialog.Accepted)
@@ -1861,6 +1874,10 @@ def test_every_tool_and_application_action_is_reachable_from_the_menu_bar(window
     # Bluebeam's Tools menu — and its Edit menu, which has Pan, Select and
     # Snapshot, and Mark for Redaction and Whiteout under PDF Content (L1)
     insert_labels = set(_menu_labels(top["Tools"])) | set(_menu_labels(top["Edit"]))
+    # read with the submenu it is under: Tools ▸ Sketch to Scale ▸ Rectangle
+    for entry in top["Tools"].actions():
+        if entry.menu() is not None:
+            insert_labels |= {f"{entry.text()} {label}" for label in _menu_labels(entry.menu())}
     assert {tool.label for tool in TOOLS} <= insert_labels
 
 
@@ -2057,7 +2074,7 @@ def test_an_ellipse_can_be_set_out_to_an_exact_size(window):
     oval = markups(window)[0]
     assert oval.set_real_size("50 mm", "30 mm", window.current_page())
     oval.refresh(page=window.current_page())
-    assert "50" in oval.size_text and "30" in oval.size_text
+    assert oval.size_text == "5.00 cm × 3.00 cm"      # on the paper, in cm
 
 
 # ---------------------------------------------------------------------------
@@ -3580,6 +3597,7 @@ def test_freehand_snaps_only_its_start_and_end(window, tool):
 # ---------------------------------------------------------------------------
 
 def test_a_new_dimension_asks_for_its_words_where_they_will_appear(window):
+    scaled_page(window)          # a dimension asks for a scale on a page with none (F-19)
     window.interactive_prompts = True
     try:
         window.select_tool("measure_dimension")
@@ -3601,6 +3619,7 @@ def test_a_new_dimension_asks_for_its_words_where_they_will_appear(window):
 
 
 def test_leaving_it_blank_leaves_it_blank(window):
+    scaled_page(window)          # a dimension asks for a scale on a page with none (F-19)
     window.interactive_prompts = True
     try:
         window.select_tool("measure_dimension")
@@ -3780,6 +3799,7 @@ def test_double_clicking_a_dimension_types_on_it(window):
 
 
 def test_typing_on_a_measurement_can_be_undone(window):
+    scaled_page(window)          # a dimension asks for a scale on a page with none (F-19)
     window.interactive_prompts = True
     try:
         window.select_tool("measure_dimension")
@@ -5510,8 +5530,9 @@ def test_a_grouped_shape_shows_no_control_points_of_its_own(window):
 
     assert not handles_drawn(line)
     window.ungroup_selection()
-    # both still picked: a multi-selection, one box round the two (Revu)
-    assert not handles_drawn(line)
+    # both still picked: a multi-selection, where each shows its own control
+    # points again, as in Revu (round 7: no box round the two)
+    assert handles_drawn(line)
     window.scene.clearSelection()
     line.setSelected(True)
     assert handles_drawn(line)
@@ -7158,6 +7179,7 @@ def test_a_closed_path_comes_back_closed(window):
 
 def test_the_properties_panel_says_where_it_is_and_how_big(window):
     """Typed, not nudged: a detail that starts exactly 40 mm in."""
+    window.view.rulers.set_unit("mm")       # Layout follows the rulers' unit
     from PySide6.QtWidgets import QDoubleSpinBox, QGroupBox
     from calcforge.core.document import MM_TO_PT, PT_TO_MM
 
@@ -7184,6 +7206,7 @@ def test_the_properties_panel_says_where_it_is_and_how_big(window):
 
 
 def test_typing_a_number_moves_and_resizes_it(window):
+    window.view.rulers.set_unit("mm")       # Layout follows the rulers' unit
     from PySide6.QtWidgets import QDoubleSpinBox, QGroupBox
     from calcforge.core.document import MM_TO_PT
 
@@ -8927,6 +8950,7 @@ def test_size_bar_matches_bluebeam_width_tab_height_enter(window, qapp):
     from calcforge.items.shapes import RectItem
 
     window.show()
+    window.view.rulers.set_unit("mm")     # a plain rectangle is typed in the rulers' unit
     window.select_tool("rect")
     QApplication.sendEvent(window.view.viewport(),
                            _mouse(window.view, QEvent.MouseButtonPress, 100, 100))
@@ -9402,7 +9426,7 @@ def test_separate_x_and_y_scales_measure_true(window):
     frame.add_markup(square, QPointF(300, 300))
     square.refresh(page=page)
     assert square.value.to("m^2").magnitude == pytest.approx(1.0 * 0.5, rel=1e-3)
-    box = RectItem("rect")
+    box = RectItem("rect", to_scale=True)        # Sketch to Scale's (round 7)
     box.set_local_rect(QRectF(0, 0, side, side))
     frame.add_markup(box, QPointF(300, 500))
     box.refresh(page=page)

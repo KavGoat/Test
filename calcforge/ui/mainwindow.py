@@ -59,7 +59,7 @@ from .stylecaps import (ARROW_SIZE, DASH, FILL, FILL_OPACITY, FONT, HATCH,
                         OPACITY, STROKE, WIDTH, capabilities,
                         common_capabilities)
 from . import toolsets
-from .tools import CATEGORIES, NONE, TOOL_MAP, TOOLS, tools_in
+from .tools import CATEGORIES, NONE, SKETCH, TOOL_MAP, TOOLS, tools_in
 from .view import SIZED_SHAPES
 from .view import PageView, typing_somewhere_else
 from .widgets import ColorButton, keep_the_wheel_with_the_scroller, arrow_combo
@@ -1469,8 +1469,11 @@ class MainWindow(QMainWindow):
         measure_bar = QToolBar("Measure")
         measure_bar.setObjectName("toolbar_measure")
         measure_bar.setIconSize(QSize(22, 22))
+        sketch_actions: list = []
         for category in CATEGORIES:
-            bar = measure_bar if category == "Measure" else tool_bar
+            # Sketch to Scale's shapes sit with the measurements they share
+            # the page scale with, as on Revu's Measure toolbar
+            bar = measure_bar if category in ("Measure", SKETCH) else tool_bar
             if bar.actions():
                 bar.addSeparator()
             for tool in tools_in(category):
@@ -1488,9 +1491,13 @@ class MainWindow(QMainWindow):
                     action.triggered.connect(lambda _checked=False, key=tool.key:
                                              self.select_tool(key))
                 self.tool_group.addAction(action)
-                bar.addAction(action)
+                if category == SKETCH:
+                    sketch_actions.append(action)
+                else:
+                    bar.addAction(action)
                 self.tool_actions[tool.key] = action
                 action.setProperty(bindable.COMMAND, f"tool.{tool.key}")
+        self._sketch_button(measure_bar, sketch_actions)
         tool_bar.addSeparator()
         tool_bar.addAction(self.act_sticky)
         # The Calculation bar's Table is the Tools bar's Table — one button
@@ -1514,6 +1521,46 @@ class MainWindow(QMainWindow):
         self._show_tool_extras("select")
         self._add_toolbar(style_bar)
         self._refresh_style_controls()
+
+    def _sketch_button(self, bar: QToolBar, actions: list) -> None:
+        """Sketch to Scale's tools on the Measure bar as one button with a
+        drop-down, showing the one last picked — as Revu groups a tool set
+        on a toolbar. Two more buttons would push the Measure bar off the
+        row it shares with Main and Calculation at 1280 px."""
+        if not actions:
+            return
+        button = QToolButton(bar)
+        button.setObjectName("sketchToScaleButton")
+        button.setIconSize(bar.iconSize())
+        button.setAutoRaise(True)
+        button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        menu = QMenu(button)
+        menu.setObjectName("sketchToScaleMenu")
+        menu.addActions(actions)
+        button.setMenu(menu)
+        button.setPopupMode(QToolButton.MenuButtonPopup)
+        button.setDefaultAction(actions[0])
+        for action in actions:
+            # the button shows (and lights up for) the sketch tool in hand
+            action.toggled.connect(lambda on, a=action: on and self._show_sketch_tool(a))
+        self.sketch_button = button
+        self.sketch_actions = list(actions)
+        self.sketch_bar_action = bar.addWidget(button)
+
+    def _show_sketch_tool(self, action) -> None:
+        button = getattr(self, "sketch_button", None)
+        if button is not None and button.defaultAction() is not action:
+            button.setDefaultAction(action)
+
+    def _refresh_sketch_button(self) -> None:
+        """Customise Toolbars ticked some Sketch to Scale tools off."""
+        actions = getattr(self, "sketch_actions", [])
+        shown = [a for a in actions if a.isVisible()]
+        holder = getattr(self, "sketch_bar_action", None)
+        if holder is not None:
+            holder.setVisible(bool(shown))
+        if shown and self.sketch_button.defaultAction() not in shown:
+            self.sketch_button.setDefaultAction(shown[0])
 
     def _build_markup_styles_bar(self) -> None:
         """The Markup Styles toolbar (markupstyles.py), on the Main bar's row:
@@ -2050,10 +2097,15 @@ class MainWindow(QMainWindow):
             sub.aboutToShow.connect(show_key)
             action.setMenu(sub)
 
-    def _tool_entry(self, key: str) -> QAction:
-        """A menu entry that picks up tool *key*, under the tool's own name."""
+    def _tool_entry(self, key: str, under: str = "") -> QAction:
+        """A menu entry that picks up tool *key*, under the tool's own name —
+        less the submenu's name it sits *under* (Revu's Tools ▸ Sketch to
+        Scale ▸ Rectangle)."""
         tool = TOOL_MAP[key]
-        entry = self.give_icon(QAction(tool.label, self), tool.icon)
+        text = tool.label
+        if under and text.startswith(under + " "):
+            text = text[len(under) + 1:]
+        entry = self.give_icon(QAction(text, self), tool.icon)
         # the tool's own binding: its key is shown here and works everywhere
         entry.setProperty(bindable.COMMAND, f"tool.{key}")
         entry.setProperty(bindable.SHOWN, True)
@@ -2257,6 +2309,11 @@ class MainWindow(QMainWindow):
                 measure_sub.addAction(self._tool_entry(tool.key))
         # the page's scale and its viewports, with Calibrate (novice 13)
         fill(measure_sub, (None, self.act_scale, self.act_viewports))
+        # Revu's Tools ▸ Sketch to Scale: shapes drawn to a real size
+        sketch_sub = tools_menu.addMenu(SKETCH)
+        sketch_sub.setObjectName("menuSketchToScale")
+        for tool in tools_in(SKETCH):
+            sketch_sub.addAction(self._tool_entry(tool.key, under=SKETCH))
         for tool in tools_in("Navigate"):
             if tool.key not in on_edit:
                 tools_menu.addAction(self._tool_entry(tool.key))
@@ -4484,6 +4541,7 @@ class MainWindow(QMainWindow):
         wanted = self.visible_tool_keys()
         for key, action in self.tool_actions.items():
             action.setVisible(key in wanted)
+        self._refresh_sketch_button()
         self._wrap_toolbar_rows_soon()          # the bars changed width
 
     # -- remembering it ------------------------------------------------
@@ -7494,18 +7552,19 @@ class MainWindow(QMainWindow):
         page = self.current_page()
         if item.kind not in SIZED_SHAPES:
             return
-        if not always and (not self.interactive_prompts
-                           or not page.scale.is_calibrated()):
+        # Sketch to Scale's shapes are set out in real dimensions on a scaled
+        # page; a plain one is sized on the paper, in the rulers' units
+        scaled = item.measures_real(page)
+        if not always and (not self.interactive_prompts or not scaled):
             return
         item.refresh(page=page)
         if item.width_value is None or item.height_value is None:
             return
-        scaled = page.scale.is_calibrated()
-        digits = max(page.scale.precision, 0) if scaled else 1
+        width_text, height_text = item.size_texts(page)
         dialog = dialogs.RectangleSizeDialog(
-            format_quantity(item.width_value, digits, "fixed"),
-            format_quantity(item.height_value, digits, "fixed"),
-            page.scale.display_unit if scaled else "mm", self, scaled=scaled)
+            width_text, height_text, item.size_unit(page), self, scaled=scaled,
+            sketch=bool(getattr(item, "to_scale", False)),
+            shape="Ellipse" if item.kind == "ellipse" else "Rectangle")
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
         width, height = dialog.values()
@@ -7515,7 +7574,7 @@ class MainWindow(QMainWindow):
 
     def edit_measure_text(self, item) -> None:
         """Type on a measurement, where the words are going to appear."""
-        self.view.open_label_editor(item)
+        self.view.open_label_editor(item, prefill=True)
 
     def set_label_angle(self, item, angle) -> None:
         """Let the text follow the line again, or hold it where it was put."""
@@ -8529,6 +8588,7 @@ class MainWindow(QMainWindow):
         """The drawing tool that makes the kind of markup a payload describes."""
         type_name = payload.get("type", "")
         kind = payload.get("kind", "") or payload.get("shape_kind", "")
+        to_scale = bool(payload.get("to_scale", False))
         for tool in TOOLS:
             if tool.factory is None:
                 continue
@@ -8537,6 +8597,9 @@ class MainWindow(QMainWindow):
                 continue
             sample_kind = getattr(sample, "kind", "") or getattr(sample, "shape_kind", "")
             if kind and sample_kind != kind:
+                continue
+            # a plain rectangle and Sketch to Scale's are different tools
+            if bool(getattr(sample, "to_scale", False)) != to_scale:
                 continue
             return tool.key
         return None
@@ -9781,14 +9844,21 @@ class MainWindow(QMainWindow):
         if not others:
             self.status_hint.setText("No pages to put it on")
             return 0
-        payload = item.serialize()
+        # a group goes over whole, as one group on each page (F-11)
+        members = self.view.group_of(item) if getattr(item, "group", "") else [item]
+        payloads = [(member.serialize(), QPointF(member.pos())) for member in members]
         frames = [self.document.pages[index].frame for index in others
                   if self.document.pages[index].frame is not None]
         self.view.begin_snapshot(frames)
+        from ..items.base import rename_groups
         for frame in frames:
-            copy = build_item(dict(payload, uid=os.urandom(8).hex()))
-            if copy is not None:
-                frame.add_markup(copy, QPointF(item.pos()))
+            renamed: dict = {}            # one fresh group per page
+            for payload, where in payloads:
+                data = dict(payload, uid=os.urandom(8).hex())
+                rename_groups(data, renamed)
+                copy = build_item(data)
+                if copy is not None:
+                    frame.add_markup(copy, where)
         self.view.commit_snapshot("Apply to Pages")
         self.status_hint.setText(f"Copied onto {len(frames)} page(s)")
         return len(frames)
@@ -9823,9 +9893,14 @@ class MainWindow(QMainWindow):
         # is that kind of call-out's leader.
         arrow.setIcon(icon("callout"))
         cloud.setIcon(icon("cloud_callout"))
+        # A Cloud+'s own cloud is its body, not a leader to take away (F-12:
+        # Remove Leader deleted it): only its other leaders are offered.
+        body = item.cloud_leader() if hasattr(item, "cloud_leader") else None
+        removable = [i for i, leader in enumerate(getattr(item, "leaders", []))
+                     if leader is not body]
         which = item.leader_near(item.mapFromScene(scene_pos))
-        if which is None and item.leaders:
-            which = len(item.leaders) - 1
+        if which not in removable:
+            which = removable[-1] if removable else None
         if which is not None:
             menu.addAction("Remove Leader",
                            lambda i=which: self.remove_leader_from(item, i))
@@ -10628,10 +10703,16 @@ class MainWindow(QMainWindow):
             menu.addAction("Follow Link", lambda: self.follow_link(item))
             menu.addAction("Edit Link…", lambda: self.edit_link(item))
             menu.addSeparator()
-        if isinstance(item, _TextBase):
+        # A group is one thing, as in Revu: its menu offers what applies to
+        # the group — the clipboard, order, lock, ungroup, the tool chest —
+        # and nothing that would reach inside it to one member (exercise
+        # round 1, F-11: Round All Corners, Exact Size and the rest changed
+        # only the first member and moved the selection to it).
+        grouped = bool(getattr(item, "group", ""))
+        if isinstance(item, _TextBase) and not grouped:
             menu.addAction("Edit Text", lambda: self.view.begin_item_edit(item))
             menu.addSeparator()
-        if isinstance(item, MeasureItem) and item.kind != "calibrate":
+        if isinstance(item, MeasureItem) and item.kind != "calibrate" and not grouped:
             # first: a measurement's name is what ties it to the calcs,
             # typed right here (the user, 2026-10-01: no separate popup)
             menu.addAction(self._variable_field(menu, item))
@@ -10652,7 +10733,7 @@ class MainWindow(QMainWindow):
         menutidy.proxy(menu, self.act_delete, "Delete", QKeySequence(Qt.Key_Delete))
         menu.addSeparator()
         # -- Revu: the outline ----------------------------------------------------
-        if self.view.has_an_outline(item) and not is_table:
+        if self.view.has_an_outline(item) and not is_table and not grouped:
             # Rectangles and clouds included: four corners and four sides
             # is an outline like any other, and everything offered on a
             # polygon's is offered on theirs.
@@ -10679,10 +10760,10 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_ungroup)
         menu.addSeparator()
         # -- CalcForge's extras for this kind of markup ---------------------------
-        if isinstance(item, _TextBase):
+        if isinstance(item, _TextBase) and not grouped:
             self._text_box_menu(menu, item)
             self._fill_leader_menu(menu, item, scene_pos)
-        if isinstance(item, MeasureItem):
+        if isinstance(item, MeasureItem) and not grouped:
             menu.addAction("Edit Text…", lambda: self.edit_measure_text(item))
             straight = menu.addAction("Inline Text")
             straight.setToolTip("Keep the measurement text in line with its line")
@@ -10691,9 +10772,10 @@ class MainWindow(QMainWindow):
             straight.toggled.connect(
                 lambda on, i=item: self.set_label_angle(i, None if on else 0.0))
             menu.addAction(self.act_scale)
-        if hasattr(item, "size_to_text"):
+        if hasattr(item, "size_to_text") and not grouped:
             menu.addAction(self.act_autosize)
-        if isinstance(item, RectItem) and item.kind in SIZED_SHAPES and not is_table:
+        if isinstance(item, RectItem) and item.kind in SIZED_SHAPES and not is_table \
+                and not grouped:
             convert = menu.addAction("Convert to Polygon",
                                      lambda: self.rectangle_to_polygon(item))
             convert.setToolTip("Turn this rectangle or ellipse into a polygon")
@@ -10722,7 +10804,7 @@ class MainWindow(QMainWindow):
         add_tool.addSeparator()
         add_tool.addAction("Choose a Tool Set…", lambda: self.add_to_toolset(item))
         styles = getattr(self, "markup_styles", None)
-        if not calc_like and styles is not None:
+        if not calc_like and styles is not None and not grouped:
             from .markupstyles import styled
             if styled(styles.tool_for_item(item) or ""):
                 # the look kept for its tool, picked again with a number key
@@ -10730,9 +10812,10 @@ class MainWindow(QMainWindow):
                                       lambda: styles.save_markup(item))
                 keep.setToolTip("Keep this look as a style of its tool: "
                                 "press its number with the tool to draw in it")
-        if not calc_like:
+        if not calc_like and not grouped:
             default = menu.addAction("Set as Default", lambda: self.set_as_default(item))
             default.setToolTip("Use these properties for new markups of this kind")
+        if not calc_like:
             apply_pages = menu.addAction("Apply to Pages…",
                                          lambda: self.apply_to_pages(item))
             apply_pages.setToolTip("Copy this markup to chosen pages")

@@ -1536,6 +1536,8 @@ def _icon_for(item) -> str:
     if isinstance(item, TextItem):
         return "text"
     if isinstance(item, RectItem):
+        if getattr(item, "to_scale", False):
+            return "sketch_ellipse" if item.kind == "ellipse" else "sketch_rect"
         return {"ellipse": "ellipse", "cloud": "cloud", "highlight": "highlight"}.get(
             item.kind, "rect")
     if isinstance(item, PolyItem):
@@ -3109,10 +3111,11 @@ class PropertiesPanel(QScrollArea):
 
     def _add_geometry(self, item) -> None:
         """Bluebeam's Layout: where it is, how big and which way it is
-        turned, as numbers with the unit beside them — millimetres, measured
-        from the top-left corner of the paper."""
-        from ..core.document import MM_TO_PT, PT_TO_MM
+        turned, as numbers with the unit beside them — in the rulers' units
+        (mm, cm, in, pt), measured from the top-left corner of the paper."""
+        from ..items.shapes import PAPER_UNITS, paper_unit
 
+        per_unit, unit_name, digits = PAPER_UNITS[paper_unit()]
         form = self._group("Layout")
         rect = item.local_rect().normalized()
         rows = [
@@ -3127,15 +3130,18 @@ class PropertiesPanel(QScrollArea):
                 ("Document Width:", rect.width(), self._set_width, True),
                 ("Document Height:", rect.height(), self._set_height, True),
             ]
+        smallest = 10.0 ** -digits
+        reach = 20000.0 * (72.0 / 25.4) / per_unit        # 20 m of paper
         for label, value, setter, is_size in rows:
-            box = _spin(value * PT_TO_MM, 0.1 if is_size else -20000.0, 20000.0, 1, 1.0)
+            box = _spin(value / per_unit, smallest if is_size else -reach, reach,
+                        digits, 1.0)
             box.setObjectName("layout" + label.rstrip(":").split()[-1])
             box.setToolTip(f"{value:.1f} pt on the paper" if is_size else f"{value:.1f} pt")
             box.valueChanged.connect(
-                lambda millimetres, apply=setter:
-                self._slide(lambda i: apply(i, millimetres * MM_TO_PT),
+                lambda number, apply=setter:
+                self._slide(lambda i: apply(i, number * per_unit),
                             "Position and size"))
-            form.addRow(label, _row(box, QLabel("mm"), stretch_first=True))
+            form.addRow(label, _row(box, QLabel(unit_name), stretch_first=True))
 
         if item.ROTATABLE:
             turn = _spin(item.rotation(), -360.0, 360.0, 1, 1.0)
@@ -3464,23 +3470,64 @@ class PropertiesPanel(QScrollArea):
     def _add_size(self, item) -> None:
         """What a rectangle or an ellipse measures, and whether it says so.
 
+        A plain one's size is its Document Width and Height, in Layout, on
+        the paper. A Sketch to Scale one is drawn to a real size: its real
+        Width and Height are here, to read and to type (3 m, 1500 mm).
+
         The size lives here rather than being written across the drawing:
         a shape drawn on a plan is a shape, and a page of shapes each carrying
         their dimensions is unreadable. The tick puts it on the shape for
         anyone who wants it there.
         """
-        form = self._group("Size")
-        item.refresh(page=self.window.current_page())
-        value = QLabel(item.size_text or "—")
-        font = value.font()
-        font.setBold(True)
-        value.setFont(font)
-        form.addRow("Measures:", value)
+        page = self.window.current_page()
+        item.refresh(page=page)
+        if getattr(item, "to_scale", False):
+            form = self._group("Sketch to Scale")
+            real = item.measures_real(page)
+            width_text, height_text = item.size_texts(page)
+            ellipse = item.kind == "ellipse"
+            fields = []
+            for caption, text, name, tip in (
+                    ("Width:", width_text, "sketchWidth",
+                     "Horizontal diameter" if ellipse else "Width"),
+                    ("Height:", height_text, "sketchHeight",
+                     "Vertical diameter" if ellipse else "Height")):
+                field = QLineEdit(text)
+                field.setObjectName(name)
+                field.setToolTip(f"{tip}, real size — type it with a unit, "
+                                 "e.g. 3 m" if real else
+                                 f"{tip} on the paper: this page has no scale yet")
+                form.addRow(caption, field)
+                fields.append(field)
 
-        exact = QPushButton("Exact size…")
-        exact.setToolTip("Set the scaled width and height or diameters")
-        exact.clicked.connect(lambda: self.window.set_rectangle_size(item))
-        form.addRow("", exact)
+            def typed(_=None) -> None:
+                if self._building:
+                    return
+                width, height = (f.text().strip() for f in fields)
+                if (width, height) == item.size_texts(page):
+                    return
+                done = []
+                self._apply(lambda i: done.append(i.set_real_size(width, height, page)),
+                            "Sketch to Scale size")
+                if not all(done):
+                    self.window.status_hint.setText(
+                        "Could not read those dimensions — try something like “3 m”.")
+            for field in fields:
+                field.editingFinished.connect(typed)
+            if not real:
+                note = QLabel("Scale Not Set — sizes are on the paper")
+                note.setObjectName("sketchNoScale")
+                note.setWordWrap(True)
+                form.addRow("", note)
+                scale = QPushButton("Set Scale…")
+                scale.clicked.connect(lambda: self.window.calibrate_dialog())
+                form.addRow("", scale)
+        else:
+            form = self._group("Size")
+            exact = QPushButton("Exact size…")
+            exact.setToolTip("Set the width and height on the paper")
+            exact.clicked.connect(lambda: self.window.set_rectangle_size(item))
+            form.addRow("", exact)
 
         show = QCheckBox("Show size")
         show.setToolTip("Write the size across the shape itself")

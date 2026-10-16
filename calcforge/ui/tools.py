@@ -24,6 +24,9 @@ SNAPSHOT = "snapshot"  # drag a region and take a copy of what is in it
 ERASE = "erase"      # rub out the ink it is dragged over
 NONE = "none"        # navigation only
 
+#: Revu's Sketch to Scale tools: on the Measure toolbar, in their own menu.
+SKETCH = "Sketch to Scale"
+
 
 @dataclass(frozen=True)
 class Tool:
@@ -39,8 +42,8 @@ class Tool:
     factory: Optional[Callable] = None
 
 
-def _rect(kind: str):
-    return lambda: RectItem(kind)
+def _rect(kind: str, to_scale: bool = False):
+    return lambda: RectItem(kind, to_scale=to_scale)
 
 
 def _poly(kind: str):
@@ -85,10 +88,10 @@ TOOLS: list[Tool] = [
          "Click each vertex, double-click to finish", factory=_poly("polyline")),
     Tool("rect", "Rectangle", "rect", DRAG, "Draw", "R",
          "Rectangle — drag it or click twice; Shift squares it off, and an "
-         "exact width and height can be typed when the page has a scale",
+         "exact width and height on the paper can be typed while drawing",
          factory=_rect("rect")),
     Tool("ellipse", "Ellipse", "ellipse", DRAG, "Draw", "E",
-         "Ellipse — hold Shift for a circle; it carries its size like a rectangle",
+         "Ellipse — hold Shift for a circle; its width and height are on the paper",
          factory=_rect("ellipse")),
     Tool("polygon", "Polygon", "polygon", POLY, "Draw", "P",
          "Click each vertex, double-click to close — not scaled",
@@ -114,7 +117,8 @@ TOOLS: list[Tool] = [
          "flattened PDF artwork in it; Undo restores it",
          factory=_rect("marquee")),
 
-    Tool("text", "Text Box", "text", DRAG, "Annotate", "T", "A box of words on the page",
+    Tool("text", "Text Box", "text", DRAG, "Annotate", "T",
+         "A box of words on the page — drag the box, then type in it",
          factory=lambda: TextItem("")),
     Tool("callout", "Callout", "callout", ANCHOR, "Annotate", "Q",
          "Click what it points at, then click where the words go",
@@ -183,11 +187,26 @@ TOOLS: list[Tool] = [
          "Click each end of something you know the length of, then type that "
          "length — the page scale follows", max_points=2,
          factory=_measure(measure_module.CALIBRATE)),
+
+    # Revu's Sketch to Scale tool set (Tools ▸ Sketch to Scale): shapes drawn
+    # to a real size, which ask for the page scale as a measurement does.
+    # The plain Rectangle and Ellipse never ask (the user, 2026-10-16).
+    # Revu gives them no keys.
+    Tool("sketch_rect", "Sketch to Scale Rectangle", "sketch_rect", DRAG,
+         SKETCH, "",
+         "A rectangle drawn to a real size: it uses the page scale, and its "
+         "real width and height can be typed while drawing — 3 m × 1.5 m",
+         factory=_rect("rect", to_scale=True)),
+    Tool("sketch_ellipse", "Sketch to Scale Ellipse", "sketch_ellipse", DRAG,
+         SKETCH, "",
+         "An ellipse drawn to a real size: it uses the page scale, and its "
+         "real diameters can be typed while drawing — Shift for a circle",
+         factory=_rect("ellipse", to_scale=True)),
 ]
 
 TOOL_MAP = {tool.key: tool for tool in TOOLS}
 
-CATEGORIES = ["Navigate", "Draw", "Annotate", "Measure"]
+CATEGORIES = ["Navigate", "Draw", "Annotate", "Measure", SKETCH]
 
 
 def tools_in(category: str) -> list[Tool]:
