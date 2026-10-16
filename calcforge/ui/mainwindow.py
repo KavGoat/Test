@@ -1056,6 +1056,12 @@ class MainWindow(QMainWindow):
         self._act("dim_content", "Dim Content", self.set_dimmer, "Ctrl+F5", checkable=True,
                   tip="Tone down the page's own content so the markups stand out "
                       "(on screen only)")
+        # the dimmer is every open drawing's: a window opened while it is on
+        # shows its tick, not a dimmed page under a cleared one
+        from .scene import DIMMER
+        self.act_dim_content.blockSignals(True)
+        self.act_dim_content.setChecked(bool(DIMMER["on"]))
+        self.act_dim_content.blockSignals(False)
         self.dimmer_levels = QActionGroup(self)
         self.dimmer_levels.setExclusive(True)
         for percent in range(0, 101, 10):

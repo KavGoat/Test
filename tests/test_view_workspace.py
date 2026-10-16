@@ -182,3 +182,20 @@ def test_open_recent_save_all_and_close_all(window, tmp_path, monkeypatch):
     assert str(first) not in mainwindow.recent_files()
     window.open_recent(str(second))
     assert window.document.path == str(second)
+
+
+def test_a_window_opened_while_dimmed_shows_dim_content_ticked(window, qapp):
+    from calcforge.ui import scene as scene_module
+    window.act_dim_content.trigger()
+    assert scene_module.DIMMER["on"]
+    other = window.open_new_window()                    # Window ▸ New Window
+    qapp.processEvents()
+    try:
+        assert other.act_dim_content.isChecked(), "the page is dimmed, so its tick shows"
+        other.act_dim_content.trigger()                 # one click undims everything
+        assert not scene_module.DIMMER["on"]
+        assert not window.act_dim_content.isChecked()
+    finally:
+        other.confirm_discard = lambda: True
+        other.close()
+        qapp.processEvents()
