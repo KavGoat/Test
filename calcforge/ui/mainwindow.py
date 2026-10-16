@@ -52,6 +52,7 @@ from .scene import DocumentScene, detach
 from .shortcuts import MARKUP, COMMAND, INSERT, TOOL, ShortcutManager
 from .shortcuts import SYMBOL as TYPED_SYMBOL
 from .stylecaps import (CLOUD, CORNER, SYMBOL)
+from .propbar import TOTALS as TOTALS_GROUP
 from .stylecaps import (ARROW_SIZE, DASH, FILL, FILL_OPACITY, FONT, HATCH,
                         OPACITY, STROKE, WIDTH, capabilities,
                         common_capabilities)
@@ -317,6 +318,20 @@ class _OnResize(QObject):
         if event.type() == QEvent.Resize:
             self._callback()
             QTimer.singleShot(0, self, self._callback)
+        return False
+
+
+class _OnRelayout(QObject):
+    """Calls *callback* when a watched toolbar's contents change size (the
+    Markup Styles bar rebuilds itself for each tool), so its row can wrap."""
+
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self._callback = callback
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.LayoutRequest:
+            self._callback()
         return False
 
 
@@ -714,6 +729,15 @@ class MainWindow(QMainWindow):
         for dock in self.panels:
             dock.dockLocationChanged.connect(lambda *_: self.note_layout_change())
             dock.topLevelChanged.connect(lambda *_: self.note_layout_change())
+            dock.dockLocationChanged.connect(
+                lambda _area, panel=dock.objectName(): self._panel_landed_soon(panel))
+            # opened beside another (from outside the rail): tabs, not a stack
+            dock.visibilityChanged.connect(
+                lambda visible, panel=dock.objectName():
+                self._panel_landed_soon(panel) if visible else None)
+            dock.topLevelChanged.connect(
+                lambda floating, panel=dock.objectName():
+                None if floating else self._panel_landed_soon(panel))
             name = dock.objectName()
             dock.visibilityChanged.connect(
                 lambda visible, panel=name:
@@ -792,8 +816,10 @@ class MainWindow(QMainWindow):
         # Bluebeam's are.
         self.left_rail = PanelRail(LEFT, self)
         self.right_rail = PanelRail(RIGHT, self)
-        self.addToolBar(Qt.LeftToolBarArea, RailBar(self.left_rail, self))
-        self.addToolBar(Qt.RightToolBarArea, RailBar(self.right_rail, self))
+        self.left_rail_bar = RailBar(self.left_rail, self)
+        self.right_rail_bar = RailBar(self.right_rail, self)
+        self.addToolBar(Qt.LeftToolBarArea, self.left_rail_bar)
+        self.addToolBar(Qt.RightToolBarArea, self.right_rail_bar)
 
     def give_icon(self, action, name: str):
         """Put an icon on an action and remember which, for the next theme.
@@ -1276,12 +1302,20 @@ class MainWindow(QMainWindow):
         return keys
 
     def _add_toolbar(self, bar) -> None:
-        """Toolbars go on any edge, and remember where they were put."""
+        """Toolbars go on any edge, and remember where they were put. On the
+        left or right edge one is a column of its own outside the panel rail
+        (arrange_side_toolbars); the Properties toolbar, whose boxes do not
+        work on end, goes top or bottom only."""
         bar.setMovable(True)
         bar.setFloatable(False)
-        # top and bottom only: the left and right edges are the panel rails,
-        # and a toolbar dropped beside one is a toolbar in a panel bar
-        bar.setAllowedAreas(Qt.TopToolBarArea | Qt.BottomToolBarArea)
+        if bar.objectName() in self.TOP_AND_BOTTOM_ONLY:
+            bar.setAllowedAreas(Qt.TopToolBarArea | Qt.BottomToolBarArea)
+        else:
+            bar.setAllowedAreas(Qt.AllToolBarAreas)
+        bar.orientationChanged.connect(
+            lambda orientation, b=bar: self._toolbar_stood_on_end(b, orientation))
+        bar.topLevelChanged.connect(
+            lambda floating: None if floating else self._arrange_side_toolbars_soon())
         self.addToolBar(bar)
         self.toolbars.append(bar)
 
@@ -1340,259 +1374,13 @@ class MainWindow(QMainWindow):
         self._build_markup_styles_bar()       # beside the tools, or wrapped below them
         self.addToolBarBreak()
 
-        style_bar = QToolBar("Style")
-        style_bar.setObjectName("toolbar_style")
-        self._style_widgets: dict[str, list] = {
-            STROKE: [], FILL: [], WIDTH: [], DASH: [], FONT: [],
-            HATCH: [], OPACITY: [], FILL_OPACITY: [], ARROW_SIZE: [],
-            CLOUD: [], CORNER: [], SYMBOL: []}
-        # As Bluebeam's Properties toolbar: it says what it is setting — the
-        # selected markup's type, or the kind the tool in hand draws
-        self.style_kind_label = QLabel("")
-        self.style_kind_label.setObjectName("styleKind")
-        self._style_kind_action = style_bar.addWidget(self.style_kind_label)
-        # Bluebeam's ▾ beside the type: the Subject, and how many are picked
-        self.style_kind_menu = QToolButton()
-        self.style_kind_menu.setObjectName("styleKindMenu")
-        self.style_kind_menu.setText("▾")
-        self.style_kind_menu.setAutoRaise(True)
-        self.style_kind_menu.setToolTip("Subject and how many markups are selected")
-        self.style_kind_menu.clicked.connect(self._show_subject_popup)
-        style_bar.addWidget(self.style_kind_menu)
-        # what a new cloud's arcs are (an item setting, not a pen setting)
+        # Revu's Properties toolbar (ui/propbar.py): what the selected markup
+        # is, then Line, Fill, Hatch and Font, each control as narrow as what
+        # it shows
         self.default_cloud_size = 2.0       # Bluebeam's cloud Size
-        self._style_widgets[STROKE].append(style_bar.addWidget(QLabel(" Line: ")))
-        self.stroke_button = ColorButton(self.default_style.stroke, True, "Line colour")
-        self.stroke_button.colorChanged.connect(self._style_stroke)
-        self._style_widgets[STROKE].append(style_bar.addWidget(self.stroke_button))
-        self._style_widgets[FILL].append(style_bar.addWidget(QLabel(" Fill: ")))
-        self.fill_button = ColorButton("", True, "Fill colour")
-        self.fill_button.colorChanged.connect(self._style_fill)
-        self._style_widgets[FILL].append(style_bar.addWidget(self.fill_button))
-        # Each opacity sits beside the thing it fades: the fill's by the fill
-        # colour, the hatch's by the hatch, and Overall (line, fill and hatch
-        # together) on its own at the end.
-        self.fill_opacity_spin = QSpinBox()
-        self.fill_opacity_spin.setObjectName("fillOpacity")
-        self.fill_opacity_spin.setRange(0, 100)
-        self.fill_opacity_spin.setSuffix(" %")
-        self.fill_opacity_spin.setToolTip(
-            "Fill opacity: how solid the fill is (not the line or the hatch)")
-        self.fill_opacity_spin.setValue(int(self.default_style.fill_opacity * 100))
-        self.fill_opacity_spin.valueChanged.connect(self._style_fill_opacity)
-        self._style_widgets[FILL_OPACITY].append(
-            style_bar.addWidget(self.fill_opacity_spin))
-        self.width_spin = QDoubleSpinBox()
-        self.width_spin.setRange(0.0, 40.0)
-        self.width_spin.setSingleStep(0.25)
-        self.width_spin.setValue(self.default_style.width)
-        self.width_spin.setSuffix(" pt")
-        self.width_spin.setObjectName("lineWidth")
-        self.width_spin.setToolTip("Line width")
-        self.width_spin.valueChanged.connect(self._style_width)
-        self._style_widgets[WIDTH].append(style_bar.addWidget(self.width_spin))
-        self.arrow_size_spin = QDoubleSpinBox()
-        self.arrow_size_spin.setObjectName("arrowSize")
-        self.arrow_size_spin.setRange(0.25, 4.0)
-        self.arrow_size_spin.setSingleStep(0.25)
-        self.arrow_size_spin.setValue(self.default_style.arrow_size)
-        self.arrow_size_spin.setSuffix(" ×")
-        self.arrow_size_spin.setToolTip("End size: how big the line ends are, "
-                                        "whatever the line width")
-        self.arrow_size_spin.valueChanged.connect(self._style_arrow_size)
-        self.arrow_start_combo = arrow_combo()
-        self.arrow_end_combo = arrow_combo()
-        self.arrow_start_label_action = None
-        for label, control, attribute in (("Start", self.arrow_start_combo, "arrow_start"),
-                                           ("End", self.arrow_end_combo, "arrow_end")):
-            control.setToolTip(f"{label} line ending")
-            control.currentIndexChanged.connect(
-                lambda _i, name=attribute, box=control: self._style_line_ending(
-                    name, box.currentData()))
-            label_action = style_bar.addWidget(QLabel(f" {label}: "))
-            if label == "Start":
-                self.arrow_start_label_action = label_action
-            self._style_widgets[ARROW_SIZE].append(label_action)
-            self._style_widgets[ARROW_SIZE].append(style_bar.addWidget(control))
-        # the heads' size after Start and End, as Bluebeam's Auto box
-        self._style_widgets[ARROW_SIZE].append(style_bar.addWidget(self.arrow_size_spin))
-        from .widgets import PatternCombo
-        self.dash_combo = PatternCombo()
-        from .widgets import big_pattern_dropdown
-        big_pattern_dropdown(self.dash_combo)
-        for name in DASH_ARRAYS:
-            # named as the Properties panel names them; the style's own key kept as data
-            self.dash_combo.addItem(_line_style_icon(name, _bar_ink(), 1), name.title(), name)
-        self.dash_combo.currentIndexChanged.connect(
-            lambda index: self._style_dash(self.dash_combo.itemData(index)) if index >= 0 else None)
-        self._style_widgets[DASH].append(style_bar.addWidget(self.dash_combo))
-        # How far apart the dashes are — the line's thickness does not say.
-        self.dash_scale_spin = QDoubleSpinBox()
-        self.dash_scale_spin.setObjectName("dashSpacing")
-        self.dash_scale_spin.setRange(0.1, 50.0)
-        self.dash_scale_spin.setDecimals(2)
-        self.dash_scale_spin.setSingleStep(0.25)
-        self.dash_scale_spin.setValue(self.default_style.dash_scale)
-        self.dash_scale_spin.setPrefix("× ")
-        self.dash_scale_spin.setToolTip("Dash spacing: how long the dashes and "
-                                        "gaps are, whatever the thickness")
-        self.dash_scale_spin.valueChanged.connect(lambda value: self._style_change(
-            DASH, lambda style: setattr(style, "dash_scale", value), "Dash spacing"))
-        self._style_widgets[DASH].append(style_bar.addWidget(self.dash_scale_spin))
-        # a cloud's Size (Bluebeam's: the PDF's cloud intensity, no unit)
-        self._style_widgets[CLOUD].append(style_bar.addWidget(QLabel(" Size: ")))
-        self.cloud_spin = QDoubleSpinBox()
-        self.cloud_spin.setObjectName("cloudSize")
-        self.cloud_spin.setRange(0.1, 20.0)
-        self.cloud_spin.setDecimals(2)
-        self.cloud_spin.setSingleStep(0.25)
-        self.cloud_spin.setValue(self.default_cloud_size)
-        self.cloud_spin.setToolTip("Size: how big the cloud's scallops are")
-        self.cloud_spin.valueChanged.connect(self._style_cloud)
-        self._style_widgets[CLOUD].append(style_bar.addWidget(self.cloud_spin))
-        # a rectangle's corners
-        self._style_widgets[CORNER].append(style_bar.addWidget(QLabel(" Radius: ")))
-        self.corner_spin = QDoubleSpinBox()
-        self.corner_spin.setObjectName("cornerRadius")
-        self.corner_spin.setRange(0.0, 200.0)
-        self.corner_spin.setDecimals(1)
-        self.corner_spin.setSuffix(" pt")
-        self.corner_spin.setValue(self.default_style.corner_radius)
-        self.corner_spin.setToolTip("Corner radius: 0 is square")
-        self.corner_spin.valueChanged.connect(lambda value: self._style_change(
-            CORNER, lambda style: setattr(style, "corner_radius", value), "Corner radius"))
-        self._style_widgets[CORNER].append(style_bar.addWidget(self.corner_spin))
-        # a count's symbol
-        self._style_widgets[SYMBOL].append(style_bar.addWidget(QLabel(" Symbol: ")))
-        self.symbol_combo = QComboBox()
-        self.symbol_combo.setObjectName("countSymbol")
-        from ..items.measure import CountItem as _Count
-        self.symbol_combo.addItems(list(_Count.SYMBOLS))
-        self.symbol_combo.setToolTip("Count symbol")
-        self.symbol_combo.currentTextChanged.connect(self._style_symbol)
-        self._style_widgets[SYMBOL].append(style_bar.addWidget(self.symbol_combo))
-        self._style_widgets[FONT].append(style_bar.addWidget(QLabel(" Font: ")))
-        self.font_family_combo = QFontComboBox()
-        self.font_family_combo.setMaximumWidth(145)
-        self.font_family_combo.currentFontChanged.connect(lambda font: self._style_change(
-            FONT, lambda style: setattr(style, "font_family", font.family()), "Font"))
-        self._style_widgets[FONT].append(style_bar.addWidget(self.font_family_combo))
-        self.font_spin = QDoubleSpinBox()
-        self.font_spin.setRange(3.0, 96.0)
-        self.font_spin.setValue(self.default_style.font_size)
-        self.font_spin.setSuffix(" pt")
-        self.font_spin.valueChanged.connect(self._style_font)
-        self._style_widgets[FONT].append(style_bar.addWidget(self.font_spin))
-        self.text_colour_button = ColorButton(self.default_style.text_color, label="Text colour")
-        self.text_colour_button.colorChanged.connect(lambda value: self._style_change(
-            FONT, lambda style: setattr(style, "text_color", value), "Text colour"))
-        self._style_widgets[FONT].append(style_bar.addWidget(self.text_colour_button))
-        self.font_buttons = {}
-        for name, label in (("bold", "B"), ("italic", "I"), ("underline", "U")):
-            button = QToolButton()
-            button.setText(label)
-            button.setCheckable(True)
-            button.setToolTip(name.capitalize())
-            button.toggled.connect(lambda on, field=name: self._style_change(
-                FONT, lambda style: setattr(style, field, on), "Font style"))
-            self.font_buttons[name] = button
-            self._style_widgets[FONT].append(style_bar.addWidget(button))
-        self.text_align_combo = QComboBox()
-        self.text_align_combo.addItems(["left", "center", "right", "justify"])
-        self.text_align_combo.setToolTip("Text alignment")
-        self.text_align_combo.currentTextChanged.connect(lambda value: self._style_change(
-            FONT, lambda style: setattr(style, "align", value), "Text alignment"))
-        self._style_widgets[FONT].append(style_bar.addWidget(self.text_align_combo))
-        # Hatch and the two opacities were only ever in the Properties panel,
-        # so the two surfaces disagreed about every markup that has them: the
-        # panel offered a hatch and a transparency the toolbar had no way to
-        # reach. They are the same setting either way, so they are here too.
-        self._style_widgets[HATCH].append(style_bar.addWidget(QLabel(" Hatch: ")))
-        from .widgets import PatternCombo
-        self.hatch_combo = PatternCombo()
-        self.hatch_combo.setObjectName("hatchPattern")
-        big_pattern_dropdown(self.hatch_combo)
-        fill_hatch_combo(self.hatch_combo, _bar_ink())
-        self.hatch_combo.setToolTip("Hatch pattern, drawn over the fill in its own colour")
-        self.hatch_combo.currentIndexChanged.connect(
-            lambda _index: self._style_hatch(self.hatch_combo.currentData()))
-        self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_combo))
-        self.hatch_colour_button = ColorButton(self.default_style.hatch_color,
-                                               label="Hatch colour")
-        self.hatch_colour_button.setObjectName("hatchColour")
-        self.hatch_colour_button.colorChanged.connect(lambda value: self._style_change(
-            HATCH, lambda style: setattr(style, "hatch_color", value), "Hatch colour"))
-        self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_colour_button))
-        from .widgets import UnboundedSpin
-        self.hatch_scale_spin = UnboundedSpin()
-        self.hatch_scale_spin.setObjectName("hatchScale")
-        self.hatch_scale_spin.setMinimumWidth(84)
-        self.hatch_scale_spin.setSuffix(" %")
-        self.hatch_scale_spin.setValue(100)
-        self.hatch_scale_spin.setToolTip("Hatch scale, as Bluebeam's: 100 as drawn, "
-                                         "50 half, 200 twice")
-        self.hatch_scale_spin.valueChanged.connect(lambda value: self._style_change(
-            HATCH, lambda style: setattr(style, "hatch_scale", value / 100.0), "Hatch scale"))
-        self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_scale_spin))
-        self.hatch_opacity_spin = QSpinBox()
-        self.hatch_opacity_spin.setObjectName("hatchOpacity")
-        self.hatch_opacity_spin.setRange(0, 100)
-        self.hatch_opacity_spin.setSuffix(" %")
-        self.hatch_opacity_spin.setToolTip(
-            "Hatch opacity: how solid the hatch lines are (not the fill or the line)")
-        self.hatch_opacity_spin.setValue(int(self.default_style.hatch_opacity * 100))
-        self.hatch_opacity_spin.valueChanged.connect(self._style_hatch_opacity)
-        self._style_widgets[HATCH].append(style_bar.addWidget(self.hatch_opacity_spin))
-        self.opacity_spin = QSpinBox()
-        self.opacity_spin.setObjectName("overallOpacity")
-        self.opacity_spin.setRange(0, 100)
-        self.opacity_spin.setSuffix(" %")
-        self.opacity_spin.setToolTip(
-            "Opacity: the whole markup — line, fill and hatch together")
-        self.opacity_spin.setValue(int(self.default_style.opacity * 100))
-        self.opacity_spin.valueChanged.connect(self._style_opacity)
-        self._style_widgets[OPACITY].append(style_bar.addWidget(self.opacity_spin))
-        self.default_button = QToolButton()
-        self.default_button.setText("Set default")
-        self.default_button.setToolTip(
-            "Use the selected markup's compatible style for new markups of this kind")
-        self.default_button.setEnabled(False)
-        self.default_button.clicked.connect(self.set_selected_as_default)
-        self._default_action = style_bar.addWidget(self.default_button)
-        self.style_bar = style_bar
-        # Revu's numbers sit just after their arrows (the arrows are drawn
-        # before the number on a toolbar: theme.py)
-        from PySide6.QtWidgets import QAbstractSpinBox
-        for spin in style_bar.findChildren(QAbstractSpinBox):
-            spin.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        # a table's own controls, on the same bar while it is open
-        from .tablebar import TableControls
-        self.table_controls = TableControls(self)
-        # The stamp's wording and the count's subject only mean anything while
-        # those tools are in hand, and reading "APPROVED" across the top of the
-        # window while drawing a rectangle is just noise. Both come and go with
-        # the tool they belong to.
-        self.stamp_combo = QComboBox()
-        from ..items.text import STAMP_PRESETS
-        self.stamp_combo.addItems(list(STAMP_PRESETS))
-        self.stamp_combo.setEditable(True)
-        self.stamp_combo.setToolTip("What the stamp says")
-        self.stamp_combo.currentTextChanged.connect(
-            lambda text: setattr(self.view, "stamp_text", text))
-        self.stamp_label = QLabel(" Stamp ")
-        self._stamp_widgets = [style_bar.addWidget(self.stamp_label),
-                               style_bar.addWidget(self.stamp_combo)]
-        count_button = QToolButton()
-        count_button.setText("Count subject…")
-        count_button.clicked.connect(self.choose_count_subject)
-        self._count_widgets = [style_bar.addWidget(count_button)]
+        from . import propbar
+        style_bar = propbar.build(self)
         self._show_tool_extras("select")
-        # Every number box as wide as its longest value and no wider: they
-        # took a hundred pixels each and the bar ran off the window (the user,
-        # 2026-10-01).
-        from PySide6.QtWidgets import QAbstractSpinBox
-        for spin in style_bar.findChildren(QAbstractSpinBox):
-            snug_number_box(spin)
         self._add_toolbar(style_bar)
         self._refresh_style_controls()
 
@@ -1602,6 +1390,9 @@ class MainWindow(QMainWindow):
         from .markupstyles import MarkupStyles
         self.markup_styles = MarkupStyles(self)
         self._add_toolbar(self.markup_styles.bar)
+        # it grows and shrinks with the tool in hand: its row wraps to suit
+        self._styles_relayout = _OnRelayout(self._wrap_toolbar_rows_soon, self)
+        self.markup_styles.bar.installEventFilter(self._styles_relayout)
 
     def _calculation_bar(self) -> QToolBar:
         """Decision 18: MarkForge's toolbars, and a condensed Calculation
@@ -1631,6 +1422,7 @@ class MainWindow(QMainWindow):
     def _dock(self, title: str, widget: QWidget, area: Qt.DockWidgetArea,
               name: str) -> PanelDock:
         dock = PanelDock(title, widget, name, self)
+        dock.hide()                 # closed until its rail opens it (_build_rails)
         self.addDockWidget(area, dock)
         self.panels.append(dock)
         return dock
@@ -1761,9 +1553,67 @@ class MainWindow(QMainWindow):
         if name not in rail.buttons:
             rail.add(name, label, icon(icon_name))
         self.panel_sides[name] = side
-        self.addDockWidget(AREAS[side], dock)
+        if dock.isFloating() or self.dockWidgetArea(dock) != AREAS[side]:
+            self.addDockWidget(AREAS[side], dock)
         dock.setVisible(open_now)
         rail.show_open(name, open_now)
+        self.tabify_panels()
+
+    # Panels on one side are tabs of one another, one shown at a time, as
+    # Revu's are; the rail's icons switch between them. They are never split
+    # one above the other (the user, 2026-10-15: "There shouldn't be panel
+    # stacked on panel on the side"): a panel dropped beside or below another
+    # joins its tabs instead, and an arrangement saved with panels stacked
+    # is tabbed when it is put back.
+    def tabify_panels(self) -> None:
+        """Make the open panels in each dock area one set of tabs.
+
+        Only open ones: the rail keeps one panel open on a side, so a closed
+        one can never be stacked under another, and Qt left the tab bars of
+        sets of closed panels lying about (one showed "Tool Chest" under the
+        Thumbnails in a tall window)."""
+        groups: dict = {}
+        for dock in self.panels:
+            if dock.isFloating() or dock.isHidden():
+                continue
+            area = self.dockWidgetArea(dock)
+            if area == Qt.NoDockWidgetArea:
+                continue
+            groups.setdefault(area, []).append(dock)
+        # the moves this makes are not taken for a user's drop
+        self._tabifying = True
+        try:
+            for docks in groups.values():
+                first = docks[0]
+                together = set(self.tabifiedDockWidgets(first))
+                for dock in docks[1:]:
+                    if dock not in together:
+                        self.tabifyDockWidget(first, dock)
+        finally:
+            self._tabifying = False
+
+    def _panel_landed(self, name: str) -> None:
+        """A panel was dragged somewhere: into its side's tabs, and onto that
+        side's rail if it went to the other side."""
+        dock = self.docks_by_name.get(name)
+        if dock is None or dock.isFloating():
+            return
+        side = {Qt.LeftDockWidgetArea: LEFT,
+                Qt.RightDockWidgetArea: RIGHT}.get(self.dockWidgetArea(dock))
+        if side is not None and self.panel_sides.get(name) != side \
+                and name in self.PANEL_ICONS:
+            was_open = not dock.isHidden()
+            self.move_panel_to_side(name, side)
+            if was_open:
+                self.show_panel(name, True)
+        self.tabify_panels()
+
+    def _panel_landed_soon(self, name: str) -> None:
+        if getattr(self, "_tabifying", False):
+            return
+        from shiboken6 import isValid
+        QTimer.singleShot(0, self, lambda: self._panel_landed(name)
+                          if isValid(self) else None)
 
     def rail_for(self, name: str) -> PanelRail:
         return (self.left_rail if self.panel_sides.get(name, LEFT) == LEFT
@@ -3323,6 +3173,10 @@ class MainWindow(QMainWindow):
         # the restored rows are all the user's; wrap them afresh
         self._auto_breaks = set()
         self._wrap_toolbar_rows_soon()
+        if getattr(self, "left_rail_bar", None) is not None:
+            self.arrange_side_toolbars()
+        if getattr(self, "docks_by_name", None):
+            self.tabify_panels()          # panels saved stacked are tabbed, once
         return done
 
     #: The toolbars' rows out of the box, top to bottom.
@@ -3660,12 +3514,90 @@ class MainWindow(QMainWindow):
             bar.setMovable(not locked)
         self.status_hint.setText("Toolbars locked" if locked else "Toolbars unlocked")
 
-    def _toolbars_off_the_rails(self) -> None:
-        """A layout saved with a toolbar on a side edge (beside a panel rail)
-        puts it back at the top."""
+    # -- toolbars on the side edges ----------------------------------------
+    # A toolbar can go to the left or right edge (the user, 2026-10-15:
+    # "allow toolbars to be dragged to the side on their own column (can't
+    # join the panel column)"). There it is a column of its own between the
+    # window's edge and the panel rail: never in the rail's column, never
+    # between the rail and its panels, never sharing a column with another
+    # toolbar. Qt's toolbar areas are outside the dock areas already, so a
+    # side toolbar is always outside the panels; what is kept in order here
+    # is the rail, which is a toolbar too and has to stay next to the panels.
+    #: The toolbars that only go top or bottom: the Properties toolbar's boxes
+    #: and lists, and the Markup Styles bar's words, do not work stood on end.
+    TOP_AND_BOTTOM_ONLY = ("toolbar_style", "toolbar_markup_styles")
+
+    def _side_rails(self) -> dict:
+        return {Qt.LeftToolBarArea: self.left_rail_bar,
+                Qt.RightToolBarArea: self.right_rail_bar}
+
+    def _side_columns_in_order(self, area) -> bool:
+        """Whether every toolbar in the side *area* is in a column of its own,
+        all of them outside the rail."""
+        rail = self._side_rails()[area]
+        bars = [bar for bar in self.toolbars if self.toolBarArea(bar) == area
+                and not bar.isHidden()]
+        if not bars:
+            return True
+        if not self.isVisible():
+            return False
+        self.layout().activate()
+        left = area == Qt.LeftToolBarArea
+        columns = set()
+        for bar in bars:
+            x = bar.geometry().x()
+            if x in columns or abs(x - rail.geometry().x()) < 2:
+                return False
+            if (x > rail.geometry().x()) if left else (x < rail.geometry().x()):
+                return False
+            columns.add(x)
+        return True
+
+    def arrange_side_toolbars(self) -> None:
+        """Give each toolbar on a side edge a column of its own, outside the
+        rail; put one that cannot stand on end back at the top."""
         for bar in self.toolbars:
-            if self.toolBarArea(bar) not in (Qt.TopToolBarArea, Qt.BottomToolBarArea):
+            if (bar.objectName() in self.TOP_AND_BOTTOM_ONLY
+                    and self.toolBarArea(bar) in self._side_rails()):
                 self.addToolBar(Qt.TopToolBarArea, bar)
+        for area, rail in self._side_rails().items():
+            if self._side_columns_in_order(area):
+                continue
+            bars = [bar for bar in self.toolbars if self.toolBarArea(bar) == area]
+            # the order they are in now, from the edge inwards
+            bars.sort(key=lambda bar: bar.geometry().x(),
+                      reverse=area == Qt.RightToolBarArea)
+            for bar in bars:
+                self.insertToolBar(rail, bar)
+                self.insertToolBarBreak(rail)
+        self._auto_breaks = {bar for bar in self._auto_breaks
+                             if self.toolBarArea(bar) in (Qt.TopToolBarArea,
+                                                          Qt.BottomToolBarArea)}
+
+    def _arrange_side_toolbars_soon(self) -> None:
+        timer = getattr(self, "_side_timer", None)
+        if timer is None:
+            timer = self._side_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self.arrange_side_toolbars)
+        timer.start(0)
+
+    def _toolbar_stood_on_end(self, bar, orientation) -> None:
+        """A toolbar moved to a side edge shows its buttons' icons only, and
+        is given its column; back at the top it is as it was."""
+        vertical = orientation == Qt.Vertical
+        hook = getattr(bar, "set_vertical", None)
+        if hook is not None:
+            hook(vertical)
+        elif vertical:
+            bar.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self._arrange_side_toolbars_soon()
+
+    def _toolbars_off_the_rails(self) -> None:
+        """A layout saved with toolbars on the side edges: each one in its
+        own column outside the rail (and the Properties toolbar, which only
+        goes top or bottom, back at the top)."""
+        self.arrange_side_toolbars()
 
     def reset_layout(self) -> None:
         """Put every panel and toolbar back where it started."""
@@ -5560,13 +5492,10 @@ class MainWindow(QMainWindow):
             for actions in self._style_widgets.values():
                 for action in actions:
                     action.setVisible(False)
-            for control in (self.font_family_combo, *self.font_buttons.values(),
-                            self.text_align_combo, self.arrow_start_combo):
-                control.setVisible(False)
-            self.arrow_start_label_action.setVisible(False)
-            self._default_action.setVisible(False)
             item = tables.item
-            self.style_kind_label.setText(f" {item.name} ")
+            self.style_kind_label.setText(item.name)
+            self.style_kind_menu.setToolTip(item.name)
+            self.style_kind_menu.set_face(picture=icon("table", 20))
             self.table_controls.show(True)
             self.table_controls.sync()
             self.style_bar.layout().invalidate()
@@ -5596,8 +5525,9 @@ class MainWindow(QMainWindow):
         # The bar never comes and goes (the page would jump under it): with
         # nothing that takes a style, the everyday controls stay, greyed out.
         idle = not supported
-        shown = supported or {STROKE, FILL, FILL_OPACITY, WIDTH, DASH, OPACITY}
-        self._order_style_bar(active)
+        shown = set(supported or {STROKE, FILL, FILL_OPACITY, WIDTH, DASH, OPACITY})
+        from . import propbar
+        shown |= propbar.extras_shown(items, active, supported)
         if items:
             names = {self._type_name(i) for i in items}
             kind = names.pop() if len(names) == 1 else f"{len(items)} markups"
@@ -5607,18 +5537,28 @@ class MainWindow(QMainWindow):
             styles = getattr(self, "markup_styles", None)
             if active is not None and styles is not None and styles.editing():
                 kind = f"{self._type_name(active)} style {styles.editing()}"
-        self.style_kind_label.setText(f" {kind} ")
+        self.style_kind_label.setText(kind)
+        self.style_kind_menu.setToolTip(f"{kind} — Subject, and more")
+        tool_key = "" if items else self.view.tool_key
+        self.style_kind_menu.set_face(picture=propbar.kind_icon(
+            self, active if items else None, tool_key if active is not None else ""))
+        # what the field groups say, less the parts a markup does not have:
+        # a contents list's font is its own, a callout has no start
+        hidden = set()
+        if isinstance(active, ContentsItem):
+            hidden.add(self.font_family_combo)
+        if isinstance(active, CalloutItem):
+            hidden |= {self.arrow_start_combo, self.arrow_start_label_action}
         for field, actions in self._style_widgets.items():
             for action in actions:
-                action.setVisible(field in shown)
+                action.setVisible(field in shown and action not in hidden
+                                  and action.defaultWidget() not in hidden)
                 action.setEnabled(not idle)
-        for control in (self.font_family_combo, *self.font_buttons.values()):
-            control.setVisible(FONT in supported and not isinstance(active, ContentsItem))
         self.text_align_combo.setVisible(FONT in supported and isinstance(active, _TextBase))
-        self.arrow_start_combo.setVisible(ARROW_SIZE in supported and not isinstance(active, CalloutItem))
-        self.arrow_start_label_action.setVisible(ARROW_SIZE in supported and not isinstance(active, CalloutItem))
-        self._default_action.setVisible(True)
-        self._default_action.setEnabled(bool(supported) and len(items) == 1)
+        self._align_label.setVisible(self.text_align_combo.isVisibleTo(self.font_style_popup))
+        self.default_button.setEnabled(bool(supported) and len(items) == 1)
+        if TOTALS_GROUP in shown:
+            self._fill_totals(items)
         if not self.style_bar.isVisibleTo(self):
             self.style_bar.setVisible(True)
         # which controls it holds changed: lay it out again (it used to be
@@ -5661,7 +5601,11 @@ class MainWindow(QMainWindow):
                     (self.opacity_spin, int(round(active.style.opacity * 100)),
                      "setValue"),
                     (self.fill_opacity_spin,
-                     int(round(active.style.fill_opacity * 100)), "setValue"))
+                     int(round(active.style.fill_opacity * 100)), "setValue"),
+                    (self.highlight_button, active.style.blend == "multiply", "setChecked"),
+                    (self.callout_shape_combo,
+                     1 if getattr(active, "shape_kind", "box") == "cloud" else 0,
+                     "setCurrentIndex"))
         for control, value, method in controls:
             control.blockSignals(True)
             getattr(control, method)(value)
@@ -6186,36 +6130,158 @@ class MainWindow(QMainWindow):
                    FILL, FILL_OPACITY, HATCH, SYMBOL)
 
     def _show_subject_popup(self) -> None:
-        """Bluebeam's: Subject (typed in, for every selected markup) and the
-        number of markups selected."""
-        from PySide6.QtWidgets import QFormLayout, QFrame
-        items = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
-        popup = QFrame(self, Qt.Popup)
-        popup.setObjectName("subjectPopup")
-        popup.setFrameShape(QFrame.StyledPanel)
-        form = QFormLayout(popup)
-        subject = QLineEdit(items[0].subject if items else "")
-        subject.setObjectName("subjectField")
-        subject.setEnabled(bool(items))
-        subject.setMinimumWidth(200)
+        """Bluebeam's type ▾: Subject (typed in, for every selected markup),
+        the number of markups selected — and CalcForge's extras."""
+        self.style_kind_menu.showPopup()
+        self.subject_field.setFocus()
+        self._subject_popup = self.style_more_popup
 
-        def apply() -> None:
-            if not items:
-                return
-            self.view.begin_snapshot(self.view.involved_frames(*items))
-            for one in items:
-                one.subject = subject.text()
-                one.touch()
-            self.view.commit_snapshot("Subject")
-            self.properties_panel.show_items(self.selected_items())
-        subject.editingFinished.connect(apply)
-        form.addRow("Subject:", subject)
-        form.addRow("Markups:", QLabel(str(len(items))))
-        popup.adjustSize()
-        popup.move(self.style_kind_menu.mapToGlobal(self.style_kind_menu.rect().bottomLeft()))
-        popup.show()
-        subject.setFocus()
-        self._subject_popup = popup
+    def _fill_style_more_popup(self) -> None:
+        """What the type ▾ panel shows for the markups picked now."""
+        items = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
+        self.subject_field.blockSignals(True)
+        self.subject_field.setText(items[0].subject if items else "")
+        self.subject_field.blockSignals(False)
+        self.subject_field.setEnabled(bool(items))
+        self.selected_count_label.setText(str(len(items)))
+        if items:
+            supported = common_capabilities(items)
+        else:
+            active = self._style_default_item()
+            supported = capabilities(active, for_default=True) if active is not None else set()
+        form = self._style_more_form
+        for widget, field in ((self.dash_scale_spin, DASH),
+                              (self.hatch_colour_button, HATCH),
+                              (self.hatch_scale_spin, HATCH),
+                              (self.hatch_opacity_spin, HATCH)):
+            form.setRowVisible(widget, field in supported)
+
+    def _subject_typed(self) -> None:
+        items = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
+        text = self.subject_field.text()
+        if not items or all(one.subject == text for one in items):
+            return
+        self.view.begin_snapshot(self.view.involved_frames(*items))
+        for one in items:
+            one.subject = text
+            one.touch()
+        self.view.commit_snapshot("Subject")
+        self.properties_panel.show_items(self.selected_items())
+
+    def _style_highlight(self, on: bool) -> None:
+        """Revu's highlight button: the markup multiplies onto the page."""
+        value = "multiply" if on else "normal"
+
+        def mutate(style) -> None:
+            style.blend = value
+        if self._edit_markup_style(lambda item: mutate(item.style)):
+            return
+        if not self.selected_items():
+            item = self._style_default_item()
+            if item is not None:
+                self.apply_default_style(item)
+                mutate(item.style)
+                toolsets.remember_default(item)
+            return
+        self._push_style(mutate, "Highlight",
+                         predicate=lambda item: bool(capabilities(item) & {STROKE, FILL}))
+
+    def _style_callout_shape(self, kind: str) -> None:
+        """A callout's Shape ▾: its box drawn as a rectangle or a cloud."""
+        kind = kind or "box"
+        if self._edit_markup_style(lambda item: setattr(item, "shape_kind", kind)):
+            return
+        items = [i for i in self.selected_items() if isinstance(i, CalloutItem)]
+        if not items:
+            item = self._style_default_item()
+            if isinstance(item, CalloutItem):
+                self.apply_default_style(item)
+                item.shape_kind = kind
+                toolsets.remember_default(item)
+            return
+        self.view.begin_snapshot(self.view.involved_frames(*items))
+        for item in items:
+            item.prepareGeometryChange()
+            item.shape_kind = kind
+            item.touch()
+            if hasattr(item, "apply_style"):
+                item.apply_style()
+            item.update()
+        self.view.commit_snapshot("Callout shape")
+        self.properties_panel.show_items(self.selected_items())
+
+    def _measure_setting(self, attr: str, value, description: str) -> None:
+        """Caption ▾: something of the selected measurements, as one undo step."""
+        if getattr(self, "_filling_caption", False):
+            return
+        items = [i for i in self.selected_items() if isinstance(i, MeasureItem)]
+        if not items:
+            return
+        self.view.begin_snapshot(self.view.involved_frames(*items))
+        for item in items:
+            item.prepareGeometryChange()
+            setattr(item, attr, value)
+            item.touch()
+            item.update()
+        self.view.commit_snapshot(description)
+        self.properties_panel.show_items(self.selected_items())
+
+    def _fill_caption_menu(self) -> None:
+        items = [i for i in self.selected_items() if isinstance(i, MeasureItem)]
+        self._filling_caption = True
+        try:
+            for action in (self.caption_show_action, self.caption_inline_action):
+                action.setEnabled(bool(items))
+            self.caption_show_action.setChecked(bool(items) and items[0].show_label)
+            self.caption_inline_action.setChecked(bool(items) and items[0].label_angle is None)
+        finally:
+            self._filling_caption = False
+
+    def _measure_page_index(self) -> int:
+        """The page of the selected measurement (the current page otherwise)."""
+        for item in self.selected_items():
+            frame = item.parentItem()
+            for index, page in enumerate(self.document.pages):
+                if page.frame is not None and page.frame is frame:
+                    return index
+        return self.current_index
+
+    def _fill_units_panel(self) -> None:
+        page = self.document.pages[self._measure_page_index()]
+        for combo, unit in ((self.units_length_combo, page.scale.display_unit),
+                            (self.units_area_combo, page.scale.area_unit)):
+            combo.blockSignals(True)
+            found = combo.findData(unit)
+            if found < 0:
+                combo.addItem(unit, unit)
+                found = combo.count() - 1
+            combo.setCurrentIndex(found)
+            combo.blockSignals(False)
+
+    def _units_chosen(self) -> None:
+        """Units ▾: write the page's measurements in other units."""
+        index = self._measure_page_index()
+        page = self.document.pages[index]
+        scale = PageScale.from_dict(page.scale.to_dict())
+        length = self.units_length_combo.currentData()
+        area = self.units_area_combo.currentData()
+        if scale.display_unit == length and scale.area_unit == area:
+            return
+        scale.display_unit, scale.area_unit = length, area
+        self.set_page_scale(scale, [index])
+        self.refresh_page_measurements(page)
+        self.refresh_selection()
+
+    def _fill_totals(self, items: list) -> None:
+        """Totals ▾: the selected measurements added up, the first on the box."""
+        from . import propbar
+        rows = propbar.totals(items)
+        menu = self.totals_button.popup_menu
+        menu.clear()
+        for name, total in rows:
+            action = menu.addAction(f"{name} = {total}")
+            action.setEnabled(False)
+        self.totals_button.set_face(f"{rows[0][0]} = {rows[0][1]}" if rows else "—")
 
     @staticmethod
     def _type_name(item) -> str:
@@ -6228,20 +6294,6 @@ class MainWindow(QMainWindow):
         if isinstance(item, MeasureItem):
             return MEASURE_NAMES.get(item.kind, "Measurement")
         return item.NAME
-
-    def _order_style_bar(self, active) -> None:
-        order = self._TEXT_ORDER if isinstance(active, _TextBase) else self._SHAPE_ORDER
-        if getattr(self, "_style_order", None) == order:
-            return
-        self._style_order = order
-        bar = self.style_bar
-        bar.setUpdatesEnabled(False)
-        try:
-            for field in order:
-                for action in self._style_widgets.get(field, ()):
-                    bar.insertAction(self._default_action, action)
-        finally:
-            bar.setUpdatesEnabled(True)
 
     def _item_setting(self, field: str, attr: str, value, description: str) -> None:
         """A toolbar control that sets something of the markup itself rather
@@ -9200,6 +9252,8 @@ class MainWindow(QMainWindow):
             if self.hatch_combo.itemData(index) in HATCH_PATTERNS:   # not Manage…
                 self.hatch_combo.setItemIcon(
                     index, _hatch_icon(self.hatch_combo.itemData(index) or "", _bar_ink()))
+        from . import propbar
+        propbar.refresh_icons(self)
         for dock in self.panels:
             bar = dock.titleBarWidget()
             if hasattr(bar, "refresh_icons"):

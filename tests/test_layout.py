@@ -77,21 +77,30 @@ def test_a_panel_can_go_to_any_edge(window):
 # toolbars
 # ---------------------------------------------------------------------------
 
-def test_toolbars_move_between_top_and_bottom_never_onto_the_rails(window):
+def test_toolbars_go_to_any_edge_but_never_into_a_panel_rail(window):
     """The left and right edges hold the panel rails: a toolbar dropped there
-    ended up inside a panel bar (the user, 2026-10-01). Top and bottom only,
-    and a layout saved with one at a side puts it back at the top."""
+    once ended up inside a panel bar (the user, 2026-10-01). Now a toolbar
+    dropped at a side is a column of its own, outside the rail (the user,
+    2026-10-15: "allow toolbars to be dragged to the side on their own column
+    (can't join the panel column)"); the Properties and Markup Styles bars,
+    whose boxes and words do not work on end, stay top or bottom."""
     for bar in window.toolbars:
         assert bar.isMovable()
-        assert bar.allowedAreas() == (Qt.TopToolBarArea | Qt.BottomToolBarArea)
-        assert not bar.isAreaAllowed(Qt.LeftToolBarArea)
-        assert not bar.isAreaAllowed(Qt.RightToolBarArea)
+        if bar.objectName() in window.TOP_AND_BOTTOM_ONLY:
+            assert bar.allowedAreas() == (Qt.TopToolBarArea | Qt.BottomToolBarArea)
+        else:
+            assert bar.isAreaAllowed(Qt.LeftToolBarArea)
+            assert bar.isAreaAllowed(Qt.RightToolBarArea)
     tools = toolbars(window)["toolbar_tools"]
     window.addToolBar(Qt.BottomToolBarArea, tools)
     assert window.toolBarArea(tools) == Qt.BottomToolBarArea
-    window.addToolBar(Qt.LeftToolBarArea, tools)          # as an old saved layout might
+    window.addToolBar(Qt.LeftToolBarArea, tools)          # as a saved layout might
     window._toolbars_off_the_rails()
-    assert window.toolBarArea(tools) == Qt.TopToolBarArea
+    assert window.toolBarArea(tools) == Qt.LeftToolBarArea
+    style = toolbars(window)["toolbar_style"]
+    window.addToolBar(Qt.LeftToolBarArea, style)          # as an old saved layout might
+    window._toolbars_off_the_rails()
+    assert window.toolBarArea(style) == Qt.TopToolBarArea
 
 
 def test_the_toolbars_can_be_locked(window):

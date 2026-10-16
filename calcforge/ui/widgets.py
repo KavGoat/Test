@@ -249,15 +249,16 @@ class _BigPatternDelegate(QStyledItemDelegateBase := __import__(
             if option.state & QStyle.State_MouseOver:
                 painter.fillRect(option.rect, option.palette.alternateBase())
             text_colour = option.palette.text().color()
-        swatch = option.rect.adjusted(6, 3, 0, -3)
-        swatch.setWidth(self.SWATCH.width())
-        # the list's own background: the samples are drawn in the theme's ink
-        painter.fillRect(swatch, option.palette.base())
+        # Revu's list: the name at the left, the pattern drawn at the right
+        swatch = option.rect.adjusted(0, 3, -8, -3)
+        swatch.setLeft(swatch.right() - self.SWATCH.width())
         icon = index.data(Qt.DecorationRole)
         if icon is not None:
+            # the list's own background: the samples are drawn in the theme's ink
+            painter.fillRect(swatch, option.palette.base())
             icon.paint(painter, swatch)
         painter.setPen(text_colour)
-        words = option.rect.adjusted(self.SWATCH.width() + 16, 0, -4, 0)
+        words = option.rect.adjusted(12, 0, -(self.SWATCH.width() + 16), 0)
         painter.drawText(words, Qt.AlignVCenter | Qt.AlignLeft,
                          str(index.data(Qt.DisplayRole) or ""))
         painter.restore()
@@ -410,6 +411,8 @@ class PatternCombo(QComboBox):
         option = QStyleOptionComboBox()
         self.initStyleOption(option)
         icon = self.itemIcon(self.currentIndex()) if self.currentIndex() >= 0 else QIcon()
+        if self.property("blankNone") and not self.currentData():
+            icon = QIcon()                     # Revu's: an empty box for no hatch
         option.currentText = ""
         option.currentIcon = QIcon()
         painter.drawComplexControl(QStyle.CC_ComboBox, option)

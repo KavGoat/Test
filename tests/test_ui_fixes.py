@@ -164,11 +164,14 @@ def test_hatch_opacity_is_its_own_and_leaves_the_fill_alone(window):
     actions = [a for a in window.style_bar.actions() if a.isVisible()]
     widgets = [window.style_bar.widgetForAction(a) for a in actions]
     order = [w for w in widgets if w in (window.fill_button, window.fill_opacity_spin,
-                                         window.hatch_combo, window.hatch_opacity_spin,
-                                         window.opacity_spin)]
+                                         window.hatch_combo, window.opacity_spin)]
     # Bluebeam's order: Line: colour, opacity …; Fill: colour, opacity; Hatch
     assert order == [window.opacity_spin, window.fill_button, window.fill_opacity_spin,
-                     window.hatch_combo, window.hatch_opacity_spin]
+                     window.hatch_combo]
+    # the hatch's own opacity is behind the type ▾, beside its colour and scale
+    window._fill_style_more_popup()
+    assert window.hatch_opacity_spin.window() is window.style_more_popup
+    assert window.hatch_opacity_spin.isVisibleTo(window.style_more_popup)
     for spin, word in ((window.fill_opacity_spin, "Fill"), (window.hatch_opacity_spin, "Hatch"),
                        (window.opacity_spin, "Opacity")):
         assert spin.toolTip().startswith(word)
@@ -294,7 +297,7 @@ def test_the_toolbar_shows_each_types_own_controls(window):
     visible = [a for a in bar.actions() if a.isVisible()]
     first_font = min(visible.index(a) for a in window._style_widgets[FONT] if a.isVisible())
     first_line = min(visible.index(a) for a in window._style_widgets[STROKE] if a.isVisible())
-    assert first_font < first_line, "words first for anything with words in it, as Bluebeam"
+    assert first_line < first_font, "Line, Fill, Hatch, then Font, as Revu's always"
 
 
 def test_the_cloud_size_is_set_from_the_toolbar_and_for_new_clouds(window):
