@@ -370,7 +370,7 @@ def test_every_way_in_opens_set_scale(window, monkeypatch):
     opened = []
     monkeypatch.setattr(dialogs.ScaleDialog, "exec",
                         lambda self: opened.append(self.windowTitle()) or 0)
-    window.act_scale.trigger()                    # Document ▸ Page Scale…
+    window.act_scale.trigger()                    # Tools ▸ Measure ▸ Set Scale…
     window.status_scale.click()                   # the status bar's Scale button
     window.calibrate_scale(120.0)                 # the Calibrate tool's two points
     assert opened == ["Set Scale"] * 3

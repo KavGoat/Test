@@ -25,7 +25,7 @@ from ..io.colorproc import (BLACK_WHITE, COLORIZE, GRAYSCALE, LSH, MASK, MODIFY,
                             Process)
 
 PAGES, SNAPSHOT, PHOTO = "pages", "snapshot", "photo"
-NO_COLOR = "No Color"
+NO_COLOR = "No Colour"
 
 
 def parse_pages(text: str, count: int) -> Optional[list]:
@@ -67,7 +67,7 @@ class _ColourButton(QToolButton):
         if self.found is not None and not self.colour:
             # a Source Color not chosen yet: Revu's empty grey square
             self.setIcon(swatch_icon("#d4d4d4", 18))
-            self.setToolTip("Source Color: click for the colours in the drawing")
+            self.setToolTip("Source Colour: click for the colours in the drawing")
             return
         self.setIcon(swatch_icon(self.colour or "", 18))
         self.setToolTip((self.colour or NO_COLOR).upper() if self.colour else NO_COLOR)
@@ -116,7 +116,7 @@ class ColorProcessingDialog(QDialog):
         self.colours = colours or ["#000000"]
         self.picture = picture
         self.previewer = preview
-        self.setWindowTitle("Change Colors" if mode == SNAPSHOT else "Color Processing")
+        self.setWindowTitle("Change Colours" if mode == SNAPSHOT else "Colour Processing")
         layout = QVBoxLayout(self)
         top = QHBoxLayout()
         top.addWidget(QLabel("Process Type:"))
@@ -219,7 +219,7 @@ class ColorProcessingDialog(QDialog):
             self.pairs_grid = QGridLayout()
             self.pairs_grid.setHorizontalSpacing(8)
             self.pairs_grid.setVerticalSpacing(8)
-            self.pairs_grid.addWidget(QLabel("Source Color:"), 0, 0, Qt.AlignRight)
+            self.pairs_grid.addWidget(QLabel("Source Colour:"), 0, 0, Qt.AlignRight)
             self.pairs_grid.addWidget(QLabel("To:"), 0, 2, Qt.AlignRight)
             self.pairs: list = []
             left.addLayout(self.pairs_grid)
@@ -242,11 +242,11 @@ class ColorProcessingDialog(QDialog):
             form = QGridLayout()
             select = _ColourButton("#000000", self._changed)
             to = _ColourButton("#ffffff", self._changed)
-            scale = QCheckBox("Scale Color")
+            scale = QCheckBox("Scale Colour")
             scale.setChecked(True)
-            scale.setToolTip("Cleared: every colour becomes the Select Color (white stays white)")
+            scale.setToolTip("Cleared: every colour becomes the Select Colour (white stays white)")
             scale.toggled.connect(self._changed)
-            form.addWidget(QLabel("Select Color:"), 0, 0, Qt.AlignRight)
+            form.addWidget(QLabel("Select Colour:"), 0, 0, Qt.AlignRight)
             form.addWidget(select, 0, 1)
             form.addWidget(QLabel("To:"), 0, 2, Qt.AlignRight)
             form.addWidget(to, 0, 3)
@@ -293,9 +293,9 @@ class ColorProcessingDialog(QDialog):
             self.mask = _ColourButton("#ffffff", self._changed)
             self.mask_tolerance = QSpinBox()
             self.mask_tolerance.setRange(0, 100)
-            self.mask_tolerance.setToolTip("How close a colour must be to the Mask Color (%)")
+            self.mask_tolerance.setToolTip("How close a colour must be to the Mask Colour (%)")
             self.mask_tolerance.valueChanged.connect(self._changed)
-            row.addWidget(QLabel("Mask Color:"))
+            row.addWidget(QLabel("Mask Colour:"))
             row.addWidget(self.mask)
             row.addWidget(QLabel("±"))
             row.addWidget(self.mask_tolerance)
@@ -314,7 +314,7 @@ class ColorProcessingDialog(QDialog):
         src = _ColourButton(source, self._changed, found=list(self.colours))
         src.taken = lambda me=src: [s.colour.lower() for _h, s, _t in self.pairs
                                     if s is not me and s.colour]
-        src.setToolTip("Source Color: click for the colours in the drawing")
+        src.setToolTip("Source Colour: click for the colours in the drawing")
         to = _ColourButton(target, self._changed, allow_none=True)
         self.pairs_grid.addWidget(src, r, 1)
         self.pairs_grid.addWidget(to, r, 3)
@@ -531,7 +531,7 @@ def apply_to_pages(window, indexes: list, proc: Process) -> int:
                 if page.frame is not None:
                     page.frame._background = None
         colorproc.process_items(lines, proc)
-    window._structural_change("Color Processing", mutate, preserve_view=True)
+    window._structural_change("Colour Processing", mutate, preserve_view=True)
     return len(changed)
 
 
@@ -559,7 +559,7 @@ def color_processing(window, index: Optional[int] = None) -> Optional[ColorProce
     which = window.page_index(index)
     page = window.document.pages[which]
     if not (page.pdf_key or page.background_key):
-        QMessageBox.information(window, "Color Processing",
+        QMessageBox.information(window, "Colour Processing",
                                 "This page has no drawing of its own to process: it is a blank "
                                 "sheet, and markups keep their own colours.")
         return None
@@ -587,7 +587,7 @@ def finish_pages(window, dialog: ColorProcessingDialog) -> int:
     if not indexes:
         return 0
     count = apply_to_pages(window, indexes, dialog.process())
-    window.status_hint.setText(f"Color Processing: {count} page{'s' * (count != 1)} processed"
+    window.status_hint.setText(f"Colour Processing: {count} page{'s' * (count != 1)} processed"
                                if count else "Nothing on those pages to process")
     return count
 
@@ -601,7 +601,7 @@ def change_colors(window, item) -> Optional[ColorProcessingDialog]:
     if isinstance(item, SnapshotItem):
         source = item.source_markups(window.document)
         if not source:
-            QMessageBox.information(window, "Change Colors",
+            QMessageBox.information(window, "Change Colours",
                                     "This snapshot was taken before CalcForge kept what a snapshot "
                                     "was made of, so its colours can't be changed. Take it again.")
             return None
@@ -629,7 +629,7 @@ def change_colors(window, item) -> Optional[ColorProcessingDialog]:
         image = QImage()
         data = window.document.asset(item.asset_key)
         if not data or not image.loadFromData(data) or image.isNull():
-            QMessageBox.information(window, "Color Processing", "There is no picture in this one.")
+            QMessageBox.information(window, "Colour Processing", "There is no picture in this one.")
             return None
         dialog = ColorProcessingDialog(window, PHOTO, picture=image)
     else:
@@ -677,7 +677,7 @@ def finish_item(window, item, proc: Process) -> bool:
         picture = item.redraw_from(source)
         # a new recording: the undo step and other copies keep the old one
         item.asset_key = document.add_asset(bytes(picture.data()), "qpic")
-        view.commit_snapshot("Change Colors")
+        view.commit_snapshot("Change Colours")
         item.update()
     elif isinstance(item, ImageItem):
         image = QImage()
@@ -688,7 +688,7 @@ def finish_item(window, item, proc: Process) -> bool:
         view.begin_snapshot(view.involved_frames(item))
         item.asset_key = document.add_asset(bytes(buffer.data()), "png")
         item.load_from_document(document)
-        view.commit_snapshot("Color Processing")
+        view.commit_snapshot("Colour Processing")
     else:
         return False
     window.refresh_selection()

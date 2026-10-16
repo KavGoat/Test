@@ -65,8 +65,10 @@ def test_insert_page_break_from_a_real_right_click_on_a_sheet_cell(w):
     assert ((("Insert",), "Insert Page Break", True)) in seen
     assert (("Insert", "Chart"), "XY Scatter", True) in seen, "charts are under Insert ▸ Chart"
     assert not any(text == "Insert Chart" for _p, text, _e in seen)
-    assert not any(path == ("Page Layout",) and "Page Break" in text and "Reset" not in text
-                   for path, text, _e in seen), "the break is on Insert ▸, not Page Layout ▸"
+    # and in Page Layout ▸ Breaks ▸ too, as in Excel's ribbon (novice 11)
+    assert (("Page Layout", "Breaks"), "Insert Page Break", True) in seen
+    assert (("Page Layout", "Breaks"), "Remove Page Break", False) in seen
+    assert (("Page Layout", "Breaks"), "Reset All Page Breaks", True) in seen
     (run,) = runs(w)
     assert options(run.sheet)["breaks"] == [9], "a break above row 10, the cell right-clicked"
     # now the cell has one: Delete ▸ Remove Page Break takes it out again
@@ -204,12 +206,16 @@ def test_the_markup_menu_is_in_revus_order(w):
     box.setSelected(True)
     menu = w.build_context_menu(box, box.mapToScene(QPointF(0, 0)))
     labels = top_level(menu)
-    assert labels[:6] == ["Cut", "Copy", "Paste", "Multiply…", "Format Painter", "Delete"]
+    # the clipboard family as on the Edit menu: Paste in Place, Paste Here…
+    # and Duplicate beside Paste (bug hunt E16)
+    assert labels[:9] == ["Cut", "Copy", "Paste", "Paste in Place", "Paste Here…",
+                          "Duplicate", "Multiply…", "Format Painter", "Delete"]
     assert find(menu, "Delete").shortcut().toString() == "Del"
     order = [labels.index(t) for t in ("Control Point", "Arc Segment", "Round All Corners",
-                                       "Order", "Alignment", "Flatten", "Lock", "Hide",
-                                       "Convert to Polygon", "Duplicate", "Add to Tool Chest",
-                                       "Set as Default", "Apply to Pages…", "Properties")]
+                                       "Order", "Alignment", "Flatten", "Unflatten", "Lock",
+                                       "Hide", "Show Hidden", "Convert to Polygon",
+                                       "Add to Tool Chest", "Set as Default", "Apply to Pages…",
+                                       "Properties")]
     assert order == sorted(order)
     points = [a.text() for a in find(menu, "Control Point").menu().actions()
               if not a.isSeparator()]
@@ -271,14 +277,18 @@ def test_the_page_tab_and_sheet_tab_menus(w):
 def test_calc_modes_page_menu_has_smaths_inserts(w):
     w.toggle_calc_mode(True)
     menu = w.build_context_menu(None, w.document.pages[0].frame.mapToScene(QPointF(80, 200)))
-    labels = top_level(menu)
-    for wanted in ("Insert Equation Here", "Text Region", "Calculation Block", "Plot"):
-        assert wanted in labels
-    find(menu, "Insert Equation Here").trigger()
+    # SMath's inserts are in Insert Here ▸ with the markups, named as on the
+    # Calculation menu (bug hunt E5)
+    insert = top_level(find(menu, "Insert Here").menu())
+    assert insert[:4] == ["Equation", "Calc Text", "Calculation Block", "Plot"]
+    assert insert[4:] == ["Text Box", "Callout", "Note", "Stamp", "Image"]
+    assert "Insert Equation Here" not in top_level(menu)
+    find(menu, "Insert Here", "Equation").trigger()
     cross = w.view.calc.cross
     assert cross is not None and abs(cross[1].y() - 200) < 10
     w.toggle_calc_mode(False)
-    assert "Insert Equation Here" not in top_level(w.build_context_menu(None, QPointF(80, 200)))
+    menu = w.build_context_menu(None, QPointF(80, 200))
+    assert "Equation" not in top_level(find(menu, "Insert Here").menu())
 
 
 # -- every menu: separators and Title Case --------------------------------------------------------

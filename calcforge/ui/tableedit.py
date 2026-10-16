@@ -2618,19 +2618,36 @@ class TableEditing:
         self.autofit(axis, list(range(t, b + 1)) if axis == "row" else list(range(l, r + 1)))
 
     def _page_layout_menu(self, menu, item) -> None:
-        """Excel's Page Layout commands, for a spreadsheet page (the page
-        break itself is on Insert ▸ and Delete ▸)."""
+        """Excel's Page Layout commands, for a spreadsheet page, shaped as its
+        ribbon (novice 11) and as Calculation ▸ Page Layout on the menu bar:
+        Breaks ▸ (Insert Page Break, Remove Page Break, Reset All Page
+        Breaks), Print Area ▸ (Set, Clear), Sheet Layout…. The page break
+        stays on Insert ▸ and Delete ▸ as well."""
         from . import sheetlayout
         window = self.view.window
+        row, col = self.active
         layout = menu.addMenu("Page Layout")
-        layout.addAction("Reset All Page Breaks", lambda: sheetlayout.reset_breaks(window, item))
-        layout.addSeparator()
-        layout.addAction("Set Print Area", lambda: sheetlayout.set_print_area(
+        breaks = layout.addMenu("Breaks")
+        brk = breaks.addAction(window.act_insert_page_break.text(),
+                               lambda: sheetlayout.insert_break(window, item, row, col))
+        brk.setToolTip(window.act_insert_page_break.toolTip())
+        brk.setEnabled(row > 0 or col > 0)
+        gone = breaks.addAction(window.act_remove_page_break.text(),
+                                lambda: sheetlayout.remove_break(window, item, row, col))
+        gone.setToolTip(window.act_remove_page_break.toolTip())
+        gone.setEnabled(sheetlayout.has_break(item, row, col))
+        breaks.addAction(window.act_reset_page_breaks.text(),
+                         lambda: sheetlayout.reset_breaks(window, item)).setToolTip(
+            window.act_reset_page_breaks.toolTip())
+        area = layout.addMenu("Print Area")
+        area.addAction(window.act_set_print_area.text(), lambda: sheetlayout.set_print_area(
             window, item, list(self.selection())))
-        layout.addAction("Clear Print Area", lambda: sheetlayout.set_print_area(window, item, None))
+        area.addAction(window.act_clear_print_area.text(),
+                       lambda: sheetlayout.set_print_area(window, item, None))
         layout.addSeparator()
         index = window.document.index_of(item.parentItem().page)
-        layout.addAction("Page Layout…", lambda: window.sheet_page_setup(index))
+        layout.addAction(window.act_sheet_page_setup.text(),
+                         lambda: window.sheet_page_setup(index))
 
     def _ask_size(self, axis: str) -> None:
         from PySide6.QtWidgets import QInputDialog

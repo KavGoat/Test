@@ -26,7 +26,7 @@ SHEET = "sheet"          # a key in an open table or spreadsheet (tableedit.py h
 # Where a binding acts (decisions 5 and 6). A key may mean two things only
 # when its two meanings can never both be live: Calc and Markup mode are
 # never on together, and inside an equation SMath's keys win ("editing
-# decides"), so Ctrl+0 is ≥ there and Fit page everywhere else.
+# decides"), so Ctrl+0 is ≥ there and Fit Width everywhere else.
 ALWAYS = "always"        # document commands, whatever is going on
 CALC = "calc"            # on the canvas in Calc mode
 MARKUP = "markup"        # on the canvas in Markup mode (tool keys, typing keys)
@@ -184,7 +184,7 @@ SHEET_KEYS: list[tuple[str, str, str]] = [
     ("border_outline",   "Outline border",             "Ctrl+Shift+&"),
     ("border_none",      "No borders",                 "Ctrl+Shift+_"),
     ("border_all",       "All borders",                ""),
-    ("merge_center",     "Merge && Center",            ""),
+    ("merge_center",     "Merge && Centre",            ""),
     ("unmerge",          "Unmerge cells",              ""),
     ("insert_cells",     "Insert cells…",              "Ctrl++"),
     ("delete_cells",     "Delete cells…",              "Ctrl+-"),
@@ -246,8 +246,9 @@ DEFAULT_BINDINGS: list[Binding] = [
     # is a second binding rather than a change to the Select tool's own
     # (QA, 2026-10-15). Markup mode only: in Calc mode V starts an equation.
     Binding("tool.select_v", "Select (Revu's key)", "V", TOOL, "Navigate", "select", MARKUP),
-    Binding("command.fit_page", "Fit page", "Ctrl+0", COMMAND, "View", "fit_page"),
-    Binding("command.fit_width", "Fit width", "Ctrl+1", COMMAND, "View", "fit_width"),
+    # Revu's keys (audit L2): Fit Page Ctrl+9, Fit Width Ctrl+0 (Actual Size Ctrl+8)
+    Binding("command.fit_page", "Fit Page", "Ctrl+9", COMMAND, "View", "fit_page"),
+    Binding("command.fit_width", "Fit Width", "Ctrl+0", COMMAND, "View", "fit_width"),
     Binding("command.renumber_counts", "Renumber counts", "", COMMAND, "Markup",
             "renumber_counts"),
 ] + _sheet_bindings() + _symbol_bindings()

@@ -151,7 +151,9 @@ def test_every_page_dialog_opens_from_its_menus(window, monkeypatch, tmp_path):
     assert [(d.placement.side.currentData(), d.placement.where(),
              d.placement.number.value()) for d in blank] == [
         ("after", "page", 1), ("before", "page", 2), ("after", "page", 2)]
-    assert window.act_add_page.text() == "Blank Page…"
+    # under Insert ▸ it is a submenu of Before… / After…, as on the page menu
+    assert window.act_add_page.text() == "Blank Page"
+    assert [a.text() for a in window.act_add_page.menu().actions()] == ["Before…", "After…"]
 
     inserting = _opened(monkeypatch, dialogs.InsertPagesDialog)
     window.act_insert_pdf.trigger()
@@ -169,7 +171,8 @@ def test_every_page_dialog_opens_from_its_menus(window, monkeypatch, tmp_path):
 
     splitting = _opened(monkeypatch, dialogs.SplitDocumentDialog)
     window.act_split_pages.trigger()
-    assert [d.windowTitle() for d in splitting] == ["Split Document"]
+    _entry(window.page_menu(1), "Split Document…").trigger()  # and on the page menu (E8)
+    assert [d.windowTitle() for d in splitting] == ["Split Document"] * 2
 
     deleting = _opened(monkeypatch, dialogs.DeletePagesDialog)
     window.act_delete_page.trigger()
@@ -181,7 +184,8 @@ def test_every_page_dialog_opens_from_its_menus(window, monkeypatch, tmp_path):
     cropping = _opened(monkeypatch, dialogs.CropPagesDialog)
     window.act_crop_page.trigger()
     assert window.act_crop_page.text() == "Crop Pages…"
-    assert [d.windowTitle() for d in cropping] == ["Crop Pages"]
+    _entry(window.page_menu(1), "Crop Pages…").trigger()      # and on the page menu (E8)
+    assert [d.windowTitle() for d in cropping] == ["Crop Pages"] * 2
 
     applying = _opened(monkeypatch, dialogs.ApplyToPagesDialog)
     window.apply_to_pages(_rect(window))

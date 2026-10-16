@@ -152,7 +152,7 @@ class ColourPopup(QFrame):
             for c, colour in enumerate(row):
                 grid.addWidget(self._swatch(colour), r, c)
         last = len(GRID) - 1
-        none = self._swatch("", tip="No Color")
+        none = self._swatch("", tip="No Colour")
         none.setEnabled(self.allow_none)
         grid.addWidget(none, last, 6)
         dropper = QToolButton()
@@ -179,14 +179,14 @@ class ColourPopup(QFrame):
                 button.setFixedSize(SWATCH + 2, SWATCH + 2)
                 button.setEnabled(False)
                 button.setToolTip("A custom colour goes here: pick one with the eyedropper "
-                                  "or More Colors")
+                                  "or More Colours")
             self.slots.append(button)
             slots.addWidget(button)
         outer.addLayout(slots)
         more = QToolButton()
         more.setObjectName("plain")
         more.setArrowType(Qt.DownArrow)
-        more.setToolTip("More Colors…")
+        more.setToolTip("More Colours…")
         more.setFixedSize(22, 14)
         more.setStyleSheet("QToolButton { border: none; }")
         more.clicked.connect(self._more)
@@ -231,7 +231,7 @@ class ColourPopup(QFrame):
             self.editor.setHidden(not self.editor.isHidden())
         shown = not self.editor.isHidden()
         self.more.setArrowType(Qt.UpArrow if shown else Qt.DownArrow)
-        self.more.setToolTip("Fewer colours" if shown else "More Colors…")
+        self.more.setToolTip("Fewer colours" if shown else "More Colours…")
         self.adjustSize()
 
     def _made(self, colour: str) -> None:

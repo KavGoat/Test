@@ -94,20 +94,20 @@ class ChangeColorsDialog(QDialog):
         super().__init__(window)
         self.window = window
         self.items = list(items)
-        self.setWindowTitle("Change Multiple Colors")
+        self.setWindowTitle("Change Multiple Colours")
         self.setObjectName("changeMultipleColors")
         self.source: Optional[str] = None
         self.destination: Optional[str] = None
         outer = QVBoxLayout(self)
-        group = QGroupBox("Colors")
+        group = QGroupBox("Colours")
         grid = QGridLayout(group)
         form = QFormLayout()
-        self.source_button = self._swatch_button("Source Color: a colour the selection uses")
+        self.source_button = self._swatch_button("Source Colour: a colour the selection uses")
         self.source_button.clicked.connect(self._pick_source)
-        self.destination_button = self._swatch_button("Destination Color: what it becomes")
+        self.destination_button = self._swatch_button("Destination Colour: what it becomes")
         self.destination_button.clicked.connect(self._pick_destination)
-        form.addRow("Source Color:", self.source_button)
-        form.addRow("Destination Color:", self.destination_button)
+        form.addRow("Source Colour:", self.source_button)
+        form.addRow("Destination Colour:", self.destination_button)
         grid.addLayout(form, 0, 0, 1, 2)
         grid.addWidget(QLabel("Before"), 1, 0)
         grid.addWidget(QLabel("After"), 1, 1)
@@ -197,7 +197,7 @@ class ChangeColorsDialog(QDialog):
             item.touch()
             item.prepareGeometryChange()
         self._restyle()
-        view.commit_snapshot("Change Colors")
+        view.commit_snapshot("Change Colours")
         return changed
 
 

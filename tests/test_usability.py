@@ -613,16 +613,21 @@ def test_every_label_the_user_reads_is_one_or_two_words(window, qapp):
 
     # What Bluebeam calls them, kept as they are (2026-10-14: the menus and
     # names are Revu's)
-    bluebeams = ("Paste in Place", "Pages from Document", "Table of Contents",
+    bluebeams = ("Paste in Place", "Insert Pages", "Table of Contents",
                  "Find Tools + Commands", "Check Spelling in Markups", "Add to Tool Chest",
                  "Zoom to Selection", "Increase Font Size", "Decrease Font Size",
                  "Send to Back", "Bring to Front", "Snap to Grid", "Snap to Content",
                  "Snap to Markup", "Align to Markups", "Align to Content",
-                 "Rotate Counterclockwise", "Headers && Footers", "Apply to Pages",
+                 "Rotate Anticlockwise", "Headers && Footers", "Apply to Pages",
                  "Set as Default", "Convert to Polygon", "Import Tool Set",
                  "Manage Tool Sets", "Show Cover Page in Side-by-Side",
                  "Continuous Side-by-Side", "Clear Recent Files", "Nothing to undo",
-                 "No recent files")
+                 "No recent files",
+                 # Revu's (audit L1, L5) and Excel's Page Layout ▸ Breaks and
+                 # Print Area (novice 11)
+                 "Mark for Redaction", "Single Page Mode", "Insert Page Break",
+                 "Remove Page Break", "Reset All Page Breaks", "Set Print Area",
+                 "Clear Print Area")
     long = [entry for entry in long if not any(name in entry for name in bluebeams)]
     assert not long, "labels of more than two words:\n" + "\n".join(sorted(set(long)))
 
@@ -1310,13 +1315,17 @@ def test_repeat_along_an_axis_is_a_rebindable_shortcut(window, monkeypatch, qapp
     window.view.setFocus()
     qapp.processEvents()
 
-    QTest.keyClick(window.view, Qt.Key_D,
-                   Qt.ControlModifier | Qt.ShiftModifier)
+    # Revu's Ctrl+M in Markup mode (the user, 2026-10-15); Ctrl+Shift+D is
+    # Revu's Delete Pages now
+    QTest.keyClick(window.view, Qt.Key_M, Qt.ControlModifier)
     qapp.processEvents()
 
-    binding = window.shortcuts.binding_for(QKeySequence("Ctrl+Shift+D"))
+    binding = window.shortcuts.binding_for(QKeySequence("Ctrl+M"), scopes=("markup",))
     assert binding is not None and binding.action_id == "command.array"
     assert len(only(window, RectItem)) == 2
+    # in Calc mode Ctrl+M is SMath's Matrix instead
+    calc = window.shortcuts.binding_for(QKeySequence("Ctrl+M"), scopes=("calc",))
+    assert calc is not None and calc.action_id == "command.insert_matrix"
 
 
 def test_offsets_are_paper_distances_without_a_scale(window):
@@ -1849,7 +1858,9 @@ def test_every_tool_and_application_action_is_reachable_from_the_menu_bar(window
                and name not in on_the_bar]
     assert missing == []
 
-    insert_labels = set(_menu_labels(top["Tools"]))       # Bluebeam's Tools menu
+    # Bluebeam's Tools menu — and its Edit menu, which has Pan, Select and
+    # Snapshot, and Mark for Redaction and Whiteout under PDF Content (L1)
+    insert_labels = set(_menu_labels(top["Tools"])) | set(_menu_labels(top["Edit"]))
     assert {tool.label for tool in TOOLS} <= insert_labels
 
 
@@ -2075,7 +2086,7 @@ def test_calibration_has_a_visible_rebindable_shortcut(window):
     assert window.act_scale.shortcut().toString() == "Ctrl+Shift+K"
     binding = [b for b in window.shortcuts.bindings()
                if b.action_id == "command.scale"]
-    assert binding and binding[0].label == "Page Scale"
+    assert binding and binding[0].label == "Set Scale"
 
 
 @pytest.mark.parametrize("entered", ["10mm", "10 mm"])
@@ -5877,7 +5888,7 @@ def test_turning_the_view_is_on_the_view_menu(window):
             rotate = next(a.menu() for a in menu.menu().actions() if a.text() == "Rotate View")
             labels = [a.text() for a in rotate.actions()]
     assert "Rotate Clockwise" in labels
-    assert "Rotate Counterclockwise" in labels
+    assert "Rotate Anticlockwise" in labels
     assert "Reset Rotation" in labels
 
 
@@ -6070,15 +6081,22 @@ def test_every_drawing_tool_is_on_the_tools_menu(window):
 
     insert = None
     for entry in window.menuBar().actions():
-        if entry.text() == "&Tools":
+        if entry.text() == "T&ools":         # Alt+T is Revu's Thumbnails panel
             insert = entry.menu()
     assert insert is not None
     subs = {a.text(): a.menu() for a in insert.actions() if a.menu()}
     subs["Measurement"] = subs.get("Measure")
     assert "Markup" in subs and subs["Measurement"] is not None
     drawn = [a.text() for a in subs["Markup"].actions()]
+    # Revu keeps the redaction box and Whiteout (its Cut Content) under Edit ▸
+    # PDF Content (audit L1)
+    edit = next(a.menu() for a in window.menuBar().actions() if a.text() == "&Edit")
+    content = next(a.menu() for a in edit.actions() if a.text() == "PDF Content")
+    in_content = [a.text() for a in content.actions()]
     for tool in tools_in("Draw"):
-        if tool.mode != NONE:
+        if tool.key in ("redact", "whiteout"):
+            assert tool.label in in_content, f"{tool.label} is not on Edit ▸ PDF Content"
+        elif tool.mode != NONE:
             assert tool.label in drawn, f"{tool.label} is not on Tools ▸ Markup"
     measured = [a.text() for a in subs["Measurement"].actions()]
     for tool in tools_in("Measure"):

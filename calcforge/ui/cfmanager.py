@@ -127,7 +127,7 @@ TEXT_HOW = [("contains", "containing"), ("notContains", "not containing"),
 DATES = [("yesterday", "Yesterday"), ("today", "Today"), ("tomorrow", "Tomorrow"),
          ("last7", "In the last 7 days"), ("lastMonth", "Last month"),
          ("thisMonth", "This month"), ("nextMonth", "Next month")]
-STYLES = [("scale2", "2-Color Scale"), ("scale3", "3-Color Scale"), ("databar", "Data Bar"),
+STYLES = [("scale2", "2-Colour Scale"), ("scale3", "3-Colour Scale"), ("databar", "Data Bar"),
           ("icons", "Icon Sets")]
 ICON_NAMES = [("arrows", "3 Arrows"), ("traffic", "3 Traffic Lights"), ("flags", "3 Flags"),
               ("symbols", "3 Symbols")]
@@ -256,10 +256,10 @@ class RuleDialog(QDialog):
                               ("Maximum", self.scale_max)):
             h.addWidget(QLabel(label))
             h.addWidget(button)
-        form.addRow("Colors:", row)
+        form.addRow("Colours:", row)
         self._scale_row = row
         self.bar_colour = _ColourButton(rule.get("color", "#638ec6"), self._changed)
-        form.addRow("Bar Color:", self.bar_colour)
+        form.addRow("Bar Colour:", self.bar_colour)
         self.icon_set = QComboBox()
         for key, label in ICON_NAMES:
             self.icon_set.addItem(label, key)
