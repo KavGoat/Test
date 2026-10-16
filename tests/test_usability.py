@@ -1752,19 +1752,27 @@ def test_preferences_exposes_the_optional_insertion_point(window, qapp):
     dialog.deleteLater()
 
 
-def test_preferences_exposes_recoverable_flattening(window, qapp):
+def test_recoverable_flattening_is_in_flatten_markups_not_preferences(window, qapp):
+    """Revu keeps Allow Markup Recovery in Flatten Markups (the user,
+    2026-10-15: "flatten recovery is in settings not in flatten")."""
     from PySide6.QtTest import QTest
     from calcforge.ui import dialogs, preferences
 
-    dialog = dialogs.PreferencesDialog(preferences.current(), window)
+    prefs = dialogs.PreferencesDialog(preferences.current(), window)
+    assert not hasattr(prefs, "recover_flattened")
+    assert prefs.result_preferences().recover_flattened == \
+        preferences.current().recover_flattened
+    prefs.deleteLater()
+
+    dialog = window.flatten_dialog()
     dialog.show()
     qapp.processEvents()
-    assert dialog.recover_flattened.text() == "Recoverable flattening"
-    before = dialog.recover_flattened.isChecked()
-    dialog.recover_flattened.setFocus()
-    QTest.keyClick(dialog.recover_flattened, Qt.Key_Space)
+    assert dialog.allow_recovery.text() == "Allow Markup Recovery (Unflatten)"
+    before = dialog.allow_recovery.isChecked()
+    dialog.allow_recovery.setFocus()
+    QTest.keyClick(dialog.allow_recovery, Qt.Key_Space)
     qapp.processEvents()
-    assert dialog.result_preferences().recover_flattened is not before
+    assert dialog.recoverable() is not before
     dialog.deleteLater()
 
 
@@ -2050,10 +2058,11 @@ def test_the_scale_dialog_offers_picking_two_points_from_a_standing_start(window
     try:
         # The button is labelled in one or two words; what it does is in the
         # tooltip, so that is where "pick two points" has to be findable.
+        # It is Revu's Calibrate, beside the Custom scale.
         picks = [b for b in dialog.findChildren(QPushButton)
                  if "pick two points" in b.toolTip().lower()]
         assert picks and picks[0].isEnabled()
-        assert picks[0].text() == "Calibrate…"
+        assert picks[0].text() == "Calibrate"
     finally:
         dialog.deleteLater()
 
@@ -2068,13 +2077,17 @@ def test_calibration_has_a_visible_rebindable_shortcut(window):
 @pytest.mark.parametrize("entered", ["10mm", "10 mm"])
 def test_the_calibration_length_prompt_accepts_joined_or_spaced_units(
         window, entered):
+    """After Calibrate, Set Scale's real-world length takes its unit typed
+    in with it, joined or spaced."""
     from calcforge.ui import dialogs
 
-    dialog = dialogs.CalibrationLengthDialog(200.0, window)
+    dialog = dialogs.ScaleDialog(window.current_page().scale, 200.0, window)
     try:
-        assert not dialog.known.text()
-        dialog.known.setText(entered)
-        assert dialog.length_text() == entered
+        assert not dialog.x_row.real_length.text()
+        dialog.x_row.real_length.setText(entered)
+        scale = dialog.result_scale()
+        assert scale is not None
+        assert scale.length(200.0).to("mm").magnitude == pytest.approx(10)
     finally:
         dialog.deleteLater()
 
@@ -2085,10 +2098,10 @@ def test_the_calibration_length_prompt_rejects_incompatible_units(
     warned = []
     monkeypatch.setattr(dialogs.QMessageBox, "warning",
                         lambda *args: warned.append(args))
-    dialog = dialogs.CalibrationLengthDialog(200.0, window)
+    dialog = dialogs.ScaleDialog(window.current_page().scale, 200.0, window)
     try:
-        dialog.known.setText("10 kPa")
-        assert dialog.length_text() is None
+        dialog.x_row.real_length.setText("10 kPa")
+        assert dialog.result_scale() is None
         assert warned and "compatible units" in warned[0][2]
     finally:
         dialog.deleteLater()
@@ -2144,13 +2157,14 @@ def test_two_clicks_and_a_length_set_the_scale(window, monkeypatch):
 
     asked = {}
 
-    class Stub(dialogs.CalibrationLengthDialog):
-        def exec(self):
-            asked["measured"] = self.measured_pt
-            self.known.setText("10 m")
-            return dialogs.QDialog.Accepted
+    # Revu: the two points come back to Set Scale, the measured length on
+    # the left and the real one typed on the right
+    def stub(self):
+        asked["measured"] = self.measured_pt
+        self.x_row.real_length.setText("10 m")
+        return dialogs.QDialog.Accepted
 
-    monkeypatch.setattr(dialogs, "CalibrationLengthDialog", Stub)
+    monkeypatch.setattr(dialogs.ScaleDialog, "exec", stub)
     window.select_tool("calibrate")
     click(window.view, 100, 300)
     click(window.view, 300, 300)
@@ -2163,7 +2177,7 @@ def test_two_clicks_and_a_length_set_the_scale(window, monkeypatch):
 
 def test_a_calibration_line_is_not_left_on_the_page(window, monkeypatch):
     from calcforge.ui import dialogs
-    monkeypatch.setattr(dialogs.CalibrationLengthDialog, "exec",
+    monkeypatch.setattr(dialogs.ScaleDialog, "exec",
                         lambda self: dialogs.QDialog.Rejected)
     window.select_tool("calibrate")
     drag(window.view, 100, 300, 300, 300)
@@ -4741,9 +4755,13 @@ def test_irreversible_flattening_keeps_only_a_vector_recording(window):
     prefs = preferences.current()
     previous = prefs.recover_flattened
     try:
-        prefs.recover_flattened = False
         window.interactive_prompts = False
-        window.act_flatten.trigger()
+        # Flatten Markups with Allow Markup Recovery unticked (right-click
+        # Flatten is always recoverable, as Revu's is)
+        dialog = window.flatten_dialog()
+        dialog.allow_recovery.setChecked(False)
+        window.finish_flatten(dialog)
+        dialog.deleteLater()
 
         assert rect.scene() is None
         assert not any(item.uid == original_uid for item in markups(window))
@@ -4760,7 +4778,7 @@ def test_irreversible_flattening_keeps_only_a_vector_recording(window):
         prefs.recover_flattened = previous
 
 
-def test_document_flattening_uses_the_classes_chosen(window, monkeypatch):
+def test_document_flattening_uses_the_types_chosen(window, monkeypatch):
     from calcforge.ui import dialogs, preferences
 
     rect = _a_rectangle(window)
@@ -4771,37 +4789,39 @@ def test_document_flattening_uses_the_classes_chosen(window, monkeypatch):
     window.view.escape_everything()
     QApplication.processEvents()
 
-    class ChosenText:
-        def __init__(self, *_args):
-            pass
+    def only_the_words(self):
+        # Revu's Type list: the rectangle's type unticked
+        self.set_type_checked(window._flatten_type(rect), False)
+        return dialogs.QDialog.Accepted
 
-        def exec(self):
-            return dialogs.QDialog.Accepted
-
-        def chosen(self):
-            return {"text"}
-
-    monkeypatch.setattr(dialogs, "FlattenDialog", ChosenText)
+    monkeypatch.setattr(dialogs.FlattenDialog, "exec", only_the_words)
     prefs = preferences.current()
     previous = prefs.recover_flattened
     try:
         prefs.recover_flattened = True
         window.act_flatten_document.trigger()
-        assert words.flattened, "the words were the class chosen"
-        assert not rect.flattened, "and the rectangle was not"
+        assert words.flattened, "the words' type was ticked"
+        assert not rect.flattened, "and the rectangle's was not"
     finally:
         prefs.recover_flattened = previous
 
 
-def test_flatten_dialog_class_choices_follow_real_clicks(window):
+def test_flatten_dialog_type_choices_follow_real_clicks(window, qapp):
+    from PySide6.QtTest import QTest
     from calcforge.ui.dialogs import FlattenDialog
 
-    dialog = FlattenDialog(True, window)
-    assert dialog.chosen() == {"markups"}
-    dialog.boxes["markups"].click()
-    dialog.boxes["text"].click()
-    dialog.boxes["measurements"].click()
-    assert dialog.chosen() == {"text", "measurements"}
+    dialog = FlattenDialog(["Cloud", "Rectangle", "Text box"], window)
+    dialog.show()
+    qapp.processEvents()
+    assert dialog.chosen_types() == {"Cloud", "Rectangle", "Text box"}
+    tree = dialog.types
+    row = tree.topLevelItem(1)
+    box = tree.visualItemRect(row)
+    # the tick box is at the left of the row
+    QTest.mouseClick(tree.viewport(), Qt.LeftButton, Qt.NoModifier,
+                     QPoint(box.left() + 10, box.center().y()))
+    qapp.processEvents()
+    assert dialog.chosen_types() == {"Cloud", "Text box"}
     dialog.deleteLater()
 
 

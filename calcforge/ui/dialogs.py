@@ -3,21 +3,24 @@ from __future__ import annotations
 
 import html
 import os
+import re
 from typing import Optional
 
-from PySide6.QtCore import QKeyCombination, Qt, Signal
-from PySide6.QtGui import QFont, QKeySequence, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QMenu,
+from PySide6.QtCore import QEvent, QKeyCombination, Qt, Signal
+from PySide6.QtGui import QFont, QKeySequence, QPalette, QPixmap
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QMenu,
                                QPlainTextEdit,
                                QDialog,
                                QDialogButtonBox, QDoubleSpinBox, QFileDialog,
-                               QFormLayout, QGroupBox, QHBoxLayout, QHeaderView,
+                               QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView,
                                QLabel, QLineEdit, QListWidget, QMessageBox, QPushButton,
-                               QRadioButton, QSpinBox, QTableWidget, QTableWidgetItem,
-                               QTabWidget, QVBoxLayout, QWidget)
+                               QRadioButton, QSpinBox, QStackedWidget, QStyle,
+                               QStyledItemDelegate,
+                               QTableWidget, QTableWidgetItem,
+                               QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
-from ..core.document import (PAGE_SIZES, PageScale, PageSetup)
-from ..core.units import parse_unit
+from ..core.document import (PAGE_SIZES, PAPER_UNITS, PageScale, PageSetup)
+from ..core.units import parse_unit, unit_text
 from ..io import pdfio
 from .widgets import UnitCombo
 
@@ -135,117 +138,761 @@ class NewPagesDialog(QDialog):
         return setup
 
 
-class ScaleDialog(QDialog):
-    """Set the drawing scale: from a standard ratio, or from a measured distance.
+class PagesChooser(QWidget):
+    """Revu's Pages: All Pages, Current (n), Selected (only when pages are
+    picked in Thumbnails) or Custom, with the range in a box beside it —
+    "1-3, 5, 9" — which typing into makes Custom (the user, 2026-10-15)."""
 
-    Two ways in, and both have to be reachable from a standing start. Picking
-    two points on the drawing is a button here rather than a radio that can
-    only be chosen once a measurement already exists — which is what it was,
-    and it read as broken.
+    ALL, CURRENT, SELECTED, CUSTOM = "all", "current", "selected", "custom"
+
+    def __init__(self, count: int, current: int = 0, selected=None,
+                 default: str = CURRENT, parent=None):
+        super().__init__(parent)
+        self.count = max(int(count), 1)
+        self.current = min(max(int(current), 0), self.count - 1)
+        self.selected = sorted(selected or [])
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.combo = QComboBox()
+        self.combo.setObjectName("pagesChoice")
+        self.combo.addItem("All Pages", self.ALL)
+        self.combo.addItem(f"Current ({self.current + 1})", self.CURRENT)
+        if self.selected:
+            self.combo.addItem("Selected", self.SELECTED)
+        self.combo.addItem("Custom", self.CUSTOM)
+        self.range = QLineEdit()
+        self.range.setObjectName("pagesRange")
+        self.range.setPlaceholderText("1-3, 5")
+        self.range.setToolTip("Pages and ranges, e.g. 1-3, 5, 9")
+        row.addWidget(self.combo, 1)
+        row.addWidget(self.range, 1)
+        self.combo.currentIndexChanged.connect(self._fill)
+        self.range.textEdited.connect(self._typed)
+        self.choose(default)
+
+    def which(self) -> str:
+        return self.combo.currentData()
+
+    def choose(self, which: str, text: Optional[str] = None) -> None:
+        index = self.combo.findData(which)
+        self.combo.setCurrentIndex(index if index >= 0 else self.combo.findData(self.CURRENT))
+        self._fill()
+        if text is not None:
+            self.range.setText(text)
+
+    def _fill(self, *_args) -> None:
+        which = self.which()
+        if which == self.ALL:
+            self.range.setText("1" if self.count == 1 else f"1-{self.count}")
+        elif which == self.CURRENT:
+            self.range.setText(str(self.current + 1))
+        elif which == self.SELECTED:
+            self.range.setText(page_ranges(self.selected))
+
+    def _typed(self, _text: str) -> None:
+        if self.which() != self.CUSTOM:
+            was = self.combo.blockSignals(True)
+            self.combo.setCurrentIndex(self.combo.findData(self.CUSTOM))
+            self.combo.blockSignals(was)
+
+    def page_indexes(self) -> Optional[list]:
+        """The chosen pages, from 0; None when the Custom range will not read."""
+        which = self.which()
+        if which == self.ALL:
+            return list(range(self.count))
+        if which == self.CURRENT:
+            return [self.current]
+        if which == self.SELECTED:
+            return list(self.selected)
+        from .colorprocess import parse_pages
+        return parse_pages(self.range.text(), self.count)
+
+
+def page_ranges(indexes) -> str:
+    """[0, 1, 2, 4] as "1-3, 5"."""
+    parts, run = [], []
+    for index in sorted(set(indexes)):
+        if run and index == run[-1] + 1:
+            run.append(index)
+            continue
+        if run:
+            parts.append(str(run[0] + 1) if len(run) == 1 else f"{run[0] + 1}-{run[-1] + 1}")
+        run = [index]
+    if run:
+        parts.append(str(run[0] + 1) if len(run) == 1 else f"{run[0] + 1}-{run[-1] + 1}")
+    return ", ".join(parts)
+
+
+# Revu's Set Scale (the user, 2026-10-15: "page scale pop up doesn't look
+# like" Bluebeam's). Its presets are the common metric, architectural and
+# engineering scales; the ones somebody saves go at the top, each with a
+# delete button. A preset is (name, paper length, paper unit, real length,
+# real unit); a metric one is just its ratio.
+FEET_INCHES = "ft' in\""
+METRIC_SCALES = (1, 2, 5, 10, 20, 25, 50, 75, 100, 125, 150, 200, 250, 500, 1000,
+                 1250, 2000, 2500, 5000)
+ARCHITECTURAL_SCALES = (("1/32\" = 1'-0\"", 1 / 32), ("1/16\" = 1'-0\"", 1 / 16),
+                        ("3/32\" = 1'-0\"", 3 / 32), ("1/8\" = 1'-0\"", 1 / 8),
+                        ("3/16\" = 1'-0\"", 3 / 16), ("1/4\" = 1'-0\"", 1 / 4),
+                        ("3/8\" = 1'-0\"", 3 / 8), ("1/2\" = 1'-0\"", 1 / 2),
+                        ("3/4\" = 1'-0\"", 3 / 4), ("1\" = 1'-0\"", 1.0),
+                        ("1 1/2\" = 1'-0\"", 1.5), ("3\" = 1'-0\"", 3.0),
+                        ("6\" = 1'-0\"", 6.0), ("12\" = 1'-0\"", 12.0))
+ENGINEERING_SCALES = (10, 20, 30, 40, 50, 60, 100, 200, 500, 1000)
+PAPER_UNIT_NAMES = ("mm", "cm", "in", "pt")
+REAL_UNIT_NAMES = ("mm", "cm", "m", "km", "in", "ft", FEET_INCHES, "yd", "mi")
+METRIC_UNITS = ("mm", "cm", "m", "km")
+# Revu's Precision: decimals for most units, fractions of an inch for
+# feet-and-inches and inches.
+DECIMAL_PRECISIONS = ("1", "0.1", "0.01", "0.001", "0.0001", "0.00001", "0.000001")
+FRACTION_PRECISIONS = (1, 2, 4, 8, 16, 32, 64)
+PRESETS_KEY = "scale/presets"
+
+
+def builtin_presets() -> list:
+    """Every preset Revu comes with: (name, paper, paper unit, real, real unit)."""
+    presets = [(f"1:{n}", 1.0, "mm", float(n), "mm") for n in METRIC_SCALES]
+    presets += [(name, inches, "in", 1.0, FEET_INCHES) for name, inches in ARCHITECTURAL_SCALES]
+    presets += [(f"1\" = {n}'", 1.0, "in", float(n), "ft") for n in ENGINEERING_SCALES]
+    return presets
+
+
+def saved_scale_presets() -> list:
+    """The scales saved with + Add Preset, newest first: [{name, paper, ...}]."""
+    import json
+    from ..settings import app_settings
+    try:
+        stored = json.loads(app_settings().value(PRESETS_KEY, "[]") or "[]")
+    except (TypeError, ValueError):
+        return []
+    return [entry for entry in stored if isinstance(entry, dict) and entry.get("name")]
+
+
+def store_scale_presets(presets: list) -> None:
+    import json
+    from ..settings import app_settings
+    settings = app_settings()
+    settings.setValue(PRESETS_KEY, json.dumps(presets))
+    settings.sync()
+
+
+def read_number(text: str) -> Optional[float]:
+    """"2.5", "1/4" or "1 1/2" as a number; None if it is not one."""
+    text = (text or "").strip()
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    match = re.fullmatch(r"(?:(\d+(?:\.\d*)?)\s+)?(\d+)\s*/\s*(\d+)", text)
+    if not match or not int(match.group(3)):
+        return None
+    return float(match.group(1) or 0) + int(match.group(2)) / int(match.group(3))
+
+
+def number_text(value: float) -> str:
+    return f"{float(f'{value:.6g}'):g}"
+
+
+_DELETE_ROLE = Qt.UserRole + 1
+
+
+class _PresetDelegate(QStyledItemDelegate):
+    """Draws the delete button at the right of a saved preset's row."""
+
+    @staticmethod
+    def _separator(index) -> bool:
+        return index.data(Qt.AccessibleDescriptionRole) == "separator"
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        if self._separator(index):
+            size.setHeight(9)
+            return size
+        size.setHeight(max(size.height() + 6, 24))
+        size.setWidth(size.width() + 34)
+        return size
+
+    def paint(self, painter, option, index):
+        if self._separator(index):
+            painter.save()
+            painter.setPen(option.palette.color(QPalette.Mid))
+            middle = option.rect.center().y()
+            painter.drawLine(option.rect.left() + 6, middle, option.rect.right() - 6, middle)
+            painter.restore()
+            return
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(option.rect, option.palette.color(QPalette.Highlight))
+        painter.save()
+        painter.setPen(option.palette.color(
+            QPalette.HighlightedText if option.state & QStyle.State_Selected else QPalette.Text))
+        painter.drawText(option.rect.adjusted(8, 0, -26, 0), Qt.AlignVCenter | Qt.AlignLeft,
+                         index.data(Qt.DisplayRole) or "")
+        if index.data(_DELETE_ROLE):
+            font = painter.font()
+            if font.pointSizeF() > 0:
+                font.setPointSizeF(font.pointSizeF() + 1)
+            elif font.pixelSize() > 0:
+                font.setPixelSize(font.pixelSize() + 1)
+            painter.setFont(font)
+            painter.drawText(PresetCombo.delete_rect(option.rect), Qt.AlignCenter, "✕")
+        painter.restore()
+
+
+class PresetCombo(QComboBox):
+    """The Scale dropdown: saved scales at the top, each with a delete
+    button, then Revu's own, which cannot be deleted."""
+
+    deleteRequested = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("scalePreset")
+        self.setItemDelegate(_PresetDelegate(self))
+        self.view().viewport().installEventFilter(self)
+        # a list of sixteen rows that scrolls, not one the height of the screen
+        self.setStyleSheet("QComboBox { combobox-popup: 0; }")
+        self.setMaxVisibleItems(16)
+        self.setMinimumContentsLength(14)
+        self.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+
+    @staticmethod
+    def delete_rect(rect):
+        return rect.adjusted(rect.width() - 22, 0, 0, 0)
+
+    def fill(self, saved: list) -> None:
+        chosen = self.currentText()
+        was = self.blockSignals(True)
+        self.clear()
+        for entry in saved:
+            self.addItem(entry["name"], ("saved", entry))
+            self.setItemData(self.count() - 1, True, _DELETE_ROLE)
+            self.setItemData(self.count() - 1, "Saved preset — ✕ deletes it", Qt.ToolTipRole)
+        for group in (METRIC_SCALES, ARCHITECTURAL_SCALES, ENGINEERING_SCALES):
+            if self.count():
+                self.insertSeparator(self.count())
+            for preset in builtin_presets():
+                kind = (METRIC_SCALES if preset[2] == "mm" else
+                        ARCHITECTURAL_SCALES if preset[4] == FEET_INCHES else ENGINEERING_SCALES)
+                if kind is group:
+                    self.addItem(preset[0], ("builtin", preset))
+        index = self.findText(chosen)
+        self.setCurrentIndex(index if index >= 0 else self.findText("1:100"))
+        self.blockSignals(was)
+
+    def eventFilter(self, watched, event):
+        # A click on a saved preset's ✕ deletes it rather than choosing it.
+        if event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease):
+            view = self.view()
+            index = view.indexAt(event.position().toPoint())
+            if index.isValid() and index.data(_DELETE_ROLE) and \
+                    self.delete_rect(view.visualRect(index)).contains(event.position().toPoint()):
+                if event.type() == QEvent.MouseButtonRelease:
+                    self.deleteRequested.emit(index.data(Qt.DisplayRole))
+                return True
+        return super().eventFilter(watched, event)
+
+
+class _ScaleRow:
+    """One scale, X or Y: Preset or Custom; a preset from the Scale
+    dropdown, or [drawing length][unit] = [real-world length][unit] with
+    Calibrate beside it."""
+
+    def __init__(self, dialog: "ScaleDialog", axis: str, calibrate: bool):
+        self.dialog = dialog
+        self.axis = axis
+        self.measured_pt: Optional[float] = None
+        self.radios = QWidget()
+        radios = QHBoxLayout(self.radios)
+        radios.setContentsMargins(0, 0, 0, 0)
+        self.preset_choice = QRadioButton("Preset")
+        self.custom_choice = QRadioButton("Custom")
+        self.group = QButtonGroup(self.radios)
+        for button in (self.preset_choice, self.custom_choice):
+            self.group.addButton(button)
+            radios.addWidget(button)
+        radios.addStretch(1)
+        self.label = QLabel("Scale:")
+        self.stack = QStackedWidget()
+        self.preset = PresetCombo()
+        self.preset.setObjectName(f"scalePreset{axis.upper()}")
+        self.stack.addWidget(self.preset)
+        custom = QWidget()
+        equation = QHBoxLayout(custom)
+        equation.setContentsMargins(0, 0, 0, 0)
+        equation.setSpacing(4)
+        self.page_length = QLineEdit("1")
+        self.page_length.setObjectName(f"scalePageLength{axis.upper()}")
+        self.page_length.setToolTip("The length on the drawing")
+        self.page_unit = QComboBox()
+        self.page_unit.addItems(PAPER_UNIT_NAMES)
+        self.real_length = QLineEdit()
+        self.real_length.setObjectName(f"scaleRealLength{axis.upper()}")
+        self.real_length.setToolTip("The real-world length it stands for")
+        self.real_unit = QComboBox()
+        self.real_unit.addItems(REAL_UNIT_NAMES)
+        for box in (self.page_length, self.real_length):
+            box.setMaximumWidth(84)
+            box.setMinimumWidth(56)
+        equation.addWidget(self.page_length)
+        equation.addWidget(self.page_unit)
+        equation.addWidget(QLabel("="))
+        equation.addWidget(self.real_length)
+        equation.addWidget(self.real_unit)
+        self.calibrate = QPushButton("Calibrate")
+        self.calibrate.setToolTip(
+            "Pick two points on the drawing to calibrate its scale: click one "
+            "end of something you know the length of, then the other, then "
+            "type that length")
+        self.calibrate.clicked.connect(lambda: dialog.start_calibrating(axis))
+        self.calibrate.setVisible(calibrate)
+        equation.addWidget(self.calibrate)
+        equation.addStretch(1)
+        self.stack.addWidget(custom)
+        self.preset_choice.toggled.connect(self._mode_changed)
+        self.preset.currentIndexChanged.connect(lambda _i: dialog.scale_changed())
+        self.real_unit.currentIndexChanged.connect(lambda _i: dialog.scale_changed())
+        self.preset.deleteRequested.connect(dialog.delete_preset)
+
+    # -- what it shows -----------------------------------------------------
+    def widgets(self) -> tuple:
+        return (self.radios, self.label, self.stack)
+
+    def set_visible(self, on: bool) -> None:
+        for widget in self.widgets():
+            widget.setVisible(on)
+
+    def is_custom(self) -> bool:
+        return self.custom_choice.isChecked()
+
+    def set_custom(self, on: bool) -> None:
+        (self.custom_choice if on else self.preset_choice).setChecked(True)
+        self._mode_changed()
+
+    def _mode_changed(self, *_args) -> None:
+        self.stack.setCurrentIndex(1 if self.is_custom() else 0)
+        self.dialog.scale_changed()
+
+    def show_scale(self, label: str, per_pt, display_unit: str, calibrated: bool) -> None:
+        """Put *label*'s scale in the row: as its preset when it is one,
+        otherwise as an equation."""
+        index = self.preset.findText(label) if label else -1
+        if not calibrated:
+            self.preset.setCurrentIndex(max(self.preset.findText("1:100"), 0))
+            self.set_custom(False)
+            return
+        if index >= 0:
+            self.preset.setCurrentIndex(index)
+            self.set_custom(False)
+            return
+        match = re.fullmatch(r"\s*([\d./ ]+?)\s*(mm|cm|in|pt)\s*=\s*([\d./ ]+?)\s*(.+?)\s*",
+                             label or "")
+        if match and match.group(4) in REAL_UNIT_NAMES:
+            self.page_length.setText(match.group(1))
+            self.page_unit.setCurrentText(match.group(2))
+            self.real_length.setText(match.group(3))
+            self.real_unit.setCurrentText(match.group(4))
+        else:
+            # a calibrated or older scale: one paper unit and what it stands for
+            unit = display_unit if display_unit in REAL_UNIT_NAMES else "m"
+            paper = "mm" if unit in METRIC_UNITS else "in"
+            self.page_length.setText("1")
+            self.page_unit.setCurrentText(paper)
+            try:
+                real = float((per_pt * PAPER_UNITS[paper]).to(
+                    "ft" if unit == FEET_INCHES else unit).magnitude)
+            except Exception:                             # noqa: BLE001
+                real = 0.0
+            self.real_length.setText(number_text(real) if real else "")
+            self.real_unit.setCurrentText(unit)
+        self.set_custom(True)
+
+    def set_measured(self, measured_pt: float) -> None:
+        """Calibrate's two points: the measured length on the left, the
+        real one to be typed on the right."""
+        self.measured_pt = measured_pt
+        unit = self.page_unit.currentText() or "mm"
+        if self.real_unit.currentText() not in METRIC_UNITS and unit == "mm":
+            unit = "in"
+        self.page_unit.setCurrentText(unit)
+        self._measured_text = number_text(measured_pt / PAPER_UNITS[unit])
+        self.page_length.setText(self._measured_text)
+        self.real_length.clear()
+        self.set_custom(True)
+        self.real_length.setFocus()
+
+    def real_unit_name(self) -> str:
+        """The real-world unit this row is in, as the unit boxes write it."""
+        if self.is_custom():
+            return self.real_unit.currentText()
+        data = self.preset.currentData()
+        if not data:
+            return "m"
+        if data[0] == "saved":
+            return data[1].get("real_unit", "m")
+        return data[1][4]
+
+    # -- the scale it says ---------------------------------------------------
+    def scale(self) -> tuple[Optional[PageScale], str]:
+        """(the scale, "") or (None, what is wrong with it)."""
+        if not self.is_custom():
+            data = self.preset.currentData()
+            if not data:
+                return None, "Choose a scale from the list."
+            kind, preset = data
+            if kind == "saved":
+                return self._from_equation(preset.get("paper", 1.0), preset.get("paper_unit", "mm"),
+                                           preset.get("real", 1.0), preset.get("real_unit", "mm"),
+                                           preset["name"])
+            name, paper, paper_unit, real, real_unit = preset
+            if paper_unit == "mm" and real_unit == "mm":
+                return PageScale.from_ratio(real / paper), ""
+            return self._from_equation(paper, paper_unit, real, real_unit, name)
+        page = read_number(self.page_length.text())
+        if self.measured_pt and self.page_length.text() == getattr(self, "_measured_text", None):
+            page = self.measured_pt / PAPER_UNITS[self.page_unit.currentText()]
+        if not page or page <= 0:
+            return None, "Enter the drawing length on the left, such as 1."
+        text = self.real_length.text().strip()
+        real = read_number(text)
+        unit = self.real_unit.currentText()
+        if real is None:
+            # "10 m" or "10mm" typed whole, its unit with it
+            try:
+                quantity = parse_unit(text)
+                valid = quantity is not None and quantity.check("[length]")
+            except Exception:                             # noqa: BLE001
+                valid = False
+            if not valid:
+                return None, ("Enter the real-world length with compatible units, "
+                              "such as 10 mm or 2 m.")
+            unit = unit_text(quantity.units, plain=False) or unit
+            real = float(quantity.magnitude)
+        if real <= 0:
+            return None, "Enter the real-world length on the right, such as 50."
+        shown = self.page_length.text().strip() if self.measured_pt is None or \
+            self.page_length.text() != getattr(self, "_measured_text", None) else number_text(page)
+        label = f"{shown} {self.page_unit.currentText()} = {number_text(real)} {unit}"
+        return self._from_equation(page, self.page_unit.currentText(), real, unit, label)
+
+    @staticmethod
+    def _from_equation(paper, paper_unit, real, real_unit, label):
+        try:
+            scale = PageScale.from_equation(
+                float(paper), paper_unit, float(real),
+                "ft" if real_unit == FEET_INCHES else real_unit, label)
+            scale.length(1.0).to("mm")
+        except Exception:                                 # noqa: BLE001
+            return None, f"“{real_unit}” is not a length unit."
+        return scale, ""
+
+    def equation(self) -> Optional[dict]:
+        """This row's Custom scale as a preset to save."""
+        scale, problem = self.scale()
+        if scale is None or problem:
+            return None
+        page = read_number(self.page_length.text()) or 1.0
+        if self.measured_pt and self.page_length.text() == getattr(self, "_measured_text", None):
+            page = self.measured_pt / PAPER_UNITS[self.page_unit.currentText()]
+        real_unit = self.real_unit.currentText()
+        real = read_number(self.real_length.text())
+        if real is None:
+            quantity = parse_unit(self.real_length.text())
+            real = float(quantity.magnitude)
+            real_unit = unit_text(quantity.units, plain=False) or real_unit
+        return {"name": scale.label, "paper": page, "paper_unit": self.page_unit.currentText(),
+                "real": real, "real_unit": real_unit}
+
+    # -- across a calibration ----------------------------------------------------
+    def state(self) -> dict:
+        return {"custom": self.is_custom(), "preset": self.preset.currentText(),
+                "page": self.page_length.text(), "page_unit": self.page_unit.currentText(),
+                "real": self.real_length.text(), "real_unit": self.real_unit.currentText()}
+
+    def restore(self, state: dict) -> None:
+        index = self.preset.findText(state.get("preset", ""))
+        if index >= 0:
+            self.preset.setCurrentIndex(index)
+        self.page_length.setText(state.get("page", "1"))
+        self.page_unit.setCurrentText(state.get("page_unit", "mm"))
+        self.real_length.setText(state.get("real", ""))
+        self.real_unit.setCurrentText(state.get("real_unit", "m"))
+        self.set_custom(bool(state.get("custom")))
+
+
+class ScaleDialog(QDialog):
+    """Revu's Set Scale: the Pages it goes to; Preset (the Scale dropdown,
+    saved scales at the top) or Custom ([drawing length][unit] =
+    [real-world length][unit], with Calibrate); Separate Y Scale with a
+    second scale for down the page; Precision, decimals or fractions; then
+    + Add Preset, Apply Scale and Cancel (the user, 2026-10-15).
+
+    Calibrate closes the dialog with PICK; the window hands over to the
+    calibrate tool, and when the two points are picked it opens the dialog
+    again with what was chosen and the measured length on the left.
+    A viewport's scale uses the same dialog with its name above, and no
+    pages or calibration of its own.
     """
 
+    # Kept for the Page panel's ratio boxes.
     RATIOS = ["1:1", "1:5", "1:10", "1:20", "1:25", "1:50", "1:100", "1:200",
               "1:250", "1:500", "1:1000", "1:1250", "1:2500"]
 
     PICK = QDialog.Accepted + 10        # "let me point at two things instead"
 
     def __init__(self, scale: PageScale, measured_pt: Optional[float] = None, parent=None,
-                 name: Optional[str] = None):
+                 name: Optional[str] = None, *, count: int = 1, current: int = 0,
+                 selected=None, state: Optional[dict] = None):
         super().__init__(parent)
-        self.setWindowTitle("Page scale" if name is None else "Viewport")
+        self.setWindowTitle("Set Scale" if name is None else "Viewport")
+        self.old = scale
         self.measured_pt = measured_pt
+        self.calibrating = ""
+        self._result: Optional[PageScale] = None
+        viewport = name is not None
         layout = QVBoxLayout(self)
-        # A viewport is named and given a ratio; it has no calibration of its
-        # own to pick.
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        grid.setColumnStretch(1, 1)
+        layout.addLayout(grid)
+        row = 0
+        # A viewport is named and given a scale; it has no pages to choose.
         self.name = QLineEdit(name or "")
-        if name is not None:
-            named = QFormLayout()
-            self.name.setToolTip("What this region of the sheet is, e.g. Detail A")
-            named.addRow("Name", self.name)
-            layout.addLayout(named)
-
-        if name is not None:
-            self.known = QLineEdit()
-            self.known.hide()
-        elif measured_pt:
-            box = QGroupBox("From the distance you drew")
-            box.setToolTip("Clear this box to use the ratio below instead")
-            form = QFormLayout(box)
-            note = QLabel(f"You drew a line {measured_pt:.1f} pt long on the page. "
-                          "Type the real-world length it stands for.")
-            note.setWordWrap(True)
-            form.addRow(note)
-            self.known = QLineEdit()
-            self.known.setPlaceholderText("5 m, 12 ft, 3600 mm…")
-            form.addRow("It represents", self.known)
-            layout.addWidget(box)
+        self.name.setToolTip("What this region of the sheet is, e.g. Detail A")
+        if viewport:
+            grid.addWidget(QLabel("Name:"), row, 0)
+            grid.addWidget(self.name, row, 1)
+            row += 1
         else:
-            self.known = QLineEdit()
-            self.known.hide()
-            pick = QPushButton("Calibrate…")
-            pick.setToolTip("Pick two points on the drawing to calibrate its "
-                            "scale: click one end of something you know the "
-                            "length of, then the other, then type that length")
-            pick.clicked.connect(lambda: self.done(self.PICK))
-            layout.addWidget(pick)
+            self.name.hide()
+        self.pages = PagesChooser(count, current, selected)
+        if not viewport:
+            grid.addWidget(QLabel("Pages:"), row, 0)
+            grid.addWidget(self.pages, row, 1)
+            row += 1
+        else:
+            self.pages.hide()
 
-        ratio_box = QGroupBox("Standard ratio")
-        ratio_form = QFormLayout(ratio_box)
-        self.ratio = QComboBox()
-        self.ratio.setEditable(True)
-        self.ratio.addItems(self.RATIOS)
-        self.ratio.setCurrentText(ratio_text(scale.ratio()) if scale.is_calibrated()
-                                  else "1:100")
-        ratio_form.addRow("Ratio", self.ratio)
-        # Some sheets are stretched: a section at 1:100 across and 1:50 down.
-        self.separate_y = QCheckBox("Separate Y scale")
-        self.separate_y.setToolTip("Use a different scale down the page than across it")
+        self.x_row = _ScaleRow(self, "x", calibrate=not viewport)
+        self.y_row = _ScaleRow(self, "y", calibrate=not viewport)
+        saved = saved_scale_presets()
+        for scale_row in (self.x_row, self.y_row):
+            scale_row.preset.fill(saved)
+        self.x_row.radios.setObjectName("scaleModeX")
+        grid.addWidget(self.x_row.radios, row, 1)
+        row += 1
+        grid.addWidget(self.x_row.label, row, 0)
+        grid.addWidget(self.x_row.stack, row, 1)
+        row += 1
+        self.separate_y = QCheckBox("Separate Y Scale")
+        self.separate_y.setToolTip("A different scale down the page than across it")
+        grid.addWidget(self.separate_y, row, 1)
+        row += 1
+        grid.addWidget(self.y_row.radios, row, 1)
+        row += 1
+        grid.addWidget(self.y_row.label, row, 0)
+        grid.addWidget(self.y_row.stack, row, 1)
+        row += 1
+        self.y_row.label.setText("Y Scale:")
+        self.precision = QComboBox()
+        self.precision.setObjectName("scalePrecision")
+        self.precision.setToolTip("How finely measurements are written")
+        self.precision.setMinimumContentsLength(9)
+        grid.addWidget(QLabel("Precision:"), row, 0)
+        grid.addWidget(self.precision, row, 1, Qt.AlignLeft)
+        # The old name, for what still sets the X scale's preset by it.
+        self.ratio = self.x_row.preset
+
+        buttons = QHBoxLayout()
+        self.add_preset = QPushButton("+ Add Preset")
+        self.add_preset.setObjectName("scaleAddPreset")
+        self.add_preset.setToolTip("Save this custom or calibrated scale to the "
+                                   "top of the Preset list")
+        self.add_preset.clicked.connect(self.save_preset)
+        buttons.addWidget(self.add_preset)
+        buttons.addStretch(1)
+        self.apply_button = QPushButton("Apply Scale")
+        self.apply_button.setObjectName("scaleApply")
+        self.apply_button.setDefault(True)
+        self.apply_button.clicked.connect(self.apply)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(self.apply_button)
+        buttons.addWidget(cancel)
+        layout.addSpacing(4)
+        layout.addLayout(buttons)
+
+        # what the page has now
+        self._filling = True
+        label = scale.label or ""
+        both = re.fullmatch(r"X (.+), Y (.+)", label)
+        self.x_row.show_scale(both.group(1) if both else label, scale.length_per_pt,
+                              scale.display_unit, scale.is_calibrated())
+        y_per_pt = scale.length_per_pt * scale.y_factor
+        self.y_row.show_scale(both.group(2) if both else label, y_per_pt,
+                              scale.display_unit, scale.is_calibrated())
         self.separate_y.setChecked(scale.is_calibrated() and scale.separate_y())
-        ratio_form.addRow("", self.separate_y)
-        self.y_ratio = QComboBox()
-        self.y_ratio.setEditable(True)
-        self.y_ratio.addItems(self.RATIOS)
-        self.y_ratio.setCurrentText(ratio_text(scale.y_ratio()) if scale.is_calibrated()
-                                    else "1:100")
-        self.y_ratio.setEnabled(self.separate_y.isChecked())
-        self.separate_y.toggled.connect(self.y_ratio.setEnabled)
-        ratio_form.addRow("Y ratio", self.y_ratio)
-        layout.addWidget(ratio_box)
+        self._precision_kind = None
+        self._filling = False
+        self.separate_y.toggled.connect(lambda _on: self.scale_changed())
+        if state:
+            self.restore(state)
+        if measured_pt:
+            row_measured = self.y_row if self.calibrating == "y" else self.x_row
+            if not self.separate_y.isChecked():
+                row_measured = self.x_row
+            row_measured.set_measured(measured_pt)
+        self.scale_changed()
 
-        units = QFormLayout()
-        self.length_unit = UnitCombo(scale.display_unit)
-        self.length_unit.setToolTip("Units used to display lengths")
-        units.addRow("Length unit", self.length_unit)
-        self.area_unit = UnitCombo(scale.area_unit)
-        self.area_unit.setToolTip("Units used to display areas")
-        units.addRow("Area unit", self.area_unit)
-        self.precision = QSpinBox()
-        self.precision.setRange(0, 6)
-        self.precision.setValue(scale.precision)
-        units.addRow("Decimal places", self.precision)
-        layout.addLayout(units)
-        layout.addWidget(_buttons(self))
+    # -- keeping it in step ---------------------------------------------------
+    def scale_changed(self) -> None:
+        if getattr(self, "_filling", True):
+            return
+        separate = self.separate_y.isChecked()
+        self.y_row.set_visible(separate)
+        self.x_row.label.setText("X Scale:" if separate else "Scale:")
+        self.add_preset.setEnabled(self.x_row.is_custom())
+        self._fill_precision()
+        self.adjustSize()
+
+    def _wants_fraction(self) -> bool:
+        """Revu writes feet-and-inches and inches to a fraction; everything
+        else to decimals (of the X scale, when there are two)."""
+        unit = self.x_row.real_unit_name()
+        if not self.x_row.is_custom():
+            data = self.x_row.preset.currentData()
+            if data and data[0] == "saved" and data[1].get("fraction"):
+                return True
+        return unit in (FEET_INCHES, "in")
+
+    def _fill_precision(self) -> None:
+        fraction = self._wants_fraction()
+        kind = "fraction" if fraction else "decimal"
+        if kind == self._precision_kind:
+            return
+        self._precision_kind = kind
+        self.precision.clear()
+        if fraction:
+            for denominator in FRACTION_PRECISIONS:
+                self.precision.addItem("1" if denominator == 1 else f"1/{denominator}",
+                                       ("fraction", denominator))
+            wanted = self.old.fraction if getattr(self.old, "fraction", 0) else 16
+            self.precision.setCurrentIndex(FRACTION_PRECISIONS.index(wanted)
+                                           if wanted in FRACTION_PRECISIONS else 4)
+        else:
+            for places, text in enumerate(DECIMAL_PRECISIONS):
+                self.precision.addItem(text, ("decimal", places))
+            wanted = min(max(int(self.old.precision), 0), len(DECIMAL_PRECISIONS) - 1)
+            self.precision.setCurrentIndex(wanted)
+
+    def set_precision(self, text: str) -> bool:
+        """Choose a Precision by what it says: "0.001", "1/8"."""
+        index = self.precision.findText(text)
+        if index < 0:
+            return False
+        self.precision.setCurrentIndex(index)
+        return True
+
+    # -- Calibrate, + Add Preset, the ✕ beside a saved one ------------------------------
+    def start_calibrating(self, axis: str = "x") -> None:
+        self.calibrating = axis
+        self.done(self.PICK)
+
+    def state(self) -> dict:
+        """Everything chosen, to put back after calibrating."""
+        return {"pages": self.pages.which(), "range": self.pages.range.text(),
+                "separate_y": self.separate_y.isChecked(), "x": self.x_row.state(),
+                "y": self.y_row.state(), "precision": self.precision.currentText(),
+                "calibrating": self.calibrating}
+
+    def restore(self, state: dict) -> None:
+        self._filling = True
+        self.pages.choose(state.get("pages", PagesChooser.CURRENT), state.get("range"))
+        self.separate_y.setChecked(bool(state.get("separate_y")))
+        self.x_row.restore(state.get("x", {}))
+        self.y_row.restore(state.get("y", {}))
+        self.calibrating = state.get("calibrating", "")
+        self._filling = False
+        self.scale_changed()
+        self.set_precision(state.get("precision", ""))
+
+    def save_preset(self) -> Optional[dict]:
+        """+ Add Preset: the custom or calibrated X scale, to the top of the list."""
+        entry = self.x_row.equation()
+        if entry is None:
+            _scale, problem = self.x_row.scale()
+            QMessageBox.warning(self, "Set Scale", problem or "Enter a custom scale first.")
+            return None
+        entry["fraction"] = self._chosen_fraction()
+        presets = [p for p in saved_scale_presets() if p.get("name") != entry["name"]]
+        store_scale_presets([entry] + presets)
+        self._refill_presets()
+        return entry
+
+    def delete_preset(self, name: str) -> None:
+        store_scale_presets([p for p in saved_scale_presets() if p.get("name") != name])
+        self._refill_presets()
+
+    def _refill_presets(self) -> None:
+        saved = saved_scale_presets()
+        for scale_row in (self.x_row, self.y_row):
+            scale_row.preset.fill(saved)
+        self.scale_changed()
+
+    def _chosen_fraction(self) -> int:
+        data = self.precision.currentData()
+        return int(data[1]) if data and data[0] == "fraction" else 0
+
+    # -- the answer ---------------------------------------------------------
+    def apply(self) -> None:
+        """Apply Scale: only once the scale and the pages both read."""
+        if self.result_scale() is None:
+            return
+        if self.pages.isVisibleTo(self) and not self.page_indexes():
+            QMessageBox.warning(self, "Set Scale",
+                                "Enter pages to apply it to, such as 1-3, 5.")
+            return
+        self.accept()
+
+    def page_indexes(self) -> Optional[list]:
+        return self.pages.page_indexes()
 
     def result_scale(self) -> Optional[PageScale]:
-        # A measured distance wins when one was drawn and named; empty the box
-        # and the ratio below is used instead.
-        if self.measured_pt and self.known.text().strip():
-            if parse_unit(self.known.text()) is None:
-                QMessageBox.warning(self, "Page scale",
-                                    "That length could not be read. Try something like “5 m”.")
+        x_scale, problem = self.x_row.scale()
+        if x_scale is None:
+            QMessageBox.warning(self, "Set Scale", problem)
+            return None
+        scale = x_scale
+        if self.separate_y.isChecked():
+            y_scale, problem = self.y_row.scale()
+            if y_scale is None:
+                QMessageBox.warning(self, "Set Scale", problem)
                 return None
-            scale = PageScale.from_calibration(self.measured_pt, self.known.text())
+            try:
+                factor = float((y_scale.length(1.0) / x_scale.length(1.0))
+                               .to("dimensionless").magnitude)
+            except Exception:                             # noqa: BLE001
+                factor = 1.0
+            if abs(factor - 1.0) > 1e-9:
+                scale.y_factor = factor
+                scale.label = f"X {x_scale.label}, Y {y_scale.label}"
+        # A metric preset is in the units the page already used, if metric;
+        # anything else is in its own real-world unit.
+        old_unit = self.old.display_unit
+        if scale.label.startswith("1:") or scale.label.startswith("X 1:"):
+            scale.display_unit = old_unit if old_unit in METRIC_UNITS else "m"
+        if scale.display_unit == self.old.display_unit:
+            scale.area_unit = self.old.area_unit
         else:
-            ratio = read_ratio(self.ratio.currentText())
-            y_ratio = read_ratio(self.y_ratio.currentText()) \
-                if self.separate_y.isChecked() else ratio
-            if ratio is None or y_ratio is None:
-                QMessageBox.warning(self, "Page scale", "Enter a ratio such as 1:100.")
-                return None
-            scale = PageScale.from_ratio(ratio, y_ratio=y_ratio)
-        scale.display_unit = self.length_unit.currentText() or "m"
-        scale.area_unit = self.area_unit.currentText() or "m^2"
-        scale.precision = self.precision.value()
+            scale.area_unit = f"{scale.display_unit}^2"
+        data = self.precision.currentData() or ("decimal", self.old.precision)
+        if data[0] == "fraction":
+            scale.fraction = int(data[1])
+            scale.precision = self.old.precision        # areas stay in decimals
+        else:
+            scale.fraction = 0
+            scale.precision = int(data[1])
+        self._result = scale
         return scale
 
 
@@ -270,41 +917,6 @@ def read_ratio(text: str) -> Optional[float]:
     except ValueError:
         return None
     return ratio if ratio and ratio > 0 else None
-
-
-class CalibrationLengthDialog(QDialog):
-    """Name the real length after two calibration points are picked."""
-
-    def __init__(self, measured_pt: float, parent=None):
-        super().__init__(parent)
-        self.measured_pt = measured_pt
-        self.setWindowTitle("Calibrate scale")
-        layout = QVBoxLayout(self)
-        note = QLabel(
-            f"The picked line is {measured_pt:.1f} pt on the page. "
-            "Enter the real length it represents.")
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        form = QFormLayout()
-        self.known = QLineEdit()
-        self.known.setPlaceholderText("10 mm")
-        form.addRow("Length", self.known)
-        layout.addLayout(form)
-        layout.addWidget(_buttons(self))
-
-    def length_text(self) -> Optional[str]:
-        text = self.known.text().strip()
-        try:
-            value = parse_unit(text)
-            valid = value is not None and value.check("[length]")
-        except Exception:  # noqa: BLE001 - invalid user-entered units
-            valid = False
-        if not valid:
-            QMessageBox.warning(
-                self, "Calibrate scale",
-                "Enter a length with compatible units, such as 10 mm or 2 m.")
-            return None
-        return text
 
 
 class PdfImportDialog(QDialog):
@@ -1198,39 +1810,124 @@ class ToolbarDialog(QDialog):
 
 
 class FlattenDialog(QDialog):
-    """Choose the document content classes to make part of the page."""
+    """Revu's Flatten Markups (Document ▸ Flatten): the Type list, checked
+    types flattened; Flatten: All Markups, Exclude Filtered Markups or
+    Currently Selected Markups; Allow Markup Recovery (Unflatten), which
+    belongs here and not in Preferences (the user, 2026-10-15: "flatten
+    recovery is in settings not in flatten"); the Pages; Flatten and Cancel.
 
-    CLASSES = (("markups", "Markups"),
-               ("text", "Text"),
-               ("measurements", "Measurements"))
+    Revu's Flatten to Layer and its Capture options are left out: layers
+    were withdrawn, and nothing here records Capture media.
+    """
 
-    def __init__(self, recoverable: bool, parent=None):
+    ALL_MARKUPS, EXCLUDE_FILTERED, SELECTED_MARKUPS = "all", "exclude_filtered", "selected"
+
+    def __init__(self, types, parent=None, *, selected_markups: int = 0,
+                 recoverable: bool = True, count: int = 1, current: int = 0,
+                 selected_pages=None):
         super().__init__(parent)
-        self.setWindowTitle("Flatten")
+        self.setWindowTitle("Flatten Markups")
         layout = QVBoxLayout(self)
-        note = QLabel(
-            "Choose what to flatten on every page. Flatten Selection remains "
-            "available for individual items.")
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        self.boxes = {}
-        for key, label in self.CLASSES:
-            box = QCheckBox(label)
-            box.setChecked(key == "markups")
-            self.boxes[key] = box
-            layout.addWidget(box)
-        recovery = QLabel(
-            "Original item data will be retained and can be restored with Recover."
-            if recoverable else
-            "Recovery data is disabled in Preferences. This discards the chosen "
-            "items' editable source when the file is saved.")
-        recovery.setWordWrap(True)
-        recovery.setStyleSheet("color:#6b7280;" if recoverable else "color:#b3261e;")
-        layout.addWidget(recovery)
-        layout.addWidget(_buttons(self))
+        body = QHBoxLayout()
+        body.setSpacing(12)
+        layout.addLayout(body, 1)
 
-    def chosen(self) -> set[str]:
-        return {key for key, box in self.boxes.items() if box.isChecked()}
+        # the Type list: a tick per kind of markup in the document
+        self.types = QTreeWidget()
+        self.types.setObjectName("flattenTypes")
+        self.types.setHeaderLabels(["Type"])
+        self.types.setRootIsDecorated(False)
+        self.types.setUniformRowHeights(True)
+        self.types.setMinimumSize(200, 200)
+        self.types.setToolTip("Checked types are flattened; unchecked ones are not")
+        for name in types:
+            entry = QTreeWidgetItem([name])
+            entry.setFlags(entry.flags() | Qt.ItemIsUserCheckable)
+            entry.setCheckState(0, Qt.Checked)
+            self.types.addTopLevelItem(entry)
+        body.addWidget(self.types, 1)
+
+        options = QVBoxLayout()
+        options.setSpacing(6)
+        options.addWidget(QLabel("Flatten:"))
+        self.scope_group = QButtonGroup(self)
+        self.all_markups = QRadioButton("All Markups")
+        self.all_markups.setToolTip("Every markup of the checked types, filtered or not")
+        self.exclude_filtered = QRadioButton("Exclude Filtered Markups")
+        self.exclude_filtered.setToolTip(
+            "Leave alone the markups a filter in the Markups list is hiding")
+        self.selected_markups = QRadioButton("Currently Selected Markups")
+        self.selected_markups.setToolTip(
+            "Only the markups that were selected before this was opened"
+            if selected_markups else "Nothing was selected before this was opened")
+        self.selected_markups.setEnabled(bool(selected_markups))
+        choices = QVBoxLayout()
+        choices.setContentsMargins(14, 0, 0, 0)
+        choices.setSpacing(6)
+        for button in (self.all_markups, self.exclude_filtered, self.selected_markups):
+            self.scope_group.addButton(button)
+            choices.addWidget(button)
+        options.addLayout(choices)
+        (self.selected_markups if selected_markups else self.all_markups).setChecked(True)
+        options.addSpacing(8)
+        self.allow_recovery = QCheckBox("Allow Markup Recovery (Unflatten)")
+        self.allow_recovery.setObjectName("flattenAllowRecovery")
+        self.allow_recovery.setToolTip(
+            "Keep what is needed to unflatten them later (Document ▸ Unflatten).\n"
+            "Without it, flattening cannot be undone once the file is saved.")
+        self.allow_recovery.setChecked(bool(recoverable))
+        options.addWidget(self.allow_recovery)
+        options.addStretch(1)
+        body.addLayout(options)
+
+        pages = QHBoxLayout()
+        pages.addWidget(QLabel("Pages:"))
+        self.pages = PagesChooser(count, current, selected_pages, default=PagesChooser.ALL)
+        pages.addWidget(self.pages, 1)
+        layout.addLayout(pages)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        self.flatten_button = QPushButton("Flatten")
+        self.flatten_button.setObjectName("flattenGo")
+        self.flatten_button.setDefault(True)
+        self.flatten_button.clicked.connect(self.flatten)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(self.flatten_button)
+        buttons.addWidget(cancel)
+        layout.addLayout(buttons)
+
+    def flatten(self) -> None:
+        if not self.page_indexes():
+            QMessageBox.warning(self, "Flatten Markups",
+                                "Enter pages to flatten, such as 1-3, 5.")
+            return
+        self.accept()
+
+    def set_type_checked(self, name: str, on: bool) -> None:
+        for row in range(self.types.topLevelItemCount()):
+            entry = self.types.topLevelItem(row)
+            if entry.text(0) == name:
+                entry.setCheckState(0, Qt.Checked if on else Qt.Unchecked)
+
+    def chosen_types(self) -> set[str]:
+        return {self.types.topLevelItem(row).text(0)
+                for row in range(self.types.topLevelItemCount())
+                if self.types.topLevelItem(row).checkState(0) == Qt.Checked}
+
+    def scope(self) -> str:
+        if self.selected_markups.isChecked():
+            return self.SELECTED_MARKUPS
+        if self.exclude_filtered.isChecked():
+            return self.EXCLUDE_FILTERED
+        return self.ALL_MARKUPS
+
+    def recoverable(self) -> bool:
+        return self.allow_recovery.isChecked()
+
+    def page_indexes(self) -> Optional[list]:
+        return self.pages.page_indexes()
 
 
 class PreferencesDialog(QDialog):
@@ -1270,12 +1967,8 @@ class PreferencesDialog(QDialog):
             "Smooth scrolling and panning on high-density (Retina, 4K) screens.\n"
             "Turn off if pages draw wrongly with your graphics driver.")
         form.addRow("", self.gpu_drawing)
-        self.recover_flattened = QCheckBox("Recoverable flattening")
-        self.recover_flattened.setChecked(prefs.recover_flattened)
-        self.recover_flattened.setToolTip(
-            "Keep the original item data in the file so Markup > Recover can restore it.\n"
-            "Turn this off only when deliberately producing an irreversible file.")
-        form.addRow("", self.recover_flattened)
+        # Recoverable flattening is Flatten Markups' Allow Markup Recovery
+        # now, as in Revu, and remembered from there (the user, 2026-10-15).
         layout.addWidget(canvas)
 
         markup = QGroupBox("Markup")
@@ -1359,7 +2052,7 @@ class PreferencesDialog(QDialog):
             autosize_text=self.autosize.isChecked(),
             insertion_point=self.insertion.isChecked(),
             gpu_drawing=self.gpu_drawing.isChecked(),
-            recover_flattened=self.recover_flattened.isChecked(),
+            recover_flattened=getattr(self.prefs, "recover_flattened", True),
             markup_style_keys=self.style_keys.isChecked(),
             page_thumbnails=getattr(self.prefs, "page_thumbnails", 1.0),
             result_decimals=self.result_decimals.value(),

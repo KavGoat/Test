@@ -188,8 +188,13 @@ class RectItem(MarkupItem):
                 self.width_value = Q_(rect.width() / MM_TO_PT, _MILLIMETRES)
                 self.height_value = Q_(rect.height() / MM_TO_PT, _MILLIMETRES)
                 digits = 1
-            self.size_text = (f"{format_quantity(self.width_value, digits, 'fixed')}"
-                              f" × {format_quantity(self.height_value, digits, 'fixed')}")
+            if scale.is_calibrated() and hasattr(scale, "format_length"):
+                # to the scale's Precision, a fraction or decimals (Set Scale)
+                self.size_text = (f"{scale.format_length(self.width_value, digits)}"
+                                  f" × {scale.format_length(self.height_value, digits)}")
+            else:
+                self.size_text = (f"{format_quantity(self.width_value, digits, 'fixed')}"
+                                  f" × {format_quantity(self.height_value, digits, 'fixed')}")
         except Exception:
             self.size_text = ""
             self.width_value = self.height_value = None

@@ -69,7 +69,9 @@ class Preferences:
     OpenGL."""
 
     recover_flattened: bool = True
-    """Keep source item data when content is flattened into the page."""
+    """Flatten Markups' Allow Markup Recovery (Unflatten), as it was last
+    left: the dialog starts from it and remembers it. It is set there, as in
+    Revu, not in Preferences (the user, 2026-10-15)."""
 
     markup_style_keys: bool = True
     """Whether 1 to 9, with a markup tool in hand, draw the next markup in

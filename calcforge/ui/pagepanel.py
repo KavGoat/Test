@@ -412,6 +412,8 @@ class PagePanel(QScrollArea):
             scale = PageScale.from_ratio(ratio, y_ratio=y_ratio)
         scale.display_unit = self.length_unit.currentText() or "m"
         scale.area_unit = self.area_unit.currentText() or "m^2"
+        # Set Scale's fractional Precision stays unless decimals are chosen here
+        scale.fraction = old.fraction if self.precision.value() == old.precision else 0
         scale.precision = self.precision.value()
         if scale.to_dict() != old.to_dict():
             self.window.set_page_scale(scale)
