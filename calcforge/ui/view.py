@@ -214,6 +214,12 @@ class _SizeEdit(QLineEdit):
             self.enterPressed.emit()
             event.accept()
             return
+        if Qt.Key_F2 <= event.key() <= Qt.Key_F35 and not event.modifiers() & (
+                Qt.ControlModifier | Qt.AltModifier):
+            # kept here: passed on up, the proxy's window ran it as a shortcut
+            # (F12 changed modes while a size was typed — bug hunt 2026-10-16)
+            event.accept()
+            return
         super().keyPressEvent(event)
 
     def event(self, event) -> bool:
@@ -5120,6 +5126,15 @@ class PageView(QGraphicsView):
         did.
         """
         if event.type() == QEvent.ShortcutOverride and self.tables.wants_shortcut(event):
+            event.accept()
+            return True
+        if (event.type() == QEvent.ShortcutOverride
+                and (self._size_editor is not None or self._label_editor is not None)
+                and Qt.Key_F2 <= event.key() <= Qt.Key_F35
+                and not event.modifiers() & (Qt.ControlModifier | Qt.AltModifier)):
+            # a size or a dimension's words being typed on the canvas: F12 is
+            # not Calc mode and F11 not full screen in the middle of a number
+            # (bug hunt, 2026-10-16)
             event.accept()
             return True
         if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Tab,

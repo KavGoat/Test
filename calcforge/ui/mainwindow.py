@@ -633,6 +633,17 @@ def _bar_ink() -> str:
     from .icons import _THEME_INK, icon_theme
     return _THEME_INK.get(icon_theme(), "#2c3340")
 
+def _a_field_being_typed_in(widget) -> bool:
+    """A box that takes typing: a line edit, a spin box's or an editable
+    list's line, or a text editor — not read-only."""
+    from PySide6.QtWidgets import QAbstractSpinBox, QPlainTextEdit, QTextEdit
+    if isinstance(widget, QLineEdit):
+        return not widget.isReadOnly()
+    if isinstance(widget, (QTextEdit, QPlainTextEdit)):
+        return not widget.isReadOnly()
+    return isinstance(widget, QAbstractSpinBox)
+
+
 class MainWindow(QMainWindow):
     """Everything the user sees: canvas, toolbars, panels and menus."""
 
@@ -3449,10 +3460,31 @@ class MainWindow(QMainWindow):
                                 QEvent.MouseButtonPress):
             return super().eventFilter(watched, event)
         owner = watched if isinstance(watched, QWidget) else None
+        on_canvas = False
         while owner is not None and not isinstance(owner, MainWindow):
+            proxy = owner.graphicsProxyWidget() if owner.parentWidget() is None else None
+            if proxy is not None and proxy.scene() is not None and proxy.scene().views():
+                # a box on the canvas (a dimension's words, a typed size):
+                # the window of the view it is shown in
+                owner = proxy.scene().views()[0]
+                on_canvas = True
+                continue
             owner = owner.parentWidget()
         if owner is not self:
             return super().eventFilter(watched, event)
+        if (event.type() == QEvent.ShortcutOverride and _a_field_being_typed_in(watched)
+                and Qt.Key_F2 <= event.key() <= Qt.Key_F35
+                and not event.modifiers() & (Qt.ControlModifier | Qt.AltModifier
+                                             | Qt.MetaModifier)):
+            # A function key while typing in a box — the formula bar, the Name
+            # Box, Search, a typed size, a dimension's words, a panel's field —
+            # belongs to the box, as it already did in a cell, an equation and
+            # a text box: F12 switched modes and F11 went full screen in the
+            # middle of a word (bug hunt, 2026-10-16). F1 (Help) still works.
+            event.accept()
+            return True
+        if on_canvas:
+            return super().eventFilter(watched, event)    # the view handles the rest
         # Inline panel editors can consume Escape before it bubbles up to
         # this window. Cancel the canvas first, while leaving dialogs/popups
         # to their own normal Escape behaviour.

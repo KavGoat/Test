@@ -76,15 +76,48 @@ def keep_a_crash_log():
         return None
     log.write(f"\n--- CalcForge started {datetime.datetime.now():%Y-%m-%d %H:%M:%S}\n")
     log.flush()
+    was_on = faulthandler.is_enabled()
     faulthandler.enable(log, all_threads=True)
     before = sys.excepthook
 
     def told(kind, value, trace):
-        log.write("".join(traceback.format_exception(kind, value, trace)))
-        log.flush()
+        if not log.closed:
+            try:
+                log.write("".join(traceback.format_exception(kind, value, trace)))
+                log.flush()
+            except (OSError, ValueError):
+                pass
         before(kind, value, trace)
+    told.before = before
+    told.faulthandler_was_on = was_on
     sys.excepthook = told
     return log
+
+
+def close_the_crash_log(log, code: int) -> None:
+    """The run is over: say so, and hand the hooks back before the file goes.
+
+    faulthandler keeps the file's descriptor number, not the file: closed
+    under it, the number is handed to whatever opens a file next, and a hard
+    crash after that wrote its dump there — or nowhere to be seen. And the
+    error hook went on writing to the closed file, so every later Python
+    error came out as "I/O operation on closed file" instead (bug hunt,
+    2026-10-16: seen in every test run after the one that starts the app)."""
+    import faulthandler
+    if log is None:
+        return
+    try:
+        log.write(f"--- closed normally ({code})\n")
+        log.flush()
+    except (OSError, ValueError):
+        pass
+    hook = sys.excepthook
+    faulthandler.disable()
+    if getattr(hook, "faulthandler_was_on", False) and sys.__stderr__ is not None:
+        faulthandler.enable(sys.__stderr__, all_threads=True)    # as it was: to the terminal
+    if getattr(hook, "before", None) is not None:
+        sys.excepthook = hook.before
+    log.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -108,7 +141,5 @@ def main(argv: list[str] | None = None) -> int:
             break
 
     code = application.exec()
-    if log is not None:
-        log.write(f"--- closed normally ({code})\n")
-        log.close()
+    close_the_crash_log(log, code)
     return code
