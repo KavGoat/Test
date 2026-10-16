@@ -637,3 +637,127 @@ Confidence: verified (visual)
   - QTest key text may differ from a real keyboard (F-18).
 - **Machine load.** Load average was 6–16 on 4 cores. Single timings near
   100 ms are noise; F-14's growth is not.
+
+## Round 1b: the list rebuilt at a7656be, and the test made safe for the gate
+
+About 160 tests failed in the gate after the merge, and 141 on af22d2b. Most of
+it was staleness: commands.json had been built at b31a4dd, and later merges
+renamed and moved commands (command families, the Properties bar, shortcuts,
+sheets, undo, shapes). The rest was the harness reaching into other tests:
+- Its dialog- and menu-closing timers kept running after its module ended,
+  which explains the other files' "asks" and context-menu failures on
+  af22d2b.
+- A window closed by File ▸ Exit was never deleted, so it went on filtering
+  every event in the application.
+
+**The list, rebuilt at a7656be** (the main branch tip, after 6bbec67).
+- `docs/qa/feature_inventory.md` now has 1865 lines (it was 1214). Most of
+  the new lines are Keys: every command can now be bound.
+- `tools/qa/commands.json` now has 2204 commands and 2729 entry points (it was
+  1455 and 1931). 583 of those are "no key bound" rows, which are skipped with
+  that reason; the commands' other entries are tested.
+
+**Nothing vanished.** I compared the b31a4dd list with the d3a71f7 one, and
+the d3a71f7 one with the 6bbec67 one, and that with a7656be. Every name that disappeared was traced
+to a rename or a move, so there is no regression finding. The renames:
+- Pages from Document… became Insert Pages.
+- Arrange ▸ became Order ▸ and Alignment ▸.
+- Rotate Counterclockwise became Rotate Anticlockwise.
+- Page Scale… became Set Scale… (Tools ▸ Measure).
+- Flatten Selection became Flatten.
+- Tools ▸ Navigation ▸ moved into Edit (Pan, Select, Snapshot).
+- Stay Active became Reuse.
+- The Style toolbar became the Properties bar, with one row of controls per
+  markup kind. Dash spacing, the line ends, the hatch controls and text
+  alignment are now on that bar or its popups.
+- Minimise, Maximise and Close went with the drawn title bar: the window has
+  its native frame since 11324c9.
+- Insert Equation Here and Text Region became Insert Here ▸ Equation and Calc
+  Text.
+- Decimal places ▸ "Significant figures mode" became the equation menu's own
+  items at the top.
+- "N selected", "Exact Size" and "Keyboard Shortcuts" changed only their
+  counts or field numbers.
+- "[field] W_total" and "[field] L.beam" are now "[field] name": the
+  variable boxes write the name.
+
+**Harness fixes** (`tools/qa/exercise.py`):
+- **Exit.** A command that closes the window (File ▸ Exit, Ctrl+Q) no longer
+  touches the window's freed undo stack. This was the "QUndoStack already
+  deleted" error. `window_gone()` now checks for it, and a new window is built
+  for the next command.
+- **Settings.** Before each command the settings are wiped, as the suite's
+  conftest does. The Tool Chest is redrawn whenever its sets differ from what
+  is stored, which fixes the "no chest gear" failures (an earlier command had
+  hidden My Tools). Switches are restored by triggering them, so what listens
+  to `triggered` hears it.
+- **Buttons named after their value.** The status-bar layout button reads
+  "Continuous" or "Single Page" depending on the mode, so it is now found by
+  what its menu offers.
+- **Overflow.** Toolbar menu buttons behind the » overflow are reached through
+  », and » is re-opened until the control shows.
+- **Properties bar states.** Each row of the Properties bar now gets a fixture
+  with that markup kind picked (Pen, Highlighter, Arc, Count, Sheet1…).
+  A kind with no fixture of its own gets one markup drawn with its tool (Sketch
+  to Scale Rectangle and Ellipse). Right-click menus are matched without
+  regard to case ("Text Box"). The shared kind menus ("Canvas, 28 kinds (Pen,
+  …)") are tried on their Rectangle or first kind, whatever the count.
+- **Rail.** Panel rail buttons are found by their tip ("Thumbnails  (Alt+T)").
+- **Menus driven as a hand does.** This is the sheet agent's finding
+  (a7656be). The pointer now glides onto each entry in small steps and waits
+  until the menu has it under the pointer, instead of jumping there and
+  clicking at once; QMenu ignores a click until the pointer has moved since
+  the menu opened. A submenu is waited for until it shows. After each command
+  `back_to_the_window()` waits until no popup is left and the window has the
+  keyboard again; the offscreen platform keeps a closed menu active for a few
+  events.
+- **Windows left behind.** `dispose()` takes each step on its own, so a window
+  that Exit had already half torn down is still deleted.
+- **Thumbnails buttons.** The menus behind the Thumbnails + and ▦ buttons are
+  driven.
+- **Fixtures.**
+  - A bookmarked document now has real bookmarks.
+  - Page labels are renamed before the label resets run.
+  - A sheet has a page break before Remove Page Break runs.
+  - Invert, Determinant and Solve run on an equation being typed.
+  - Placeholder lines ("(no names yet)", "Y scale" until "Separate Y scale"
+    is ticked) are expected to be greyed.
+- **Help menu.** A menu that is slow to open (Help ▸ Find Tools) is waited for.
+- **Stale paths.** The dialog openers use the new menu paths.
+
+**Isolation** (`tests/test_every_command.py`):
+- **Clean exit.** The module fixture ends with `ex.shutdown()`. That stops the
+  dialog-closing timers, puts back `sys.excepthook` and the Qt message handler,
+  closes the window, and empties the clipboard and the settings. It also
+  restores quit-on-last-window-closed and the application's palette and style
+  sheet.
+- **Fair failures.** The window is reused from test to test. A failure is
+  judged again on a window built for it alone, so a result never depends on
+  the order xdist runs tests in.
+- **Stable xfail keys.** `known_failures.json` is keyed by where the command
+  is, its name and its way in (`exercise.job_keys`), not by M0123-style ids,
+  which shift whenever a line is added. A command that is not found now says
+  how to rebuild the list, and that a vanished command is a regression.
+- **Speed.** The test does not take pictures (`ex.PICTURES = False`); they are
+  for the contact sheets. That was a third of each run.
+- **Hangs.** A hang is written to `test_every_command-hang-<job>-<pid>.txt`
+  in the temp folder before the worker ends.
+
+**Still failing: nothing.** At 6bbec67 and at a7656be every one of round 1's mechanical
+failures is fixed: F-03, F-05, F-06 and F-07. `known_failures.json` is empty
+and the file passes without an xfail. The `nokey` rows are skipped.
+
+**Changed since round 1:**
+- Corner radius, the hatch controls, Count subject… and the table bar's
+  Format… are reachable through the Properties bar's » at 1280 px, so the
+  F-20 instances for them are closed.
+- On d3a71f7, one worker died once at M0067#2 (Ctrl+Alt+Up, Increase Font
+  Size, in a text box). It did not happen again, alone or in sequence. The
+  hang log now catches it if it comes back.
+
+**Wall time** (4 cores, load average 8–10 from other sessions):
+- The file alone at `-n 3` takes 580 s (9.7 min) at a7656be: 2146 passed,
+  583 skipped ("no key bound"), 0 failed. It took 498 s at 6bbec67, before
+  the gliding pointer, and 968 s at d3a71f7, with more failures to re-run.
+- The full suite at `-n 3` on a7656be with this file: 1328 s (22 min),
+  about 6,260 passed, 588 skipped, 0 failed. The file is about 45 % of that.
