@@ -51,7 +51,13 @@ def watch_dialog(handler, limit=4000):
 
 
 def undo(w):
+    """Ctrl+Z, once the window has the keyboard, and the step it undid."""
+    from tests.test_markup_interaction_round6 import back_to_the_window
+    assert back_to_the_window(w), "the window has the keyboard again"
+    stack = w.undo_stack
+    before = stack.index()
     key(w, Qt.Key_Z, Qt.ControlModifier)
+    assert stack.index() == before - 1, "Ctrl+Z reached the undo stack"
 
 
 # -- F-05: one placement, one undo ------------------------------------------------------
@@ -118,6 +124,7 @@ def test_an_ellipse_converts_to_a_polygon_that_follows_it(w):
     for point in shape.points:
         at = shape.mapToScene(point) - centre
         assert (at.x() / rx) ** 2 + (at.y() / ry) ** 2 == pytest.approx(1.0, abs=0.02)
+    assert w.undo_stack.undoText() == "Turn into a polygon"     # the step is there
     undo(w)
     assert markups(w, PolyItem) == [] and len(markups(w, RectItem)) == 1
 

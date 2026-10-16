@@ -83,6 +83,8 @@ def menu_bar_pick(w, *path):
             break
         popup.close()
         pump()
+    from tests.test_markup_interaction_round6 import back_to_the_window
+    back_to_the_window(w)
 
 
 def form_rows(group) -> dict:

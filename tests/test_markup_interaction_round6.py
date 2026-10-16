@@ -186,6 +186,33 @@ def watching(handler, every=20, limit=4000):
     return timer
 
 
+def back_to_the_window(w, limit=3.0):
+    """Wait until the keyboard is the window's again after a popup: no popup
+    or modal dialog left, and the main window active.
+
+    The offscreen platform makes a popup menu the active window and hands
+    activation back to the main window only some events after the menu has
+    closed. A key sent before then reaches no shortcut, so a Ctrl+Z straight
+    after a right-click menu was lost on a loaded machine. This waits for
+    that state rather than for a fixed time; if it never comes (the platform
+    has no window manager to do it), it asks for it, as clicking the window
+    would."""
+    deadline = time.perf_counter() + limit
+    asked = False
+    while True:
+        QApplication.instance().processEvents()
+        popup = QApplication.activePopupWidget() or QApplication.activeModalWidget()
+        if popup is None and QApplication.activeWindow() is w and w.isActiveWindow():
+            return True
+        if time.perf_counter() > deadline:
+            if asked:
+                return False
+            asked = True
+            w.activateWindow()
+            deadline = time.perf_counter() + limit
+        time.sleep(0.005)
+
+
 def right_click_menu(w, point: QPointF, pick: str = ""):
     """Right-click at *point* the way the mouse does, read the menu that
     opens, and click *pick* in it (or close it). Returns its entries."""
@@ -214,6 +241,9 @@ def right_click_menu(w, point: QPointF, pick: str = ""):
             QContextMenuEvent.Mouse, local, vp(w).mapToGlobal(local)))
         pump()
     keep.stop()
+    # what comes next may be a key: it has to reach the window, not the
+    # menu that has just closed
+    back_to_the_window(w)
     return got.get("labels", [])
 
 
