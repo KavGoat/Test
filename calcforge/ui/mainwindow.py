@@ -454,8 +454,8 @@ class SplitDocumentWindow(QSplitter):
                 dock.hide()
             pane.statusBar().hide()
             pane.menuBar().setNativeMenuBar(False)
-            if getattr(pane, "window_buttons", None) is not None:
-                pane.window_buttons.hide()        # the split window has its own frame
+            # the split window has the ordinary frame; each pane's menus are
+            # a row under its title bar (nativeframe drops the caption gap)
             pane.setParent(self, Qt.Widget)
             self.addWidget(pane)
             # Window shortcuts would be ambiguous between the two editors.
@@ -471,11 +471,6 @@ class SplitDocumentWindow(QSplitter):
         for offset, pane in enumerate(self.panes):
             pane._split_host = None
             pane.setParent(None, Qt.Window)
-            from . import titlebar
-            if titlebar.OWN_TITLE_BAR:
-                pane.setWindowFlag(Qt.FramelessWindowHint, True)
-            if getattr(pane, "window_buttons", None) is not None:
-                pane.window_buttons.show()
             state, status_visible = pane._before_split
             pane.restoreState(state)
             pane.statusBar().setVisible(status_visible)
@@ -702,8 +697,8 @@ class MainWindow(QMainWindow):
         self._build_docks()
         self._build_menus()
         self._build_status()
-        from . import titlebar
-        titlebar.install(self)                    # one row: icon, menus, window buttons
+        from . import nativeframe
+        nativeframe.install(self)                 # Windows: the menus in its own title bar
         self._connect()
         self.apply_shortcuts()
         from . import preferences as _prefs
@@ -1750,8 +1745,8 @@ class MainWindow(QMainWindow):
 
     def _fit_menu_corner(self) -> None:
         """Narrow the search field before the menus have to go behind the
-        menu bar's » — and never so far that the window buttons are pushed
-        off the row.
+        menu bar's » — and never so far that the room kept for Windows'
+        caption buttons is pushed off the row.
 
         The menu bar lays its right-hand corner out at the width it asks for,
         whatever room there is: with a 260 px search field the corner asked
@@ -3214,11 +3209,16 @@ class MainWindow(QMainWindow):
         self._auto_breaks = set()
         self._wrap_toolbar_rows_soon()
 
-    def changeEvent(self, event) -> None:
-        super().changeEvent(event)
-        if event.type() == QEvent.WindowStateChange:
-            from . import titlebar
-            titlebar.window_state_changed(self)
+    if sys.platform == "win32":
+        def nativeEvent(self, event_type, message):
+            """Windows' messages for the frame: the menus sit in its title
+            bar (nativeframe). Only defined on Windows, where it is needed."""
+            frame = getattr(self, "_native_frame", None)
+            if frame is not None:
+                answer = frame.native_event(message)
+                if answer is not None:
+                    return answer
+            return super().nativeEvent(event_type, message)
 
     def keyPressEvent(self, event) -> None:
         """Escape works wherever the keyboard happens to be.
@@ -3717,6 +3717,7 @@ class MainWindow(QMainWindow):
         settings.setValue("window/stamp", stamp)
         self._layout_stamp = stamp
         settings.setValue("window/geometry", self.saveGeometry())
+        settings.setValue("window/frame", "native")
         settings.setValue("window/maximised", self.isMaximized())
         settings.setValue("window/state", self.saveState())
         settings.setValue("toolbars/rows", self.TOOLBAR_ROWS_VERSION)
@@ -3740,6 +3741,10 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             self._layout_stamp = 0
         geometry = settings.value("window/geometry")
+        if sys.platform != "darwin" and settings.value("window/frame") != "native":
+            # saved by a window that drew its own frame (before 2026-10-16):
+            # its size and place would land the native frame askew
+            geometry = None
         state = settings.value("window/state")
         if geometry is not None:
             self.restoreGeometry(geometry)
@@ -9306,6 +9311,8 @@ class MainWindow(QMainWindow):
         application = QApplication.instance()
         if application is not None:
             apply_theme(application, theme)
+        from . import nativeframe
+        nativeframe.follow_theme()           # Windows' caption buttons too
         if self.scene is not None:
             self.scene.set_canvas_colour(CANVAS[theme])
         self.refresh_icons()

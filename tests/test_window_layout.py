@@ -7,6 +7,7 @@ At 1280 px the Calculation bar showed one button of twelve and the markup
 tools hid fifteen. A dragged cloud had a hook at its south-east corner.
 """
 import math
+import sys
 
 import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -107,19 +108,26 @@ def test_dropped_status_controls_come_back_with_room(window, qapp):
     assert not window.status_more.isVisible()
 
 
-def test_the_window_buttons_stay_on_the_menu_row(window, qapp):
-    from calcforge.ui import titlebar
-    if not titlebar.OWN_TITLE_BAR:
-        pytest.skip("the system draws the frame")
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="the menus are in the system's title bar on Windows only")
+def test_the_caption_buttons_room_stays_on_the_menu_row(window, qapp):
+    """The menus are drawn in Windows' own title bar: the row keeps room at
+    its right for Windows' minimise, maximise and close."""
+    if window._native_frame is None:
+        pytest.skip("not on Windows' own window system (an offscreen run)")
     window.show()
     _settle(qapp)
     window.resize(640, 480)
     _settle(qapp)
     bar = window.menuBar()
-    buttons = window.window_buttons
-    assert buttons.isVisible()
-    right = buttons.mapTo(bar, buttons.rect().topRight()).x()
+    frame = window._native_frame
+    gap = frame.gap
+    assert gap.width() > 0
+    right = gap.mapTo(bar, gap.rect().topRight()).x()
     assert right <= bar.width()
+    # nothing that takes a click sits under the caption buttons
+    caption = frame.caption_rect()
+    assert not any(rect.intersects(caption) for rect in frame.widget_rects())
     # the search field gave way first, and the menus went behind the » that
     # can be seen
     assert window.search_field.width() < 260
