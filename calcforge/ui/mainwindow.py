@@ -57,7 +57,7 @@ from .stylecaps import (ARROW_SIZE, DASH, FILL, FILL_OPACITY, FONT, HATCH,
                         OPACITY, STROKE, WIDTH, capabilities,
                         common_capabilities)
 from . import toolsets
-from .tools import CATEGORIES, NONE, TOOL_MAP, TOOLS, tools_in
+from .tools import CATEGORIES, NONE, SKETCH, TOOL_MAP, TOOLS, tools_in
 from .view import SIZED_SHAPES
 from .view import PageView, typing_somewhere_else
 from .widgets import ColorButton, keep_the_wheel_with_the_scroller, arrow_combo
@@ -1415,8 +1415,11 @@ class MainWindow(QMainWindow):
         measure_bar = QToolBar("Measure")
         measure_bar.setObjectName("toolbar_measure")
         measure_bar.setIconSize(QSize(22, 22))
+        sketch_actions: list = []
         for category in CATEGORIES:
-            bar = measure_bar if category == "Measure" else tool_bar
+            # Sketch to Scale's shapes sit with the measurements they share
+            # the page scale with, as on Revu's Measure toolbar
+            bar = measure_bar if category in ("Measure", SKETCH) else tool_bar
             if bar.actions():
                 bar.addSeparator()
             for tool in tools_in(category):
@@ -1434,8 +1437,12 @@ class MainWindow(QMainWindow):
                     action.triggered.connect(lambda _checked=False, key=tool.key:
                                              self.select_tool(key))
                 self.tool_group.addAction(action)
-                bar.addAction(action)
+                if category == SKETCH:
+                    sketch_actions.append(action)
+                else:
+                    bar.addAction(action)
                 self.tool_actions[tool.key] = action
+        self._sketch_button(measure_bar, sketch_actions)
         tool_bar.addSeparator()
         tool_bar.addAction(self.act_sticky)
         # The Calculation bar's Table is the Tools bar's Table — one button
@@ -1459,6 +1466,46 @@ class MainWindow(QMainWindow):
         self._show_tool_extras("select")
         self._add_toolbar(style_bar)
         self._refresh_style_controls()
+
+    def _sketch_button(self, bar: QToolBar, actions: list) -> None:
+        """Sketch to Scale's tools on the Measure bar as one button with a
+        drop-down, showing the one last picked — as Revu groups a tool set
+        on a toolbar. Two more buttons would push the Measure bar off the
+        row it shares with Main and Calculation at 1280 px."""
+        if not actions:
+            return
+        button = QToolButton(bar)
+        button.setObjectName("sketchToScaleButton")
+        button.setIconSize(bar.iconSize())
+        button.setAutoRaise(True)
+        button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        menu = QMenu(button)
+        menu.setObjectName("sketchToScaleMenu")
+        menu.addActions(actions)
+        button.setMenu(menu)
+        button.setPopupMode(QToolButton.MenuButtonPopup)
+        button.setDefaultAction(actions[0])
+        for action in actions:
+            # the button shows (and lights up for) the sketch tool in hand
+            action.toggled.connect(lambda on, a=action: on and self._show_sketch_tool(a))
+        self.sketch_button = button
+        self.sketch_actions = list(actions)
+        self.sketch_bar_action = bar.addWidget(button)
+
+    def _show_sketch_tool(self, action) -> None:
+        button = getattr(self, "sketch_button", None)
+        if button is not None and button.defaultAction() is not action:
+            button.setDefaultAction(action)
+
+    def _refresh_sketch_button(self) -> None:
+        """Customise Toolbars ticked some Sketch to Scale tools off."""
+        actions = getattr(self, "sketch_actions", [])
+        shown = [a for a in actions if a.isVisible()]
+        holder = getattr(self, "sketch_bar_action", None)
+        if holder is not None:
+            holder.setVisible(bool(shown))
+        if shown and self.sketch_button.defaultAction() not in shown:
+            self.sketch_button.setDefaultAction(shown[0])
 
     def _build_markup_styles_bar(self) -> None:
         """The Markup Styles toolbar (markupstyles.py), on the Main bar's row:
@@ -1994,10 +2041,15 @@ class MainWindow(QMainWindow):
             sub.aboutToShow.connect(show_key)
             action.setMenu(sub)
 
-    def _tool_entry(self, key: str) -> QAction:
-        """A menu entry that picks up tool *key*, under the tool's own name."""
+    def _tool_entry(self, key: str, under: str = "") -> QAction:
+        """A menu entry that picks up tool *key*, under the tool's own name —
+        less the submenu's name it sits *under* (Revu's Tools ▸ Sketch to
+        Scale ▸ Rectangle)."""
         tool = TOOL_MAP[key]
-        entry = self.give_icon(QAction(tool.label, self), tool.icon)
+        text = tool.label
+        if under and text.startswith(under + " "):
+            text = text[len(under) + 1:]
+        entry = self.give_icon(QAction(text, self), tool.icon)
         entry.setToolTip(tool.hint)
         entry.setStatusTip(tool.hint)
         if key == "table":
@@ -2197,6 +2249,11 @@ class MainWindow(QMainWindow):
                 measure_sub.addAction(self._tool_entry(tool.key))
         # the page's scale and its viewports, with Calibrate (novice 13)
         fill(measure_sub, (None, self.act_scale, self.act_viewports))
+        # Revu's Tools ▸ Sketch to Scale: shapes drawn to a real size
+        sketch_sub = tools_menu.addMenu(SKETCH)
+        sketch_sub.setObjectName("menuSketchToScale")
+        for tool in tools_in(SKETCH):
+            sketch_sub.addAction(self._tool_entry(tool.key, under=SKETCH))
         for tool in tools_in("Navigate"):
             if tool.key not in on_edit:
                 tools_menu.addAction(self._tool_entry(tool.key))
@@ -4287,6 +4344,7 @@ class MainWindow(QMainWindow):
         wanted = self.visible_tool_keys()
         for key, action in self.tool_actions.items():
             action.setVisible(key in wanted)
+        self._refresh_sketch_button()
         self._wrap_toolbar_rows_soon()          # the bars changed width
 
     # -- remembering it ------------------------------------------------
@@ -7202,18 +7260,18 @@ class MainWindow(QMainWindow):
         page = self.current_page()
         if item.kind not in SIZED_SHAPES:
             return
-        if not always and (not self.interactive_prompts
-                           or not page.scale.is_calibrated()):
+        # Sketch to Scale's shapes are set out in real dimensions on a scaled
+        # page; a plain one is sized on the paper, in the rulers' units
+        scaled = item.measures_real(page)
+        if not always and (not self.interactive_prompts or not scaled):
             return
         item.refresh(page=page)
         if item.width_value is None or item.height_value is None:
             return
-        scaled = page.scale.is_calibrated()
-        digits = max(page.scale.precision, 0) if scaled else 1
+        width_text, height_text = item.size_texts(page)
         dialog = dialogs.RectangleSizeDialog(
-            format_quantity(item.width_value, digits, "fixed"),
-            format_quantity(item.height_value, digits, "fixed"),
-            page.scale.display_unit if scaled else "mm", self, scaled=scaled)
+            width_text, height_text, item.size_unit(page), self, scaled=scaled,
+            sketch=bool(getattr(item, "to_scale", False)))
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
         width, height = dialog.values()
@@ -8230,6 +8288,7 @@ class MainWindow(QMainWindow):
         """The drawing tool that makes the kind of markup a payload describes."""
         type_name = payload.get("type", "")
         kind = payload.get("kind", "") or payload.get("shape_kind", "")
+        to_scale = bool(payload.get("to_scale", False))
         for tool in TOOLS:
             if tool.factory is None:
                 continue
@@ -8238,6 +8297,9 @@ class MainWindow(QMainWindow):
                 continue
             sample_kind = getattr(sample, "kind", "") or getattr(sample, "shape_kind", "")
             if kind and sample_kind != kind:
+                continue
+            # a plain rectangle and Sketch to Scale's are different tools
+            if bool(getattr(sample, "to_scale", False)) != to_scale:
                 continue
             return tool.key
         return None

@@ -100,7 +100,9 @@ def test_pressing_the_edge_of_one_of_several_selected_markups_moves_them_all(w):
     assert all(r.isSelected() for r in rects)
     before = [scene_rect(r).topLeft() for r in rects]
     sizes = [scene_rect(r).size() for r in rects]
-    top_edge = rects[2].mapToScene(QPointF(10, 0))          # middle of its top stroke
+    # its top stroke between the corner's control point and the middle one
+    # (round 7: each of several selected keeps its own handles)
+    top_edge = rects[2].mapToScene(QPointF(5, 0))
     drag(w, top_edge, top_edge + QPointF(30, 25))
     after = [scene_rect(r).topLeft() for r in rects]
     for b, a in zip(before, after):
@@ -109,45 +111,21 @@ def test_pressing_the_edge_of_one_of_several_selected_markups_moves_them_all(w):
     assert [scene_rect(r).size() for r in rects] == sizes
 
 
-def test_a_corner_of_one_of_several_selected_markups_moves_them_all(w):
+def test_a_corner_of_one_of_several_selected_markups_resizes_only_it(w):
+    """Round 7 (the user, 2026-10-16): several selected markups each keep
+    their own control points, as in Revu; a corner resizes its own markup."""
     one = draw_rect(w, 100, 200, 120, 80)
     two = draw_rect(w, 300, 200, 120, 80)
-    # one selected markup keeps its control points: its corner resizes it
-    click(w, scene_rect(two).center())
-    size = scene_rect(two).size()
-    corner = scene_rect(two).bottomRight()
-    drag(w, corner, corner + QPointF(40, 30))
-    assert scene_rect(two).width() == pytest.approx(size.width() + 40, abs=1.5)
-    assert scene_rect(two).height() == pytest.approx(size.height() + 30, abs=1.5)
-    key(w, Qt.Key_Z, Qt.ControlModifier)
-    two = markups(w, RectItem)[1]
-    one = markups(w, RectItem)[0]
-    # several: the same press on a corner moves them all
     click(w, scene_rect(one).center())
     click(w, scene_rect(two).center(), Qt.ShiftModifier)
     assert one.isSelected() and two.isSelected()
     size, start = scene_rect(one).size(), scene_rect(two).topLeft()
+    two_size = scene_rect(two).size()
     corner = scene_rect(one).bottomRight()
     drag(w, corner, corner + QPointF(40, 30))
-    assert scene_rect(one).size() == size
-    moved = scene_rect(two).topLeft() - start
-    assert moved.x() == pytest.approx(40, abs=1.5) and moved.y() == pytest.approx(30, abs=1.5)
-
-
-def test_several_selected_resize_through_the_selection_box(w):
-    one = draw_rect(w, 100, 200, 100, 50)
-    two = draw_rect(w, 300, 300, 100, 50)
-    key(w, Qt.Key_A, Qt.ControlModifier)
-    box = scene_rect(one).united(scene_rect(two))
-    sizes = [scene_rect(one).size(), scene_rect(two).size()]
-    drag(w, box.bottomRight(), box.bottomRight() + QPointF(box.width(), box.height()))
-    grown = markups(w, RectItem)
-    whole = scene_rect(grown[0]).united(scene_rect(grown[1]))
-    assert whole.width() == pytest.approx(2 * box.width(), abs=3)
-    assert (whole.topLeft() - box.topLeft()).manhattanLength() < 1
-    # each of them twice the size, not just the one whose corner it was
-    for item, size in zip(grown, sizes):
-        assert scene_rect(item).width() == pytest.approx(2 * size.width(), abs=3)
+    assert scene_rect(one).width() == pytest.approx(size.width() + 40, abs=1.5)
+    assert scene_rect(one).height() == pytest.approx(size.height() + 30, abs=1.5)
+    assert scene_rect(two).topLeft() == start and scene_rect(two).size() == two_size
 
 
 def test_a_handle_takes_the_press_only_inside_the_square_it_is_drawn_in(w):
@@ -170,12 +148,12 @@ def test_a_handle_takes_the_press_only_inside_the_square_it_is_drawn_in(w):
     assert scene_rect(one).width() == pytest.approx(size.width() + 40, abs=2)
 
 
-def test_a_multi_selection_draws_one_box_and_no_control_points(w, tmp_path):
+def test_a_multi_selection_draws_no_box_round_the_lot(w, tmp_path):
     one = draw_rect(w, 100, 200, 100, 50)
     two = draw_rect(w, 300, 300, 100, 50)
     key(w, Qt.Key_A, Qt.ControlModifier)
     assert w.view.scene().many_selected()
-    assert w.view._selection_box() is not None
+    assert w.view._selected_group() is None        # round 7: no group box
     click(w, page(w, 600, 600))
     click(w, scene_rect(one).center())
     assert one.isSelected() and not two.isSelected()
@@ -290,28 +268,23 @@ def test_every_measurement_asks_for_a_scale_and_cancel_keeps_it(w, tool):
     assert not w.current_page().scale.is_calibrated()
 
 
-# -- 3. one click puts a text box down, ready to type -------------------------------
+# -- 3. a text box is dragged out (round 7: tests/test_round7_shapes.py) -------------
 
-def test_one_click_with_the_text_box_tool_gives_a_box_to_type_in(w):
+def test_a_dragged_text_box_is_ready_to_type_in(w):
     click(w, page(w, 600, 600))
     key(w, Qt.Key_T)                              # Revu's key for the Text Box tool
     assert w.view.tool_key == "text"
-    click(w, page(w, 200, 300))
+    click(w, page(w, 200, 300))                   # a click alone places nothing
+    assert markups(w, TextItem) == [] and w.view.tool_key == "text"
+    drag(w, page(w, 100, 400), page(w, 400, 460))
     QTest.keyClicks(vp(w), "Hello")
     pump()
     box = w.view.editing_item()
     assert isinstance(box, TextItem)
     assert box.text() == "Hello"
-    assert box.local_rect().width() == pytest.approx(170, abs=1)
+    assert box.local_rect().width() == pytest.approx(300, abs=3)
     key(w, Qt.Key_Escape)
     assert [m.text() for m in markups(w, TextItem)] == ["Hello"]
-    # a drag still sizes it
-    w.select_tool("text")
-    drag(w, page(w, 100, 400), page(w, 400, 460))
-    box = w.view.editing_item()
-    assert box.local_rect().width() == pytest.approx(300, abs=3)
-
-
 
 
 # -- 4. a measurement's value is never under its handles -----------------------------
@@ -373,7 +346,7 @@ def test_markups_get_the_tools_name_as_subject(w):
     click(w, page(w, 450, 260))
     key(w, Qt.Key_Escape)
     w.select_tool("text")
-    click(w, page(w, 100, 500))
+    drag(w, page(w, 100, 500), page(w, 250, 540))
     QTest.keyClicks(vp(w), "x")
     key(w, Qt.Key_Escape)
     w.select_tool("select")

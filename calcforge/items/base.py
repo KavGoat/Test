@@ -419,9 +419,10 @@ def covered_rect(item) -> QRectF:
 def many_selected(scene) -> bool:
     """True when the selection is several things (Revu's multi-selection).
 
-    Then the markups' own control points are not offered: one dashed box
-    round the lot, with its own corner handles, is (ui/view.py), and a press
-    anywhere on any of them moves them all."""
+    Each markup still shows and uses its own control points (a handle
+    resizes its own markup only); a press anywhere else on any of them moves
+    them all (ui/view.py). There is no box round the lot (the user,
+    2026-10-16: group resize is not Bluebeam's)."""
     ask = getattr(scene, "many_selected", None) if scene is not None else None
     return bool(ask()) if callable(ask) else False
 
@@ -1065,7 +1066,7 @@ class MarkupItem(QGraphicsObject):
         rotation handle a blue dot on a dashed stalk above."""
         if not self.isSelected() or not self._handles_visible:
             return
-        if self.group or many_selected(self.scene()):
+        if self.group:
             return
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)

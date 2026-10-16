@@ -161,6 +161,8 @@ class Rulers:
         self.view = view
         self.on = False
         self.unit = self._kept_unit()
+        from ..items.shapes import set_paper_unit
+        set_paper_unit(self.unit)          # paper sizes are in the rulers' unit
         self.pointer: Optional[QPointF] = None
         self.top = Ruler(view, self, True)
         self.left = Ruler(view, self, False)
@@ -186,6 +188,16 @@ class Rulers:
             self.unit = unit
             app_settings().setValue("view/ruler_unit", unit)
             self.refresh()
+            # the paper sizes Properties shows (Document Width and Height, a
+            # plain rectangle's size) follow the rulers' unit
+            from ..items.shapes import set_paper_unit
+            set_paper_unit(unit)
+            scene = self.view.scene()
+            if scene is not None and hasattr(scene, "refresh_items"):
+                scene.refresh_items()
+            window = getattr(self.view, "window", None)
+            if window is not None and hasattr(window, "refresh_selection"):
+                window.refresh_selection()
 
     def show(self, on: bool) -> None:
         self.on = bool(on)

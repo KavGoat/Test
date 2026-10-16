@@ -378,11 +378,14 @@ class MarkupStyles(QObject):
         """The tool that draws markups like *item* (worked out once per kind:
         a selection of hundreds must not cost hundreds of look-ups)."""
         kind = (getattr(item, "TYPE", ""),
-                getattr(item, "kind", "") or getattr(item, "shape_kind", ""))
+                getattr(item, "kind", "") or getattr(item, "shape_kind", ""),
+                bool(getattr(item, "to_scale", False)))
         if kind not in _tool_by_kind:
             try:
-                _tool_by_kind[kind] = self.window._tool_for_payload(
-                    {"type": kind[0], "kind": kind[1]} if kind[1] else {"type": kind[0]})
+                payload = {"type": kind[0], "kind": kind[1]} if kind[1] else {"type": kind[0]}
+                if kind[2]:
+                    payload["to_scale"] = True      # Sketch to Scale's own tool
+                _tool_by_kind[kind] = self.window._tool_for_payload(payload)
             except Exception:  # noqa: BLE001 - a markup with no tool of its own
                 _tool_by_kind[kind] = None
         return _tool_by_kind[kind]

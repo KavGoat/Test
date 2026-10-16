@@ -11,11 +11,81 @@ from PySide6.QtGui import QFontMetricsF
 
 from ..core.units import Unit, format_quantity, parse_unit
 from .base import (CLOUD_SIZE, HANDLE_SIZE, SELECT_BLUE, MarkupItem, Style,
-                   handle_zoom, many_selected, paint_control_point, paint_rotate_handle,
+                   handle_zoom, paint_control_point, paint_rotate_handle,
                    cloud_path, draw_head, register_item, round_the_joins)
 
 # Page refreshes construct two lengths per rectangle; the unit is built once.
 _MILLIMETRES = Unit((("mm", 1),))
+
+
+# ---------------------------------------------------------------------------
+# Paper units: what a plain shape's size is given in (Revu's "Document Width"
+# and "Document Height"), following the rulers' units (ui/rulers.py).
+# ---------------------------------------------------------------------------
+
+#: Points in one of each paper unit, how it is written, and its decimals.
+PAPER_UNITS = {"in": (72.0, "in", 2), "cm": (72.0 / 2.54, "cm", 2),
+               "mm": (72.0 / 25.4, "mm", 1), "pt": (1.0, "pt", 1),
+               "pica": (12.0, "pica", 2)}
+_paper = {"unit": None}
+
+
+def paper_unit() -> str:
+    """The paper unit in use: the rulers' (cm until they are set)."""
+    if _paper["unit"] is None:
+        try:
+            from ..settings import app_settings
+            unit = str(app_settings().value("view/ruler_unit", "cm") or "cm")
+        except Exception:  # noqa: BLE001 - no settings: the rulers' default
+            unit = "cm"
+        _paper["unit"] = unit if unit in PAPER_UNITS else "cm"
+    return _paper["unit"]
+
+
+def set_paper_unit(unit: Optional[str]) -> None:
+    """The rulers changed unit (None: read it again from the settings)."""
+    _paper["unit"] = unit if unit in PAPER_UNITS else None
+
+
+def paper_number(points: float, unit: Optional[str] = None) -> float:
+    """A length on the paper, in points, as a number of paper units."""
+    return points / PAPER_UNITS[unit or paper_unit()][0]
+
+
+def paper_text(points: float, unit: Optional[str] = None) -> str:
+    """A length on the paper, in paper units: "4.00 cm"."""
+    per, name, digits = PAPER_UNITS[unit or paper_unit()]
+    return f"{points / per:.{digits}f} {name}"
+
+
+def paper_points(text: str, unit: Optional[str] = None) -> Optional[float]:
+    """A typed paper length as points: a bare number is in the paper unit;
+    one with a unit of its own (25 mm, 2 in, 12 pt, 3 pica) is read as that."""
+    import re
+    stripped = (text or "").strip()
+    if not stripped:
+        return None
+    match = re.fullmatch(r"([+]?(?:\d+(?:\.\d*)?|\.\d+))\s*([A-Za-z]*)", stripped)
+    if match:
+        number, name = float(match.group(1)), match.group(2).lower()
+        if not name:
+            return number * PAPER_UNITS[unit or paper_unit()][0]
+        if name in PAPER_UNITS:
+            return number * PAPER_UNITS[name][0]
+        if name in ("inch", "inches"):
+            return number * 72.0
+    quantity = parse_unit(stripped)
+    if quantity is None:
+        return None
+    try:
+        from ..core.document import MM_TO_PT
+        return float(quantity.to("mm").magnitude) * MM_TO_PT
+    except Exception:  # noqa: BLE001 - not a length
+        return None
+
+
+#: The box-shaped markups drawn to a size: they carry it (Width and Height).
+SIZED_KINDS = ("rect", "ellipse")
 
 
 def _smooth_path(points: list[QPointF], tension: float = 0.42) -> QPainterPath:
@@ -54,11 +124,17 @@ class RectItem(MarkupItem):
     KINDS = ("rect", "ellipse", "cloud", "highlight", "redact", "marquee")
     SCALE_BOX = True
 
-    def __init__(self, kind: str = "rect", rect: Optional[QRectF] = None):
+    def __init__(self, kind: str = "rect", rect: Optional[QRectF] = None,
+                 to_scale: bool = False):
         super().__init__()
         self.kind = kind
         self._rect = QRectF(rect) if rect else QRectF(0, 0, 120, 70)
         self.cloud_size = CLOUD_SIZE
+        # Revu's two kinds of rectangle and ellipse: the plain markup, sized
+        # on the paper (Document Width and Height, in the rulers' units), and
+        # Sketch to Scale's, which asks for a page scale and is sized in real
+        # dimensions — 3 m × 1.5 m at 1:50 (the user, 2026-10-16).
+        self.to_scale = bool(to_scale) and kind in SIZED_KINDS
         # A rectangle reports its real size when the page carries a scale, so it
         # can be used to set out an area rather than only to draw a box.
         # Off: a rectangle drawn on a drawing is a rectangle, not a dimension.
@@ -82,9 +158,10 @@ class RectItem(MarkupItem):
 
     @property
     def NAME_FOR_KIND(self) -> str:
-        return {"rect": "Rectangle", "ellipse": "Ellipse", "cloud": "Cloud",
+        name = {"rect": "Rectangle", "ellipse": "Ellipse", "cloud": "Cloud",
                 "highlight": "Highlight", "redact": "Redaction",
                 "marquee": "Snapshot region"}.get(self.kind, "Shape")
+        return f"Sketch to Scale {name}" if getattr(self, "to_scale", False) else name
 
     def display_name(self) -> str:
         return self.label or self.NAME_FOR_KIND
@@ -161,18 +238,33 @@ class RectItem(MarkupItem):
         from .base import scale_where
         return scale_where(self, page, self._rect.normalized().center())
 
+    def measures_real(self, page=None) -> bool:
+        """True when its size is a real one: a Sketch to Scale shape on a
+        page (or viewport) with a scale. A plain shape is always sized on
+        the paper, scale or no scale."""
+        if not self.to_scale:
+            return False
+        scale = self.scale_on(page) if page is not None else self.page_scale()
+        return bool(scale.is_calibrated())
+
+    def size_unit(self, page=None) -> str:
+        """The unit its size is typed and shown in."""
+        if self.measures_real(page):
+            scale = self.scale_on(page) if page is not None else self.page_scale()
+            return scale.display_unit
+        return PAPER_UNITS[paper_unit()][1]
+
     def refresh(self, workspace=None, page=None) -> None:
         """Work out the size to write on the rectangle.
 
-        A scaled page gives real dimensions; an unscaled one still gives the
-        paper size in millimetres, because a rectangle that says nothing at all
-        is the one complaint everybody has about drawing one.
+        A Sketch to Scale shape on a scaled page gives real dimensions; a
+        plain one — and a sketch on a page with no scale — gives its size on
+        the paper, in the rulers' units (Revu's Document Width and Height).
         """
-        scale = self.scale_on(page) if page is not None else self.page_scale()
         rect = self._rect.normalized()
         # A rectangle and an ellipse are both drawn to a size somebody cares
         # about; a cloud or a highlight is drawn around something else.
-        if self.kind not in ("rect", "ellipse"):
+        if self.kind not in SIZED_KINDS:
             self.size_text = ""
             self.width_value = self.height_value = None
             self.update()
@@ -180,43 +272,60 @@ class RectItem(MarkupItem):
         try:
             from ..core.units import Q_, convert
             from ..core.document import MM_TO_PT
-            if scale.is_calibrated():
+            scale = None
+            if self.to_scale:
+                scale = self.scale_on(page) if page is not None else self.page_scale()
+            if scale is not None and scale.is_calibrated():
                 self.width_value = convert(scale.length(rect.width()), scale.display_unit)
                 self.height_value = convert(scale.height(rect.height()), scale.display_unit)
                 digits = max(scale.precision, 0)
+                if hasattr(scale, "format_length"):
+                    # to the scale's Precision, a fraction or decimals (Set Scale)
+                    self.size_text = (f"{scale.format_length(self.width_value, digits)}"
+                                      f" × {scale.format_length(self.height_value, digits)}")
+                else:
+                    self.size_text = (f"{format_quantity(self.width_value, digits, 'fixed')}"
+                                      f" × {format_quantity(self.height_value, digits, 'fixed')}")
             else:
                 self.width_value = Q_(rect.width() / MM_TO_PT, _MILLIMETRES)
                 self.height_value = Q_(rect.height() / MM_TO_PT, _MILLIMETRES)
-                digits = 1
-            if scale.is_calibrated() and hasattr(scale, "format_length"):
-                # to the scale's Precision, a fraction or decimals (Set Scale)
-                self.size_text = (f"{scale.format_length(self.width_value, digits)}"
-                                  f" × {scale.format_length(self.height_value, digits)}")
-            else:
-                self.size_text = (f"{format_quantity(self.width_value, digits, 'fixed')}"
-                                  f" × {format_quantity(self.height_value, digits, 'fixed')}")
+                self.size_text = f"{paper_text(rect.width())} × {paper_text(rect.height())}"
         except Exception:
             self.size_text = ""
             self.width_value = self.height_value = None
         self.update()
 
+    def size_texts(self, page=None) -> tuple[str, str]:
+        """Its width and height as they are shown and typed: real ones with
+        the scale's unit, or paper ones in the rulers' unit."""
+        rect = self._rect.normalized()
+        if self.measures_real(page):
+            self.refresh(page=page)
+            scale = self.scale_on(page) if page is not None else self.page_scale()
+            digits = max(scale.precision, 0)
+            return (format_quantity(self.width_value, digits, "fixed"),
+                    format_quantity(self.height_value, digits, "fixed"))
+        return paper_text(rect.width()), paper_text(rect.height())
+
     def set_real_size(self, width_text: str, height_text: str, page=None) -> bool:
-        """Resize to an exact real-world width and height."""
+        """Resize to an exact width and height: real-world ones for a Sketch
+        to Scale shape on a scaled page, paper ones otherwise."""
         scale = self.scale_on(page) if page is not None else self.page_scale()
-        width = parse_unit(width_text)
-        height = parse_unit(height_text)
-        if width is None or height is None:
-            return False
         try:
-            if scale.is_calibrated():
+            if self.measures_real(page):
+                width = parse_unit(width_text)
+                height = parse_unit(height_text)
+                if width is None or height is None:
+                    return False
                 per_point = scale.length(1.0)
                 points_wide = float((width / per_point).to("dimensionless").magnitude)
                 points_high = float((height / per_point).to("dimensionless").magnitude) \
                     / (getattr(scale, "y_factor", 1.0) or 1.0)
             else:
-                from ..core.document import MM_TO_PT
-                points_wide = float(width.to("mm").magnitude) * MM_TO_PT
-                points_high = float(height.to("mm").magnitude) * MM_TO_PT
+                points_wide = paper_points(width_text)
+                points_high = paper_points(height_text)
+                if points_wide is None or points_high is None:
+                    return False
         except Exception:
             return False
         if points_wide <= 0 or points_high <= 0:
@@ -376,6 +485,8 @@ class RectItem(MarkupItem):
         data.update({"kind": self.kind, "rect": [self._rect.x(), self._rect.y(),
                                                  self._rect.width(), self._rect.height()],
                      "show_size": self.show_size})
+        if self.to_scale:
+            data["to_scale"] = True
         self.cloud_to_dict(data)
         if self.cutouts:
             data["cutouts"] = self.cutouts_as_data()
@@ -386,6 +497,8 @@ class RectItem(MarkupItem):
         values = data.get("rect", [0, 0, 100, 60])
         self._rect = QRectF(*values)
         self.show_size = bool(data.get("show_size", False))
+        # written before Sketch to Scale existed: a plain shape
+        self.to_scale = bool(data.get("to_scale", False)) and self.kind in SIZED_KINDS
         self.cutouts_from_data(data)
         self.load_base(data)
         self.cloud_from_dict(data)
@@ -1055,7 +1168,7 @@ class PolyItem(MarkupItem):
         # handle here would be a control point nobody can use.
         if not self.isSelected() or not self._handles_visible or self.group:
             return
-        if self.locked or many_selected(self.scene()):
+        if self.locked:
             return
         if not self.uses_vertex_handles:
             super().paint_handles(painter)

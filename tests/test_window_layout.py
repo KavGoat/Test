@@ -169,6 +169,12 @@ def test_the_calculation_bar_shows_every_action_at_1280(window, qapp):
 
 def test_every_tool_is_still_on_a_toolbar(window):
     on_bars = {action for bar in window.toolbars for action in bar.actions()}
+    # a toolbar button's own drop-down counts (Sketch to Scale's, round 7)
+    from PySide6.QtWidgets import QToolButton
+    for bar in window.toolbars:
+        for button in bar.findChildren(QToolButton):
+            if button.menu() is not None and button.parentWidget() is bar:
+                on_bars |= set(button.menu().actions())
     for key, action in window.tool_actions.items():
         assert action in on_bars, key
     measure = _bars(window)["toolbar_measure"]

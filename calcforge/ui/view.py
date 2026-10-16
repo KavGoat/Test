@@ -216,7 +216,10 @@ WORD_TOOLS = frozenset({"text", "callout", "cloud_callout", "typewriter"})
 SCALE_PROMPT_TOOLS = frozenset({
     "measure_length", "measure_polylength", "measure_area", "measure_perimeter",
     "measure_volume", "measure_angle", "measure_radius", "measure_diameter",
-    "count"})
+    "count",
+    # Revu's Sketch to Scale shapes, drawn to a real size (the user,
+    # 2026-10-16); the plain Rectangle and Ellipse never ask
+    "sketch_rect", "sketch_ellipse"})
 
 
 class _SizeEdit(QLineEdit):
@@ -2080,11 +2083,11 @@ class PageView(QGraphicsView):
                 detach(item)
 
     def _press_select(self, event: QMouseEvent, scene_pos: QPointF) -> None:
-        # 1. a selected group — or several markups selected together — owns
-        # one outer resize box (Revu: a dashed box with corner handles round
-        # a multi-selection). Check it before the modifier-specific reshape
-        # paths so Shift can release its ratio.
-        grouped = self._selection_box()
+        # 1. a selected group owns one outer resize box. Check it before the
+        # modifier-specific reshape paths so Shift can release its ratio.
+        # Several markups selected have no box of their own (Revu: each keeps
+        # its own control points, and a handle resizes only its own markup).
+        grouped = self._selected_group()
         if grouped is not None:
             members, box = grouped
             key = self._group_handle_at(scene_pos, box)
@@ -2104,9 +2107,11 @@ class PageView(QGraphicsView):
                 event.accept()
                 return
 
-        # With several things selected, their own control points are not
-        # offered: a press anywhere on any of them moves them all, and Shift
-        # or Ctrl on one is a click that adds or takes away (QA finding 1.7).
+        # With several things selected, each keeps its own control points —
+        # a press on one of them resizes or reshapes that markup alone, as in
+        # Revu — but a press anywhere else on any of them moves them all, and
+        # Shift or Ctrl on one is a click that adds or takes away (QA finding
+        # 1.7; the user, 2026-10-16: no group resize).
         many = self.scene().many_selected()
 
         # 3. Shift on a dimension's number takes hold of the number itself,
@@ -2148,8 +2153,9 @@ class PageView(QGraphicsView):
                 event.accept()
                 return
 
-        # 5. a resize handle on an already-selected item
-        for item in [] if many else self.scene().selectedItems():
+        # 5. a resize handle on an already-selected item — each of several
+        # selected markups has its own, and resizes only itself
+        for item in self.scene().selectedItems():
             if not isinstance(item, MarkupItem) or not self.editable(item):
                 continue
             if item.group:
@@ -2998,7 +3004,7 @@ class PageView(QGraphicsView):
         if self._pending_cloud_leader is not None:
             self.setCursor(cloud_callout_cursor())
             return
-        grouped = self._selection_box()
+        grouped = self._selected_group()
         if grouped is not None:
             _members, box = grouped
             key = self._group_handle_at(scene_pos, box)
@@ -3036,7 +3042,7 @@ class PageView(QGraphicsView):
                 if rect is not None and rect.contains(scene_pos):
                     self.setCursor(Qt.IBeamCursor)
                     return
-        for item in [] if many else self.scene().selectedItems():
+        for item in self.scene().selectedItems():
             if isinstance(item, MarkupItem) and self.editable(item):
                 if item.group:
                     continue
@@ -3271,12 +3277,17 @@ class PageView(QGraphicsView):
 
         if self._mode == "draw_drag" and self._is_a_click(scene_pos) \
                 and isinstance(self._draft, TextItem):
-            # Revu's text box: one click puts down a box of the default size
-            # with the caret in it, ready to type; a drag still sizes it. It
-            # used to wait for a second corner, and the words typed meanwhile
-            # were lost (novice finding 6).
-            self._mode = "idle"
-            self.finish_draft(scene_pos)
+            # Revu's text box is dragged out: a click alone places nothing,
+            # and the tool stays in hand for the drag (the user, 2026-10-16).
+            # It used to wait for a second corner, and the words typed
+            # meanwhile were lost (novice finding 6); now the drag is the
+            # whole gesture and the caret is in the box when it ends.
+            self.cancel_draft()
+            self.forget_snapshot()
+            self.setCursor(self._cursor_for_tool(self.current_tool()))
+            self.statusMessage.emit(
+                f"{self.current_tool().label}: drag a box, then type in it "
+                "· Esc to put the tool away")
             event.accept()
             return
 
@@ -3864,6 +3875,8 @@ class PageView(QGraphicsView):
         if isinstance(draft, MeasureItem):
             if draft.kind != DIMENSION:
                 note_scale = True
+        if getattr(draft, "to_scale", False):
+            note_scale = True              # Sketch to Scale, as a measurement
         self.commit_snapshot(f"Add {tool.label.lower()}")
 
         if isinstance(draft, MeasureItem) and draft.kind == DIMENSION \
@@ -4056,8 +4069,9 @@ class PageView(QGraphicsView):
         grid.setContentsMargins(5, 2, 5, 4)
         grid.setHorizontalSpacing(3)
         grid.setVerticalSpacing(0)
-        scale = self._draft_scale()
-        unit = scale.display_unit if scale.is_calibrated() else "mm"
+        # Sketch to Scale's shapes are typed in real units on a scaled page;
+        # a plain one is typed on the paper, in the rulers' units
+        unit = draft.size_unit(self.page()) if self.page() is not None else "mm"
         ellipse = draft.kind == "ellipse"
         fields = []
         for column, (caption, suffix, tip) in enumerate((
@@ -4158,14 +4172,22 @@ class PageView(QGraphicsView):
         if page is None:
             return
         draft.refresh(page=page)
-        scale = self._draft_scale()
-        digits = max(scale.precision, 0) if scale.is_calibrated() else 2
-        for box, value, typed in ((self._size_width, draft.width_value, self._typed_w),
-                                  (self._size_height, draft.height_value, self._typed_h)):
+        if draft.measures_real(page):
+            scale = self._draft_scale()
+            digits = max(scale.precision, 0)
+            shown = [None if v is None else float(v.magnitude)
+                     for v in (draft.width_value, draft.height_value)]
+        else:
+            from ..items.shapes import PAPER_UNITS, paper_number, paper_unit
+            digits = PAPER_UNITS[paper_unit()][2]
+            rect = draft.local_rect().normalized()
+            shown = [paper_number(rect.width()), paper_number(rect.height())]
+        for box, value, typed in ((self._size_width, shown[0], self._typed_w),
+                                  (self._size_height, shown[1], self._typed_h)):
             if box is None or value is None or typed is not None:
                 continue
             was = box.blockSignals(True)
-            box.setText(f"{float(value.magnitude):.{digits}f}")
+            box.setText(f"{value:.{digits}f}")
             if box is self._size_current:
                 box.selectAll()
             box.blockSignals(was)
@@ -4197,6 +4219,14 @@ class PageView(QGraphicsView):
         from ..core.units import parse_unit
 
         page = self.page()
+        draft = self._draft
+        if page is not None and isinstance(draft, RectItem) \
+                and not draft.measures_real(page):
+            # a plain shape — or a sketch on a page with no scale — is sized
+            # on the paper: a bare number is in the rulers' unit
+            from ..items.shapes import paper_points
+            points = paper_points(text)
+            return points if points is not None and points > 0 else None
         quantity = parse_unit(self._size_with_default_unit(text, self._size_unit))
         if quantity is None or page is None:
             return None
@@ -4431,28 +4461,6 @@ class PageView(QGraphicsView):
             return None
         members = self.group_of(selected[0])
         if set(members) != set(selected):
-            return None
-        box = self.markup_box(members[0])
-        for member in members[1:]:
-            box = box.united(self.markup_box(member))
-        return members, box
-
-    def _selection_box(self):
-        """The box a selection is resized by, as (members, scene rectangle):
-        one complete group's, or — several markups selected — the box round
-        all of them, as Revu draws for a multi-selection. Equations and
-        tables are left out of it: they are as big as what they say."""
-        scene = self.scene()
-        if scene is None:
-            return None
-        grouped = self._selected_group()
-        if grouped is not None or not scene.many_selected():
-            return grouped
-        members = [item for item in scene.selectedItems()
-                   if isinstance(item, MarkupItem) and self.editable(item)
-                   and not getattr(item, "IS_CALC", False)
-                   and not isinstance(item, CalcTextItem)]
-        if not members:
             return None
         box = self.markup_box(members[0])
         for member in members[1:]:
@@ -4903,16 +4911,12 @@ class PageView(QGraphicsView):
         """
         families: dict = {}
         scene = self.scene()
-        if scene is not None and scene.many_selected():
-            # Revu's multi-selection: one dashed box round everything picked
-            whole = self._selection_box()
-            if whole is not None:
-                families[""] = whole[0]
-        else:
-            for item in scene.selectedItems() if scene is not None else []:
-                name = getattr(item, "group", "")
-                if name:
-                    families.setdefault(name, []).append(item)
+        # Several markups selected get no box round them all (Revu): each
+        # shows its own control points instead.
+        for item in scene.selectedItems() if scene is not None else []:
+            name = getattr(item, "group", "")
+            if name:
+                families.setdefault(name, []).append(item)
         if not families:
             return
         painter.save()
