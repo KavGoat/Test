@@ -470,9 +470,10 @@ def test_a_tab_can_open_a_second_view_of_the_same_document(window):
     point = window.document_tabs.tabRect(0).center()
     window._tab_context_menu(point, menu)
     labels = [action.text() for action in menu.actions()]
-    assert labels == ["Open tab", "Open window", "Split view"]
+    assert labels == ["Close", "Close All", "Close Others", "", "Save", "Save As…", "",
+                      "New Window", "Open in Split View", "Duplicate Tab"]
 
-    menu.actions()[0].trigger()
+    [a for a in menu.actions() if a.text() == "Duplicate Tab"][0].trigger()
     QApplication.processEvents()
     assert window.document_tabs.count() == 3
     assert window.document is original
@@ -1808,12 +1809,15 @@ def test_current_page_commands_are_reachable_from_the_menu_bar(window, qapp):
     menu.popup(window.mapToGlobal(window.rect().center()))
     qapp.processEvents()
     labels = _menu_labels(menu)
-    assert {"Rename…", "Blank After", "Move Down",
-            "Rotate Clockwise", "Color Processing…"} <= set(labels)
+    assert {"Rename Page Label…", "Insert Blank Page", "After", "Move Down",
+            "Rotate Pages", "Clockwise", "Colour Processing…"} <= set(labels)
 
-    add = _menu_entry(menu, "Blank After")
-    QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier,
-                     menu.actionGeometry(add).center())
+    blank = _menu_entry(menu, "Insert Blank Page").menu()
+    blank.popup(window.mapToGlobal(window.rect().center()))
+    qapp.processEvents()
+    add = _menu_entry(blank, "After")
+    QTest.mouseClick(blank, Qt.LeftButton, Qt.NoModifier,
+                     blank.actionGeometry(add).center())
     qapp.processEvents()
     assert len(window.document.pages) == 2
 
@@ -1852,7 +1856,7 @@ def test_every_tool_and_application_action_is_reachable_from_the_menu_bar(window
 def test_the_only_page_cannot_be_deleted_from_the_menu(window):
     assert len(window.document.pages) == 1
     actions = {action.text(): action for action in window.page_menu(0).actions()}
-    assert not actions["Delete Page"].isEnabled()
+    assert not actions["Delete Pages"].isEnabled()
 
 
 def test_inserting_an_image_page_can_be_undone(window, tmp_path, monkeypatch):
@@ -2196,13 +2200,13 @@ def test_a_page_label_can_be_renamed_and_reset_from_its_menu(window, monkeypatch
 
     menu = window.page_menu(0)
     next(action for action in menu.actions()
-         if action.text() == "Rename…").trigger()
+         if action.text() == "Rename Page Label…").trigger()
     assert page.label == "Foundation"
     assert "Foundation" in window.pages_panel.list.item(0).text()
 
     menu = window.page_menu(0)
     next(action for action in menu.actions()
-         if action.text() == "Reset Label").trigger()
+         if action.text() == "Reset Page Label").trigger()
     assert page.label == "drawing.pdf page A1"
     assert "drawing.pdf page A1" in window.pages_panel.list.item(0).text()
 
@@ -2218,7 +2222,7 @@ def test_resetting_a_blank_pages_label_restores_its_number(window):
 
 def test_the_page_menu_can_set_the_scale(window):
     labels = [action.text() for action in window.page_menu(0).actions()]
-    assert "Page Scale…" in labels
+    assert "Set Scale…" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -2305,11 +2309,13 @@ def test_rotating_can_be_undone(window):
 
 def test_the_page_menu_offers_rotating_and_paper_sizes(window):
     menu = window.page_menu(0)
-    labels = [action.text() for action in menu.actions()]
     # Named so it cannot be mistaken for turning the view, which is on the
     # View menu and changes nothing about the document.
-    assert "Rotate Clockwise" in labels
-    assert "Rotate Counterclockwise" in labels
+    rotate = next(action.menu() for action in menu.actions()
+                  if action.text() == "Rotate Pages")
+    labels = [action.text() for action in rotate.actions()]
+    assert "Clockwise" in labels
+    assert "Anticlockwise" in labels
     paper = next(action.menu() for action in menu.actions()
                  if action.text() == "Paper Size")
     sizes = [action.text() for action in paper.actions()]
@@ -2607,8 +2613,8 @@ def test_the_page_menu_only_offers_it_where_there_is_a_drawing(window, tmp_path)
     _sheet_page(window, tmp_path)
     blank = {a.text(): a for a in window.page_menu(0).actions()}
     sheet = {a.text(): a for a in window.page_menu(1).actions()}
-    assert not blank["Color Processing…"].isEnabled()
-    assert sheet["Color Processing…"].isEnabled()
+    assert not blank["Colour Processing…"].isEnabled()
+    assert sheet["Colour Processing…"].isEnabled()
 
 
 # ---------------------------------------------------------------------------
@@ -4588,8 +4594,8 @@ def test_the_markup_menu_offers_the_whole_of_bluebeams(window):
     rect.setSelected(True)
     labels = _menu_labels(window.build_context_menu(rect, QPointF(150, 150)))
     for wanted in ("Cut", "Copy", "Paste", "Duplicate", "Format Painter",
-                   "Delete", "Arrange", "Align", "Lock",
-                   "Hide", "Flatten Selection", "Apply to Pages…",
+                   "Delete", "Order", "Alignment", "Lock",
+                   "Hide", "Flatten", "Apply to Pages…",
                    "Properties"):
         assert wanted in labels, f"{wanted!r} missing from {labels}"
 
@@ -4598,14 +4604,14 @@ def test_align_is_offered_but_dead_until_there_are_two(window):
     rect = _a_rectangle(window)
     rect.setSelected(True)
     menu = window.build_context_menu(rect, QPointF(150, 150))
-    align = [a for a in menu.actions() if a.text() == "Align"][0]
+    align = [a for a in menu.actions() if a.text() == "Alignment"][0]
     assert not align.isEnabled()
 
     other = _a_rectangle(window, 300, 120, 380, 200)
     rect.setSelected(True)
     other.setSelected(True)
     menu = window.build_context_menu(rect, QPointF(150, 150))
-    align = [a for a in menu.actions() if a.text() == "Align"][0]
+    align = [a for a in menu.actions() if a.text() == "Alignment"][0]
     assert align.isEnabled()
 
 
@@ -4885,16 +4891,16 @@ def test_the_menu_offers_a_leader_on_a_text_box_and_removal_on_a_callout(window)
     box = markups(window)[-1]
     box.setSelected(True)
     labels = _menu_labels(window.build_context_menu(box, box.pos()))
-    assert "Add arrow leader" in labels
-    assert "Add cloud leader" in labels
+    assert "Add Arrow Leader" in labels
+    assert "Add Cloud Leader" in labels
 
     window.set_leader(box, True)
     call = [i for i in markups(window) if isinstance(i, CalloutItem)][-1]
     labels = _menu_labels(window.build_context_menu(call, call.pos()))
-    assert "Add arrow leader" in labels
-    assert "Add cloud leader" in labels
-    assert "Remove leader" in labels
-    assert "Remove leaders" not in labels
+    assert "Add Arrow Leader" in labels
+    assert "Add Cloud Leader" in labels
+    assert "Remove Leader" in labels
+    assert "Remove Leaders" not in labels
 
 
 def test_a_text_boxs_leader_is_still_there_after_a_save(window):
@@ -5991,13 +5997,13 @@ def test_the_outline_menu_offers_all_four(window):
     shape = _polygon(window)
     corner = shape.mapToScene(shape.points[1])
     menu = window.build_context_menu(shape, corner)
-    outline = [a.menu() for a in menu.actions() if a.text() == "This outline"]
+    outline = [a.menu() for a in menu.actions() if a.text() == "Control Point"]
     assert outline, "the outline submenu should be there"
     labels = [a.text() for a in outline[0].actions()]
-    assert "Round corner" in labels
-    assert "Remove point" in labels
-    assert "Insert break" in labels
-    assert "Arc side" in labels
+    assert "Round Corner" in labels
+    assert "Subtract Control Point" in labels
+    assert "Insert Break" in labels
+    assert "Arc Segment" in [a.text() for a in menu.actions()]
 
 
 def test_a_rectangle_can_become_a_polygon_to_be_reshaped(window):
@@ -7336,8 +7342,8 @@ def test_the_menu_adds_and_removes_one_leader_at_a_time(window):
 
     menu = window.build_context_menu(call, call.mapToScene(QPointF(20, 20)))
     labels = _menu_labels(menu)
-    assert "Add arrow leader" in labels
-    assert "Add cloud leader" in labels
+    assert "Add Arrow Leader" in labels
+    assert "Add Cloud Leader" in labels
 
     # Each one asks where it points before anything is added.
     window.add_leader_to(call)
@@ -7349,7 +7355,7 @@ def test_the_menu_adds_and_removes_one_leader_at_a_time(window):
     # Right-click on one of them, and that one can be taken away.
     on_it = call.mapToScene(call.elbow_of(call.leaders[1]))
     labels = _menu_labels(window.build_context_menu(call, on_it))
-    assert "Remove leader" in labels
+    assert "Remove Leader" in labels
     window.remove_leader_from(call, 1)
     assert len(call.leaders) == 2
 
@@ -7370,8 +7376,8 @@ def test_a_cloud_callout_is_offered_more_leaders_of_either_kind(window):
     assert [leader.kind for leader in call.leaders] == ["cloud"]
 
     labels = _menu_labels(window.build_context_menu(call, call.pos()))
-    assert "Add arrow leader" in labels
-    assert "Add cloud leader" in labels
+    assert "Add Arrow Leader" in labels
+    assert "Add Cloud Leader" in labels
 
     window.add_leader_to(call, "arrow")
     click(window.view, 560, 460)
@@ -7791,17 +7797,17 @@ def test_a_rectangles_corners_are_on_its_right_click_menu(window):
     box = _rectangle(window)
     corner = box.mapToScene(box.corner_points()[0])
     menu = window.build_context_menu(box, corner)
-    outline = [a.menu() for a in menu.actions() if a.text() == "This outline"]
+    outline = [a.menu() for a in menu.actions() if a.text() == "Control Point"]
     assert outline, "a rectangle has four corners and four sides"
     actions = outline[0].actions()
     labels = [a.text() for a in actions]
     tips = [a.toolTip() for a in actions]
     # One or two words on the entry; what it does to which corner or side is
     # in the tooltip.
-    assert "Round corner" in labels
-    assert "Remove point" in labels
-    assert "Add point" in labels
-    assert any("arc" in label.lower() for label in labels)
+    assert "Round Corner" in labels
+    assert "Subtract Control Point" in labels
+    assert "Add Control Point" in labels
+    assert any("arc" in a.text().lower() for a in menu.actions())
     assert any("break" in label.lower() for label in labels)
     assert any("round this corner" in tip.lower() for tip in tips)
     assert any("remove this point" in tip.lower() for tip in tips)
@@ -7818,11 +7824,11 @@ def test_the_outline_menu_shows_up_in_the_middle_of_a_shape_too(window):
     box = _rectangle(window)
     middle = box.mapToScene(box.local_rect().center())
     outline = [a.menu() for a in window.build_context_menu(box, middle).actions()
-               if a.text() == "This outline"]
+               if a.text() == "Control Point"]
     assert outline
     labels = [a.text() for a in outline[0].actions()]
-    assert "Round corner" in labels
-    assert "Add point" in labels
+    assert "Round Corner" in labels
+    assert "Add Control Point" in labels
 
 
 def test_a_cloud_drawn_as_a_box_has_an_outline_too(window):
@@ -7830,7 +7836,7 @@ def test_a_cloud_drawn_as_a_box_has_an_outline_too(window):
     assert box.kind == "cloud"
     outline = [a.menu() for a in window.build_context_menu(
         box, box.mapToScene(box.corner_points()[2])).actions()
-        if a.text() == "This outline"]
+        if a.text() == "Control Point"]
     assert outline, "a cloud has corners like anything else drawn as a box"
 
 
@@ -8076,8 +8082,8 @@ def test_the_menu_says_how_many_pages_it_is_about(window):
     actions = window.page_menu(1).actions()
     labels = [a.text() for a in actions]
     tips = {a.text(): a.toolTip() for a in actions}
-    assert "Delete Page" in labels
-    assert tips["Delete Page"] == "Delete page"
+    assert "Delete Pages" in labels
+    assert tips["Delete Pages"] == "Delete page"
 
 
 # ---------------------------------------------------------------------------
@@ -8551,12 +8557,12 @@ def test_a_rectangle_takes_a_point_in_or_out_and_becomes_a_polygon(window):
 
     middle = box.mapToScene(box.local_rect().center())
     menu = window.build_context_menu(box, middle)
-    outline = [a.menu() for a in menu.actions() if a.text() == "This outline"]
+    outline = [a.menu() for a in menu.actions() if a.text() == "Control Point"]
     assert outline, "a rectangle has corners and sides like anything else"
     labels = [a.text() for a in outline[0].actions()]
-    assert "Add point" in labels and "Remove point" in labels
+    assert "Add Control Point" in labels and "Subtract Control Point" in labels
 
-    add = [a for a in outline[0].actions() if a.text() == "Add point"][0]
+    add = [a for a in outline[0].actions() if a.text() == "Add Control Point"][0]
     add.trigger()
     QApplication.processEvents()
 

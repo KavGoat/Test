@@ -5505,11 +5505,29 @@ class PageView(QGraphicsView):
             event.accept()
             return
         scene_pos = self.mapToScene(event.pos())
+        # a spreadsheet's headings kept in view (over the canvas): Excel's
+        # short row or column heading menu
+        headings = getattr(self, "sheet_headings", None)
+        hit = headings.hit(QPointF(event.pos())) if headings is not None else None
+        if hit is not None:
+            run, zone = hit
+            if self.tables.item is not run:
+                self.tables.open(run, (0, 0))
+            self.tables.context_menu(event.globalPos(), heading=zone)
+            event.accept()
+            return
         table = self.tables.item
         if table is not None and table.chrome_rect().contains(table.mapFromScene(scene_pos)):
+            local = table.mapFromScene(scene_pos)
+            zone = self.tables._zone(table, local)
+            if zone and zone[0] in ("row", "col", "row_edge", "col_edge"):
+                self.tables.context_menu(event.globalPos(),
+                                         heading=(zone[0].split("_")[0], zone[1]))
+                event.accept()
+                return
             # Excel: a right-click outside the selection moves it to that cell
             # first, so the menu's commands act where the pointer is.
-            cell = table.cell_at(table.mapFromScene(scene_pos))
+            cell = table.cell_at(local)
             if cell is not None:
                 r0, c0, r1, c1 = self.tables.selection()
                 if not (r0 <= cell[0] <= r1 and c0 <= cell[1] <= c1):

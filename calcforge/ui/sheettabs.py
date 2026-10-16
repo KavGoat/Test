@@ -177,15 +177,36 @@ class SheetTabs(QWidget):
         self.refresh()
 
     # -- the menu and + --------------------------------------------------------------------------
-    def _menu(self, pos) -> None:
-        index = self.bar.tabAt(pos)
+    def build_menu(self, index: int) -> QMenu:
+        """Excel's sheet tab menu (QA round 4): Insert Sheet, Delete,
+        Rename…, then CalcForge's Go To. (Move or Copy… and Tab Colour are
+        left out: a sheet cannot be copied as a sheet yet, nor coloured.)"""
+        from . import menutidy
         menu = QMenu(self)
+        menu.addAction("Insert Sheet", self.new_sheet).setToolTip(
+            "A new sheet: a spreadsheet page at the end")
         if index >= 0:
-            menu.addAction("Go to", lambda: self.go(index))
+            delete = menu.addAction("Delete", lambda: self.delete_sheet(index))
+            delete.setToolTip("Delete this sheet and its pages")
             menu.addAction("Rename…", lambda: self._rename(index))
             menu.addSeparator()
-        menu.addAction("New sheet", self.new_sheet)
-        menu.exec(self.bar.mapToGlobal(pos))
+            menu.addAction("Go To", lambda: self.go(index)).setToolTip(
+                "Go to this sheet's first page")
+        return menutidy.tidy(menu)
+
+    def _menu(self, pos) -> None:
+        self.build_menu(self.bar.tabAt(pos)).exec(self.bar.mapToGlobal(pos))
+
+    def delete_sheet(self, index: int) -> None:
+        """Excel's Delete on a sheet tab: the sheet's pages go (asked first)."""
+        if not 0 <= index < len(self.entries):
+            return
+        uid, _name = self.entries[index]
+        window = self.window
+        pages = [i for i, page in enumerate(window.document.pages) if page.sheet == uid]
+        if pages:
+            window.delete_page(pages[0], pages=pages)
+            self.refresh()
 
     def new_sheet(self) -> None:
         """A new spreadsheet page, a sheet of its own, at the end."""

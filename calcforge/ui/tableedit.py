@@ -2312,11 +2312,20 @@ class TableEditing:
         return True
 
     # -- the right-click menu ----------------------------------------------------------------------
-    def context_menu(self, global_pos) -> bool:
+    def context_menu(self, global_pos, heading: Optional[tuple] = None) -> bool:
+        """Excel's cell menu, or — *heading* ("row", r) / ("col", c) — its
+        short row or column heading menu."""
         item = self.item
         if item is None:
             return False
-        menu = QMenu(self.view)
+        if heading is not None:
+            menu = self.heading_menu(*heading)
+        else:
+            menu = self.cell_menu()
+        menu.exec(global_pos)
+        return True
+
+    def _clipboard_entries(self, menu) -> None:
         menu.addAction("Cut", lambda: self.copy(cut=True), QKeySequence.Cut)
         menu.addAction("Copy", self.copy, QKeySequence.Copy)
         menu.addAction("Paste", self.paste, QKeySequence.Paste)
@@ -2325,22 +2334,49 @@ class TableEditing:
         special.addAction("Formulas", lambda: self.paste("formulas"))
         special.addAction("Formats", lambda: self.paste("formats"))
         special.addAction("Transpose", lambda: self.paste("transpose"))
+
+    def cell_menu(self) -> QMenu:
+        """The cells' right-click menu, grouped and named as Excel's (QA round 4)."""
+        from . import menutidy, sheetlayout
+        item = self.item
+        window = self.view.window
+        menu = QMenu(self.view)
+        self._clipboard_entries(menu)
         menu.addSeparator()
+        # Insert ▸ and Delete ▸ use the names the Style bar's Rows & Columns
+        # menu uses, so the two read alike
+        row, col = self.active
         ins = menu.addMenu("Insert")
-        ins.addAction("Rows above", self.insert_rows)
-        ins.addAction("Rows below", lambda: self.insert_rows(below=True))
-        ins.addAction("Columns to the left", self.insert_cols)
-        ins.addAction("Columns to the right", lambda: self.insert_cols(right=True))
+        ins.addAction("Insert Rows Above", self.insert_rows)
+        ins.addAction("Insert Rows Below", lambda: self.insert_rows(below=True))
+        ins.addAction("Insert Columns Left", self.insert_cols)
+        ins.addAction("Insert Columns Right", lambda: self.insert_cols(right=True))
+        if _is_run(item):
+            ins.addSeparator()
+            brk = ins.addAction("Insert Page Break",
+                                lambda: sheetlayout.insert_break(window, item, row, col))
+            brk.setToolTip("A page break above the active cell's row and left of its column")
+            brk.setEnabled(row > 0 or col > 0)
+        ins.addSeparator()
+        charts = ins.addMenu("Chart")
+        charts.addAction("XY Scatter", lambda: window.insert_chart("scatter", False, True))
+        charts.addAction("Scatter with Lines", lambda: window.insert_chart("scatter", True, True))
+        charts.addAction("Line", lambda: window.insert_chart("line", True, False))
+        charts.addAction("Column", lambda: window.insert_chart("column", False, False))
         dele = menu.addMenu("Delete")
-        dele.addAction("Rows", self.delete_rows)
-        dele.addAction("Columns", self.delete_cols)
+        dele.addAction("Delete Rows", self.delete_rows)
+        dele.addAction("Delete Columns", self.delete_cols)
+        if _is_run(item) and sheetlayout.has_break(item, row, col):
+            dele.addSeparator()
+            dele.addAction("Remove Page Break",
+                           lambda: sheetlayout.remove_break(window, item, row, col))
         clr = menu.addMenu("Clear")
-        clr.addAction("Contents", lambda: self.clear("contents"))
-        clr.addAction("Formats", lambda: self.clear("formats"))
-        clr.addAction("All", lambda: self.clear("all"))
+        clr.addAction("Clear Contents", lambda: self.clear("contents"))
+        clr.addAction("Clear Formats", lambda: self.clear("formats"))
+        clr.addAction("Clear All", lambda: self.clear("all"))
         menu.addSeparator()
         mm = menu.addMenu("Merge")
-        mm.addAction("Merge && Center", lambda: self.merge("center"))
+        mm.addAction("Merge && Centre", lambda: self.merge("center"))
         mm.addAction("Merge Across", lambda: self.merge("across"))
         mm.addAction("Merge Cells", lambda: self.merge("cells"))
         mm.addAction("Unmerge Cells", lambda: self.merge("unmerge"))
@@ -2348,10 +2384,8 @@ class TableEditing:
         size.addAction("Distribute Rows Evenly", lambda: self.distribute("row"))
         size.addAction("Distribute Columns Evenly", lambda: self.distribute("col"))
         size.addSeparator()
-        size.addAction("AutoFit Column Width", lambda: self.autofit(
-            "col", list(range(self.selection()[1], self.selection()[3] + 1))))
-        size.addAction("AutoFit Row Height", lambda: self.autofit(
-            "row", list(range(self.selection()[0], self.selection()[2] + 1))))
+        size.addAction("AutoFit Column Width", lambda: self._autofit("col"))
+        size.addAction("AutoFit Row Height", lambda: self._autofit("row"))
         size.addAction("Row Height…", lambda: self._ask_size("row"))
         size.addAction("Column Width…", lambda: self._ask_size("col"))
         size.addSeparator()
@@ -2360,22 +2394,20 @@ class TableEditing:
         size.addAction("Hide Columns", lambda: self.hide("col", True))
         size.addAction("Unhide Columns", lambda: self.hide("col", False))
         menu.addSeparator()
-        window = self.view.window
         menu.addAction("Format Cells…", window.format_cells_dialog, QKeySequence("Ctrl+1"))
         from . import datatools
         datatools.fill_menu(menu, self)
         menu.addSeparator()
-        charts = menu.addMenu("Insert Chart")
-        charts.addAction("XY Scatter", lambda: window.insert_chart("scatter", False, True))
-        charts.addAction("Scatter with Lines", lambda: window.insert_chart("scatter", True, True))
-        charts.addAction("Line", lambda: window.insert_chart("line", True, False))
-        charts.addAction("Column", lambda: window.insert_chart("column", False, False))
         names_menu = menu.addMenu("Names")
         names_menu.addAction("Define Name…", self._ask_name)
         from . import names as _names
         names_menu.addAction("Name Manager…", lambda: _names.name_manager(self), QKeySequence("Ctrl+F3"))
         names_menu.addAction("Create from Selection…", lambda: _names.ask_create_from_selection(self),
                              QKeySequence("Ctrl+Shift+F3"))
+        if _is_run(item):
+            self._page_layout_menu(menu, item)
+        # CalcForge's own, after Excel's
+        menu.addSeparator()
         # calculation sections (2026-10-11): cells read by every later section
         from . import calcsections
         area = list(self.selection())
@@ -2383,26 +2415,69 @@ class TableEditing:
         made = menu.addAction("Make Local" if on else "Make Global",
                               lambda: calcsections.set_cells_global(window, item, area, not on))
         made.setToolTip("Global cells are read by every later calc section (past its breaks)")
-        if _is_run(item):
-            self._page_layout_menu(menu, item)
-            menu.addAction("Rename Sheet…", self.rename)
+        menu.addAction("Rename Sheet…" if _is_run(item) else "Rename Table…", self.rename)
+        return menutidy.tidy(menu)
+
+    def heading_menu(self, axis: str, index: int) -> QMenu:
+        """Excel's row (or column) heading menu: the short one (QA round 4).
+        A heading outside the selection picks out that whole row or column
+        first, as Excel does."""
+        from . import menutidy, sheetlayout
+        item = self.item
+        window = self.view.window
+        rows, cols = item.size
+        t, l, b, r = self.selection()
+        row = axis == "row"
+        whole = (l == 0 and r == cols - 1) if row else (t == 0 and b == rows - 1)
+        inside = (t <= index <= b) if row else (l <= index <= r)
+        if not (whole and inside):
+            if row:
+                self.select((index, 0), (index, cols - 1), (index, 0))
+            else:
+                self.select((0, index), (rows - 1, index), (0, index))
+        menu = QMenu(self.view)
+        self._clipboard_entries(menu)
+        menu.addSeparator()
+        if row:
+            menu.addAction("Insert Rows Above", self.insert_rows)
+            menu.addAction("Insert Rows Below", lambda: self.insert_rows(below=True))
+            menu.addAction("Delete Rows", self.delete_rows)
         else:
-            menu.addAction("Rename Table…", self.rename)
-        menu.exec(global_pos)
-        return True
+            menu.addAction("Insert Columns Left", self.insert_cols)
+            menu.addAction("Insert Columns Right", lambda: self.insert_cols(right=True))
+            menu.addAction("Delete Columns", self.delete_cols)
+        menu.addAction("Clear Contents", lambda: self.clear("contents"))
+        menu.addSeparator()
+        menu.addAction("Format Cells…", window.format_cells_dialog, QKeySequence("Ctrl+1"))
+        which = "row" if row else "col"
+        menu.addAction("Row Height…" if row else "Column Width…", lambda: self._ask_size(which))
+        menu.addAction("AutoFit Row Height" if row else "AutoFit Column Width",
+                       lambda: self._autofit(which))
+        menu.addAction("Hide", lambda: self.hide(which, True))
+        menu.addAction("Unhide", lambda: self.hide(which, False))
+        if _is_run(item):
+            menu.addSeparator()
+            at = (index, 0) if row else (0, index)
+            brk = menu.addAction("Insert Page Break",
+                                 lambda: sheetlayout.insert_break(window, item, *at))
+            brk.setToolTip("A page break above this row" if row else
+                           "A page break left of this column")
+            brk.setEnabled(index > 0)
+            if sheetlayout.has_break(item, *at):
+                menu.addAction("Remove Page Break",
+                               lambda: sheetlayout.remove_break(window, item, *at))
+        return menutidy.tidy(menu)
+
+    def _autofit(self, axis: str) -> None:
+        t, l, b, r = self.selection()
+        self.autofit(axis, list(range(t, b + 1)) if axis == "row" else list(range(l, r + 1)))
 
     def _page_layout_menu(self, menu, item) -> None:
-        """Excel's Page Layout commands, for a spreadsheet page."""
+        """Excel's Page Layout commands, for a spreadsheet page (the page
+        break itself is on Insert ▸ and Delete ▸)."""
         from . import sheetlayout
         window = self.view.window
         layout = menu.addMenu("Page Layout")
-        row, col = self.active
-        if sheetlayout.has_break(item, row, col):
-            layout.addAction("Remove Page Break", lambda: sheetlayout.remove_break(window, item, row, col))
-        else:
-            act = layout.addAction("Insert Page Break",
-                                   lambda: sheetlayout.insert_break(window, item, row, col))
-            act.setEnabled(row > 0 or col > 0)
         layout.addAction("Reset All Page Breaks", lambda: sheetlayout.reset_breaks(window, item))
         layout.addSeparator()
         layout.addAction("Set Print Area", lambda: sheetlayout.set_print_area(

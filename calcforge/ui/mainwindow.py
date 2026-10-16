@@ -1064,9 +1064,9 @@ class MainWindow(QMainWindow):
         self._act("back", "Send to Back", lambda: self.reorder("back"), "Ctrl+Shift+[", tip="Send the selection behind every other markup")
         self._act("forward", "Bring Forward", lambda: self.reorder("forward"), "Ctrl+]")
         self._act("backward", "Send Backward", lambda: self.reorder("backward"), "Ctrl+[")
-        for key, label in (("left", "Align left"), ("hcenter", "Align centres"),
-                           ("right", "Align right"), ("top", "Align top"),
-                           ("vcenter", "Align middles"), ("bottom", "Align bottom")):
+        for key, label in (("left", "Align Left"), ("hcenter", "Align Centre"),
+                           ("right", "Align Right"), ("top", "Align Top"),
+                           ("vcenter", "Align Middle"), ("bottom", "Align Bottom")):
             self._act(f"align_{key}", label, lambda _=False, k=key: self.align_items(k))
         # Bold has always been reachable — Ctrl+B tries the words before it
         # reaches for a bookmark. Italic and underline had nothing at all:
@@ -2582,14 +2582,56 @@ class MainWindow(QMainWindow):
         index = self.document_tabs.tabAt(point)
         if index < 0:
             return None
+        from . import menutidy
         supplied = menu is not None
         menu = menu or QMenu(self.document_tabs)
-        menu.addAction("Open tab", lambda: self.open_same_document_tab(index))
-        menu.addAction("Open window", lambda: self.open_same_document_window(index))
-        menu.addAction("Split view", lambda: self.split_document(index))
+        # Revu's tab menu (QA round 4): Close, Close All, Close Others | Save,
+        # Save As… | New Window, Split | and CalcForge's Duplicate Tab. Each
+        # acts on the tab clicked, which is brought forward first where the
+        # command works on the document in view.
+        active = index == self._active_tab
+
+        def on_tab(action):
+            def run(_checked=False):
+                self.switch_to_document(index)
+                action.trigger()
+            return run
+        close = menu.addAction("Close", lambda: self.close_document_tab(index))
+        if active:
+            close.setShortcut(self.act_close_tab.shortcut())
+            close.setShortcutContext(Qt.WidgetShortcut)
+        menu.addAction(self.act_close_all)
+        others = menu.addAction("Close Others", lambda: self.close_other_documents(index))
+        others.setEnabled(len(self._open_documents) > 1)
+        menu.addSeparator()
+        for action in (self.act_save, self.act_save_as):
+            entry = menu.addAction(action.text(), on_tab(action))
+            entry.setShortcut(action.shortcut())
+            entry.setShortcutContext(Qt.WidgetShortcut)
+        menu.addSeparator()
+        window = menu.addAction("New Window", lambda: self.open_same_document_window(index))
+        window.setToolTip("Show this document in a window of its own as well")
+        split = menu.addAction("Open in Split View", lambda: self.split_document(index))
+        split.setToolTip("Show this document beside the one in view, in a split window")
+        duplicate = menu.addAction("Duplicate Tab", lambda: self.open_same_document_tab(index))
+        duplicate.setToolTip("Another tab on the same document, with a view of its own")
+        menutidy.tidy(menu)
         if not supplied:
             menu.exec(self.document_tabs.mapToGlobal(point))
         return menu
+
+    def close_other_documents(self, keep: int) -> None:
+        """Close every tab but *keep*, each asking about unsaved changes; a
+        Cancel stops there."""
+        for index in range(len(self._open_documents) - 1, -1, -1):
+            if index == keep:
+                continue
+            count = len(self._open_documents)
+            self.close_document_tab(index)
+            if len(self._open_documents) == count:
+                return                                 # Cancel kept it
+            if index < keep:
+                keep -= 1
 
     def open_same_document_window(self, index: Optional[int] = None) -> "MainWindow":
         """Show this document in another window without copying its contents."""
@@ -4008,12 +4050,13 @@ class MainWindow(QMainWindow):
         self.pages_panel.list.setCurrentRow(target)
         self.status_hint.setText(f"Page pasted in as page {target + 1}")
 
-    def delete_page(self, index: Optional[int] = None) -> None:
-        """Take out the page — or the whole run picked out in the panel."""
+    def delete_page(self, index: Optional[int] = None, pages: Optional[list] = None) -> None:
+        """Take out the page — or the whole run picked out in the panel, or
+        the *pages* given (a sheet's, from its tab)."""
         if len(self.document.pages) <= 1:
             QMessageBox.information(self, "Delete page", "A document needs at least one page.")
             return
-        going = self.pages_acted_on(index)
+        going = sorted(pages) if pages is not None else self.pages_acted_on(index)
         # Never all of them: a document has to keep a page. The last one in
         # the run stays behind rather than the first, so what is left is the
         # end of what was there rather than the start of it.
@@ -4445,130 +4488,135 @@ class MainWindow(QMainWindow):
     def page_menu(self, index: int, menu: Optional[QMenu] = None) -> QMenu:
         """Everything you can do to one page — or to the run picked out.
 
-        The wording says which: with six sheets picked out, "Delete these 6
-        pages" is what the menu offers, so nothing is taken away by a command
-        that read as being about one page.
+        Revu's Thumbnails menu, in its order and with its names (QA round 4,
+        audit A1): Page Setup…, Set Scale… | Cut, Copy and Paste Pages |
+        Insert Blank Page, Insert Pages, Delete Pages, Rotate Pages, Rename
+        Page Label, Reset All Page Labels | Print Pages… | Flatten… — then
+        CalcForge's own, in a group of their own at the end.
+
+        The tooltips say which pages: with six sheets picked out, "Delete
+        these 6 pages" is what Delete Pages does, so nothing is taken away by
+        a command that read as being about one page.
         """
+        from . import menutidy
         index = self.page_index(index)
         acting = self.pages_acted_on(index)
         several = len(acting) > 1
         these = f"these {len(acting)} pages" if several else "page"
+        page = self.document.pages[index]
         menu = menu or QMenu(self)
+        # -- page setup and scale ----------------------------------------------------
+        menu.addAction("Page Setup…", lambda: (self.go_to_page(index), self.page_setup()))
+        menu.addAction("Set Scale…", lambda: (self.go_to_page(index), self.calibrate_dialog()))
+        menu.addSeparator()
+        # -- the clipboard -------------------------------------------------------------
+        many = len(self.document.pages) > 1
+        cut = menu.addAction("Cut Pages", lambda: self.cut_pages(index))
+        cut.setToolTip(f"Copy {these}, then delete them")
+        cut.setEnabled(many and len(acting) < len(self.document.pages))
+        copy = menu.addAction("Copy Pages", lambda: self.copy_page(index))
+        copy.setToolTip(f"Copy {these}")
+        waiting = self.page_on_the_clipboard()
+        paste = menu.addMenu("Paste Pages")
+        paste.setToolTip("Paste the copied pages before or after this page"
+                         if waiting is not None else "There is no page on the clipboard")
+        before = paste.addAction("Before", lambda: self.paste_page(index, before=True))
+        before.setToolTip(f"Paste the copied pages before page {index + 1}")
+        after = paste.addAction("After", lambda: self.paste_page(index))
+        after.setToolTip(f"Paste the copied pages after page {index + 1}")
+        paste.setEnabled(waiting is not None)
+        menu.addSeparator()
+        # -- insert, delete, rotate, label -------------------------------------------
+        blank = menu.addMenu("Insert Blank Page")
+        blank.addAction("Before", lambda: self.add_page_before(index)).setToolTip(
+            "Insert a blank page before this page")
+        blank.addAction("After", lambda: self.add_page(index)).setToolTip(
+            "Insert a blank page after this page")
+        pages = menu.addMenu("Insert Pages")
+        pages.addAction("Before…", lambda: self.insert_pdf(index, before=True)).setToolTip(
+            "Insert PDF pages before this page")
+        pages.addAction("After…", lambda: self.insert_pdf(index)).setToolTip(
+            "Insert PDF pages after this page")
+        pages.addSeparator()
+        pages.addAction("Image Before…",
+                        lambda: self.insert_image_page(index, before=True)).setToolTip(
+            "Insert an image page before this page")
+        pages.addAction("Image After…", lambda: self.insert_image_page(index)).setToolTip(
+            "Insert an image page after this page")
+        delete = menu.addAction("Delete Pages", lambda: self.delete_page(index))
+        delete.setToolTip(f"Delete {these}")
+        delete.setEnabled(many)
+        turn = menu.addMenu("Rotate Pages")
+        turn_cw = turn.addAction("Clockwise", lambda: self.rotate_page(index, True))
+        turn_cw.setToolTip("Turn the paper and everything drawn on it. To turn "
+                           "only the way it is shown, use View ▸ Rotate View.")
+        turn_acw = turn.addAction("Anticlockwise", lambda: self.rotate_page(index, False))
+        turn_acw.setToolTip("Turn the paper and everything drawn on it anticlockwise")
+        if not several:
+            rename = menu.addAction("Rename Page Label…", lambda: self.rename_page(index))
+            rename.setToolTip("Give this page a custom label")
+            reset = menu.addAction("Reset Page Label", lambda: self.reset_page_label(index))
+            reset.setToolTip("Restore the imported label, or the normal page number")
+            reset.setEnabled(page.label != page.source_note.strip())
+        every = menu.addAction("Reset All Page Labels", self.reset_all_page_labels)
+        every.setToolTip("Every page back to its imported label, or the normal page number")
+        every.setEnabled(any(p.label != p.source_note.strip() for p in self.document.pages))
+        menu.addSeparator()
+        printing = menu.addAction("Print Pages…", lambda: self.print_pages(index))
+        printing.setToolTip(f"Print {these}")
+        menu.addSeparator()
+        menu.addAction(self.act_flatten_document)
+        processing = menu.addAction("Colour Processing…", lambda: self.color_processing(index))
+        processing.setEnabled(bool(page.background_key or page.pdf_key))
+        menu.addSeparator()
+        # -- CalcForge's own ------------------------------------------------------------
         here = menu.addAction("Go to Page", lambda: self.go_to_page(index))
         here.setToolTip("Go to this page")
         bookmark = menu.addAction("Add Bookmark", lambda: self.bookmark_page(index))
         bookmark.setToolTip("Add this page to the document bookmarks")
-        if not several:
-            rename = menu.addAction("Rename…", lambda: self.rename_page(index))
-            rename.setToolTip("Give this page a custom label")
-            reset = menu.addAction("Reset Label", lambda: self.reset_page_label(index))
-            reset.setToolTip("Restore the imported label, or the normal page number")
-            reset.setEnabled(bool(self.document.pages[index].label))
+        first, last = acting[0], acting[-1]
+        up = menu.addAction("Move Up", lambda: self.move_page(first, first - 1, len(acting)))
+        up.setEnabled(first > 0)
+        down = menu.addAction("Move Down", lambda: self.move_page(first, first + 1, len(acting)))
+        down.setEnabled(last < len(self.document.pages) - 1)
+        sheet_page = menu.addAction("Spreadsheet After", lambda: self.insert_sheet_page(index))
+        sheet_page.setToolTip("Insert a page of spreadsheet cells after this page")
+        if page.sheet is not None:
+            sheet_page.setText("Add Sheet Page")
+            layout = menu.addAction("Sheet Layout…", lambda: self.sheet_page_setup(index))
+            layout.setToolTip("Print area, titles, fit to page width, centring, gridlines")
+        duplicate = menu.addAction("Duplicate Pages" if several else "Duplicate Page",
+                                   lambda: self.duplicate_page(index))
+        duplicate.setToolTip(f"Duplicate {these}")
+        from . import calcsections
+        calcsections.add_menu(self, menu, index)
+        grid = menu.addAction("Page Grid")
+        grid.setCheckable(True)
+        grid.setChecked(page.shows_a_grid(self.document.settings))
+        grid.setToolTip("A grid belongs to the page it is on, and prints with "
+                        "it.\nPages that came in from a PDF start without one.")
+        grid.toggled.connect(lambda on, i=index: self.set_page_grid(i, on))
+        running = menu.addMenu("Header/Footer")
+        for which, label in (("header", "Show Header"), ("footer", "Show Footer")):
+            entry = running.addAction(label)
+            entry.setCheckable(True)
+            entry.setChecked(getattr(page, f"shows_a_{which}")(self.document.settings))
+            entry.toggled.connect(
+                lambda on, i=index, w=which: self.set_page_running_text(i, w, on))
+        running.addSeparator()
+        wording = running.addAction("Headers && Footers…", self.edit_header_footer)
+        wording.setToolTip("Edit the document's header and footer wording")
+        paper = menu.addMenu("Paper Size")
+        for name in PAGE_SIZES:
+            entry = paper.addAction(name, lambda n=name: self.set_page_size(index, n))
+            entry.setCheckable(True)
+            entry.setChecked(page.setup.size_name == name)
         include = menu.addAction("Print")
         include.setToolTip("Include the selected page or pages in print and export")
         include.setCheckable(True)
         include.setChecked(all(self.document.pages[i].printable for i in acting))
         include.toggled.connect(
-            lambda on, pages=tuple(acting): self.set_pages_printable(pages, on))
-        menu.addSeparator()
-        copy = menu.addAction("Copy Pages" if several else "Copy Page",
-                              lambda: self.copy_page(index))
-        copy.setToolTip(f"Copy {these}")
-        # Named with the place it lands, because "Paste Page" on its own does
-        # not say where the page goes and there is nothing on screen to say
-        # so either.
-        waiting = self.page_on_the_clipboard()
-        paste = menu.addAction("Paste After",
-                               lambda: self.paste_page(index))
-        paste.setToolTip(f"Paste a page after page {index + 1}")
-        paste.setEnabled(waiting is not None)
-        if waiting is None:
-            paste.setText("Paste Page")
-            paste.setToolTip("There is no page on the clipboard")
-        before = menu.addAction("Paste Before",
-                                lambda: self.paste_page(index, before=True))
-        before.setToolTip(f"Paste a page before page {index + 1}")
-        before.setEnabled(waiting is not None)
-        menu.addSeparator()
-        blank_before = menu.addAction("Blank Before", lambda: self.add_page_before(index))
-        blank_before.setToolTip("Insert a blank page before this page")
-        blank_after = menu.addAction("Blank After", lambda: self.add_page(index))
-        blank_after.setToolTip("Insert a blank page after this page")
-        sheet_page = menu.addAction("Spreadsheet After",
-                                    lambda: self.insert_sheet_page(index))
-        sheet_page.setToolTip("Insert a page of spreadsheet cells after this page")
-        if self.document.pages[index].sheet is not None:
-            sheet_page.setText("Add Sheet Page")
-            layout = menu.addAction("Sheet Layout…",
-                                    lambda: self.sheet_page_setup(index))
-            layout.setToolTip("Print area, titles, fit to page width, centring, gridlines")
-        duplicate = menu.addAction("Duplicate Pages" if several else "Duplicate Page",
-                                   lambda: self.duplicate_page(index))
-        duplicate.setToolTip(f"Duplicate {these}")
-        menu.addSeparator()
-        pdf_before = menu.addAction("PDF Before…",
-                                    lambda: self.insert_pdf(index, before=True))
-        pdf_before.setToolTip("Insert PDF pages before this page")
-        pdf_after = menu.addAction("PDF After…", lambda: self.insert_pdf(index))
-        pdf_after.setToolTip("Insert PDF pages after this page")
-        image_before = menu.addAction(
-            "Image Before…", lambda: self.insert_image_page(index, before=True))
-        image_before.setToolTip("Insert an image page before this page")
-        image_after = menu.addAction("Image After…",
-                                     lambda: self.insert_image_page(index))
-        image_after.setToolTip("Insert an image page after this page")
-        menu.addSeparator()
-        first, last = acting[0], acting[-1]
-        up = menu.addAction("Move Up", lambda: self.move_page(
-            first, first - 1, len(acting)))
-        up.setEnabled(first > 0)
-        down = menu.addAction("Move Down", lambda: self.move_page(
-            first, first + 1, len(acting)))
-        down.setEnabled(last < len(self.document.pages) - 1)
-        menu.addSeparator()
-        menu.addSeparator()
-        turn_cw = menu.addAction("Rotate Clockwise",
-                                 lambda: self.rotate_page(index, True))
-        turn_cw.setToolTip("Turn the paper and everything drawn on it. To turn "
-                           "only the way it is shown, use View ▸ Turn view.")
-        turn_acw = menu.addAction("Rotate Counterclockwise",
-                                  lambda: self.rotate_page(index, False))
-        turn_acw.setToolTip("Turn the paper and everything drawn on it anticlockwise")
-        running = menu.addMenu("Header/Footer")
-        for which, label in (("header", "Show Header"),
-                             ("footer", "Show Footer")):
-            entry = running.addAction(label)
-            entry.setCheckable(True)
-            page = self.document.pages[index]
-            entry.setChecked(getattr(page, f"shows_a_{which}")(
-                self.document.settings))
-            entry.toggled.connect(
-                lambda on, i=index, w=which: self.set_page_running_text(i, w, on))
-        running.addSeparator()
-        wording = running.addAction("Edit Wording…", self.edit_header_footer)
-        wording.setToolTip("Edit the document's header and footer wording")
-        grid = menu.addAction("Page Grid")
-        grid.setCheckable(True)
-        grid.setChecked(self.document.pages[index].shows_a_grid(
-            self.document.settings))
-        grid.setToolTip("A grid belongs to the page it is on, and prints with "
-                        "it.\nPages that came in from a PDF start without one.")
-        grid.toggled.connect(lambda on, i=index: self.set_page_grid(i, on))
-        paper = menu.addMenu("Paper Size")
-        for name in PAGE_SIZES:
-            entry = paper.addAction(name, lambda n=name: self.set_page_size(index, n))
-            entry.setCheckable(True)
-            entry.setChecked(self.document.pages[index].setup.size_name == name)
-        menu.addAction("Page Setup…", lambda: (self.go_to_page(index),
-                                               self.page_setup()))
-        menu.addAction("Page Scale…", lambda: (self.go_to_page(index),
-                                               self.calibrate_dialog()))
-        from . import calcsections
-        calcsections.add_menu(self, menu, index)
-        processing = menu.addAction("Color Processing…",
-                                    lambda: self.color_processing(index))
-        page = self.document.pages[index]
-        processing.setEnabled(bool(page.background_key or page.pdf_key))
+            lambda on, chosen=tuple(acting): self.set_pages_printable(chosen, on))
         editable = menu.addAction("Make This Page's Markups Editable",
                                   lambda: self.make_markups_editable(index))
         editable.setToolTip(
@@ -4577,11 +4625,51 @@ class MainWindow(QMainWindow):
             "change. What is read out is\nCalcForge's drawing of them, so it "
             "will not match the file exactly.")
         editable.setEnabled(bool(page.pdf_key) and page.pdf_annotations)
-        delete = menu.addAction("Delete Pages" if several else "Delete Page",
-                                lambda: self.delete_page(index))
-        delete.setToolTip(f"Delete {these}")
-        delete.setEnabled(len(self.document.pages) > 1)
-        return menu
+        return menutidy.tidy(menu)
+
+    def cut_pages(self, index: Optional[int] = None) -> None:
+        """Revu's Cut Pages: the pages copied, then deleted (asked first)."""
+        going = self.pages_acted_on(index)
+        if len(going) >= len(self.document.pages):
+            self.status_hint.setText("A document needs at least one page")
+            return
+        self.copy_page(index)
+        self.delete_page(index)
+
+    def reset_all_page_labels(self) -> None:
+        """Revu's Reset All Page Labels: every page back to its imported
+        label, or to its plain number; one undo step."""
+        changed = [(page, page.source_note.strip()) for page in self.document.pages
+                   if page.label != page.source_note.strip()]
+        if not changed:
+            return
+
+        def mutate():
+            for page, restored in changed:
+                page.label = restored
+
+        self._structural_change("Reset all page labels", mutate, preserve_view=True)
+
+    def print_pages(self, index: Optional[int] = None) -> None:
+        """Revu's Print Pages…: the print dialog with these pages chosen."""
+        chosen = self.pages_acted_on(index)
+        printer = self._printer()
+        first, last = chosen[0] + 1, chosen[-1] + 1
+        printer.setPrintRange(QPrinter.PageRange)
+        printer.setFromTo(first, last)
+        dialog = QPrintDialog(printer, self)
+        dialog.setMinMax(1, len(self.document.pages))
+        dialog.setOption(QPrintDialog.PrintPageRange, True)
+        if dialog.exec() != QPrintDialog.Accepted:
+            return
+        pages = None
+        if printer.printRange() == QPrinter.PageRange and \
+                (printer.fromPage(), printer.toPage()) == (first, last):
+            pages = [self.document.pages[i] for i in chosen]   # a picked set, gaps kept
+        try:
+            export_io.print_document(self.document, printer, pages)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Print", str(exc))
 
     def rename_page(self, index: int) -> None:
         """Give one page the label shown in the Pages panel."""
@@ -7787,7 +7875,7 @@ class MainWindow(QMainWindow):
         for name in names[:60]:
             variables.addAction(name, lambda n=name: self.insert_text_field(item, "{=" + n + "}"))
         if not names:
-            nothing = variables.addAction("No variables yet")
+            nothing = variables.addAction("No Variables Yet")
             nothing.setEnabled(False)
         fields.addSeparator()
         from .dialogs import FIELD_CHOICES
@@ -8295,10 +8383,10 @@ class MainWindow(QMainWindow):
         """
         if not getattr(item, "CAN_LEAD", True):
             return                    # Calculation text never becomes a callout
-        arrow = menu.addAction("Add arrow leader",
+        arrow = menu.addAction("Add Arrow Leader",
                                lambda: self.add_leader_to(item, "arrow"))
         arrow.setToolTip("A line with a head on it, dragged to what it is about")
-        cloud = menu.addAction("Add cloud leader",
+        cloud = menu.addAction("Add Cloud Leader",
                                lambda: self.add_leader_to(item, "cloud"))
         cloud.setToolTip("A revision cloud round the area, joined to the note "
                          "by a plain line")
@@ -8310,7 +8398,7 @@ class MainWindow(QMainWindow):
         if which is None and item.leaders:
             which = len(item.leaders) - 1
         if which is not None:
-            menu.addAction("Remove leader",
+            menu.addAction("Remove Leader",
                            lambda i=which: self.remove_leader_from(item, i))
 
     def add_leader_to(self, item, kind: str = "arrow") -> None:
@@ -8883,18 +8971,17 @@ class MainWindow(QMainWindow):
     # menus & help
     # ==================================================================
     def _fill_outline_menu(self, menu, item, scene_pos: QPointF) -> None:
-        """What can be done to this shape's corners and sides.
+        """What can be done to this shape's corners and sides, as Revu names
+        it: Control Point ▸ (Add / Subtract Control Point), Arc Segment and
+        Round All Corners — and CalcForge's own corner rounding and drafting
+        break symbol, kept in Control Point ▸.
 
-        The same four things the held keys do, for anyone who would rather
-        read them than remember them: a point in or out, a corner rounded, a
-        side bent into an arc — and the drafting break symbol, which has no
-        key of its own.
-
-        The pointer picks which corner and which side, and when it is not near
-        either of them — right in the middle of a big rectangle, say — the
-        nearest are offered and the wording says so. This used to show nothing
-        at all in that case, which is how a feature that is on every shape
-        came to be one nobody could find.
+        The same things the held keys do, for anyone who would rather read
+        them than remember them. The pointer picks which corner and which
+        side, and when it is not near either of them — right in the middle of
+        a big rectangle, say — the nearest are offered and the tooltip says
+        so. A straight two-point line has no corner to round and no side to
+        arc (QA round 4), so it is offered neither.
         """
         local = item.mapFromScene(scene_pos)
         reach = 12.0 / max(self.view.zoom(), 0.05)
@@ -8909,38 +8996,71 @@ class MainWindow(QMainWindow):
             segment = self.view._segment_near(item, local, float("inf"))
         this_corner = "this" if on_a_corner else "the nearest"
         this_side = "this" if on_a_side else "the nearest"
+        straight = isinstance(item, PolyItem) and not item.closed and len(item.points) == 2
 
-        outline = menu.addMenu("This outline")
-        if vertex is not None:
-            round_off = outline.addAction(
-                "Sharpen corner" if item.is_rounded(vertex) else "Round corner",
+        points = menu.addMenu("Control Point")
+        if segment is not None:
+            add = points.addAction(
+                "Add Control Point", lambda: self._reshape(
+                    item, "add", segment, local if on_a_side else None))
+            add.setToolTip(f"Put a point in {this_side} side; Shift and the pointer "
+                           "does this too")
+        if vertex is not None and len(corners) > 2:
+            take_out = points.addAction("Subtract Control Point",
+                                        lambda: self._reshape(item, "delete", vertex))
+            take_out.setToolTip(
+                f"Remove {this_corner} point; Shift and the pointer does this too")
+        if vertex is not None and not straight:
+            rounded = item.is_rounded(vertex)
+            round_off = points.addAction(
+                "Sharpen Corner" if rounded else "Round Corner",
                 lambda: self._reshape(item, "round", vertex))
             round_off.setToolTip(
-                f"{'Sharpen' if item.is_rounded(vertex) else 'Round'} {this_corner} "
+                f"{'Sharpen' if rounded else 'Round'} {this_corner} "
                 "corner; Ctrl and the pointer over a corner does this too")
-            if len(corners) > 2:
-                take_out = outline.addAction("Remove point",
-                    lambda: self._reshape(item, "delete", vertex))
-                take_out.setToolTip(
-                    f"Remove {this_corner} point; Shift and the pointer does this too")
         if segment is not None:
-            add = outline.addAction(
-                "Add point", lambda: self._reshape(
-                    item, "add", segment, local if on_a_side else None))
-            add.setToolTip(f"Put a point in {this_side} side")
-            curve = outline.addAction(
-                "Straighten side" if item.is_curved(segment) else "Arc side",
-                lambda: self._reshape(item, "curve", segment))
-            curve.setToolTip(f"Change {this_side} side between straight and arced")
+            points.addSeparator()             # CalcForge's own
             broken = bool(item.broken.get(segment))
-            break_action = outline.addAction(
-                "Remove break" if broken else "Insert break",
+            break_action = points.addAction(
+                "Remove Break" if broken else "Insert Break",
                 lambda: self._reshape(item, "break", segment))
             break_action.setToolTip(
                 f"{'Remove' if broken else 'Insert'} the structural break symbol "
                 f"on {this_side} side")
-        if outline.isEmpty():
-            menu.removeAction(outline.menuAction())
+        if segment is not None and not straight:
+            curved = item.is_curved(segment)
+            curve = menu.addAction(
+                "Straighten Segment" if curved else "Arc Segment",
+                lambda: self._reshape(item, "curve", segment))
+            curve.setToolTip(f"Change {this_side} side between straight and arced; "
+                             "Ctrl and the pointer over a side does this too")
+        roundable = self._roundable_corners(item)
+        if roundable:
+            sharpen = all(item.is_rounded(v) for v in roundable)
+            every = menu.addAction("Sharpen All Corners" if sharpen else "Round All Corners",
+                                   lambda: self._round_all_corners(item, not sharpen))
+            every.setToolTip("Round off every corner of the shape" if not sharpen
+                             else "Make every corner square again")
+
+    @staticmethod
+    def _roundable_corners(item) -> list:
+        """The corners that can be rounded: every one of a closed shape, the
+        inner ones of an open line."""
+        count = len(item.corner_points())
+        closed = isinstance(item, RectItem) or getattr(item, "closed", False)
+        if closed:
+            return list(range(count)) if count >= 3 else []
+        return list(range(1, count - 1))
+
+    def _round_all_corners(self, item, rounded: bool = True) -> None:
+        """Revu's Round All Corners (or every corner square again), one undo step."""
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        item = self.view.swap_for_a_polygon(item)
+        for vertex in self._roundable_corners(item):
+            if item.is_rounded(vertex) != rounded:
+                item.round_corner(vertex)
+        self.view.commit_snapshot("Round all corners" if rounded else "Sharpen all corners")
+        self.refresh_selection()
 
     @staticmethod
     def _nearest_corner(corners, local: QPointF) -> Optional[int]:
@@ -8991,22 +9111,39 @@ class MainWindow(QMainWindow):
 
     def build_context_menu(self, item, scene_pos: QPointF,
                            menu: Optional[QMenu] = None) -> QMenu:
+        """A markup's right-click menu in Revu's order (QA round 4, audit
+        C1/C2), or the page's when nothing is under the pointer.
+
+        What belongs to the kind of thing clicked (an equation's settings, a
+        table's Edit Table, a measurement's Variable) comes first; then
+        Revu's: Cut, Copy, Paste, Multiply…, Format Painter, Delete |
+        Control Point ▸, Arc Segment, Round All Corners | Order ▸,
+        Alignment ▸, Flatten, Lock, Hide, Group | CalcForge's shape extras |
+        Add to Tool Chest ▸, Set as Default, Apply to Pages…, Properties.
+        """
+        from . import menutidy
         menu = menu or QMenu(self)
         menu.setSeparatorsCollapsible(True)
-        if item is not None and getattr(item, "IS_CALC", False) \
-                and getattr(item, "region", None) is not None:
+        if item is None:
+            self._fill_page_context_menu(menu, scene_pos)
+            return menutidy.tidy(menu)
+        kind = getattr(item, "TYPE", "")
+        is_table = kind == "table"
+        # -- what belongs to this kind of thing --------------------------------
+        if getattr(item, "IS_CALC", False) and getattr(item, "region", None) is not None:
             from . import calcmenu
             calcmenu.fill(self, menu, item)
-        if item is not None and getattr(item, "TYPE", "") == "table":
-            menu.addAction("Edit Cells", lambda: self.view.tables.open(item))
+        if is_table:
+            edit = menu.addAction("Edit Table", lambda: self.view.tables.open(item, (0, 0)))
+            edit.setToolTip("Open the table's cells, at A1")
             rename = menu.addAction("Rename Table…", lambda: self._rename_table(item))
             rename.setEnabled(not item.locked)
             menu.addSeparator()
-        if item is not None and getattr(item, "TYPE", "") == "chart":
+        if kind == "chart":
             edit = menu.addAction("Edit Chart…", lambda: self._edit_chart(item))
             edit.setEnabled(not item.locked)
             menu.addSeparator()
-        if item is not None and getattr(item, "TYPE", "") == "calc_block":
+        if kind == "calc_block":
             contained = menu.addAction("Self-Contained")
             contained.setCheckable(True)
             contained.setChecked(item.self_contained)
@@ -9018,154 +9155,194 @@ class MainWindow(QMainWindow):
                                     lambda: self.remove_block_keep_equations(item))
             remove.setEnabled(not item.locked)
             menu.addSeparator()
-        if item is not None:
-            if isinstance(item, ImageItem) and not item.locked:
-                swap = menu.addMenu("Replace Image")
-                swap.addAction("From File…", lambda: self.replace_image(item, "file"))
-                pasted = swap.addAction("From Clipboard",
-                                        lambda: self.replace_image(item, "clipboard"))
-                pasted.setEnabled(self.clipboard_has_image())
-                menu.addAction("Crop Image", lambda: (self.scene.clearSelection(),
-                                                      item.setSelected(True),
-                                                      self.select_tool("crop_image")))
-                menu.addSeparator()
-            if getattr(item, "TYPE", "") == "link":
-                menu.addAction("Follow Link", lambda: self.follow_link(item))
-                menu.addAction("Edit Link…", lambda: self.edit_link(item))
-            if isinstance(item, _TextBase):
-                menu.addAction("Edit Text", lambda: self.view.begin_item_edit(item))
-                self._text_box_menu(menu, item)
-            several = self.colour_changeable(item)
-            if len(several) > 1:
-                # Revu's Change Multiple Colors: one colour of the selection
-                # becomes another
-                menu.addAction("Change Colors…", lambda: self.change_multiple_colors(several))
-            elif isinstance(item, SnapshotItem):
-                menu.addAction("Change Colors…", lambda: self.change_colors(item))
-            elif isinstance(item, ImageItem):
-                menu.addAction("Color Processing…", lambda: self.change_colors(item))
-            if self.view.has_an_outline(item):
-                # Rectangles and clouds included: four corners and four sides
-                # is an outline like any other, and everything offered on a
-                # polygon's is offered on theirs.
-                self._fill_outline_menu(menu, item, scene_pos)
-            if isinstance(item, RectItem) and item.kind in SIZED_SHAPES:
-                convert = menu.addAction("Convert to Polygon",
-                               lambda: self.rectangle_to_polygon(item))
-                convert.setToolTip("Turn this rectangle or ellipse into a polygon")
-                menu.addAction("Exact Size…",
-                               lambda: self.set_rectangle_size(item))
-                show = menu.addAction("Show Size")
-                show.setCheckable(True)
-                show.setChecked(item.show_size)
-                show.toggled.connect(lambda on: self.set_size_visible(item, on))
-            if isinstance(item, MeasureItem):
-                if item.kind != "calibrate":
-                    # first: a measurement's name is what ties it to the calcs,
-                    # typed right here (the user, 2026-10-01: no separate popup)
-                    menu.addAction(self._variable_field(menu, item))
-                    if item.variable:
-                        menu.addAction("Show in Variables",
-                                       lambda i=item: self.show_variable_of(i))
-                    menu.addSeparator()
-                menu.addAction("Edit Text…", lambda: self.edit_measure_text(item))
-                straight = menu.addAction("Inline Text")
-                straight.setToolTip("Keep the measurement text in line with its line")
-                straight.setCheckable(True)
-                straight.setChecked(item.label_angle is None)
-                straight.toggled.connect(
-                    lambda on, i=item: self.set_label_angle(i, None if on else 0.0))
-                menu.addAction("Page Scale…", self.calibrate_dialog)
-            if hasattr(item, "size_to_text"):
-                menu.addAction(self.act_autosize)
+        if isinstance(item, ImageItem) and not item.locked:
+            swap = menu.addMenu("Replace Image")
+            swap.addAction("From File…", lambda: self.replace_image(item, "file"))
+            pasted = swap.addAction("From Clipboard",
+                                    lambda: self.replace_image(item, "clipboard"))
+            pasted.setEnabled(self.clipboard_has_image())
+            menu.addAction("Crop Image", lambda: (self.scene.clearSelection(),
+                                                  item.setSelected(True),
+                                                  self.select_tool("crop_image")))
             menu.addSeparator()
-            if len([i for i in self.selected_items() if isinstance(i, MarkupItem)]) > 1:
-                menu.addAction(self.act_group)
-            if any(getattr(i, "group", "") for i in self.selected_items()):
-                menu.addAction(self.act_ungroup)
-            if isinstance(item, _TextBase):
-                self._fill_leader_menu(menu, item, scene_pos)
-            # equations and blocks are not drawn with a markup's pen, never
-            # hidden or flattened (decision 17): only what applies to them
-            calc_like = bool(getattr(item, "IS_CALC", False))
-            if not calc_like:
-                default = menu.addAction("Set as Default", lambda: self.set_as_default(item))
-                default.setToolTip("Use these properties for new markups of this kind")
-            # Bluebeam's Add to Tool Chest: the tool sets, one click each
-            add_tool = menu.addMenu("Add to Tool Chest")
-            add_tool.setToolTip("Keep this markup in a tool set to use again")
-            for group in toolsets.load_toolsets():
-                add_tool.addAction(group.name, lambda n=group.name: self.add_to_toolset(
-                    item, into=n, ask=False))
-            add_tool.addSeparator()
-            add_tool.addAction("Choose a Tool Set…", lambda: self.add_to_toolset(item))
+        if kind == "link":
+            menu.addAction("Follow Link", lambda: self.follow_link(item))
+            menu.addAction("Edit Link…", lambda: self.edit_link(item))
             menu.addSeparator()
-            menu.addAction(self.act_cut)
-            menu.addAction(self.act_copy)
-            menu.addAction(self.act_paste)
-            menu.addAction(self.act_duplicate)
-            if not calc_like:
-                menu.addAction(self.act_format_painter)
-            menu.addAction(self.act_delete)
+        if isinstance(item, _TextBase):
+            menu.addAction("Edit Text", lambda: self.view.begin_item_edit(item))
             menu.addSeparator()
-            order = menu.addMenu("Arrange")
-            for action in (self.act_front, self.act_forward, self.act_backward, self.act_back):
-                order.addAction(action)
-            align = menu.addMenu("Align")
-            align.setEnabled(len(self.selected_items()) > 1)
-            for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
-                align.addAction(getattr(self, f"act_align_{key}"))
-            menu.addAction(self.act_array)
-            menu.addAction(self.act_lock)
-            if not calc_like:
-                menu.addAction(self.act_hide)
-                menu.addSeparator()
-                menu.addAction(self.act_flatten)
-                apply_pages = menu.addAction("Apply to Pages…",
-                                             lambda: self.apply_to_pages(item))
-                apply_pages.setToolTip("Copy this markup to chosen pages")
+        if isinstance(item, MeasureItem) and item.kind != "calibrate":
+            # first: a measurement's name is what ties it to the calcs,
+            # typed right here (the user, 2026-10-01: no separate popup)
+            menu.addAction(self._variable_field(menu, item))
+            if item.variable:
+                menu.addAction("Show in Variables",
+                               lambda i=item: self.show_variable_of(i))
             menu.addSeparator()
-            menu.addAction("Properties", self.show_properties_panel)
-        else:
-            # Revu's page menu: Paste; Add Note, Add Bookmark, Add Flag; Next
-            # and Previous Page; Select All; Print… and Search. Our own
-            # entries stay, in among them (QA, 2026-10-15).
-            menu.addAction(self.act_paste)
-            menu.addAction(self.act_paste_in_place)
-            menu.addAction(self.act_paste_here)
-            menu.addAction(icon(TOOL_MAP["note"].icon), "Add Note",
-                           lambda _c=False, p=scene_pos: self._insert_at("note", p))
-            menu.addAction(self.act_bookmark)
-            menu.addAction(icon(TOOL_MAP["flag"].icon), "Add Flag",
-                           lambda _c=False, p=scene_pos: self._insert_at("flag", p))
+        # equations and blocks are not drawn with a markup's pen, never
+        # hidden or flattened (decision 17): only what applies to them
+        calc_like = bool(getattr(item, "IS_CALC", False))
+        # -- Revu: the clipboard -------------------------------------------------
+        menu.addAction(self.act_cut)
+        menu.addAction(self.act_copy)
+        menu.addAction(self.act_paste)
+        menu.addAction(self.act_array)
+        if not calc_like:
+            menu.addAction(self.act_format_painter)
+        menutidy.proxy(menu, self.act_delete, "Delete", QKeySequence(Qt.Key_Delete))
+        menu.addSeparator()
+        # -- Revu: the outline ----------------------------------------------------
+        if self.view.has_an_outline(item) and not is_table:
+            # Rectangles and clouds included: four corners and four sides
+            # is an outline like any other, and everything offered on a
+            # polygon's is offered on theirs.
+            self._fill_outline_menu(menu, item, scene_pos)
+        menu.addSeparator()
+        # -- Revu: order, alignment, flatten, lock, hide --------------------------
+        order = menu.addMenu("Order")
+        for action in (self.act_front, self.act_forward, self.act_backward, self.act_back):
+            order.addAction(action)
+        align = menu.addMenu("Alignment")
+        align.setEnabled(len(self.selected_items()) > 1)
+        for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
+            align.addAction(getattr(self, f"act_align_{key}"))
+        if not calc_like:
+            menutidy.proxy(menu, self.act_flatten, "Flatten")
+        menu.addAction(self.act_lock)
+        if not calc_like:
+            menu.addAction(self.act_hide)
+        if len([i for i in self.selected_items() if isinstance(i, MarkupItem)]) > 1:
+            menu.addAction(self.act_group)
+        if any(getattr(i, "group", "") for i in self.selected_items()):
+            menu.addAction(self.act_ungroup)
+        menu.addSeparator()
+        # -- CalcForge's extras for this kind of markup ---------------------------
+        if isinstance(item, _TextBase):
+            self._text_box_menu(menu, item)
+            self._fill_leader_menu(menu, item, scene_pos)
+        if isinstance(item, MeasureItem):
+            menu.addAction("Edit Text…", lambda: self.edit_measure_text(item))
+            straight = menu.addAction("Inline Text")
+            straight.setToolTip("Keep the measurement text in line with its line")
+            straight.setCheckable(True)
+            straight.setChecked(item.label_angle is None)
+            straight.toggled.connect(
+                lambda on, i=item: self.set_label_angle(i, None if on else 0.0))
+            menutidy.proxy(menu, self.act_scale, "Set Scale…")
+        if hasattr(item, "size_to_text"):
+            menu.addAction(self.act_autosize)
+        if isinstance(item, RectItem) and item.kind in SIZED_SHAPES and not is_table:
+            convert = menu.addAction("Convert to Polygon",
+                                     lambda: self.rectangle_to_polygon(item))
+            convert.setToolTip("Turn this rectangle or ellipse into a polygon")
+            menu.addAction("Exact Size…", lambda: self.set_rectangle_size(item))
+            show = menu.addAction("Show Size")
+            show.setCheckable(True)
+            show.setChecked(item.show_size)
+            show.toggled.connect(lambda on: self.set_size_visible(item, on))
+        menu.addAction(self.act_duplicate)
+        several = self.colour_changeable(item)
+        if len(several) > 1:
+            # Revu's Change Multiple Colors: one colour of the selection
+            # becomes another
+            menu.addAction("Change Colours…", lambda: self.change_multiple_colors(several))
+        elif isinstance(item, SnapshotItem):
+            menu.addAction("Change Colours…", lambda: self.change_colors(item))
+        elif isinstance(item, ImageItem):
+            menu.addAction("Colour Processing…", lambda: self.change_colors(item))
+        menu.addSeparator()
+        # -- Revu: the tool chest, defaults and properties ------------------------
+        # Bluebeam's Add to Tool Chest: the tool sets, one click each
+        add_tool = menu.addMenu("Add to Tool Chest")
+        add_tool.setToolTip("Keep this markup in a tool set to use again")
+        for group in toolsets.load_toolsets():
+            add_tool.addAction(group.name, lambda n=group.name: self.add_to_toolset(
+                item, into=n, ask=False))
+        add_tool.addSeparator()
+        add_tool.addAction("Choose a Tool Set…", lambda: self.add_to_toolset(item))
+        if not calc_like:
+            default = menu.addAction("Set as Default", lambda: self.set_as_default(item))
+            default.setToolTip("Use these properties for new markups of this kind")
+            apply_pages = menu.addAction("Apply to Pages…",
+                                         lambda: self.apply_to_pages(item))
+            apply_pages.setToolTip("Copy this markup to chosen pages")
+        menu.addAction("Properties", self.show_properties_panel)
+        return menutidy.tidy(menu)
+
+    def _fill_page_context_menu(self, menu, scene_pos: QPointF) -> None:
+        """Revu's page menu: Paste; Add Note, Add Bookmark, Add Flag; Next and
+        Previous Page; Select All; Print… and Search. Our own entries stay, in
+        among them (QA, 2026-10-15) — and in Calc mode SMath's: an equation,
+        text, a block or a plot where the pointer is (QA round 4)."""
+        from . import menutidy
+        frame = self.view.frame_at(scene_pos)
+        menu.addAction(self.act_paste)
+        menu.addAction(self.act_paste_in_place)
+        menu.addAction(self.act_paste_here)
+        menu.addAction(icon(TOOL_MAP["note"].icon), "Add Note",
+                       lambda _c=False, p=scene_pos: self._insert_at("note", p))
+        menu.addAction(self.act_bookmark)
+        menu.addAction(icon(TOOL_MAP["flag"].icon), "Add Flag",
+                       lambda _c=False, p=scene_pos: self._insert_at("flag", p))
+        menu.addSeparator()
+        menu.addAction(self.act_next_page)
+        menu.addAction(self.act_prev_page)
+        menu.addSeparator()
+        menu.addAction(self.act_select_all)
+        menu.addSeparator()
+        if self.view.calc.calc_mode() and frame is not None:
+            self._fill_calc_here(menu, frame, scene_pos)
             menu.addSeparator()
-            menu.addAction(self.act_next_page)
-            menu.addAction(self.act_prev_page)
-            menu.addSeparator()
-            menu.addAction(self.act_select_all)
-            menu.addSeparator()
-            insert = menu.addMenu("Insert Here")
-            for key in ("text", "callout", "note", "stamp", "image"):
-                tool = TOOL_MAP[key]
-                insert.addAction(icon(tool.icon), tool.label,
-                                 lambda _c=False, k=key, p=scene_pos: self._insert_at(k, p))
-            menu.addSeparator()
-            menu.addAction(self.act_page_setup)
-            menu.addAction(self.act_scale)
-            frame = self.view.frame_at(scene_pos)
-            if frame is not None:
-                spot = frame.mapFromScene(scene_pos)
-                viewport = frame.page.viewport_at(spot.x(), spot.y())
-                if viewport is not None:
-                    page = frame.page
-                    menu.addAction(f"{viewport.name} scale…",
-                                   lambda: self.edit_viewport(page, viewport))
-                    menu.addAction("Delete Viewport",
-                                   lambda: self.delete_viewport(page, viewport))
-            menu.addSeparator()
-            menu.addAction(self.act_print)
-            menu.addAction(self.act_find_text)
-        return menu
+        insert = menu.addMenu("Insert Here")
+        for key in ("text", "callout", "note", "stamp", "image"):
+            tool = TOOL_MAP[key]
+            insert.addAction(icon(tool.icon), menutidy.title_case(tool.label),
+                             lambda _c=False, k=key, p=scene_pos: self._insert_at(k, p))
+        menu.addSeparator()
+        menu.addAction(self.act_page_setup)
+        menutidy.proxy(menu, self.act_scale, "Set Scale…")
+        if frame is not None:
+            spot = frame.mapFromScene(scene_pos)
+            viewport = frame.page.viewport_at(spot.x(), spot.y())
+            if viewport is not None:
+                page = frame.page
+                menu.addAction(f"{viewport.name} Scale…",
+                               lambda: self.edit_viewport(page, viewport))
+                menu.addAction("Delete Viewport",
+                               lambda: self.delete_viewport(page, viewport))
+        menu.addSeparator()
+        menu.addAction(self.act_print)
+        menu.addAction(self.act_find_text)
+
+    def _fill_calc_here(self, menu, frame, scene_pos: QPointF) -> None:
+        """Calc mode's group on the page menu: SMath's inserts, at the click."""
+        from .sheetpages import blocks_calc
+        if blocks_calc(frame):
+            return                      # no equations on a spreadsheet page
+        spot = frame.mapFromScene(scene_pos)
+
+        def here(then=None):
+            def run(_checked=False):
+                calc = self.view.calc
+                calc.leave()
+                self.scene.clearSelection()
+                calc.place_cross(frame, spot)
+                self.view.setFocus(Qt.OtherFocusReason)
+                if then is not None:
+                    then()
+            return run
+        equation = menu.addAction("Insert Equation Here", here())
+        equation.setToolTip("Put the red cross here: what is typed next is an equation")
+        menu.addAction("Text Region", here(self.insert_calc_text)).setToolTip(
+            "Calculation text here (\" in Calc mode)")
+        menu.addAction("Calculation Block", here(self.insert_block)).setToolTip(
+            "An empty calculation block here")
+        menu.addAction("Plot", here(self.insert_plot)).setToolTip("A 2-D plot here (@ in Calc mode)")
+        index = self.document.index_of(frame.page)
+        if index is not None and index >= 0:
+            from . import calcsections
+            calcsections.add_menu(self, menu, index)
 
     def _insert_at(self, key: str, scene_point: QPointF) -> None:
         """Put a new markup on the page under *scene_point*."""

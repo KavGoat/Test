@@ -115,7 +115,7 @@ def add_menu(window, menu, index: int) -> None:
     """The page menu's section entries."""
     pages = window.document.pages
     page = pages[index]
-    entry = menu.addAction("Calc section break above this page")
+    entry = menu.addAction("Calc Section Break Above This Page")
     entry.setCheckable(True)
     entry.setChecked(bool(page.section_break))
     entry.setEnabled(index > 0)
@@ -123,7 +123,7 @@ def add_menu(window, menu, index: int) -> None:
                      "and sheets before it are not seen, except the ones made global")
     entry.toggled.connect(lambda on, i=index: set_break(window, i, on))
     if page.section_break:
-        menu.addAction("Rename calc section…", lambda i=index: rename(window, i))
+        menu.addAction("Rename Calc Section…", lambda i=index: rename(window, i))
 
 
 # -- global cells ----------------------------------------------------------------------------
