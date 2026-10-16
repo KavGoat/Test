@@ -2311,8 +2311,11 @@ def via_menu_keys(win, entry, outcome, each_index=None):
 
 def toolbar_named(win, title):
     QtWidgets = qt()[2]
+    # the Style bar is Revu's Properties toolbar now (propbar.py, a9cdcd2);
+    # commands.json was built when it was still called Style
+    names = {title, {"Style": "Properties"}.get(title, title)}
     for bar in win.findChildren(QtWidgets.QToolBar):
-        if bar.windowTitle() == title:
+        if bar.windowTitle() in names:
             return bar
     raise NotReached(f"no toolbar '{title}'")
 

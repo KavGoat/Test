@@ -322,11 +322,33 @@ def _sort_block(tables):
         return None, False
     rows, cols = item.size
     block = (0, 0, min(used[2], rows - 1), min(used[3], cols - 1))
-    first = [sheet.value(0, c) for c in range(block[1], block[3] + 1)]
-    second = [sheet.value(1, c) for c in range(block[1], block[3] + 1)] if block[2] >= 1 else []
-    header = any(isinstance(v, str) and v for v in first) and any(
-        not isinstance(v, str) for v in second if v is not None)
-    return block, header
+    return block, has_headers(sheet, block)
+
+
+def has_headers(sheet, block) -> bool:
+    """Excel's guess at "My data has headers" for a block: its first row is
+    all text (a number there is data, QA F-16), and either a column has text
+    over a value that isn't text, or the first row looks different (bold,
+    fill, borders) from the row under it. Plain text over plain text can't
+    be told apart, so it is taken as data, as Excel does."""
+    top, left, bottom, right = block
+    if bottom <= top:
+        return False
+    wb = sheet.workbook
+    first = [sheet.value(top, c) for c in range(left, right + 1)]
+    second = [sheet.value(top + 1, c) for c in range(left, right + 1)]
+    filled = [v for v in first if v is not None and v != ""]
+    if not filled or not all(isinstance(v, str) for v in filled):
+        return False
+    if any(isinstance(a, str) and a and b is not None and b != "" and not isinstance(b, str)
+           for a, b in zip(first, second)):
+        return True
+
+    def look(row, col):
+        st = wb.style_of(sheet, row, col)
+        return (st.bold, st.italic, st.fill, st.bottom, st.top)
+    return any(look(top, c) != look(top + 1, c) for c in range(left, right + 1)
+               if sheet.value(top, c) not in (None, ""))
 
 
 def quick_sort(tables, ascending: bool, col: int | None = None) -> None:
@@ -347,6 +369,8 @@ class SortDialog(QDialog):
         self.header = QCheckBox("My data has headers")
         self.header.setChecked(header)
         layout.addWidget(self.header)
+        # the Sort by lists name the columns by their headings, or by letter
+        self.header.toggled.connect(lambda _on: self._name_columns())
         self.levels = QVBoxLayout()
         layout.addLayout(self.levels)
         add = QPushButton("Add Level")
@@ -379,6 +403,17 @@ class SortDialog(QDialog):
         row.addWidget(order)
         self.levels.addLayout(row)
         self.rows.append((column, order))
+
+    def _name_columns(self) -> None:
+        if self.block is None:
+            return
+        t = self.block[0]
+        sheet = self.tables.item.sheet
+        for column, _order in self.rows:
+            for i in range(column.count()):
+                c = column.itemData(i)
+                head = data.shown(sheet, t, c) if self.header.isChecked() else ""
+                column.setItemText(i, head or f"Column {col_letters(c)}")
 
     def keys(self) -> list:
         return [(column.currentData(), order.currentIndex() == 0) for column, order in self.rows]
@@ -589,6 +624,60 @@ class GoalSeekDialog(QDialog):
 
 def goal_seek_dialog(tables):
     dialog = GoalSeekDialog(tables)
+    _show(tables.view.window, dialog)
+    return dialog
+
+
+# -- Insert and Delete (Ctrl++ and Ctrl+-) ------------------------------------------------------------
+class CellsDialog(QDialog):
+    """Excel's Insert and Delete dialogs: shift the cells beside the
+    selection along, or take whole rows or columns (QA F-13)."""
+
+    CHOICES = {True: [("right", "Shift cells r&ight"), ("down", "Shift cells &down"),
+                      ("row", "Entire &row"), ("col", "Entire &column")],
+               False: [("left", "Shift cells &left"), ("up", "Shift cells &up"),
+                       ("row", "Entire &row"), ("col", "Entire &column")]}
+
+    def __init__(self, tables, insert: bool):
+        from PySide6.QtWidgets import QButtonGroup, QGroupBox, QRadioButton
+        super().__init__(tables.view)
+        self.tables = tables
+        self.insert = insert
+        self.setWindowTitle("Insert" if insert else "Delete")
+        layout = QVBoxLayout(self)
+        group = QGroupBox("Insert" if insert else "Delete")
+        inner = QVBoxLayout(group)
+        self.buttons = QButtonGroup(self)
+        self.radios = {}
+        for key, label in self.CHOICES[insert]:
+            radio = QRadioButton(label)
+            self.buttons.addButton(radio)
+            self.radios[key] = radio
+            inner.addWidget(radio)
+        layout.addWidget(group)
+        # Excel's first guess: along the selection's longer side
+        t, l, b, r = tables.selection()
+        across = (b - t) > (r - l)
+        default = ("right" if insert else "left") if across else ("down" if insert else "up")
+        self.radios[default].setChecked(True)
+        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        box.accepted.connect(self.accept)
+        box.rejected.connect(self.reject)
+        layout.addWidget(box)
+
+    def choice(self) -> str:
+        return next(key for key, radio in self.radios.items() if radio.isChecked())
+
+    def choose(self, key: str) -> None:
+        self.radios[key].setChecked(True)
+
+    def accept(self) -> None:
+        self.tables.insert_or_delete(self.choice(), self.insert)
+        super().accept()
+
+
+def cells_dialog(tables, insert: bool):
+    dialog = CellsDialog(tables, insert)
     _show(tables.view.window, dialog)
     return dialog
 

@@ -111,14 +111,20 @@ class Sheet:
     def cell(self, row: int, col: int) -> Optional[Cell]:
         return self.cells.get((row, col))
 
+    #: bumped whenever a cell is added or taken away (evaluate.py's column
+    #: summaries are only good for the cells there when they were made)
+    cells_serial = 0
+
     def _put(self, row: int, col: int, cell: Cell) -> None:
         if (row, col) not in self.cells:
             rows = self._rows_in_col.setdefault(col, [])
             bisect.insort(rows, row)
+            self.cells_serial += 1
         self.cells[(row, col)] = cell
 
     def _drop(self, row: int, col: int) -> None:
         if self.cells.pop((row, col), None) is not None:
+            self.cells_serial += 1
             rows = self._rows_in_col.get(col)
             if rows:
                 i = bisect.bisect_left(rows, row)
@@ -327,6 +333,10 @@ class Workbook:
         self._evaluating: set = set()
         self._done: set = set()
         self._in_pass = False
+        # during a pass: each column's values already worked out, kept so a
+        # column of running totals reads its column once rather than once a
+        # row (findings 5.2; evaluate.RefValue.float_values)
+        self._columns: dict = {}
         self._changed: set = set()
         self._outside_reads: dict[tuple, set] = {}
         self._spill_moved: list = []                 # spilled values that changed this pass
@@ -858,6 +868,7 @@ class Workbook:
                 self._tell(changed)
             return changed
         self._in_pass = True
+        self._columns = {}
         try:
             order, loops = self._order()
             kept = {k for k in self.circular if k not in self._dirty}
@@ -883,6 +894,7 @@ class Workbook:
                 self._dirty.clear()
                 self._dirty_many(moved, include_self=False)
                 self._done -= self._dirty
+                self._columns = {}         # values seen final may change again
                 order, loops = self._order()
                 for key in order:
                     if key not in self._done:
@@ -892,6 +904,7 @@ class Workbook:
             self._spill_moved = []
             self._dirty.clear()
             self._done.clear()
+            self._columns = {}
             self._in_pass = False
         changed, self._changed = self._changed, set()
         if changed:
@@ -937,6 +950,26 @@ class Workbook:
             dirty_cols.setdefault(sid, []).append(col)
         for cols in dirty_cols.values():
             cols.sort()
+        # A block read gives only its dirty cells not yet ordered: each
+        # column's rows skip past the finished ones (a "next unfinished"
+        # pointer per row, halved as it is followed). A column of running
+        # totals otherwise offered every cell above each total again: 4.5
+        # million steps to order 3000 of them (findings 5.1 and 5.5).
+        ahead: dict = {k: list(range(len(rows) + 1)) for k, rows in dirty_rows.items()}
+        place: dict = {(k[0], row, k[1]): i for k, rows in dirty_rows.items()
+                       for i, row in enumerate(rows)}
+
+        def unfinished(nxt, i):
+            while nxt[i] != i:
+                nxt[i] = nxt[nxt[i]]
+                i = nxt[i]
+            return i
+
+        def finished(key):
+            state[key] = 2
+            i = place.get(key)
+            if i is not None:
+                ahead[(key[0], key[2])][i] = i + 1
         spilling: dict = {}               # sheet id -> [(anchor key, its spilled block)]
         for sid, sheet in sheets.items():
             for (row, col), (h, w) in sheet.spills.items():
@@ -951,10 +984,13 @@ class Workbook:
                 j = bisect.bisect_right(cols, right)
                 for col in cols[i:j]:
                     rows = dirty_rows[(sid, col)]
+                    nxt = ahead[(sid, col)]
                     a = bisect.bisect_left(rows, top)
                     b = bisect.bisect_right(rows, bottom)
-                    for row in rows[a:b]:
-                        yield (sid, row, col)
+                    a = unfinished(nxt, a)
+                    while a < b:
+                        yield (sid, rows[a], col)
+                        a = unfinished(nxt, a + 1)
             # a spilled cell in the block is calculated by the formula it
             # spilled from
             for anchor, (t, l, b, r) in spilling.get(sid, ()):
@@ -984,7 +1020,7 @@ class Workbook:
                 continue
             sheet = sheets.get(start[0])
             if sheet is None or (start[1], start[2]) not in sheet.cells:
-                state[start] = 2
+                finished(start)
                 continue
             state[start] = 1
             stack = [(start, precedents(start))]
@@ -1005,7 +1041,7 @@ class Workbook:
                         loops.add(p)
                 else:
                     stack.pop()
-                    state[key] = 2
+                    finished(key)
                     order.append(key)
         return order, loops
 
@@ -1148,12 +1184,13 @@ class Workbook:
         return cell.value
 
     # -- moving things about -------------------------------------------------------------------
-    def _rewrite_all(self, change, label_sheet: Sheet) -> None:
+    def _rewrite_all(self, change, label_sheet: Sheet, done: frozenset = frozenset()) -> None:
         """Pass every reference in every formula and name through change(ref,
-        effective sheet)."""
+        effective sheet); *done*: cells (sheet id, row, col) already passed
+        through it as they moved."""
         for other in self.sheets:
             for (row, col), cell in list(other.cells.items()):
-                if not cell.is_formula:
+                if not cell.is_formula or (other.id, row, col) in done:
                     continue
                 text = F.rewrite(cell.input[1:], lambda ref, s, o=other: change(ref, self.sheet(s) if s else o))
                 if "=" + text != cell.input:
@@ -1184,47 +1221,159 @@ class Workbook:
             sheet.wanted.pop(anchor, None)
             self._dirty.add((sheet.id,) + anchor)
 
-    def _move_cells(self, sheet: Sheet, mapping: Callable[[int, int], Optional[tuple]]) -> None:
-        """Move every cell of the sheet to mapping(row, col) (None: deleted)."""
+    def _move_cells(self, sheet: Sheet, mapping: Callable[[int, int], Optional[tuple]],
+                    change=None) -> frozenset:
+        """Move every cell of the sheet to mapping(row, col) (None: deleted).
+        With *change* (the references' rewrite that goes with the move), a
+        moved formula takes its rewritten text as it lands, so it is read
+        once rather than once moved and again rewritten (findings 5.1).
+        Returns the cells so rewritten, for _rewrite_all to pass over."""
         self._clear_spills(sheet)
         moves = []
+        done = set()
         for (row, col), cell in list(sheet.cells.items()):
             to = mapping(row, col)
             if to != (row, col):
-                moves.append(((row, col), to, cell.state()))
+                state = cell.state()
+                if change is not None and to is not None and cell.is_formula:
+                    text = F.rewrite(state[0][1:], lambda ref, s: change(
+                        ref, self.sheet(s) if s else sheet))
+                    state = ("=" + text, state[1], state[2])
+                    done.add((sheet.id,) + to)
+                moves.append(((row, col), to, state))
         for (row, col), _to, _state in moves:
             self._set_state(sheet, row, col, ("", 0, None))
         for _frm, to, state in moves:
             if to is not None:
                 self._set_state(sheet, to[0], to[1], state)
+        return frozenset(done)
 
     def insert_rows(self, sheet: Sheet, at: int, count: int = 1) -> None:
         with self.transaction("Insert rows"):
-            self._move_cells(sheet, lambda r, c: (r + count, c) if r >= at else (r, c))
-            self._rewrite_all(lambda ref, s: _shift_ref(ref, s is sheet, "row", at, count, 0), sheet)
+            change = lambda ref, s: _shift_ref(ref, s is sheet, "row", at, count, 0)
+            done = self._move_cells(sheet, lambda r, c: (r + count, c) if r >= at else (r, c), change)
+            self._rewrite_all(change, sheet, done)
             self._shift_extras(sheet, "row", at, count)
 
     def delete_rows(self, sheet: Sheet, at: int, count: int = 1) -> None:
         with self.transaction("Delete rows"):
             last = at + count - 1
-            self._move_cells(sheet, lambda r, c: None if at <= r <= last else
-                             ((r - count, c) if r > last else (r, c)))
-            self._rewrite_all(lambda ref, s: _shift_ref(ref, s is sheet, "row", at, 0, count), sheet)
+            change = lambda ref, s: _shift_ref(ref, s is sheet, "row", at, 0, count)
+            done = self._move_cells(sheet, lambda r, c: None if at <= r <= last else
+                                    ((r - count, c) if r > last else (r, c)), change)
+            self._rewrite_all(change, sheet, done)
             self._shift_extras(sheet, "row", at, -count)
 
     def insert_cols(self, sheet: Sheet, at: int, count: int = 1) -> None:
         with self.transaction("Insert columns"):
-            self._move_cells(sheet, lambda r, c: (r, c + count) if c >= at else (r, c))
-            self._rewrite_all(lambda ref, s: _shift_ref(ref, s is sheet, "col", at, count, 0), sheet)
+            change = lambda ref, s: _shift_ref(ref, s is sheet, "col", at, count, 0)
+            done = self._move_cells(sheet, lambda r, c: (r, c + count) if c >= at else (r, c), change)
+            self._rewrite_all(change, sheet, done)
             self._shift_extras(sheet, "col", at, count)
 
     def delete_cols(self, sheet: Sheet, at: int, count: int = 1) -> None:
         with self.transaction("Delete columns"):
             last = at + count - 1
-            self._move_cells(sheet, lambda r, c: None if at <= c <= last else
-                             ((r, c - count) if c > last else (r, c)))
-            self._rewrite_all(lambda ref, s: _shift_ref(ref, s is sheet, "col", at, 0, count), sheet)
+            change = lambda ref, s: _shift_ref(ref, s is sheet, "col", at, 0, count)
+            done = self._move_cells(sheet, lambda r, c: None if at <= c <= last else
+                                    ((r, c - count) if c > last else (r, c)), change)
+            self._rewrite_all(change, sheet, done)
             self._shift_extras(sheet, "col", at, -count)
+
+    # -- Excel's Insert / Delete cells, shifting the cells beside them --------------------
+    def merges_in_the_way(self, sheet: Sheet, top: int, left: int, bottom: int, right: int,
+                          axis: str) -> bool:
+        """Whether shifting the cells of the block along *axis* ("row": up
+        or down, "col": left or right) would cut a merged block, which Excel
+        refuses ("We can't do that to a merged cell")."""
+        lo, hi = (left, right) if axis == "row" else (top, bottom)
+        start = top if axis == "row" else left
+        for m in sheet.merges:
+            m_lo, m_hi = (m[1], m[3]) if axis == "row" else (m[0], m[2])
+            m_start, m_end = (m[0], m[2]) if axis == "row" else (m[1], m[3])
+            if m_end < start or m_hi < lo or m_lo > hi:
+                continue                   # wholly before the block or beside the band
+            if m_lo < lo or m_hi > hi:
+                return True                # straddles the band's side
+            if m_start < start <= m_end:
+                return True                # straddles the block's leading edge
+        return False
+
+    def shift_cells(self, sheet: Sheet, top: int, left: int, bottom: int, right: int,
+                    axis: str, insert: bool) -> None:
+        """Excel's Insert ▸ Shift cells down / right (*insert*) and Delete ▸
+        Shift cells up / left, for the block (top, left)-(bottom, right).
+        *axis* "row" moves the cells of the block's columns up or down; "col"
+        moves those of its rows left or right. Formulas that read the moved
+        cells follow them; one that read a deleted cell gives #REF!, as in
+        Excel. A table grows rather than lose cells pushed past its end."""
+        on_row = axis == "row"
+        lo, hi = (left, right) if on_row else (top, bottom)
+        at = top if on_row else left
+        n = (bottom - top + 1) if on_row else (right - left + 1)
+        last = at + n - 1
+
+        def in_band(r, c):
+            k = c if on_row else r
+            return lo <= k <= hi
+
+        def along(r, c):
+            return r if on_row else c
+
+        def put(r, c, k):
+            return (k, c) if on_row else (r, k)
+
+        def mapping(r, c):
+            if not in_band(r, c):
+                return (r, c)
+            k = along(r, c)
+            if insert:
+                return put(r, c, k + n) if k >= at else (r, c)
+            if at <= k <= last:
+                return None
+            return put(r, c, k - n) if k > last else (r, c)
+
+        def change(ref, s):
+            if s is not sheet:
+                return ref
+            if isinstance(ref, CellRef):
+                if not in_band(ref.row, ref.col):
+                    return ref
+                return _shift_ref(ref, True, axis, at, n if insert else 0, 0 if insert else n)
+            if ref.whole:
+                return ref                 # whole rows and columns are not cut
+            r_lo, r_hi = (ref.left, ref.right) if on_row else (ref.top, ref.bottom)
+            if r_lo < lo or r_hi > hi:
+                return ref                 # reaches beside the band: left as it is
+            return _shift_ref(ref, True, axis, at, n if insert else 0, 0 if insert else n)
+
+        label = ("Insert cells" if insert else "Delete cells")
+        with self.transaction(label):
+            before = _layout_state(sheet)
+            if insert and sheet.size is not None:
+                rows, cols = sheet.size
+                reach = max((along(r, c) for (r, c) in sheet.cells
+                             if in_band(r, c) and along(r, c) >= at and
+                             not sheet.cells[(r, c)].empty()), default=-1)
+                end = (rows if on_row else cols)
+                if reach + n >= end:       # the table grows to keep them
+                    grown = reach + n + 1
+                    sheet.size = (grown, cols) if on_row else (rows, grown)
+            done = self._move_cells(sheet, mapping, change)
+            self._rewrite_all(change, sheet, done)
+            merges = []
+            for m in sheet.merges:
+                if not in_band(m[0], m[1]) or not in_band(m[2], m[3]):
+                    merges.append(m)
+                    continue
+                a, b = mapping(m[0], m[1]), mapping(m[2], m[3])
+                if a is not None and b is not None:
+                    merges.append((a[0], a[1], b[0], b[1]))
+            sheet.merges = merges
+            after = _layout_state(sheet)
+            if after != before:
+                self._record(lambda: _set_layout(sheet, before), lambda: _set_layout(sheet, after))
+                self._tell({("layout", sheet.id)})
 
     def _shift_extras(self, sheet, axis, at, delta) -> None:
         """Sizes, hidden rows/columns, merges and a table's extent move with

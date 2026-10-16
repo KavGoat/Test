@@ -364,3 +364,152 @@ def test_clicks_arrows_zoom_and_pages_within_budget(w):
     idle()
     assert te.item is run and te.active == (6, 2)
     w.toggle_calc_mode(False)
+
+
+# -- findings 5.1, 5.2 and 5.5 (2026-10-16) --------------------------------------------------------
+def running_totals(n):
+    """n members: load, span, M = wL²/8 and the running total of M."""
+    from calcforge.sheet.workbook import Workbook
+    wb = Workbook()
+    s = wb.add_sheet()
+    with wb.transaction():
+        wb.set_input(s, 0, 0, "Member")
+        wb.set_input(s, 0, 3, "Moment")
+        wb.set_input(s, 0, 4, "Running")
+        for r in range(2, n + 2):
+            wb.set_input(s, r - 1, 0, f"B{r}")
+            wb.set_input(s, r - 1, 1, str((r % 17) + 1.5))
+            wb.set_input(s, r - 1, 2, str((r % 7) + 2))
+            wb.set_input(s, r - 1, 3, f"=B{r}*C{r}^2/8")
+            wb.set_input(s, r - 1, 4, f"=SUM($D$2:D{r})")
+    return wb, s
+
+
+def test_a_value_above_3000_running_totals_recalculates_within_budget(monkeypatch):
+    """Each =SUM($D$2:Dn) read its whole block again: 2 s for one value
+    typed above 3000 of them; the column is gathered once a pass now."""
+    from calcforge.sheet.evaluate import RefValue
+    wb, s = running_totals(3000)
+    values = iter(range(3, 100))
+
+    def type_one():
+        wb.set_input(s, 5, 1, str(next(values)))
+    walked = Calls(monkeypatch, RefValue, "filled_values")
+    ms = timed(type_one, n=3, fastest=True)
+    assert walked.count == 0, "no block walked cell by cell (2996 a value, before)"
+    # ordering them, everything recalculated: 3.9 s before, 0.4 s now
+    assert timed(lambda: wb.recalculate(everything=True), n=2, fastest=True) < 1500
+    moments = [(((r % 17) + 1.5) * ((r % 7) + 2) ** 2 / 8) for r in range(2, 3002)]
+    moments[4] = s.value(5, 1) * ((6 % 7) + 2) ** 2 / 8
+    assert s.value(3000, 4) == pytest.approx(sum(moments))
+    assert ms < 800                     # 2000 ms before, 250-450 now
+
+
+def test_the_quick_sum_reads_as_the_slow_one_does():
+    """SUM over plain numbers is taken from the pass's column lists; text,
+    TRUE and blanks are passed over as before, and a quantity or an error
+    in the block falls back to the full reading."""
+    from calcforge.sheet.values import ErrorValue, Qty
+    from calcforge.sheet.workbook import Workbook
+    wb = Workbook()
+    s = wb.add_sheet()
+    with wb.transaction():
+        for r, text in enumerate(["Loads", "1.5", "", "TRUE", "2.25", "note", "=A2*2"]):
+            wb.set_input(s, r, 0, text)
+        wb.set_input(s, 0, 1, "=SUM(A1:A7)")
+        wb.set_input(s, 1, 1, "=SUM(A1:A3,A5:A7)")
+        for r, text in enumerate(["3 kN", "4 kN"]):
+            wb.set_input(s, r, 2, text)
+        wb.set_input(s, 2, 1, "=SUM(C1:C2)")
+        wb.set_input(s, 0, 3, "=1/0")
+        wb.set_input(s, 1, 3, "5")
+        wb.set_input(s, 3, 1, "=SUM(D1:D2)")
+    assert s.value(0, 1) == pytest.approx(1.5 + 2.25 + 3.0)
+    assert s.value(1, 1) == pytest.approx(1.5 + 2.25 + 3.0)
+    assert isinstance(s.value(2, 1), Qty) and s.value(2, 1).si == pytest.approx(7000)
+    assert isinstance(s.value(3, 1), ErrorValue)
+    wb.set_input(s, 1, 0, "10")             # the cells read change: summed again
+    assert s.value(0, 1) == pytest.approx(10 + 2.25 + 20)
+
+
+def test_inserting_a_row_above_3000_formulas_within_budget(w, monkeypatch):
+    """Each moved formula was read twice (moved, then its references
+    rewritten), and ordering the running totals walked their blocks: 6 s
+    to insert one row; Shift+Space, Ctrl++ as a person does it."""
+    from PySide6.QtTest import QTest
+    w.insert_sheet_page(0)
+    idle()
+    run = the_run(w)
+    wb, sheet = run.sheet.workbook, run.sheet
+    with wb.transaction("Fill"):
+        for r in range(2, 3002):
+            wb.set_input(sheet, r - 1, 1, str((r % 17) + 1.5))
+            wb.set_input(sheet, r - 1, 3, f"=B{r}*2")
+            wb.set_input(sheet, r - 1, 4, f"=SUM($D$2:D{r})")
+    idle()
+    w.undo_stack.clear()
+    open_cell(w, run, 10, 1)
+
+    def insert():
+        w.view.tables.select((10, 1))
+        QTest.keyClick(w.view, Qt.Key_Space, Qt.ShiftModifier)
+        QTest.keyClick(w.view, Qt.Key_Plus, Qt.ControlModifier | Qt.ShiftModifier)
+
+    def undo_it():
+        if w.undo_stack.count():
+            w.undo_stack.undo()
+    from calcforge.sheet.workbook import Workbook
+    read = Calls(monkeypatch, Workbook, "_learn")
+    insert()
+    idle()
+    # each moved formula read once as it lands (twice before: moved, then
+    # its references rewritten)
+    assert read.count < 1.2 * 6000, read.count
+    ms = timed(insert, n=2, setup=undo_it, fastest=True)
+    sheet = the_run(w).sheet
+    # E11 moved to E12 and reads one row further, as in Excel
+    assert sheet.input(10, 1) == "" and sheet.input(11, 4) == "=SUM($D$2:D12)"
+    assert sheet.input(9, 4) == "=SUM($D$2:D10)" and sheet.input(3001, 4) == "=SUM($D$2:D3002)"
+    assert ms < 4500                    # 6 s before, about 1.5 s now (3 s loaded)
+
+
+def test_opening_a_3000_row_workbook_within_budget(w, tmp_path):
+    from openpyxl import Workbook as XL
+    book = XL()
+    ws = book.active
+    ws.title = "Loads"
+    ws.append(["Member", "Load", "Span", "Moment", "Running"])
+    for r in range(2, 3002):
+        ws.append([f"B{r - 1}", (r % 17) + 1.5, (r % 7) + 2, f"=B{r}*C{r}^2/8",
+                   f"=SUM($D$2:D{r})"])
+    path = str(tmp_path / "loads.xlsx")
+    book.save(path)
+    from calcforge.ui.mainwindow import MainWindow
+    opened = []
+
+    def a_window():
+        tidy()
+        other = MainWindow()
+        other.confirm_discard = lambda: True
+        other.interactive_prompts = False
+        other.resize(1280, 860)
+        other.show()
+        opened.append(other)
+
+    def tidy():
+        while opened:
+            other = opened.pop()
+            other.document.modified = False
+            other.close()
+            other.deleteLater()
+    # the opening is timed, not the making of the window it opens in
+    ms = timed(lambda: opened[-1].open_from_command_line(path), n=2, setup=a_window,
+               fastest=True)
+    run = next(i for i in opened[-1].view.scene().items() if isinstance(i, SheetRunItem))
+    assert run.sheet.value(3000, 4) == pytest.approx(
+        sum(((r % 17) + 1.5) * ((r % 7) + 2) ** 2 / 8 for r in range(2, 3002)))
+    tidy()
+    # 5.6 s before (budget 1.5 s), about 2.4 s now and 4.8 s on a loaded
+    # machine running the suite in parallel: the work itself is held down
+    # by the two tests above, this catches it growing back
+    assert ms < 7000
