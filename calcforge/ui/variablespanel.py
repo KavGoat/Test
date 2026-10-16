@@ -221,6 +221,7 @@ class VariablesPanel(QWidget):
         self.setObjectName("variablesPanel")
         self.rows: list = []
         self._watched = None
+        self._watched_book = None
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
         lay.setSpacing(4)
@@ -271,7 +272,14 @@ class VariablesPanel(QWidget):
         self._watched = sheet
         sheet.listeners.append(self._soon)
         from ..sheet.docbook import book_for
+        # the tables of the document left behind are not followed either: a
+        # closed document's book held on to this panel, and the panel to its
+        # window
+        old = self._watched_book
+        if old is not None and self._soon_for_tables in old.listeners:
+            old.listeners.remove(self._soon_for_tables)
         book = book_for(document)
+        self._watched_book = book
         if self._soon_for_tables not in book.listeners:
             book.listeners.append(self._soon_for_tables)
         self._soon()

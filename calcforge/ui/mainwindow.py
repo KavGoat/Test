@@ -563,6 +563,22 @@ def _a_field_being_typed_in(widget) -> bool:
     return isinstance(widget, QAbstractSpinBox)
 
 
+def _moves_documents(method):
+    """Nothing is let go of while *method* carries a document from one pane
+    or window to another (it is shown by neither on the way); whatever it
+    left behind is let go of once it has (ui/release.py)."""
+    import functools
+
+    @functools.wraps(method)
+    def run(self, *args, **kwargs):
+        from . import release
+        with release.holding():
+            result = method(self, *args, **kwargs)
+        self._let_go()
+        return result
+    return run
+
+
 class MainWindow(QMainWindow):
     """Everything the user sees: canvas, toolbars, panels and menus."""
 
@@ -581,6 +597,10 @@ class MainWindow(QMainWindow):
         self.document = Document()
         self.undo_stack = QUndoStack(self)
         self.undo_stack.setUndoLimit(200)
+        from . import release
+        release.STACKS.add(self.undo_stack)
+        #: closed for good: nothing it showed is kept for it (see _let_go)
+        self._closed_for_good = False
         self.current_index = 0
         self.default_style = Style()
         self.shortcuts = ShortcutManager(self)
@@ -2316,6 +2336,50 @@ class MainWindow(QMainWindow):
         self.markups_panel.markupsPicked.connect(self.pick_markups)
         self._connect_undo_stack(self.undo_stack)
 
+    def shown_states(self):
+        """(document, scene, undo stack) of every tab and view this window
+        shows, or nothing once it is closed for good."""
+        if getattr(self, "_closed_for_good", True):
+            return
+        yield self.document, self.scene, self.undo_stack
+        active = getattr(self, "_active_pane", None)
+        for pane in getattr(self, "_panes", ()):
+            if pane is active:
+                for index, state in enumerate(self._open_documents):
+                    if index != self._active_tab:      # (its live state is above)
+                        yield state["document"], state["scene"], state["undo_stack"]
+            else:
+                for state in pane.documents:
+                    yield state["document"], state["scene"], state["undo_stack"]
+                yield None, pane.view.scene(), None
+
+    def _let_go(self) -> None:
+        """Release every canvas, history and document no window shows now
+        (ui/release.py): a closed tab, a replaced document, a split turned
+        off."""
+        import shiboken6
+        from . import release
+        windows = [w for w in type(self)._windows if shiboken6.isValid(w)]
+        if self not in windows and shiboken6.isValid(self):
+            windows.append(self)
+        showing = [w for w in windows if not getattr(w, "_closed_for_good", True)]
+        for window in showing:
+            # the tab in view is kept as what it shows now, not as what it
+            # showed when it was last left: a document New or Open replaced
+            # there is not still held by its tab
+            here = window._active_tab
+            if 0 <= here < len(window._open_documents):
+                window._open_documents[here] = window._current_document_state()
+        release.let_go(showing, windows)
+        # a gesture's "before" taken on a page that has now gone
+        for window in showing:
+            for pane in window._panes:
+                view = pane.view
+                if not shiboken6.isValid(view) or not view._snapshot:
+                    continue
+                view._snapshot = [(frame, items) for frame, items in view._snapshot
+                                  if shiboken6.isValid(frame) and frame.scene() is not None]
+
     def _connect_undo_stack(self, stack) -> None:
         """Connect this window once, without disturbing another shared view."""
         if any(stack is seen for seen in self._connected_undo_stacks):
@@ -2390,6 +2454,8 @@ class MainWindow(QMainWindow):
         same_document = document is self.document
         stack = self.undo_stack if same_document else QUndoStack(self)
         if not same_document:
+            from . import release
+            release.STACKS.add(stack)
             self._connect_undo_stack(stack)
         fresh = {"document": document if document is not None else Document(),
                  "scene": self.scene if same_document else None,
@@ -2478,6 +2544,7 @@ class MainWindow(QMainWindow):
         window._adopt_document_state(dict(state))
         return window
 
+    @_moves_documents
     def tear_off_document(self, index: int, global_point: QPoint = QPoint()) -> None:
         """Move a tab into a new independent application window."""
         if not (0 <= index < len(self._open_documents)):
@@ -2510,6 +2577,7 @@ class MainWindow(QMainWindow):
                for held in self._open_documents):
             state["undo_stack"].setParent(window)
 
+    @_moves_documents
     def move_document_to(self, index, target, before=-1):
         """Move the live document, viewport and undo history between windows."""
         if target is self or not 0 <= index < len(self._open_documents):
@@ -2694,9 +2762,11 @@ class MainWindow(QMainWindow):
         """Split this window in two, or turn an existing split off."""
         if self.is_split:
             self.unsplit()
+            self._let_go()
             return None
         return self.split_document()
 
+    @_moves_documents
     def separate_views(self) -> Optional["MainWindow"]:
         """Window ▸ Separate Views: the other pane becomes a window of its
         own, with its own menus."""
@@ -2740,6 +2810,7 @@ class MainWindow(QMainWindow):
         self._adopt_document_state(state)
         return where
 
+    @_moves_documents
     def move_document_to_pane(self, index: int, pane: ViewPane, before: int = -1) -> None:
         """A tab dragged onto the other pane: its document goes there."""
         if pane is self._active_pane or pane not in self._panes \
@@ -2795,6 +2866,8 @@ class MainWindow(QMainWindow):
             # The pane's last tab going (closed, or dragged away) is the split
             # going: the other pane carries on as the window's one view.
             self.unsplit(keep=other, carry_over=False)
+            if not moving:
+                self._let_go()
             return
         if len(self._open_documents) == 1:
             self.new_document(confirm=False)
@@ -2815,6 +2888,10 @@ class MainWindow(QMainWindow):
         self.document_tabs.setVisible(True)
         if was_active:
             self._adopt_document_state(self._open_documents[self._active_tab])
+        if not moving:
+            # a tab being moved is shown somewhere else next; one closed is
+            # gone, and what it held goes with it
+            self._let_go()
 
     def confirm_all_documents(self) -> bool:
         """Include inactive tabs — and the other view's, in Split View — in
@@ -2868,6 +2945,8 @@ class MainWindow(QMainWindow):
         # Replacing one view's document must not clear another view's history.
         self.undo_stack = QUndoStack(self)
         self.undo_stack.setUndoLimit(200)
+        from . import release
+        release.STACKS.add(self.undo_stack)
         self._connect_undo_stack(self.undo_stack)
 
     def new_document(self, confirm: bool = True) -> None:
@@ -2881,6 +2960,7 @@ class MainWindow(QMainWindow):
         self.toggle_calc_mode(False)          # decision 7: File > New is in Markup mode
         self.view.fit_page()
         self.update_title()
+        self._let_go()
 
     def rebuild_scenes(self) -> None:
         """Give every page a frame on the canvas, and show the current one.
@@ -2891,8 +2971,11 @@ class MainWindow(QMainWindow):
         page would have quietly emptied every page in the document.
         """
         self._adopt_calc_defaults(self.document)
+        from . import release
+        release.DOCUMENTS.add(self.document)
         if self.scene is None or self.scene.document is not self.document:
             self.scene = DocumentScene(self.document)
+            release.SCENES.add(self.scene)
             self.scene.itemsChanged.connect(self._refresh_lists_soon)
             self.scene.selectionChanged.connect(self._scene_selection_changed)
             self.view.setScene(self.scene)
@@ -2995,12 +3078,14 @@ class MainWindow(QMainWindow):
             if new_tab:
                 self.close_document_tab(self._active_tab, moving=True)
                 self.switch_to_document(previous)
+            self._let_go()
             return
         self.undo_stack.clear()
         self.current_index = 0
         self.rebuild_scenes()
         self.view.fit_page()
         self.update_title()
+        self._let_go()
         remember_recent_file(path)
         self._say_what_the_workbook_left_out()
 
@@ -3067,6 +3152,7 @@ class MainWindow(QMainWindow):
         self.rebuild_scenes()
         self.view.fit_page()
         self.update_title()
+        self._let_go()
         self._say_what_the_workbook_left_out()
 
     def _say_what_the_workbook_left_out(self) -> None:
@@ -3485,6 +3571,15 @@ class MainWindow(QMainWindow):
             except (RuntimeError, TypeError):
                 pass
         event.accept()
+        # Closed for good: whatever only this window showed — its canvases,
+        # their markups, tables and equations, its undo histories and the
+        # caches kept for them — goes now, not with the application.
+        self._closed_for_good = True
+        try:
+            self.view.escape_everything()
+        except RuntimeError:
+            pass
+        self._let_go()
 
     # ==================================================================
     # autosave and recovery
