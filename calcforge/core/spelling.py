@@ -37,9 +37,15 @@ BUNDLED = Path(__file__).resolve().parent.parent / "data" / "en_nz.txt.gz"
 
 
 def _read(path: Path) -> set[str]:
+    """The words in a list, one to a line, in lower case. Read whole and
+    split in C: line by line in Python was a tenth of a second for the
+    bundled list (novice finding 25)."""
     opener = gzip.open if str(path).endswith(".gz") else open
-    with opener(path, "rt", encoding="utf-8", errors="ignore") as handle:
-        return {line.strip() for line in handle if line.strip()}
+    with opener(path, "rb") as handle:
+        text = handle.read().decode("utf-8", errors="ignore")
+    words = set(map(str.strip, text.lower().splitlines()))
+    words.discard("")
+    return words
 
 
 class SpellChecker:
@@ -53,12 +59,36 @@ class SpellChecker:
                  path: Optional[str] = None):
         self._words: Optional[set[str]] = None
         self._path = path
+        self._loading = None            # the thread reading it, while it does
         self.personal: set[str] = {word.lower() for word in (extra or ())}
 
     # -- the dictionary ----------------------------------------------------
+    def preload(self) -> None:
+        """Start reading the dictionary in the background, ahead of need.
+
+        Reading it takes a sixth of a second, and it used to be read at the
+        first click that opened a box to type in — the first Cloud+ or text
+        box stalled for a quarter of a second (novice finding 25). Picking a
+        tool that writes words starts it; whatever asks first waits only for
+        what is left of it."""
+        if self._words is not None or self._loading is not None:
+            return
+        import threading
+
+        def read() -> None:
+            words = self._load()
+            if self._words is None:
+                self._words = words
+        self._loading = threading.Thread(target=read, name="dictionary", daemon=True)
+        self._loading.start()
+
     def words(self) -> set[str]:
         if self._words is None:
-            self._words = self._load()
+            loading = self._loading
+            if loading is not None:
+                loading.join()
+            if self._words is None:
+                self._words = self._load()
         return self._words
 
     def _load(self) -> set[str]:
@@ -72,7 +102,7 @@ class SpellChecker:
         for candidate in candidates:
             if candidate and os.path.exists(candidate):
                 try:
-                    return {word.lower() for word in _read(candidate)}
+                    return _read(candidate)
                 except OSError:
                     continue
         return set()                      # no dictionary: nothing is misspelt

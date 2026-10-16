@@ -428,7 +428,16 @@ class CalcEditing:
             if hit is not None:
                 self._select_drag = hit
             return True
+        typing_in = self.item
         self.leave()
+        if (item is not None and typing_in is not None and typing_in is not item
+                and typing_in.scene() is not None
+                and event.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier)):
+            # Shift or Ctrl+click on another equation adds it to the one just
+            # clicked, as Revu's and SMath's picking does: the first click
+            # opened that one for typing, which left it out of the
+            # selection, so only the second was picked (bug hunt round 1).
+            typing_in.setSelected(True)
         if item is not None:
             # Picked up like any markup — dragged, grouped, box-selected —
             # and opened for typing if it was only clicked (see mouse_release).

@@ -11,7 +11,7 @@ from PySide6.QtGui import QFontMetricsF
 
 from ..core.units import Unit, format_quantity, parse_unit
 from .base import (CLOUD_SIZE, HANDLE_SIZE, SELECT_BLUE, MarkupItem, Style,
-                   handle_zoom, paint_control_point, paint_rotate_handle,
+                   handle_zoom, many_selected, paint_control_point, paint_rotate_handle,
                    cloud_path, draw_head, register_item, round_the_joins)
 
 # Page refreshes construct two lengths per rectangle; the unit is built once.
@@ -787,6 +787,12 @@ class PolyItem(MarkupItem):
         return self._with_scale_box(rect.adjusted(-margin, -margin, margin, margin))
 
     # -- handles -----------------------------------------------------------
+    def handle_half_px(self, key: str) -> float:
+        """A break's width and height handles are drawn as larger squares."""
+        if key[:1] in ("w", "z") and key[1:].isdigit():
+            return 3.5
+        return super().handle_half_px(key)
+
     def handle_points(self) -> dict[str, QPointF]:
         if self.uses_vertex_handles:
             if self.kind == "arc" and len(self.points) >= 2:
@@ -1049,7 +1055,7 @@ class PolyItem(MarkupItem):
         # handle here would be a control point nobody can use.
         if not self.isSelected() or not self._handles_visible or self.group:
             return
-        if self.locked:
+        if self.locked or many_selected(self.scene()):
             return
         if not self.uses_vertex_handles:
             super().paint_handles(painter)

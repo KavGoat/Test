@@ -288,8 +288,9 @@ class CalcItem(MarkupItem):
             r = self._view.boundingRect()
             box = QRectF(r.x() * PT_PER_PX, r.y() * PT_PER_PX,
                          r.width() * PT_PER_PX, r.height() * PT_PER_PX).adjusted(-2, -2, 2, 2)
-        note = self._error_note_rect()
-        return box.united(note) if note is not None else box
+        for note in self._error_note_places():
+            box = box.united(note)
+        return box
 
     #: The error said under an equation that is not being edited.
     ERROR_INK = QColor("#d00000")
@@ -307,17 +308,47 @@ class CalcItem(MarkupItem):
         font.setPixelSize(11)
         return font
 
-    def _error_note_rect(self):
-        """Where the error is written: just under the equation, in red,
-        whether it is selected or not, and printed (the user, 2026-10-15)."""
+    def _error_note_places(self) -> list:
+        """Where the error could be written: just under the equation, and —
+        when another equation is in the way there — to its right. Both are
+        in its bounding box, so moving a neighbour in or out never leaves a
+        piece of the note behind."""
         message = self._error_message()
         if not message:
-            return None
+            return []
         from PySide6.QtGui import QFontMetricsF
         metrics = QFontMetricsF(self._error_note_font())
         box = self.local_rect()
         width = (metrics.horizontalAdvance(message) + 4) * PT_PER_PX
-        return QRectF(box.left(), box.bottom() + 1.5, width, (metrics.height() + 2) * PT_PER_PX)
+        height = (metrics.height() + 2) * PT_PER_PX
+        below = QRectF(box.left(), box.bottom() + 1.5, width, height)
+        beside = QRectF(box.right() + 6, box.top() + min(box.height(), 2 * height) / 2 - height / 2,
+                        width, height)
+        return [below, beside]
+
+    def _error_note_rect(self):
+        """Where the error is written: just under the equation, in red,
+        whether it is selected or not, and printed (the user, 2026-10-15).
+        When the next equation sits right under it, the note would be
+        written over that one's first line (novice finding 17); it goes to
+        the right of the equation instead. (SMath pushes the regions below
+        apart; that is WebSMath's layout, which stays as it is.)"""
+        places = self._error_note_places()
+        if not places:
+            return None
+        below, beside = places
+        frame = self.parentItem()
+        if frame is None:
+            return below
+        mine = self.mapRectToParent(below)
+        for other in frame.childItems():
+            if other is self or not isinstance(other, MarkupItem) or not other.isVisible():
+                continue
+            if not (getattr(other, "IS_CALC", False) or isinstance(other, CalcTextItem)):
+                continue
+            if other.mapRectToParent(other.local_rect()).intersects(mine):
+                return beside
+        return below
 
     def shape(self):
         from PySide6.QtGui import QPainterPath
@@ -478,6 +509,43 @@ def _connect(sheet, scene) -> None:
     sheet.request_settle = request
 
 
+def _dotted_names(parts: list) -> list:
+    """kN, m -> "kN·m": the unit names of one side of a unit, joined by the
+    middle dot an engineer writes between them. A name raised to a power
+    ends a run (kN·m², then ·s), since the power belongs to it alone."""
+    joined: list = []
+    run = ""
+    for name, power in parts:
+        run = f"{run}·{name}" if run else (f"·{name}" if joined else name)
+        if power != 1:
+            joined.append((run, power))
+            run = ""
+    if run:
+        joined.append((run, 1))
+    return joined
+
+
+def dotted_units(shown):
+    """A result as shown on the page, with "kN·m" written as copying writes
+    it (record.plain_text) rather than "kN m" (novice finding 16). WebSMath's
+    layout (calc/ui/layout.py, kept byte-identical) puts a space between unit
+    names; the names handed to it carry the dot instead. Anything that is
+    not a quantity with a product of units is given back as it was."""
+    from dataclasses import replace
+
+    from ..calc.engine.display import DMatrix, DQuantity, DUnit
+    if isinstance(shown, DQuantity) and isinstance(shown.unit, DUnit):
+        unit = shown.unit
+        if len(unit.num) < 2 and len(unit.den) < 2:
+            return shown
+        return replace(shown, unit=DUnit(_dotted_names(unit.num), _dotted_names(unit.den)))
+    if isinstance(shown, DMatrix):
+        cells = [dotted_units(cell) for cell in shown.cells]
+        if any(new is not old for new, old in zip(cells, shown.cells)):
+            return replace(shown, cells=cells)
+    return shown
+
+
 class _PageRegionView(RegionItem):
     """WebSMath's drawing of a region, broken onto more lines when it is too
     wide for its page and not being typed into (calc/ui/wrap.py)."""
@@ -513,7 +581,19 @@ class _PageRegionView(RegionItem):
         p.drawLine(QPointF(bar, info.base - info.asc), QPointF(bar, underline_y))
 
     def relayout(self) -> None:
-        super().relayout()
+        region = self.region
+        kept = getattr(region, "display", None)
+        dotted = dotted_units(kept) if kept is not None else None
+        if dotted is not kept:
+            # laid out with the dotted names, and the worksheet's own answer
+            # (what verify, search and copying read) put straight back
+            region.display = dotted
+            try:
+                super().relayout()
+            finally:
+                region.display = kept
+        else:
+            super().relayout()
         self.too_wide = False
         if self.focused or not self.max_width or self._size[0] <= self.max_width + 1e-6:
             return
