@@ -270,8 +270,18 @@ class MarkupStylesBar(QToolBar):
         self.buttons = []
         self.add_button = None
         if key is None:
-            hint = QLabel("  Markup Styles: pick a markup tool  ")
+            # a greyed button, not a label: just as tall as the style buttons
+            # it stands in for, so the rows below don't move when a markup is
+            # picked (the page jumped by 21 px)
+            hint = QToolButton()
+            hint.setText("Markup Styles: pick a markup tool")
             hint.setObjectName("markupStylesHint")
+            hint.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            hint.setIconSize(ICON_SIZE)
+            blank = QPixmap(ICON_SIZE)
+            blank.fill(Qt.transparent)
+            hint.setIcon(QIcon(blank))
+            hint.setAutoRaise(True)
             hint.setEnabled(False)
             self.addWidget(hint)
             return

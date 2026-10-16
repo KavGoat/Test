@@ -14,7 +14,7 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QMenu
+from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
 from calcforge.items.shapes import RectItem
 from calcforge.items.text import CalloutItem, TextItem
@@ -181,7 +181,7 @@ def test_the_toolbar_follows_the_tool_in_hand(win):
     assert "Callout" in bar.title.text() and bar_numbers(win) == [0, 1]
     win.select_tool("pan")
     assert bar.buttons == []
-    hints = [w for w in bar.findChildren(QLabel) if w.objectName() == "markupStylesHint"]
+    hints = [w for w in bar.findChildren(QWidget) if w.objectName() == "markupStylesHint"]
     assert hints and not hints[-1].isEnabled()
     # Select in hand, a rectangle selected: the rectangle's styles
     win.select_tool("rect")
