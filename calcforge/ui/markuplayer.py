@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import math
 import time
+import weakref
 from collections import OrderedDict
 
 from PySide6.QtCore import QRectF, QTimer
@@ -57,7 +58,9 @@ CACHE_BYTES = 384 * 1024 * 1024
 CELL = 128.0
 
 _ALL: "OrderedDict[tuple, int]" = OrderedDict()     # (id(layer), key) -> bytes
-_LAYERS: dict = {}                                   # id(layer) -> layer
+#: id(layer) -> layer, weakly: a closed document's pages must not be kept
+#: alive (and painted) by the cache that only needs them to drop squares.
+_LAYERS: "weakref.WeakValueDictionary[int, MarkupLayer]" = weakref.WeakValueDictionary()
 _held = [0]
 #: Set while squares are being drawn: a markup that asks to be repainted
 #: from inside its own paint is not changing.
@@ -97,6 +100,12 @@ def _remember(layer, key, pixmap) -> None:
         holder = _LAYERS.get(owner)
         if holder is not None:
             holder._drop(old, forget=False)
+
+
+def _forget_layer(owner: int) -> None:
+    """A layer has gone: what its squares weighed is no longer held."""
+    for marker in [m for m in _ALL if m[0] == owner]:
+        _held[0] -= _ALL.pop(marker)
 
 
 def _touch(layer, key) -> None:
@@ -141,6 +150,7 @@ class MarkupLayer:
         #: whether it is still right without drawing or writing them again.
         self.generation = 0
         _LAYERS[id(self)] = self
+        weakref.finalize(self, _forget_layer, id(self))
 
     # -- who is in the squares ------------------------------------------------
     def wants(self, item) -> bool:
