@@ -4,6 +4,26 @@ Kept by the lead agent (docs/AGENT_PROMPT.md §5). One line per finding, newest
 round at the top. Status: open · fixing (who) · merged · pushed · decision
 (waiting on the user) · not a bug.
 
+## Round 5 — spreadsheet speed (performance agent, 2026-10-16)
+
+Merged in cbacfa6. Medians in ms, before → after:
+
+| Action | Before → after |
+|---|---|
+| Keystroke in a cell | 21 → 3 (the editor's style sheet was causing endless repaints) |
+| Undo on the 300-formula sheet | 117 → 16 |
+| Undo on a 3000-row workbook | 6.9 s → 1.5 s |
+| Table markup keystroke | 108 → 4 |
+| Table markup click | 14 → 5 |
+| Zoom on the 3000-row sheet | 112 → 33 |
+
+Still open, each over the 50 ms aim:
+- 5.1 Insert or delete a row on a heavy sheet: 115 ms (300 formulas), 3.3 s (3000 rows). Every moved formula is parsed and calculated again; this needs an engine refactor.
+- 5.2 A 3000-row running-total column recalculates in about 1.1–1.5 s, spent in Python cell reads.
+- 5.3 Dragging a column edge redraws the cached rows on every move: about 25–60 ms per move.
+- 5.4 Panning or zooming a table markup takes about 15 ms per frame, against 2–6 ms for markups, because tables are drawn live rather than from tiles.
+- 5.5 Opening the 3000-row xlsx takes 4.3 s, against the 1.5 s budget.
+
 ## Round 4 — right-click menus, placement and grouping (lead as bug tester, 2026-10-15)
 
 Every right-click menu was dumped from the real window (empty page in both modes,
