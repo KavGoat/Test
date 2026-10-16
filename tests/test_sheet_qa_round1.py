@@ -19,7 +19,7 @@ import sys
 import time
 
 import pytest
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMenu, QPushButton
@@ -70,58 +70,95 @@ def loads(w):
     return table
 
 
+def _wait_for(condition, limit=2.0):
+    """Process events until *condition()* holds (True) or *limit* seconds pass."""
+    deadline = time.perf_counter() + limit
+    while not condition():
+        if time.perf_counter() > deadline:
+            return False
+        QApplication.processEvents()
+        time.sleep(0.005)
+    return True
+
+
+def _menus_showing():
+    return [m for m in QApplication.topLevelWidgets() if isinstance(m, QMenu) and m.isVisible()]
+
+
+def _point_at(menu, action) -> bool:
+    """Move the pointer onto *action* the way a hand does, in several small
+    steps, and wait until the menu has it under the pointer. QMenu takes a
+    click only once the pointer has moved since the menu opened (six moves,
+    or more than the drag distance from where the pointer was): one jump
+    could land within that distance of where an earlier test left the
+    pointer, and the click was ignored (gate af22d2b)."""
+    rect = menu.actionGeometry(action)
+    centre = rect.center()
+    for k in range(8, -1, -1):
+        QTest.mouseMove(menu, QPoint(centre.x() - k * max(1, rect.width() // 20), centre.y()))
+    return _wait_for(lambda: menu.activeAction() is action, 1.0)
+
+
 def through_menu(w, open_it, path):
     """Open a real (modal) menu with *open_it* and click through *path* with
-    the mouse. Returns (found, enabled) of the last entry; a greyed one is
-    not clicked and the menu is closed with Esc, as a person would."""
-    got = {}
-    tries = [0]
+    the mouse. Returns (found, enabled, details) of the last entry; a greyed
+    one is not clicked and the menu is closed, as a person would.
 
-    def step(depth=0):
-        menu = QApplication.activePopupWidget()
-        if not isinstance(menu, QMenu) or (depth and menu is got.get("menu")):
-            tries[0] += 1
-            if tries[0] < 100:
-                QTimer.singleShot(20, lambda: step(depth))
-            else:
-                close_all()
-            return
-        got["menu"] = menu
-        action = next((a for a in menu.actions()
-                       if a.text().replace("&", "") == path[depth]), None)
-        if action is None:
-            got["found"] = False
-            got["entries"] = [a.text() for a in menu.actions()]
-            QTest.keyClick(menu, Qt.Key_Escape)
-            close_all()
-            return
-        got["found"], got["enabled"] = True, action.isEnabled()
-        centre = menu.actionGeometry(action).center()
-        if depth < len(path) - 1 and not action.isEnabled():
-            got["found"] = True            # a greyed submenu: its entries are greyed with it
-            close_all()
-            return
-        if depth < len(path) - 1:
-            QTest.mouseMove(menu, centre)
-            QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier, centre)
-            tries[0] = 0
-            QTimer.singleShot(60, lambda: step(depth + 1))
-            return
-        if action.isEnabled():
-            QTest.mouseMove(menu, centre)          # the pointer over it, then the click
-            QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier, centre)
-        close_all()
+    The menu driven is the one *open_it* opened (not any popup a test before
+    left showing), each submenu is the one its entry opens, and each step
+    waits for the menu to be in the state a person would see before the
+    next: the entry under the pointer, the submenu shown, the menu closed
+    after the click."""
+    from tests.test_markup_interaction_round6 import back_to_the_window
+    for stale in _menus_showing():
+        stale.close()
+    back_to_the_window(w)
+    before = {id(m) for m in _menus_showing()}
+    got = {"found": False, "enabled": None, "clicked": False}
 
     def close_all():
-        for _ in range(6):
-            popup = QApplication.activePopupWidget()
-            if popup is None:
-                break
-            popup.close()
-    QTimer.singleShot(40, step)
+        for menu in reversed(_menus_showing()):
+            menu.close()
+
+    def drive():
+        def opened():
+            return [m for m in _menus_showing() if id(m) not in before]
+        if not _wait_for(lambda: bool(opened())):
+            got["error"] = "no menu opened"
+            return close_all()
+        menu = opened()[0]
+        for depth, label in enumerate(path):
+            action = next((a for a in menu.actions()
+                           if a.text().replace("&", "") == label and a.isVisible()), None)
+            if action is None:
+                got["found"] = False
+                got["entries"] = [a.text() for a in menu.actions()]
+                return close_all()
+            got["found"], got["enabled"] = True, action.isEnabled()
+            if not action.isEnabled():
+                return close_all()         # greyed (a greyed submenu greys what is in it)
+            if not _point_at(menu, action):
+                got["error"] = f"the pointer never rested on {label}"
+                return close_all()
+            centre = menu.actionGeometry(action).center()
+            if depth < len(path) - 1:
+                sub = action.menu()
+                if not sub.isVisible():
+                    QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier, centre)
+                if not _wait_for(sub.isVisible):
+                    got["error"] = f"{label} ▸ did not open"
+                    return close_all()
+                menu = sub
+                continue
+            QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier, centre)
+            got["clicked"] = _wait_for(lambda: not menu.isVisible(), 1.0)
+            return close_all()
+
+    QTimer.singleShot(0, drive)
     open_it()
     pump()
-    return got.get("found", False), got.get("enabled"), got
+    back_to_the_window(w)
+    return got["found"], got["enabled"], got
 
 
 def right_click(view, x, y):
@@ -647,15 +684,31 @@ def test_a_cells_menu_starts_with_its_variable_name_and_global(w):
     labels = [a.text() for a in menu.actions()]
     assert "Make Global" not in labels and "Make Local" not in labels, "Global once, at the top"
     # typed into the box in the real menu, Enter names the cell
+    from PySide6.QtWidgets import QLineEdit
+    from tests.test_markup_interaction_round6 import back_to_the_window
+    for stale in _menus_showing():
+        stale.close()
+    back_to_the_window(w)
+    typed_in = []
+
     def name_it():
-        popup = QApplication.activePopupWidget()
-        from PySide6.QtWidgets import QLineEdit
-        field = popup.findChild(QLineEdit, "cellVariable")
-        QTest.keyClicks(field, "P_joist")
-        QTest.keyClick(field, Qt.Key_Return)
-    QTimer.singleShot(80, name_it)
+        # the menu this right-click opened: the one holding the Variable box
+        def field():
+            return next((m.findChild(QLineEdit, "cellVariable") for m in _menus_showing()
+                         if m.findChild(QLineEdit, "cellVariable") is not None), None)
+        if not _wait_for(lambda: field() is not None and field().hasFocus()):
+            typed_in.append("no Variable box with the keys")
+            for m in _menus_showing():
+                m.close()
+            return
+        QTest.keyClicks(field(), "P_joist")
+        QTest.keyClick(field(), Qt.Key_Return)
+        typed_in.append("ok")
+    QTimer.singleShot(0, name_it)
     right_click_cell(w, table, "B2")()
     pump()
+    back_to_the_window(w)
+    assert typed_in == ["ok"], typed_in
     t = tables(w)[0]
     dn = t.sheet.workbook.find_name("P_joist", None)
     assert dn is not None and dn.refers_to.replace("$", "").endswith("!B2")
