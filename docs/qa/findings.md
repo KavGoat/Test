@@ -4,6 +4,15 @@ Kept by the lead agent (docs/AGENT_PROMPT.md §5). One line per finding, newest
 round at the top. Status: open · fixing (who) · merged · pushed · decision
 (waiting on the user) · not a bug.
 
+## Round 7 — window frame, Split View, open (2026-10-16)
+
+Merged in dcfda5c.
+- 7.1 Native title bar. Windows' own frame and buttons, with the menus inside through DWM. On other platforms, the native bar with the menus below it. Status: merged. **Never run on Windows**, only checked on Linux against a simulated Win32. The user must try it there. Risks to watch: caption buttons not showing through, or a black area behind the menu row when the GPU canvas is on.
+- 7.2 Split View in one window: one menu and one set of toolbars, each view with its own tabs. It opens in about 60 ms (was 3.8 s). Separate Views gives each window its own menu. Status: merged.
+- 7.3 A tab dragged straight across moved its neighbour (Qt reports the moves the other way round). Status: merged, fixed.
+- 7.4 File ▸ Open adds a tab; an already-open file brings its tab forward. Status: merged.
+- 7.5 Flaky: `test_calc_modes::test_a_word_and_a_space_become_calculation_text_and_undo_brings_the_equation_back` fails about 1 run in 3 under `-n 3`, also on untouched code. A flake is not a root cause. Status: open, to investigate.
+
 ## Round 6 — Properties toolbar against the user's Revu screenshots (lead, 2026-10-16)
 
 Merged in 6260296 (a9cdcd2). The lead compared the bars type by type
