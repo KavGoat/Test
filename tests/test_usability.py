@@ -8120,8 +8120,13 @@ def test_the_style_toolbar_and_the_properties_panel_agree(window):
         window.view.scene().clearSelection()
         item.setSelected(True)
         window.refresh_selection()
+        # the style fields; Revu's Highlight, Shape, Cut-out, Units, Caption
+        # and Totals (ui/propbar.py) are about the markup, not its pen
+        from calcforge.ui import propbar
+        markup_groups = {propbar.SHAPE, propbar.HIGHLIGHT, propbar.CUTOUT,
+                         propbar.UNITS, propbar.MEASURE, propbar.TOTALS}
         on_the_toolbar = {field for field, actions in window._style_widgets.items()
-                          if any(action.isVisible() for action in actions)}
+                          if any(action.isVisible() for action in actions)} - markup_groups
         in_the_panel = capabilities(item)
         if on_the_toolbar != in_the_panel:
             disagreed.append(f"{tool.key}: toolbar {sorted(on_the_toolbar)} "
