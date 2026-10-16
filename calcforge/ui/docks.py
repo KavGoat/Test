@@ -57,6 +57,25 @@ def _icon(name: str, size: int = 14) -> QIcon:
     return drawn_icon(draw, size, size)
 
 
+class _ElidedTitle(QLabel):
+    """A panel's title that ends in … when the panel is too narrow for it.
+
+    A plain label was cut off mid-letter by the buttons beside it when a
+    narrow window squeezed the panels ("Thumbı", QA, 2026-10-15).
+    """
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, super().minimumSizeHint().height())
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        rect = self.contentsRect()
+        text = self.fontMetrics().elidedText(self.text(), Qt.ElideRight, rect.width())
+        self.style().drawItemText(painter, rect, int(self.alignment()), self.palette(),
+                                  self.isEnabled(), text, self.foregroundRole())
+        painter.end()
+
+
 class DockTitleBar(QWidget):
     """Title, pin, float and close — in that order, like every other tool."""
 
@@ -68,7 +87,7 @@ class DockTitleBar(QWidget):
         layout.setContentsMargins(9, 3, 4, 3)
         layout.setSpacing(2)
 
-        self.label = QLabel(dock.windowTitle())
+        self.label = _ElidedTitle(dock.windowTitle())
         self.label.setObjectName("dockTitle")
         self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         layout.addWidget(self.label)

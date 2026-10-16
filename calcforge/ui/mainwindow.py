@@ -119,10 +119,120 @@ class CenteredStatusBar(QStatusBar):
     it in the middle of whatever space the rest leaves it.
     """
 
+    #: Narrowest the bar asks for, whatever it holds: what is left when every
+    #: droppable control is gone is the toggles, the page navigation and the
+    #: zoom box, and those are laid out in less than this.
+    MINIMUM_WIDTH = 420
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.center_widget = None
         self._spacers = (None, None)
+        self._droppable: list = []          # least important first
+        self._dropped: list = []
+        self._overflow = None
+        self._fitting = False
+
+    # Every control in the footer used to be fixed, so the footer alone asked
+    # for 1174 px and the window could not be made narrower than about 1180 —
+    # no half-screen snapping on a 1920 px monitor (QA, 2026-10-15). Revu's
+    # footer drops its less important controls as it narrows and brings them
+    # back when there is room; so does this one. What is dropped is still on
+    # the » menu at the right, so nothing becomes unreachable.
+    def set_droppable(self, widgets: list, overflow: QToolButton) -> None:
+        """*widgets* may be hidden when the bar is short of room, the first
+        of them first. *overflow* is shown while any of them is, and lists
+        them."""
+        self._droppable = list(widgets)
+        self._overflow = overflow
+        overflow.setVisible(False)
+        self.fit_to_width()
+
+    def dropped(self) -> list:
+        """The controls hidden for want of room, in the order they went."""
+        return list(self._dropped)
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        if not self._droppable:
+            return hint
+        return QSize(min(hint.width(), self.MINIMUM_WIDTH), hint.height())
+
+    @staticmethod
+    def _natural_width(widget: QWidget) -> int:
+        """The width *widget* is laid out at when there is room for it."""
+        if widget.sizePolicy().horizontalPolicy() == QSizePolicy.Ignored:
+            return widget.minimumWidth()
+        hint = widget.sizeHint().expandedTo(widget.minimumSize())
+        return hint.boundedTo(widget.maximumSize()).width()
+
+    def _needed_width(self, kept: list) -> int:
+        """How wide the bar has to be to show everything it always shows
+        plus *kept*, each at its natural width."""
+        spacing = 6                         # QStatusBar's own, between items
+        # its margins and the grip's gap, and the spacing either side of the
+        # two centring spacers and the stretch between the bar's two halves
+        needed = 2 + 2 + 1 + 3 * spacing + 4
+        left, right = self._spacers
+        dropping = set(self._droppable)
+        for child in self.children():
+            if (not isinstance(child, QWidget) or child.isWindow()
+                    or child in (left, right) or child in dropping):
+                continue
+            if child.isHidden() and child is not self._overflow:
+                continue
+            if child is self._overflow and not (set(self._droppable) - set(kept)):
+                continue
+            needed += self._natural_width(child) + spacing
+        for widget in kept:
+            needed += self._natural_width(widget) + spacing
+        return needed
+
+    def fit_to_width(self) -> None:
+        """Hide the least important controls the bar has no room for, and
+        bring back the ones it has room for again."""
+        if not self._droppable or self._fitting:
+            return
+        self._fitting = True
+        try:
+            room = self.width()
+            kept = list(self._droppable)
+            while kept and self._needed_width(kept) > room:
+                kept.pop(0)
+            dropped = [w for w in self._droppable if w not in kept]
+            for widget in self._droppable:
+                if widget.isHidden() == (widget in kept):
+                    widget.setVisible(widget in kept)
+            self._dropped = dropped
+            if self._overflow is not None and self._overflow.isHidden() == bool(dropped):
+                self._overflow.setVisible(bool(dropped))
+            # the spacers that centre the page navigation keep the widths they
+            # were given for a wider bar: with them the navigation was laid
+            # out narrower than itself, its buttons over the page number
+            left, right = self._spacers
+            if left is not None and self._squeezed_by() > 0:
+                left.setMinimumWidth(0)
+                right.setMinimumWidth(0)
+        finally:
+            self._fitting = False
+
+    def _squeezed_by(self) -> int:
+        """How much narrower than itself the page navigation is laid out."""
+        widget = self.center_widget
+        if widget is None or not widget.isVisible():
+            return 0
+        return max(0, widget.minimumSizeHint().width() - widget.width())
+
+    def resizeEvent(self, event) -> None:
+        self.fit_to_width()
+        super().resizeEvent(event)
+
+    def event(self, event) -> bool:
+        # a control grew or shrank (the page size or the zoom changed what
+        # it says): see again what fits
+        if event.type() == QEvent.LayoutRequest:
+            self.fit_to_width()
+        return super().event(event)
 
     def set_center_widget(self, widget: QWidget) -> None:
         self.center_widget = widget
@@ -147,8 +257,11 @@ class CenteredStatusBar(QStatusBar):
         # as far as the two spacers have room
         now = widget.mapToGlobal(QPoint(widget.width() // 2, 0)).x()
         shift = int(round(global_x - now))
-        before = min(max(left.width() + shift, 0), left.width() + right.width())
-        after = left.width() + right.width() - before
+        # never more than the bar can spare (a narrowed bar's spacers can be
+        # wider than that until it is laid out again)
+        room = max(0, left.width() + right.width() - self._squeezed_by())
+        before = min(max(left.width() + shift, 0), room)
+        after = room - before
         # equal stretches share the room; the side that needs more than half
         # is given it as its minimum, the other takes what is left
         left.setMinimumWidth(before if before > after else 0)
@@ -187,6 +300,22 @@ class _DoubleClickToggle(QObject):
                 and event.button() == Qt.LeftButton):
             self._callback()
             return True
+        return False
+
+
+class _OnResize(QObject):
+    """Calls *callback* whenever a watched widget is resized: straight away,
+    and once more when the events of the moment are over, when whatever was
+    being shown or laid out with it has caught up."""
+
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self._callback = callback
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.Resize:
+            self._callback()
+            QTimer.singleShot(0, self, self._callback)
         return False
 
 
@@ -526,6 +655,9 @@ class MainWindow(QMainWindow):
         self._active_tab = -1
         self._split_host = None
         self.toolbars: list = []
+        # toolbars a row break was put before because their row had no room
+        # for them (_wrap_toolbar_rows): not the user's, never saved
+        self._auto_breaks: set = set()
         self.visible_tools = None       # None means every tool
         self._default_state = None
         self._icon_names: dict = {}
@@ -590,6 +722,7 @@ class MainWindow(QMainWindow):
         for toolbar in self.toolbars:
             toolbar.topLevelChanged.connect(lambda *_: self.note_layout_change())
             toolbar.visibilityChanged.connect(lambda *_: self.note_layout_change())
+            toolbar.visibilityChanged.connect(lambda *_: self._wrap_toolbar_rows_soon())
             toolbar.movableChanged.connect(lambda *_: self.note_layout_change())
         self._enforce_panel_limit()
         self._initial_fit = QTimer(self)
@@ -1156,10 +1289,15 @@ class MainWindow(QMainWindow):
                        self.act_undo, self.act_redo):
             main_bar.addSeparator() if action is None else main_bar.addAction(action)
         self._add_toolbar(main_bar)
-        self._build_markup_styles_bar()       # beside it, where there is room
-        # The markup tools get a row to themselves: there are enough of them
-        # that sharing one with the file actions hides the last few.
-        self.addToolBarBreak()
+        # The Calculation bar and the measuring tools share the first row with
+        # the file actions, which use barely a third of it. Beside the markup
+        # tools the Calculation bar was left 63 px and showed one button of
+        # twelve at 1280 px wide, even in Calc mode, and the markup tools hid
+        # fifteen of their own (QA, 2026-10-15). Revu has Markup and Measure
+        # as toolbars of their own too. A row with too little room for its
+        # bars wraps, the last bar going to a row of its own, as Revu's do
+        # (_wrap_toolbar_rows).
+        self._add_toolbar(self._calculation_bar())
 
         self.tool_group = QActionGroup(self)
         self.tool_group.setExclusive(True)
@@ -1167,9 +1305,13 @@ class MainWindow(QMainWindow):
         tool_bar = QToolBar("Tools")
         tool_bar.setObjectName("toolbar_tools")
         tool_bar.setIconSize(QSize(22, 22))
+        measure_bar = QToolBar("Measure")
+        measure_bar.setObjectName("toolbar_measure")
+        measure_bar.setIconSize(QSize(22, 22))
         for category in CATEGORIES:
-            if category != CATEGORIES[0]:
-                tool_bar.addSeparator()
+            bar = measure_bar if category == "Measure" else tool_bar
+            if bar.actions():
+                bar.addSeparator()
             for tool in tools_in(category):
                 action = self.give_icon(QAction(tool.label, self), tool.icon)
                 action.setCheckable(True)
@@ -1181,12 +1323,16 @@ class MainWindow(QMainWindow):
                 action.triggered.connect(lambda _checked=False, key=tool.key:
                                          self.select_tool(key))
                 self.tool_group.addAction(action)
-                tool_bar.addAction(action)
+                bar.addAction(action)
                 self.tool_actions[tool.key] = action
         tool_bar.addSeparator()
         tool_bar.addAction(self.act_sticky)
+        self._add_toolbar(measure_bar)
+        # The markup tools get a row to themselves: there are enough of them
+        # that sharing one with anything else hides the last few.
+        self.addToolBarBreak()
         self._add_toolbar(tool_bar)
-        self._add_toolbar(self._calculation_bar())
+        self._build_markup_styles_bar()       # beside the tools, or wrapped below them
         self.addToolBarBreak()
 
         style_bar = QToolBar("Style")
@@ -1729,6 +1875,33 @@ class MainWindow(QMainWindow):
         row.addWidget(self.mode_switch)
         row.addWidget(field)
         self.menuBar().setCornerWidget(holder, Qt.TopRightCorner)
+        self._menu_corner_fitter = _OnResize(self._fit_menu_corner, self)
+        self.menuBar().installEventFilter(self._menu_corner_fitter)
+
+    #: The search field's width when the menu row has room, and the least it
+    #: is squeezed to when it has not.
+    SEARCH_WIDTH = (150, 260)
+
+    def _fit_menu_corner(self) -> None:
+        """Narrow the search field before the menus have to go behind the
+        menu bar's » — and never so far that the window buttons are pushed
+        off the row.
+
+        The menu bar lays its right-hand corner out at the width it asks for,
+        whatever room there is: with a 260 px search field the corner asked
+        for 470 px and, in a window half a screen wide, sat over the menus
+        and hid the » that leads to them (QA, 2026-10-15).
+        """
+        field = getattr(self, "search_field", None)
+        bar = self.menuBar()
+        if field is None or bar.isNativeMenuBar():
+            return
+        narrowest, widest = self.SEARCH_WIDTH
+        # everything on the row but the field, at the width it asks for
+        others = bar.sizeHint().width() - field.width()
+        width = max(narrowest, min(widest, bar.width() - others))
+        if width != field.width():
+            field.setFixedWidth(width)
 
     def search_everything(self, wanted: str) -> list:
         """Everything that matches *wanted*: (label, kind, target), best first."""
@@ -2211,6 +2384,69 @@ class MainWindow(QMainWindow):
         self.zoom_combo.setCurrentText("100%")
         self.zoom_combo.activated.connect(self._zoom_chosen)
         status.addPermanentWidget(self.zoom_combo)
+
+        # What the footer drops as the window narrows, the least missed first:
+        # the pointer's coordinates, then the paper size, Sync, Snap and the
+        # page layout, as Revu's own footer does (QA, 2026-10-15). The page
+        # navigation and the zoom box always stay. Whatever is dropped is on
+        # the » menu beside the zoom box until there is room for it again.
+        self.status_more = QToolButton()
+        self.status_more.setObjectName("statusMore")
+        self.status_more.setAutoRaise(True)
+        self.status_more.setText("»")
+        self.status_more.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self._status_icon_buttons[self.status_more] = "overflow"
+        self.status_more.setToolTip("The status bar controls there is no room for")
+        self.status_more.setPopupMode(QToolButton.InstantPopup)
+        more_menu = QMenu(self.status_more)
+        more_menu.aboutToShow.connect(lambda: self._fill_status_overflow(more_menu))
+        self.status_more.setMenu(more_menu)
+        status.addPermanentWidget(self.status_more)
+        self._refresh_status_icons()
+        status.set_droppable([self.status_position, self.status_size, self.window_sync,
+                              self.status_snap, self.status_scroll, self.status_fit,
+                              self.status_scale, self.status_dimmer, self.status_toggles],
+                             self.status_more)
+
+    def _fill_status_overflow(self, menu: QMenu) -> None:
+        """The » menu: the status bar's dropped controls, each doing what it
+        does on the bar."""
+        menu.clear()
+        status = self.statusBar()
+        dropped = status.dropped() if isinstance(status, CenteredStatusBar) else []
+        for widget in dropped:
+            if widget is self.status_position:
+                text = self.status_position.text() or "—"
+                menu.addAction(f"Pointer: {text}").setEnabled(False)
+            elif widget is self.status_size:
+                menu.addAction(f"Page Setup ({self.status_size.text()})…", self.page_setup)
+            elif widget is self.window_sync:
+                sync = menu.addMenu("Window Sync")
+                for index in range(self.window_sync.count()):
+                    action = sync.addAction(self.window_sync.itemText(index))
+                    action.setCheckable(True)
+                    action.setChecked(index == self.window_sync.currentIndex())
+                    action.triggered.connect(
+                        lambda _on=False, i=index: self.window_sync.setCurrentIndex(i))
+            elif widget in (self.status_snap, self.status_scroll):
+                sub = menu.addMenu(widget.text())
+                for action in widget.menu().actions():
+                    sub.addAction(action)
+            elif widget is self.status_fit:
+                menu.addAction("Fit Width", self.view.fit_width)
+            elif widget is self.status_scale:
+                menu.addAction(f"{self.status_scale.text()}…", self.calibrate_dialog)
+            elif widget is self.status_dimmer:
+                menu.addAction(self.act_dim_content)
+            elif widget is self.status_toggles:
+                menu.addSeparator()
+                grid = menu.addAction("Show Grid")
+                grid.setCheckable(True)
+                grid.setChecked(self.status_grid.isChecked())
+                grid.triggered.connect(self.status_grid.setChecked)
+                for action in (self.act_snap, self.act_snap_content, self.act_snap_items,
+                               self.act_sticky):
+                    menu.addAction(action)
 
     def _connect(self) -> None:
         self.view.statusMessage.connect(self.status_hint.setText)
@@ -2888,6 +3124,184 @@ class MainWindow(QMainWindow):
             return self.save_document()
         return True
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._wrap_toolbar_rows()
+        self._share_width_with_panels()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # the first size is given before the window counts as shown
+        QTimer.singleShot(0, self, self._wrap_toolbar_rows)
+        QTimer.singleShot(0, self, self._share_width_with_panels)
+
+    # -- side panels in a narrow window ----------------------------------
+    # The side panels kept their full width as the window narrowed and the
+    # page took all of the loss: at 800 px the page was 183 px wide between
+    # a 200 px Thumbnails panel and a 300 px Properties panel (QA,
+    # 2026-10-15). The panels now give up a share once the page is down to
+    # CANVAS_SHARE of the window, and are given back the width they had when
+    # the window widens again.
+    CANVAS_SHARE = 0.4
+    #: The narrowest a side panel is squeezed to by this; it can still be
+    #: dragged narrower, or closed.
+    PANEL_LEAST = 140
+
+    def _side_panels(self) -> list:
+        return [dock for dock in getattr(self, "panels", [])
+                if not dock.isHidden() and not dock.isFloating()
+                and self.dockWidgetArea(dock) in (Qt.LeftDockWidgetArea,
+                                                  Qt.RightDockWidgetArea)]
+
+    def _share_width_with_panels(self) -> None:
+        if not self.isVisible() or self.isFullScreen():
+            return
+        docks = self._side_panels()
+        remembered = self.__dict__.setdefault("_panel_widths", {})
+        # the widths the panels had at the last size that did not squeeze
+        # them: Qt itself takes a little off them before this sees the resize
+        natural = self.__dict__.setdefault("_panel_natural", {})
+        for dock in list(remembered):
+            if dock not in docks:
+                del remembered[dock]
+        if not docks:
+            return
+        # a panel's width as the layout has it now (activate: the docks may
+        # not have been laid out at the new window size yet)
+        self.layout().activate()
+        widths = {dock: dock.width() for dock in docks}
+        canvas = self.centralWidget().width()
+        wanted = int(self.width() * self.CANVAS_SHARE)
+        new = dict(widths)
+        if canvas < wanted:
+            short = wanted - canvas
+            spare = {dock: max(0, width - self.PANEL_LEAST) for dock, width in widths.items()}
+            total = sum(spare.values())
+            if not total:
+                return
+            for dock in docks:
+                remembered.setdefault(dock, max(widths[dock], natural.get(dock, 0)))
+                new[dock] = widths[dock] - min(spare[dock], short * spare[dock] // total)
+        elif remembered and canvas > wanted:
+            room = canvas - wanted
+            owed = {dock: max(0, remembered[dock] - widths[dock])
+                    for dock in docks if dock in remembered}
+            total = sum(owed.values())
+            if not total:
+                remembered.clear()
+                natural.clear()
+                natural.update(widths)
+                return
+            for dock, debt in owed.items():
+                new[dock] = widths[dock] + min(debt, room * debt // total)
+                if new[dock] >= remembered[dock]:
+                    del remembered[dock]
+        if not remembered:
+            natural.clear()
+            natural.update(new)
+        changed = [dock for dock in docks if new[dock] != widths[dock]]
+        if changed:
+            self.resizeDocks(changed, [new[dock] for dock in changed], Qt.Horizontal)
+
+    # -- toolbar rows that wrap ------------------------------------------
+    # Revu's toolbars sit in rows, and a row that is too narrow for its bars
+    # wraps: the bars that do not fit go down to a row of their own, and come
+    # back when the window is wide again. Qt's own answer is to squash the
+    # last bar on a row into its » chevron, which left the Calculation bar
+    # showing one button of twelve (QA, 2026-10-15). The breaks put in here
+    # are remembered apart from the ones the user made by dragging, and are
+    # left out of the saved arrangement, so a narrow window today does not
+    # become tomorrow's layout.
+    def _toolbar_lines(self, area) -> list:
+        """The shown toolbars in *area*, row by row as the user arranged
+        them: a break the wrapping put in does not start a row here."""
+        bars = [bar for bar in self.toolbars
+                if self.toolBarArea(bar) == area and not bar.isHidden()]
+        bars.sort(key=lambda bar: (bar.y(), bar.x()))
+        lines: list = []
+        for bar in bars:
+            if not lines or (self.toolBarBreak(bar) and bar not in self._auto_breaks):
+                lines.append([])
+            lines[-1].append(bar)
+        return lines
+
+    def _wrap_toolbar_rows(self) -> None:
+        """Break each toolbar row where its bars stop fitting, and take back
+        the breaks there is room to do without."""
+        if not self.isVisible() or not self.toolbars:
+            return
+        room = self.contentsRect().width()
+        wanted: set = set()
+        for area in (Qt.TopToolBarArea, Qt.BottomToolBarArea):
+            for line in self._toolbar_lines(area):
+                used = 0
+                for bar in line:
+                    width = bar.sizeHint().width()
+                    if used and used + width > room:
+                        wanted.add(bar)
+                        used = 0
+                    used += width
+        if wanted == self._auto_breaks:
+            return
+        for bar in self._auto_breaks - wanted:
+            if self.toolBarBreak(bar):
+                self.removeToolBarBreak(bar)
+        for bar in wanted - self._auto_breaks:
+            if not self.toolBarBreak(bar):
+                self.insertToolBarBreak(bar)
+        self._auto_breaks = wanted
+
+    def _wrap_toolbar_rows_soon(self) -> None:
+        timer = getattr(self, "_wrap_timer", None)
+        if timer is None:
+            timer = self._wrap_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._wrap_toolbar_rows)
+        timer.start(0)
+
+    def saveState(self, version: int = 0) -> QByteArray:
+        """The arrangement as the user made it: without the row breaks put
+        in only because the window is narrow just now."""
+        made = [bar for bar in getattr(self, "_auto_breaks", ()) if self.toolBarBreak(bar)]
+        for bar in made:
+            self.removeToolBarBreak(bar)
+        try:
+            return super().saveState(version)
+        finally:
+            for bar in made:
+                self.insertToolBarBreak(bar)
+
+    def restoreState(self, state, version: int = 0) -> bool:
+        done = super().restoreState(state, version)
+        # the restored rows are all the user's; wrap them afresh
+        self._auto_breaks = set()
+        self._wrap_toolbar_rows_soon()
+        return done
+
+    #: The toolbars' rows out of the box, top to bottom.
+    TOOLBAR_ROWS = (("toolbar_main", "toolbar_calculation", "toolbar_measure"),
+                    ("toolbar_tools",), ("toolbar_style",))
+    #: Bumped when TOOLBAR_ROWS changes in a way a saved arrangement from
+    #: before should not keep: 2 split the measuring tools off the markup
+    #: tools and moved the Calculation bar up a row (QA, 2026-10-15).
+    TOOLBAR_ROWS_VERSION = 2
+
+    def _default_toolbar_rows(self) -> None:
+        """Put the toolbars back in their rows out of the box, keeping which
+        are shown."""
+        bars = {bar.objectName(): bar for bar in self.toolbars}
+        shown = {bar: not bar.isHidden() for bar in self.toolbars}
+        for number, row in enumerate(self.TOOLBAR_ROWS):
+            if number:
+                self.addToolBarBreak(Qt.TopToolBarArea)
+            for name in row:
+                if name in bars:
+                    self.addToolBar(Qt.TopToolBarArea, bars[name])
+        for bar, visible in shown.items():
+            bar.setVisible(visible)
+        self._auto_breaks = set()
+        self._wrap_toolbar_rows_soon()
+
     def changeEvent(self, event) -> None:
         super().changeEvent(event)
         if event.type() == QEvent.WindowStateChange:
@@ -3244,6 +3658,7 @@ class MainWindow(QMainWindow):
         wanted = self.visible_tool_keys()
         for key, action in self.tool_actions.items():
             action.setVisible(key in wanted)
+        self._wrap_toolbar_rows_soon()          # the bars changed width
 
     # -- remembering it ------------------------------------------------
     def note_layout_change(self) -> None:
@@ -3290,6 +3705,7 @@ class MainWindow(QMainWindow):
         settings.setValue("window/geometry", self.saveGeometry())
         settings.setValue("window/maximised", self.isMaximized())
         settings.setValue("window/state", self.saveState())
+        settings.setValue("toolbars/rows", self.TOOLBAR_ROWS_VERSION)
         settings.setValue("window/markups_list",
                           [self.bottom_split.sizes()[1] if self.markups_list_open() else 0,
                            self._markups_height])
@@ -3316,6 +3732,12 @@ class MainWindow(QMainWindow):
         if state is not None:
             self.restoreState(state)
             self._toolbars_off_the_rails()
+            try:
+                rows = int(settings.value("toolbars/rows", 1))
+            except (TypeError, ValueError):
+                rows = 1
+            if rows < self.TOOLBAR_ROWS_VERSION:
+                self._default_toolbar_rows()
         stored = settings.value("window/markups_list")
         try:
             shown, height = (int(v) for v in stored) if stored else (0, 220)
@@ -8302,6 +8724,12 @@ class MainWindow(QMainWindow):
     def _refresh_status_icons(self) -> None:
         for button, name in getattr(self, "_status_icon_buttons", {}).items():
             button.setIcon(icon(name))
+        # the » of every toolbar and of the menu bar, in the theme's ink
+        holders = list(getattr(self, "toolbars", [])) + [self.menuBar()]
+        for holder in holders:
+            for name in ("qt_toolbar_ext_button", "qt_menubar_ext_button"):
+                for button in holder.findChildren(QToolButton, name):
+                    button.setIcon(icon("overflow"))
 
     def refresh_icons(self) -> None:
         """Redraw every icon in the colours of the theme now in use."""
@@ -8341,6 +8769,7 @@ class MainWindow(QMainWindow):
             self.scene.set_canvas_colour(CANVAS[theme])
         self.refresh_icons()
         self._refresh_all_scenes()
+        self._wrap_toolbar_rows_soon()          # the new style's buttons may be wider
         rulers = getattr(self.view, "rulers", None)
         if rulers is not None:
             rulers.refresh()                 # their ground and corner follow the theme

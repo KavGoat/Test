@@ -82,10 +82,15 @@ QToolBar {{
     background: {chrome}; border: 0; border-bottom: 1px solid {chrome_edge};
     spacing: 1px; padding: 3px 4px 3px 2px;
 }}
+/* 3px a side, as tight as Revu's own buttons: at 5px the first row could
+   not hold the file, Calculation and Measure bars together at 1280 px
+   (QA, 2026-10-15) */
 QToolBar QToolButton {{
     border: 0; border-bottom: 2px solid transparent;
-    border-radius: 3px; padding: 4px 5px; margin: 0 1px;
+    border-radius: 3px; padding: 4px 3px; margin: 0 1px;
 }}
+/* the » is only 12px wide: the padding above left it 4px, a grey dot */
+QToolBar QToolButton#qt_toolbar_ext_button {{ padding: 0; margin: 0; }}
 QToolBar QToolButton:hover {{ background: {accent_soft}; }}
 QToolBar QToolButton:pressed {{ background: {accent_deep}; }}
 QToolBar QToolButton:checked {{ background: {picked}; color: {picked_ink}; }}

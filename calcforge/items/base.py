@@ -1669,116 +1669,110 @@ _PENS: dict = {}
 
 def _cloud_path(polygon: QPolygonF, radius: float, closed: bool = True,
                 inverted: bool = False) -> QPainterPath:
-    """A revision cloud round *polygon*, drawn as PDF readers draw a cloudy
-    border (Apache PDFBox's CloudyBorder, after Acrobat): a corner curl at
-    each corner, then curls of *radius* along each side, their arcs meeting
-    in cusps, the leftover length shared out by easing the first arcs. The
-    curls bulge outward; *inverted* (Bluebeam's Invert) turns them inward.
+    """A revision cloud round *polygon*: scallops of *radius*, centred on the
+    outline, one at each corner and the rest spaced evenly along each side,
+    as Revu draws them. Neighbouring scallops meet in a cusp where their
+    circles cross outside the outline, at the same spacing and depth as a PDF
+    reader's cloudy border (Apache PDFBox's CloudyBorder: centres 2·cos 34°
+    × radius apart). The curls bulge outward; *inverted* (Bluebeam's Invert)
+    turns them inward.
+
+    Each scallop is drawn from the cusp it shares with the one before to the
+    cusp it shares with the one after, and the last ends where the first
+    began. The PDFBox shape this replaced eased its leftover length into the
+    first scallops of each side and began each corner with a short curl
+    drawn backwards: where the path closed, at the south-east corner of a
+    dragged cloud, that showed as a hook, and the eased scallops overlapped
+    their corner (QA, 2026-10-15).
     Worked in y-up coordinates, as the PDF's own, and turned back."""
     points = [(p.x(), -p.y()) for p in polygon]
-    # no zero-length sides, and closed
+    # no zero-length sides, and not closed (the first point is not repeated)
     clean = []
     for pt in points:
         if not clean or math.hypot(pt[0] - clean[-1][0], pt[1] - clean[-1][1]) > 1e-9:
             clean.append(pt)
-    if len(clean) >= 2 and math.hypot(clean[0][0] - clean[-1][0], clean[0][1] - clean[-1][1]) > 1e-9:
-        clean.append(clean[0])
+    if len(clean) >= 2 and math.hypot(clean[0][0] - clean[-1][0],
+                                      clean[0][1] - clean[-1][1]) <= 1e-9:
+        clean.pop()
     path = QPainterPath()
     if len(clean) < 3:
         return path
-    # the positive angle direction (curls outward), or the other way round
+    # anticlockwise (y up), so outward is to the right of the way round —
+    # or the other way round, which turns the scallops inward
     area = sum(clean[i][0] * clean[(i + 1) % len(clean)][1]
                - clean[i][1] * clean[(i + 1) % len(clean)][0] for i in range(len(clean)))
     if (area < 0) != inverted:
         clean.reverse()
     radius = max(float(radius), 0.5)
-    a34, a30, a12, a90, a180 = (math.radians(34), math.radians(30), math.radians(12),
-                                math.pi / 2, math.pi)
-    k = math.cos(a34)
-    adv_interm = 2 * k * radius
-    adv_corner = k * radius
-    started = [False]
+    pitch = 2 * math.cos(math.radians(34)) * radius
+
+    # the scallops' centres, each with the way round at that point
+    centres = []
+    count = len(clean)
+    for i in range(count):
+        (x0, y0), (x1, y1) = clean[i], clean[(i + 1) % count]
+        length = math.hypot(x1 - x0, y1 - y0)
+        if length <= 1e-9:
+            continue
+        ux, uy = (x1 - x0) / length, (y1 - y0) / length
+        steps = max(1, math.ceil(length / pitch - 1e-9))
+        for step in range(steps):
+            t = length * step / steps
+            centres.append((x0 + ux * t, y0 + uy * t, ux, uy))
+    # sides much shorter than a scallop: one scallop, not a pile of them
+    kept = []
+    for centre in centres:
+        if kept and math.hypot(centre[0] - kept[-1][0], centre[1] - kept[-1][1]) < 0.35 * radius:
+            continue
+        kept.append(centre)
+    while (len(kept) > 3 and math.hypot(kept[0][0] - kept[-1][0],
+                                        kept[0][1] - kept[-1][1]) < 0.35 * radius):
+        kept.pop()
+    centres = kept
+    if len(centres) < 3:
+        return path
+    # circles that would not cross (a cloud smaller than its scallops) are
+    # made just big enough to
+    widest = max(math.hypot(centres[(i + 1) % len(centres)][0] - centres[i][0],
+                            centres[(i + 1) % len(centres)][1] - centres[i][1])
+                 for i in range(len(centres)))
+    radius = max(radius, widest / (2 * math.cos(math.radians(34))))
+
+    def cusp(a, b):
+        """Where the circles round centres *a* and *b* cross on the outside
+        (to the right of the way from a to b)."""
+        mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        d = math.hypot(dx, dy)
+        h = math.sqrt(max(radius * radius - d * d / 4, 0.0))
+        return mx + h * dy / d, my - h * dx / d
 
     def out(x, y):
         return QPointF(x, -y)
 
-    def segment(start, end, cx, cy, move=False):
-        denom = math.sin((end - start) / 2.0)
+    def segment(cx, cy, start, end):
+        half = (end - start) / 2.0
         ca, sa, cb, sb = math.cos(start), math.sin(start), math.cos(end), math.sin(end)
-        if move or not started[0]:
-            path.moveTo(out(cx + radius * ca, cy + radius * sa))
-            started[0] = True
-        if denom == 0:
-            return
-        bcp = 1.333333333 * (1 - math.cos((end - start) / 2.0)) / denom
+        bcp = 4.0 / 3.0 * (1 - math.cos(half)) / math.sin(half)
         path.cubicTo(out(cx + radius * (ca - bcp * sa), cy + radius * (sa + bcp * ca)),
                      out(cx + radius * (cb + bcp * sb), cy + radius * (sb - bcp * cb)),
                      out(cx + radius * cb, cy + radius * sb))
 
-    def arc(start, end, cx, cy, concave=False):
-        todo = end - start
-        while todo < 0:
-            todo += 2 * math.pi
-        if concave and todo > math.pi:
-            # a corner turning the other way (a concave corner, or every
-            # corner of an inverted cloud): the short way back, not round
-            todo -= 2 * math.pi
-        step = a90 if todo >= 0 else -a90
-        sweep, done = todo, 0.0
-        while abs(todo) > a90:
-            segment(start + done, start + done + step, cx, cy)
-            done += step
-            todo -= step
-        if todo != 0:
-            segment(start + done, start + sweep, cx, cy)
-
-    def params(length):
-        n = math.ceil((length - 2 * adv_corner) / adv_interm)
-        dx = (length - (2 * adv_corner + n * adv_interm)) / 2
-        arg = (k * radius + dx) / radius
-        alpha = 0.0 if arg < -1.0 or arg > 1.0 else math.acos(arg)
-        return n, alpha, dx
-
-    count = len(clean)
-    first = math.hypot(clean[0][0] - clean[-2][0], clean[0][1] - clean[-2][1])
-    n0, alpha0, _dx = params(first)
-    alpha_prev = alpha0 if n0 == 0 else a34
-    angle_prev = 0.0
-    for j in range(count - 1):
-        (x0, y0), (x1, y1) = clean[j], clean[j + 1]
-        length = math.hypot(x1 - x0, y1 - y0)
-        n, alpha, dx = params(length)
-        angle = math.atan2(y1 - y0, x1 - x0)
-        if j == 0:
-            px, py = clean[count - 2]
-            angle_prev = math.atan2(y0 - py, x0 - px)
-        cos, sin = (x1 - x0) / length, (y1 - y0) / length
-        # the corner curl
-        a = angle_prev + a180 + alpha_prev
-        b = a - math.radians(22)
-        turn = (angle - angle_prev + math.pi) % (2 * math.pi) - math.pi
-        segment(a, b, x0, y0, move=not started[0])
-        arc(b, angle - alpha, x0, y0, concave=turn < -1e-9)
-        x = x0 + (2 * k * radius + 2 * dx) * cos
-        y = y0 + (2 * k * radius + 2 * dx) * sin
-        rest = n
-        if n >= 1:
-            back = angle + a180
-            segment(back + alpha, back + alpha - a30, x, y)
-            segment(back + alpha - a30, back + a90, x, y)
-            segment(back + a90, back + a180 - a34, x, y)
-            x += adv_interm * cos
-            y += adv_interm * sin
-            rest = n - 1
-        back = angle + a180
-        for _ in range(rest):
-            segment(back + a34, back + a12, x, y)
-            segment(back + a12, back + a90, x, y)
-            segment(back + a90, back + a180 - a34, x, y)
-            x += adv_interm * cos
-            y += adv_interm * sin
-        angle_prev = angle
-        alpha_prev = alpha if n == 0 else a34
+    total = len(centres)
+    cusps = [cusp(centres[i - 1], centres[i]) for i in range(total)]
+    path.moveTo(out(*cusps[0]))
+    for i, (cx, cy, ux, uy) in enumerate(centres):
+        (sx, sy), (ex, ey) = cusps[i], cusps[(i + 1) % total]
+        start = math.atan2(sy - cy, sx - cx)
+        sweep = (math.atan2(ey - cy, ex - cx) - start) % (2 * math.pi)
+        # the arc round the outside: its middle to the right of the way round
+        middle = start + sweep / 2
+        if ux * math.sin(middle) - uy * math.cos(middle) > 0:
+            sweep -= 2 * math.pi
+        pieces = max(1, math.ceil(abs(sweep) / (math.pi / 2) - 1e-9))
+        for piece in range(pieces):
+            segment(cx, cy, start + sweep * piece / pieces,
+                    start + sweep * (piece + 1) / pieces)
     path.closeSubpath()
     return path
 
