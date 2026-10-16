@@ -634,7 +634,18 @@ class PolyItem(MarkupItem):
         stays a cloud; everything else becomes a plain polygon.
         """
         kind = "cloud" if box.kind == "cloud" else "polygon"
-        shape = cls(kind, box.corner_points())
+        # an ellipse goes round its curve closely, as Revu's conversion does
+        # (exercise round 1, F-10: it gave the bounding box)
+        # — 32 vertices, few enough that each keeps its own handle
+        if box.kind == "ellipse":
+            rect = box.local_rect().normalized()
+            centre, rx, ry = rect.center(), rect.width() / 2, rect.height() / 2
+            points = [QPointF(centre.x() + math.cos(2 * math.pi * i / 32) * rx,
+                              centre.y() + math.sin(2 * math.pi * i / 32) * ry)
+                      for i in range(32)]
+        else:
+            points = box.corner_points()
+        shape = cls(kind, [QPointF(p) for p in points])
         shape.style = box.style.copy()
         shape.cloud_size = box.cloud_size
         shape.cloud_invert = box.cloud_invert
@@ -1169,6 +1180,7 @@ class PolyItem(MarkupItem):
         if not self.isSelected() or not self._handles_visible or self.group:
             return
         if self.locked:
+            self.paint_locked_selection(painter)       # F-32
             return
         if not self.uses_vertex_handles:
             super().paint_handles(painter)

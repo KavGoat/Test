@@ -210,11 +210,13 @@ WORD_TOOLS = frozenset({"text", "callout", "cloud_callout", "typewriter"})
 
 
 #: The tools that ask for a page scale when the page has none: Revu's
-#: measurement tools, every one of them. Dimension (a markup carrying its own
-#: words), the cut-outs (taken out of an area already scaled) and Calibrate
-#: (which sets the scale) do not.
+#: measurement tools, every one of them — Dimension too, which writes the
+#: length it measures unless it is given words of its own (exercise round 1,
+#: F-19). The cut-outs (taken out of an area already scaled), Viewport (which
+#: asks for its own) and Calibrate (which sets the scale) do not.
 SCALE_PROMPT_TOOLS = frozenset({
-    "measure_length", "measure_polylength", "measure_area", "measure_perimeter",
+    "measure_length", "measure_dimension",
+    "measure_polylength", "measure_area", "measure_perimeter",
     "measure_volume", "measure_angle", "measure_radius", "measure_diameter",
     "count",
     # Revu's Sketch to Scale shapes, drawn to a real size (the user,
@@ -1940,6 +1942,16 @@ class PageView(QGraphicsView):
             return
 
         if (self._pending_arrow_leader is not None
+                and event.button() == Qt.LeftButton
+                and self._inside_its_box(self._pending_arrow_leader, scene_pos)):
+            # a leader points out of its box at something, never into its
+            # own words (exercise round 1, F-12): the click waits for a place
+            self.statusMessage.emit(
+                "Click outside the box, on what the arrow should point at "
+                "· Esc to cancel")
+            event.accept()
+            return
+        if (self._pending_arrow_leader is not None
                 and event.button() == Qt.LeftButton):
             item, self._pending_arrow_leader = self._pending_arrow_leader, None
             self.setCursor(self._cursor_for_tool(self.current_tool()))
@@ -2472,6 +2484,7 @@ class PageView(QGraphicsView):
             self._release_stale_mode()
         if (self._pending_anchor is not None or self._pending_stamp is not None
                 or self._pending_arrow_leader is not None
+                or self._pending_cloud_leader is not None
                 or self.current_tool().mode == CLICK):
             self.viewport().update()          # the leader, or the preview, follows
 
@@ -3432,7 +3445,7 @@ class PageView(QGraphicsView):
     # item creation
     # ------------------------------------------------------------------
     # -- typing on a measurement -------------------------------------------
-    def open_label_editor(self, item) -> bool:
+    def open_label_editor(self, item, prefill: bool = False) -> bool:
         """Type a measurement's own text where the text sits.
 
         A dimension carries whatever the author wants on it, and asking for
@@ -3444,7 +3457,11 @@ class PageView(QGraphicsView):
             return False
         self.close_label_editor(commit=False)
         editor = QLineEdit()
-        editor.setText(item.custom_label)
+        # *prefill* (Edit Text… on a measurement already there): what it says
+        # now, selected, so typing replaces it and Enter keeps it (exercise
+        # round 1, F-33: it opened an empty box and the value vanished). A
+        # new dimension still starts blank, its value shown as the hint.
+        editor.setText(item.custom_label or (item.measured_text if prefill else "") or "")
         editor.setPlaceholderText(item.measured_text or "text for this dimension")
         editor.setAlignment(Qt.AlignCenter)
         editor.setStyleSheet(
@@ -3488,6 +3505,8 @@ class PageView(QGraphicsView):
             if proxy.scene() is not None:
                 proxy.scene().removeItem(proxy)
             proxy.deleteLater()
+        if item is not None and text == (item.measured_text or "").strip():
+            text = ""                  # the measured value: it stays live
         if commit and item is not None and item.custom_label != text:
             self.begin_snapshot(self.involved_frames(item))
             item.custom_label = text
@@ -3718,7 +3737,7 @@ class PageView(QGraphicsView):
         self.selectionChanged.emit()
         self.commit_snapshot(f"Add {tool.label.lower()}")
         self.finish_tool()
-        self.begin_item_edit(item)
+        self.begin_item_edit(item, placed=True)
 
     def edit_note(self, note) -> bool:
         """Ask for a note's text. False when the author changed their mind."""
@@ -3883,7 +3902,7 @@ class PageView(QGraphicsView):
                 and self.window.interactive_prompts:
             self.open_label_editor(draft)
         elif isinstance(draft, (TextItem, CalloutItem)):
-            self.begin_item_edit(draft)
+            self.begin_item_edit(draft, placed=True)
         self.finish_tool()
         # Last word, so returning to the select tool does not wipe the notice.
         if note_scale:
@@ -4328,7 +4347,11 @@ class PageView(QGraphicsView):
                 or self.calc.editing())
 
 
-    def begin_item_edit(self, item) -> None:
+    def begin_item_edit(self, item, placed: bool = False) -> None:
+        """Open *item*'s words for typing. *placed*: it was put down a moment
+        ago, and the step that added it is the last one on the undo stack —
+        what is typed now joins that step, so one Ctrl+Z takes back the box
+        and its words together (Revu; exercise round 1, F-05)."""
         if self._mode == "lasso":
             self.cancel_marquee()
         if self._editing_item is not None and self._editing_item is not item:
@@ -4348,6 +4371,12 @@ class PageView(QGraphicsView):
         item.setSelected(True)
         item.begin_edit()
         self._editing_item = item
+        self._placed_step = None
+        stack = self.window.undo_stack
+        if placed and stack.index() > 0 and stack.index() == stack.count():
+            added = stack.command(stack.index() - 1)
+            if isinstance(added, PageEditCommand):
+                self._placed_step = (added, stack.index())
 
 
     def place_caret(self, item, scene_pos: QPointF) -> None:
@@ -4393,8 +4422,33 @@ class PageView(QGraphicsView):
         # A text box left completely empty is an invisible click target; drop it.
         elif self._is_empty(item):
             detach(item)
+        placed, self._placed_step = getattr(self, "_placed_step", None), None
+        if placed is not None and self._join_the_placing(*placed):
+            self.documentEdited.emit()
+            return
         self.commit_snapshot("Edit text")
         self.documentEdited.emit()
+
+    def _join_the_placing(self, added, index: int) -> bool:
+        """The words typed into a box just put down belong to the step that
+        put it down. False when anything else was done in between, and the
+        typing is a step of its own as before."""
+        stack = self.window.undo_stack
+        if stack.index() != index or stack.count() != index \
+                or stack.command(index - 1) is not added:
+            return False
+        frame = added._live_frame()
+        if frame is None or frame.scene() is None:
+            return False
+        after = frame.serialize_items()
+        self._snapshot = []
+        if after == added.before:
+            # put down and left empty: nothing was added after all
+            added.setObsolete(True)
+            stack.undo()
+            return True
+        added.after = after
+        return True
 
     @staticmethod
     def _is_empty(item) -> bool:
@@ -4659,6 +4713,8 @@ class PageView(QGraphicsView):
                 self._draw_cloud_leader_preview(painter)
             else:
                 self._draw_marquee(painter)
+        elif self._pending_cloud_leader is not None:
+            self._draw_cloud_leader_preview(painter)       # before the drag (F-12)
         self._draw_group_boxes(painter)
         self.calc.draw_cross(painter)
         if self._pending_stamp is not None:
@@ -4953,9 +5009,19 @@ class PageView(QGraphicsView):
         went either, so it jumped the moment the drag ended.
         """
         item = self._pending_cloud_leader
-        if item is None or len(self._marquee) < 2:
+        if item is None:
             return
-        rect = QRectF(self._marquee[0], self._marquee[-1]).normalized()
+        if len(self._marquee) < 2:
+            # not dragged yet: a cloud of a likely size at the pointer, joined
+            # to the note, so choosing Add Cloud Leader shows what it will do
+            # (F-12: it showed nothing until the drag)
+            at = self.snap_scene(self._last_scene_pos)
+            if self._inside_its_box(item, at):
+                return
+            reach = 30.0 / max(self._zoom, 0.05)
+            rect = QRectF(at.x() - reach, at.y() - reach * 0.7, 2 * reach, 1.4 * reach)
+        else:
+            rect = QRectF(self._marquee[0], self._marquee[-1]).normalized()
         if rect.width() < 1 or rect.height() < 1:
             return
         preview = self._a_copy_leading_to(item, cloud=rect)
@@ -4972,6 +5038,8 @@ class PageView(QGraphicsView):
         item = self._pending_arrow_leader
         if item is None or item.scene() is None:
             return
+        if self._inside_its_box(item, self._last_scene_pos):
+            return                  # never drawn through its own words (F-12)
         preview = self._a_copy_leading_to(
             item, point=self.snap_scene(self._last_scene_pos))
         if preview is None:
@@ -4981,6 +5049,14 @@ class PageView(QGraphicsView):
         painter.translate(item.mapToScene(QPointF(0, 0)))
         preview.paint_leader(painter)
         painter.restore()
+
+    @staticmethod
+    def _inside_its_box(item, scene_pos: QPointF) -> bool:
+        """Whether *scene_pos* is on a note's own box of words."""
+        try:
+            return item.local_rect().normalized().contains(item.mapFromScene(scene_pos))
+        except (AttributeError, RuntimeError):
+            return False
 
     def _a_copy_leading_to(self, item, point: Optional[QPointF] = None,
                            cloud: Optional[QRectF] = None):

@@ -518,7 +518,6 @@ def test_a_click_with_the_text_box_tool_places_nothing_and_a_drag_does(w):
     assert w.view.tool_key in ("select", "text")
     key(w, Qt.Key_Escape)
     assert [m.text() for m in markups(w, TextItem)] == ["Hello there"]
-    # and undo takes the words and then the box back
-    key(w, Qt.Key_Z, Qt.ControlModifier)
+    # and one undo takes the box and its words back (exercise round 1, F-05)
     key(w, Qt.Key_Z, Qt.ControlModifier)
     assert markups(w, TextItem) == []

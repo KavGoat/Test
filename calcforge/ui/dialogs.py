@@ -1156,16 +1156,18 @@ class RectangleSizeDialog(QDialog):
     """Type an exact real-world width and height for a box or an ellipse."""
 
     def __init__(self, width_text: str, height_text: str, unit: str, parent=None,
-                 scaled: bool = True, sketch: bool = True):
+                 scaled: bool = True, sketch: bool = True, shape: str = "Rectangle"):
         super().__init__(parent)
-        self.setWindowTitle("Rectangle Size")
+        # named for what it sizes: an ellipse's is "Ellipse Size" (F-10)
+        self.setWindowTitle(f"{shape} Size")
         layout = QVBoxLayout(self)
+        name = shape.lower()
         if scaled:
-            message = ("This page has a scale, so the rectangle can be set out at an "
+            message = (f"This page has a scale, so the {name} can be set out at an "
                        "exact size. Leave these as they are to keep what you drew.")
         elif sketch:
             message = ("This page has no scale, so these are paper sizes. Give the "
-                       "page a scale to set the rectangle out in real dimensions.")
+                       f"page a scale to set the {name} out in real dimensions.")
         else:
             message = ("The size on the paper. Sketch to Scale's rectangle and "
                        "ellipse (Tools ▸ Sketch to Scale) are set out in real "

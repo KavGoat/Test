@@ -166,6 +166,9 @@ def _size_field(w):
 
 def _dimension_words(w):
     from tests.test_usability import drag
+    from calcforge.core.document import PageScale
+    # a dimension asks for a scale on a page with none (exercise round 1, F-19)
+    w.current_page().scale = PageScale.from_ratio(50)
     w.interactive_prompts = True
     try:
         w.select_tool("measure_dimension")

@@ -7271,7 +7271,8 @@ class MainWindow(QMainWindow):
         width_text, height_text = item.size_texts(page)
         dialog = dialogs.RectangleSizeDialog(
             width_text, height_text, item.size_unit(page), self, scaled=scaled,
-            sketch=bool(getattr(item, "to_scale", False)))
+            sketch=bool(getattr(item, "to_scale", False)),
+            shape="Ellipse" if item.kind == "ellipse" else "Rectangle")
         if dialog.exec() != dialogs.QDialog.Accepted:
             return
         width, height = dialog.values()
@@ -7281,7 +7282,7 @@ class MainWindow(QMainWindow):
 
     def edit_measure_text(self, item) -> None:
         """Type on a measurement, where the words are going to appear."""
-        self.view.open_label_editor(item)
+        self.view.open_label_editor(item, prefill=True)
 
     def set_label_angle(self, item, angle) -> None:
         """Let the text follow the line again, or hold it where it was put."""
@@ -9538,14 +9539,21 @@ class MainWindow(QMainWindow):
         if not others:
             self.status_hint.setText("No pages to put it on")
             return 0
-        payload = item.serialize()
+        # a group goes over whole, as one group on each page (F-11)
+        members = self.view.group_of(item) if getattr(item, "group", "") else [item]
+        payloads = [(member.serialize(), QPointF(member.pos())) for member in members]
         frames = [self.document.pages[index].frame for index in others
                   if self.document.pages[index].frame is not None]
         self.view.begin_snapshot(frames)
+        from ..items.base import rename_groups
         for frame in frames:
-            copy = build_item(dict(payload, uid=os.urandom(8).hex()))
-            if copy is not None:
-                frame.add_markup(copy, QPointF(item.pos()))
+            renamed: dict = {}            # one fresh group per page
+            for payload, where in payloads:
+                data = dict(payload, uid=os.urandom(8).hex())
+                rename_groups(data, renamed)
+                copy = build_item(data)
+                if copy is not None:
+                    frame.add_markup(copy, where)
         self.view.commit_snapshot("Apply to Pages")
         self.status_hint.setText(f"Copied onto {len(frames)} page(s)")
         return len(frames)
@@ -9580,9 +9588,14 @@ class MainWindow(QMainWindow):
         # is that kind of call-out's leader.
         arrow.setIcon(icon("callout"))
         cloud.setIcon(icon("cloud_callout"))
+        # A Cloud+'s own cloud is its body, not a leader to take away (F-12:
+        # Remove Leader deleted it): only its other leaders are offered.
+        body = item.cloud_leader() if hasattr(item, "cloud_leader") else None
+        removable = [i for i, leader in enumerate(getattr(item, "leaders", []))
+                     if leader is not body]
         which = item.leader_near(item.mapFromScene(scene_pos))
-        if which is None and item.leaders:
-            which = len(item.leaders) - 1
+        if which not in removable:
+            which = removable[-1] if removable else None
         if which is not None:
             menu.addAction("Remove Leader",
                            lambda i=which: self.remove_leader_from(item, i))
@@ -10363,10 +10376,16 @@ class MainWindow(QMainWindow):
             menu.addAction("Follow Link", lambda: self.follow_link(item))
             menu.addAction("Edit Link…", lambda: self.edit_link(item))
             menu.addSeparator()
-        if isinstance(item, _TextBase):
+        # A group is one thing, as in Revu: its menu offers what applies to
+        # the group — the clipboard, order, lock, ungroup, the tool chest —
+        # and nothing that would reach inside it to one member (exercise
+        # round 1, F-11: Round All Corners, Exact Size and the rest changed
+        # only the first member and moved the selection to it).
+        grouped = bool(getattr(item, "group", ""))
+        if isinstance(item, _TextBase) and not grouped:
             menu.addAction("Edit Text", lambda: self.view.begin_item_edit(item))
             menu.addSeparator()
-        if isinstance(item, MeasureItem) and item.kind != "calibrate":
+        if isinstance(item, MeasureItem) and item.kind != "calibrate" and not grouped:
             # first: a measurement's name is what ties it to the calcs,
             # typed right here (the user, 2026-10-01: no separate popup)
             menu.addAction(self._variable_field(menu, item))
@@ -10387,7 +10406,7 @@ class MainWindow(QMainWindow):
         menutidy.proxy(menu, self.act_delete, "Delete", QKeySequence(Qt.Key_Delete))
         menu.addSeparator()
         # -- Revu: the outline ----------------------------------------------------
-        if self.view.has_an_outline(item) and not is_table:
+        if self.view.has_an_outline(item) and not is_table and not grouped:
             # Rectangles and clouds included: four corners and four sides
             # is an outline like any other, and everything offered on a
             # polygon's is offered on theirs.
@@ -10414,10 +10433,10 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_ungroup)
         menu.addSeparator()
         # -- CalcForge's extras for this kind of markup ---------------------------
-        if isinstance(item, _TextBase):
+        if isinstance(item, _TextBase) and not grouped:
             self._text_box_menu(menu, item)
             self._fill_leader_menu(menu, item, scene_pos)
-        if isinstance(item, MeasureItem):
+        if isinstance(item, MeasureItem) and not grouped:
             menu.addAction("Edit Text…", lambda: self.edit_measure_text(item))
             straight = menu.addAction("Inline Text")
             straight.setToolTip("Keep the measurement text in line with its line")
@@ -10426,9 +10445,10 @@ class MainWindow(QMainWindow):
             straight.toggled.connect(
                 lambda on, i=item: self.set_label_angle(i, None if on else 0.0))
             menu.addAction(self.act_scale)
-        if hasattr(item, "size_to_text"):
+        if hasattr(item, "size_to_text") and not grouped:
             menu.addAction(self.act_autosize)
-        if isinstance(item, RectItem) and item.kind in SIZED_SHAPES and not is_table:
+        if isinstance(item, RectItem) and item.kind in SIZED_SHAPES and not is_table \
+                and not grouped:
             convert = menu.addAction("Convert to Polygon",
                                      lambda: self.rectangle_to_polygon(item))
             convert.setToolTip("Turn this rectangle or ellipse into a polygon")
@@ -10457,7 +10477,7 @@ class MainWindow(QMainWindow):
         add_tool.addSeparator()
         add_tool.addAction("Choose a Tool Set…", lambda: self.add_to_toolset(item))
         styles = getattr(self, "markup_styles", None)
-        if not calc_like and styles is not None:
+        if not calc_like and styles is not None and not grouped:
             from .markupstyles import styled
             if styled(styles.tool_for_item(item) or ""):
                 # the look kept for its tool, picked again with a number key
@@ -10465,9 +10485,10 @@ class MainWindow(QMainWindow):
                                       lambda: styles.save_markup(item))
                 keep.setToolTip("Keep this look as a style of its tool: "
                                 "press its number with the tool to draw in it")
-        if not calc_like:
+        if not calc_like and not grouped:
             default = menu.addAction("Set as Default", lambda: self.set_as_default(item))
             default.setToolTip("Use these properties for new markups of this kind")
+        if not calc_like:
             apply_pages = menu.addAction("Apply to Pages…",
                                          lambda: self.apply_to_pages(item))
             apply_pages.setToolTip("Copy this markup to chosen pages")

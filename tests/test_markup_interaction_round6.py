@@ -193,7 +193,9 @@ def right_click_menu(w, point: QPointF, pick: str = ""):
 
     def handle(menu):
         got["labels"] = [a.text() for a in menu.actions() if a.text()]
-        target = next((a for a in menu.actions() if a.text() == pick), None)
+        # no pick: close it (an empty pick used to "click" the first
+        # separator and leave the menu open)
+        target = next((a for a in menu.actions() if pick and a.text() == pick), None)
         if target is not None:
             QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier,
                              menu.actionGeometry(target).center())

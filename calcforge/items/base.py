@@ -1068,6 +1068,9 @@ class MarkupItem(QGraphicsObject):
             return
         if self.group:
             return
+        if self.locked:
+            self.paint_locked_selection(painter)
+            return
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
         zoom = handle_zoom(painter)
@@ -1075,9 +1078,6 @@ class MarkupItem(QGraphicsObject):
         painter.setPen(selection_pen(zoom))
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(rect)
-        if self.locked:
-            painter.restore()
-            return
         self.paint_scale_box(painter, zoom)
         points = self.handle_points()
         leader = self.leader_handles()
@@ -1099,6 +1099,37 @@ class MarkupItem(QGraphicsObject):
                     QPointF(point.x() - half - 1.0 / zoom, point.y())]))
             else:
                 paint_control_point(painter, point, zoom)
+        painter.restore()
+
+    def paint_locked_selection(self, painter: QPainter) -> None:
+        """A locked markup, selected: the dashed box stood off the shape, so
+        it is not lost in the shape's own line, and a padlock on its corner —
+        no handles, because nothing about it can be dragged (exercise round
+        1, F-32: it showed no sign of being selected at all)."""
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        zoom = handle_zoom(painter)
+        margin = (3.0 + 0.0) / zoom + max(float(getattr(self.style, "width", 0.0)), 0.0) / 2
+        box = self.local_rect().normalized().adjusted(-margin, -margin, margin, margin)
+        painter.setPen(selection_pen(zoom))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(box)
+        # the padlock, a few pixels across whatever the zoom
+        unit = 1.0 / zoom
+        corner = box.topRight()
+        body = QRectF(corner.x() - 4.5 * unit, corner.y() - 3.5 * unit, 9 * unit, 7 * unit)
+        shackle = QRectF(body.x() + 1.8 * unit, body.y() - 4.2 * unit, 5.4 * unit, 7 * unit)
+        pen = QPen(SELECT_BLUE)
+        pen.setWidthF(1.3 * unit)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawArc(shackle, 0, 180 * 16)
+        painter.setPen(QPen(SELECT_BLUE, 0.8 * unit))
+        painter.setBrush(QBrush(SELECT_BLUE))
+        painter.drawRoundedRect(body, 1.2 * unit, 1.2 * unit)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor("#ffffff")))
+        painter.drawEllipse(QPointF(body.center().x(), body.center().y()), 1.1 * unit, 1.1 * unit)
         painter.restore()
 
     def paint_scale_box(self, painter: QPainter, zoom: float) -> None:

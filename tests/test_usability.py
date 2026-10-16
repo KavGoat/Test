@@ -3597,6 +3597,7 @@ def test_freehand_snaps_only_its_start_and_end(window, tool):
 # ---------------------------------------------------------------------------
 
 def test_a_new_dimension_asks_for_its_words_where_they_will_appear(window):
+    scaled_page(window)          # a dimension asks for a scale on a page with none (F-19)
     window.interactive_prompts = True
     try:
         window.select_tool("measure_dimension")
@@ -3618,6 +3619,7 @@ def test_a_new_dimension_asks_for_its_words_where_they_will_appear(window):
 
 
 def test_leaving_it_blank_leaves_it_blank(window):
+    scaled_page(window)          # a dimension asks for a scale on a page with none (F-19)
     window.interactive_prompts = True
     try:
         window.select_tool("measure_dimension")
@@ -3797,6 +3799,7 @@ def test_double_clicking_a_dimension_types_on_it(window):
 
 
 def test_typing_on_a_measurement_can_be_undone(window):
+    scaled_page(window)          # a dimension asks for a scale on a page with none (F-19)
     window.interactive_prompts = True
     try:
         window.select_tool("measure_dimension")
