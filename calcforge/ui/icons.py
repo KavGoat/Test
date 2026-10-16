@@ -198,6 +198,15 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         _pen(painter, ACCENT, 2.0)
         painter.drawArc(QRectF(11, 2, 9, 9), 180 * 16, 180 * 16)
         return
+    if name == "overflow":
+        # the » on a toolbar or the menu bar with more than it has room for,
+        # in the theme's ink: the style's own was dark grey and could not be
+        # seen on the dark bars (QA, 2026-10-15)
+        _pen(painter, INK, 2.2)
+        for left in (5.0, 12.0):
+            painter.drawPolyline(QPolygonF([QPointF(left, 6), QPointF(left + 6, 12),
+                                            QPointF(left, 18)]))
+        return
     if name == "reuse":
         # Bluebeam's Reuse Markup Tools: a pointer going round again
         _pen(painter, INK, 1.5)
