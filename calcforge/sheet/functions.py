@@ -185,7 +185,7 @@ def numbers(args, text_counts=False, logical_counts=False):
         if a is MISSING:
             continue
         if isinstance(a, RefValue):
-            for _r, _c, v in a.filled():
+            for v in a.filled_values():
                 t = type(v)
                 if t is float or t is Qty:
                     out.append(v)

@@ -1181,9 +1181,24 @@ class PageFrame(QGraphicsObject):
         # than once each (calc/docsheet.py).
         from ..calc.docsheet import sheet_for
         with QSignalBlocker(self), sheet_for(self.document).batch():
+            # A table or a spreadsheet's cells are put back as they were
+            # where they are, changing only the cells that differ: rebuilt,
+            # every cell was read and calculated again, and undoing one
+            # typed value in a big workbook took seconds (2026-10-16).
+            wanted = {entry.get("uid"): entry for entry in data}
+            kept = set()
             for item in self.markups():
-                self.remove_markup(item)
+                restore = getattr(item, "restore_in_place", None)
+                entry = wanted.get(item.uid)
+                if restore is not None and entry is not None and restore(entry):
+                    kept.add(item.uid)
+            for item in self.markups():
+                if item.uid not in kept:
+                    self.remove_markup(item)
             for entry in data:
+                if entry.get("uid") in kept:
+                    kept.discard(entry.get("uid"))          # (once: a uid twice is built)
+                    continue
                 item = build_item(entry)
                 if item is None:
                     continue
