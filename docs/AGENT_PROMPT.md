@@ -94,6 +94,22 @@ units included.
   decided; check `docs/tasklist.md` first.
 - **Prove visual changes.** Validate anything visual in the real window with
   a screenshot, and look at the screenshot.
+- **Nothing is done until a person's way of using it is tested** (the user,
+  2026-10-16). Every button, menu item, right-click item, panel control, key
+  and feature that a change adds or touches must:
+  - be driven in the real window with the mouse (click where it is drawn, open
+    the real menu, right-click the real target) and with the keyboard (its
+    shortcut, typing into its fields);
+  - be checked by eye on screenshots in light and dark mode;
+  - have its siblings checked too, so the same family is offered the same way
+    everywhere (an insert has Before and After; names match across menus).
+
+  `tools/qa/exercise.py` and `tests/test_every_command.py` do the mechanical
+  part. A doer's report lists what was exercised this way. The lead does not
+  merge work that lacks it. The user should never be the one who finds a bug.
+- **Never replace the native window frame.** Use the system's own title bar,
+  window controls, dragging and snapping. On Windows the menus sit inside the
+  native title bar, as in Revu (decided 2026-10-16).
 - **Commits.** Develop and push only on the branch above. Open a PR only if
   I ask. End every commit message with:
   ```
