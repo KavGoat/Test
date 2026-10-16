@@ -144,3 +144,52 @@ def test_the_properties_panel_box_is_the_same(w):
     QTest.keyClick(field, Qt.Key_Return)
     pump()
     assert measure.variable == "L.b"
+
+
+# -- the user's review, 2026-10-16: the name sits in the middle, full size ----------------------
+def _ink_columns(image, top, bottom, left, right):
+    """Runs of columns holding dark ink, each with its first and last row."""
+    def dark(x, y):
+        colour = image.pixelColor(x, y)
+        return colour.lightness() < 120
+    runs, start = [], None
+    for x in range(left, right):
+        inked = any(dark(x, y) for y in range(top, bottom))
+        if inked and start is None:
+            start = x
+        if not inked and start is not None:
+            runs.append((start, x))
+            start = None
+    out = []
+    for a, b in runs:
+        rows = [y for y in range(top, bottom) if any(dark(x, y) for x in range(a, b))]
+        out.append((a, b, min(rows), max(rows)))
+    return out
+
+
+def test_the_name_is_centred_full_size_and_never_clipped(w):
+    from PySide6.QtGui import QFontMetricsF
+    measure = a_length(w)
+    w.set_measure_variable(measure, "L.beam")
+    menu = w.build_context_menu(measure, measure.sceneBoundingRect().center())
+    field = menu.findChild(QLineEdit, "measureVariable")
+    menu.popup(w.mapToGlobal(w.rect().center()))
+    pump()
+    field.clearFocus()
+    pump()
+    image = field.grab().toImage()
+    height = image.height()
+    glyphs = _ink_columns(image, 2, height - 2, 3, image.width() - 3)
+    assert glyphs, "the name is drawn"
+    base, subscript = glyphs[0], glyphs[1:]
+    ink_top = min(g[2] for g in glyphs)
+    ink_bottom = max(g[3] for g in glyphs)
+    assert ink_top >= 4 and ink_bottom <= height - 5, "clear of the box's top and bottom"
+    above, below = ink_top, height - 1 - ink_bottom
+    assert abs(above - below) <= 3, "in the middle of the box"
+    l_height = base[3] - base[2] + 1
+    assert all(l_height >= g[3] - g[2] + 1 for g in subscript), "L is at least as tall as beam"
+    assert all(g[3] > base[3] for g in subscript), "the subscript drops below the base line"
+    words = QFontMetricsF(field.font()).capHeight()
+    assert abs(l_height - words) <= 1.5, "L is the size of the menu's own capitals"
+    menu.hide()

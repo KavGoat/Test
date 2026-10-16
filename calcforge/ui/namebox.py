@@ -38,6 +38,7 @@ EDGE = QColor("#a9abad")
 FOCUS = QColor("#0083db")
 HINT = QColor("#8a8c8e")
 MARGIN = 3.0
+PAD_X_EMPTY = 4.0       # where an empty name's square sits (the region's own pad)
 
 _NO_SHEET = SimpleNamespace(index=SimpleNamespace(vars={}, funcs=()))
 
@@ -173,7 +174,7 @@ class SMathNameEdit(QLineEdit):
     # -- the mouse ---------------------------------------------------------
     def mousePressEvent(self, event) -> None:            # noqa: N802 - Qt's name
         self.setFocus(Qt.MouseFocusReason)
-        self._item.place_cursor(QPointF(event.position()) - self._origin())
+        self._item.place_cursor(self._to_name(QPointF(event.position())))
         self._relayout()
         event.accept()
 
@@ -192,30 +193,66 @@ class SMathNameEdit(QLineEdit):
         self._relayout()
 
     # -- drawing -----------------------------------------------------------
-    def _ink(self) -> tuple:
-        """The name's own height: above and below its baseline, with room
-        for the cursor's underline."""
+    # The name is the equation's own drawing of it, scaled so that its base
+    # letters are the size of the words round the box (the menu's "Variable")
+    # — an equation's 10 pt on the page is drawn smaller than a menu's text —
+    # and set in the middle of the box, its subscript below the base line
+    # with room under it (the user's review, 2026-10-16: "L" was jammed at
+    # the top and looked no bigger than "beam").
+    PAD = 5.0           # clear space round the ink, top and bottom
+
+    def _scale(self) -> float:
+        from PySide6.QtGui import QFontMetricsF
+        words = QFontMetricsF(self.font()).capHeight()
+        maths = QFontMetricsF(self._item.style.font(italic=True)).capHeight()
+        return words / maths if maths > 0 and words > 0 else 1.0
+
+    def ink_rect(self) -> QRectF:
+        """Where the name's glyphs are, in the equation's own coordinates."""
+        from PySide6.QtGui import QFontMetricsF
+        from ..calc.ui.layout import LRect, LText
+        found = QRectF()
+
+        def walk(node, ox, oy):
+            x, y = ox + node.x, oy + node.y
+            if isinstance(node, LText) and node.text.strip():
+                tight = QFontMetricsF(node.font).tightBoundingRect(node.text)
+                rect = tight.translated(x, y)
+            elif isinstance(node, LRect):
+                rect = QRectF(x, y - node.asc, node.w, node.asc + node.desc)
+            else:
+                rect = None
+            if rect is not None:
+                nonlocal found
+                found = rect if found.isNull() else found.united(rect)
+            for child in node.children:
+                walk(child, x, y)
         lay = self._item._layout
-        if lay is None:
-            return 11.0, 4.0
-        return max(lay.asc, 9.0) + 2.0, max(lay.desc, 3.0) + 2.5
+        if lay is not None:
+            walk(lay, 0.0, 0.0)
+        if found.isNull():
+            base = self._item._baseline
+            found = QRectF(PAD_X_EMPTY, base - 9.0, 8.0, 11.0)
+        return found
 
     def _origin(self) -> QPointF:
-        """Where the region's own origin goes for its name to sit in the
-        middle of the box."""
-        asc, desc = self._ink()
-        baseline = self._item._baseline
-        top = (self.height() - (asc + desc)) / 2
-        return QPointF(MARGIN, top + asc - baseline)
+        """Where the equation's origin goes, in the box, before scaling."""
+        ink, scale = self.ink_rect(), self._scale()
+        top = (self.height() - ink.height() * scale) / 2 - ink.top() * scale
+        return QPointF(MARGIN + 3 - ink.left() * scale, top)
+
+    def _to_name(self, point: QPointF) -> QPointF:
+        scale = self._scale()
+        return (point - self._origin()) / scale
 
     def sizeHint(self) -> QSize:                         # noqa: N802
-        asc, desc = self._ink()
-        width = self._item.frame_rect().width()
-        return QSize(int(max(110.0, width + 2 * MARGIN + 8)), int(asc + desc + 2 * MARGIN + 4))
+        ink, scale = self.ink_rect(), self._scale()
+        usual = super().sizeHint().height()
+        return QSize(int(max(110.0, ink.right() * scale + 2 * MARGIN + 12)),
+                     int(max(usual, ink.height() * scale + 2 * self.PAD) + 0.999))
 
     def minimumSizeHint(self) -> QSize:                  # noqa: N802
-        asc, desc = self._ink()
-        return QSize(60, int(asc + desc + 2 * MARGIN + 4))
+        return QSize(60, self.sizeHint().height())
 
     def paintEvent(self, _event) -> None:                # noqa: N802
         painter = QPainter(self)
@@ -232,6 +269,8 @@ class SMathNameEdit(QLineEdit):
         painter.save()
         painter.setClipRect(whole.adjusted(1, 1, -1, -1))
         painter.translate(self._origin())
+        scale = self._scale()
+        painter.scale(scale, scale)
         # the equation's own drawing of the name, and its cursor — without
         # the frame an equation being edited has on the page
         layout = self._item._layout
