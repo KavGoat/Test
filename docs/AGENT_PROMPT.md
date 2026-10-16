@@ -107,6 +107,12 @@ units included.
   `tools/qa/exercise.py` and `tests/test_every_command.py` do the mechanical
   part. A doer's report lists what was exercised this way. The lead does not
   merge work that lacks it. The user should never be the one who finds a bug.
+- **Every command can be given a shortcut** (the user, 2026-10-16). Anything a
+  change adds that a person can do must be listed in Keyboard Shortcuts as a
+  named command, so the user can bind any usual key (Ctrl/Alt/Shift plus a
+  key, F-keys, or a single letter for tools) to it. This covers menu-bar
+  items, right-click commands, toolbar buttons and panel buttons.
+  `tests/test_every_command_is_bindable.py` enforces it.
 - **Never replace the native window frame.** Use the system's own title bar,
   window controls, dragging and snapping. On Windows the menus sit inside the
   native title bar, as in Revu (decided 2026-10-16).
