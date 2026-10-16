@@ -519,10 +519,30 @@ def _equation_menu(v, item):
                 and a.text() == "Equation")
 
 
+def _whole_menu(v, item):
+    return v.window.build_context_menu(item, centre(item))
+
+
+def _option(v, item, *path):
+    """Trigger a WebSMath option by the site's path, wherever CalcForge has it.
+
+    The user's layout (2026-10-16): the variable's own settings — Decimal
+    Places, Significant Figures, Global — are lifted to the top of the
+    equation's menu, as a measurement's Variable is first on its menu. The
+    rest of WebSMath's Equation submenu is where the site has it.
+    """
+    if path[0] == "Decimal places" and path[-1] == "Significant figures mode":
+        _trigger(_whole_menu(v, item), "Significant Figures")
+    elif path[0] == "Decimal places":
+        _trigger(_whole_menu(v, item), "Decimal Places", *path[1:])
+    else:
+        _trigger(_equation_menu(v, item), *path)
+
+
 def _trigger(menu, *path):
     for title in path[:-1]:
         menu = next(a.menu() for a in menu.actions() if a.text() == title)
-    next(a for a in menu.actions() if a.text() == path[-1]).trigger()
+    next(a for a in menu.actions() if a.text().rstrip(" *") == path[-1]).trigger()
 
 
 def test_copy_paste_regions(v):
@@ -569,20 +589,30 @@ def test_context_menu_items_match_site(v):
     v.type_at(18, 18, "1/3=")
     item = v.focused_item
     v.calc.leave()
+    # the user's layout first: the variable's settings at the top
+    whole = _menu_titles(_whole_menu(v, item))
+    first = [x if isinstance(x, str) else x[0] for x in whole][:4]
+    assert first == ["Decimal Places", "Significant Figures",
+                     "Global (Read by Later Calc Sections)", "-"]
+    places = dict(x for x in whole if not isinstance(x, str))["Decimal Places"]
+    assert places[:2] == ["Trailing zeros", "-"]
+    assert places[2:] == [str(n) if n != 4 else "4 *" for n in range(16)]
     t = _menu_titles(_equation_menu(v, item))
     top = [x if isinstance(x, str) else x[0] for x in t]
     # SMath Cloud's items for a math region (Cut … Select all are CalcForge's own,
-    # on the menu the Equation submenu sits in); Font … Border are decision 20's
+    # on the menu the Equation submenu sits in); Font … Border are decision 20's.
+    # Decimal places (with its Significant figures mode) is the one lifted out.
     assert top[:top.index("Rounding") + 1] == [
         "Display input data", "-", "Go to definition", "Show description",
         "Disable evaluation", "-", "Ignore units", "-", "Optimization",
-        "Decimal places", "Exponential threshold", "Fractions", "Rounding"]
+        "Exponential threshold", "Fractions", "Rounding"]
+    assert "Decimal places" not in top, "lifted to the top, not copied"
     sub = dict(x for x in t if not isinstance(x, str))
     assert sub["Optimization"] == ["Symbolic", "Numeric", "None"]
-    assert sub["Decimal places"][:4] == ["Trailing zeros", "-", "Significant figures mode", "-"]
-    assert sub["Decimal places"][4:] == [str(n) if n != 4 else "4 *" for n in range(16)]
     assert sub["Exponential threshold"] == [str(n) if n != 5 else "5 *" for n in range(16)]
-    assert sub["Fractions"] == ["Decimal", "Fraction", "Auto", "Default", "-", "Use mixed numbers"]
+    # the document's own choice is marked *, as in Decimal Places
+    assert sub["Fractions"] == ["Decimal *", "Fraction", "Auto", "Default", "-",
+                                "Use mixed numbers"]
     assert sub["Rounding"] == ["Half to even", "Away from zero"]
 
 
@@ -603,7 +633,7 @@ def test_context_menu_options_match_site(v, typed, path, shown):
     v.type_at(18, 18, typed)
     item = v.focused_item
     v.calc.leave()
-    _trigger(_equation_menu(v, item), *path)
+    _option(v, item, *path)
     assert display_text(item.region.display) == shown
 
 
@@ -628,7 +658,7 @@ def test_default_rounding_is_half_to_even_on_the_binary_value(v):
     v.type_at(18, 72, "0.125=")
     item = v.focused_item
     v.calc.leave()
-    _trigger(_equation_menu(v, item), "Decimal places", "2")
+    _option(v, item, "Decimal places", "2")
     assert display_text(item.region.display) == "0.12"  # a true tie: to even
     _trigger(_equation_menu(v, item), "Rounding", "Away from zero")
     assert display_text(item.region.display) == "0.13"
