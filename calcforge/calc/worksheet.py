@@ -187,7 +187,8 @@ class Worksheet:
             return True
         from .engine import evaluator
 
-        if evaluator.EXTERNAL is not None and evaluator.EXTERNAL.function(name, nargs) is not None:
+        if evaluator.EXTERNAL is not None and \
+                evaluator.EXTERNAL.function(name, nargs, region.key) is not None:
             return True
         return builtins.has_overload(name, nargs)
 
@@ -620,29 +621,22 @@ class ScopedContext(IndexedContext):
         self.own = own if own is not None else DefinitionIndex()
 
     def _latest(self, table: str, name):
+        """The (key, value) of the block's own definition or the worksheet's,
+        whichever is the later (lookup, has and function are
+        IndexedContext's, which also weighs the tables' against it)."""
         mine = self.own.last_entry(getattr(self.own, table).get(name), self.key)
         theirs = self.index.last_entry(getattr(self.index, table).get(name), self.key)
         if mine is None:
-            return theirs[1] if theirs is not None else None
+            return theirs
         if theirs is None or mine[0] > theirs[0]:
-            return mine[1]
-        return theirs[1]
+            return mine
+        return theirs
 
-    def lookup(self, name: str):
-        if name in self.vars:
-            return self.vars[name]
+    def _equation_entry(self, name: str):
         return self._latest("vars", name)
 
-    def has(self, name: str) -> bool:
-        from .engine import evaluator
-
-        if name in self.vars or self._latest("vars", name) is not None:
-            return True
-        return evaluator.EXTERNAL is not None and evaluator.EXTERNAL.has(name)
-
-    def function(self, name: str, nargs: int):
-        f = self.funcs.get((name, nargs))
-        return f if f is not None else self._latest("funcs", (name, nargs))
+    def _function_entry(self, name: str, nargs: int):
+        return self._latest("funcs", (name, nargs))
 
     def any_function(self, name: str):
         for (n, k), f in self.funcs.items():

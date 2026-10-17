@@ -12,7 +12,12 @@ Between them and the equations (docs/SPREADSHEET_DESIGN.md):
     - a cell of a table:       Loads.D12
     - a column by its heading: Loads.Load         (the values under the heading, as a vector)
     - the table as a lookup:   bolts(d, "A")      (first column searched, interpolated)
-* where the two disagree with reading order, dependencies win: after every
+* a table's names are defined where the table is: an equation reads the
+  latest definition before it in reading order, an equation's or a
+  table's (the user's report, 2026-10-17: test:=5 kN, then a sheet's cell
+  named test, then test= gives the cell's 2);
+* where the two disagree with reading order, dependencies win: with no
+  definition before it an equation reads a table after it, and after every
   calculation the tables take up changed variables and the equations
   changed table values, until nothing changes (a true loop stops and is
   reported as circular).
@@ -122,10 +127,30 @@ class DocumentBook:
         """Where a table sits (its top-left, in SMath pixels on its page as written)."""
         if self._places.get(uid) == (page_uid, x_px, y_px):
             return
-        self._places[uid] = (page_uid, x_px, y_px)
         sheet = self.by_uid.get(uid)
+        was = self._key(sheet) if sheet is not None else None
+        self._places[uid] = (page_uid, x_px, y_px)
         if sheet is not None:
             self.workbook.outside_changed({n for n in self.workbook.outside_names_read()})
+            if self._passed_equations(was, self._key(sheet)):
+                # its names now come before or after other definitions
+                self._names_changed()
+
+    def _passed_equations(self, was, now) -> bool:
+        """Whether a table moving from reading key *was* to *now* passed an
+        equation (or a calculation section's start) on the way."""
+        if self._sheet is None or was == now:
+            return False
+        low, high = (was, now) if was < now else (now, was)
+        calc = self._sheet
+        if any(low < start <= high for start in calc.section_starts()):
+            return True
+        import bisect
+        ws = calc.worksheet
+        ws.ordered()
+        keys = ws._order_keys
+        i = bisect.bisect_right(keys, low)
+        return i < len(keys) and keys[i] < high
 
     def _custom_unit(self, name: str):
         """(factor, dims) of a custom unit — a quantity with units the
@@ -288,8 +313,8 @@ class DocumentBook:
                     out[f"{sheet.name}.{_ident(cell.value)}"] = f"column “{cell.value}” of {sheet.name}"
         return out
 
-    def _seen(self, got):
-        """The (sheet, value) the equation now asking may read, or None."""
+    def _seen(self, got, at_key=None):
+        """The (sheet, value) an equation at *at_key* may read, or None."""
         if got is None:
             return None
         sheet, value = got
@@ -299,17 +324,61 @@ class DocumentBook:
         else:
             used = sheet.used_area()
             area, ref_sheet = (used if used is not None else (0, 0, 0, 0)), sheet
-        return got if self.readable(ref_sheet, area, self.reading_at) else None
+        return got if self.readable(ref_sheet, area, at_key) else None
 
-    def has(self, name: str) -> bool:
-        # known even from a later section: its value then says why it can't be read
-        return self._named(name) is not None
+    # -- where the tables define a name: their place in reading order ------------------------
+    # A table's or sheet's names (named cells, Table.D12, Table.Column, the
+    # table as a lookup) are defined where it is in the document — its
+    # top-left corner — and take their turn with the equations' definitions
+    # there (calc/engine/evaluator.py IndexedContext.entry): an equation
+    # reads the latest definition before it, whichever kind it is. Only
+    # when nothing before it defines the name does a table after it answer
+    # (dependencies win over reading order, docs/SPREADSHEET_DESIGN.md).
+    def _before(self, sheet: Sheet, at_key) -> Optional[tuple]:
+        """The sheet's reading key when it is before *at_key*, else None."""
+        key = self._key(sheet)
+        return key if at_key is not None and key < tuple(at_key) else None
 
-    def value(self, name: str):
+    def defined_at(self, name: str, at_key) -> Optional[tuple]:
+        """Where the tables define *name*, when that is before *at_key* and
+        can be read there; else None."""
         got = self._named(name)
         if got is None:
             return None
-        if self._seen(got) is None:
+        at = self._before(got[0], at_key)
+        if at is None or self._seen(got, at_key) is None:
+            return None
+        return at
+
+    def _lookup_sheet(self, name: str, nargs: int) -> Optional[Sheet]:
+        if not 1 <= nargs <= 3 or not _ident_ok(name):
+            return None
+        return self.workbook.sheet(name)
+
+    def _lookup_readable(self, sheet: Sheet, at_key) -> bool:
+        used = sheet.used_area()
+        return self.readable(sheet, used if used is not None else (0, 0, 0, 0), at_key)
+
+    def function_at(self, name: str, nargs: int, at_key) -> Optional[tuple]:
+        """Where the table that *name(…)* looks up is, when it is before
+        *at_key* and can be read there; else None."""
+        sheet = self._lookup_sheet(name, nargs)
+        if sheet is None:
+            return None
+        at = self._before(sheet, at_key)
+        return at if at is not None and self._lookup_readable(sheet, at_key) else None
+
+    def has(self, name: str, at_key=None) -> bool:
+        # known even from a later section: its value then says why it can't be read
+        return self._named(name) is not None
+
+    def value(self, name: str, at_key=None):
+        """The value of a table's *name* for the equation at *at_key*."""
+        at_key = self.reading_at if at_key is None else at_key
+        got = self._named(name)
+        if got is None:
+            return None
+        if self._seen(got, at_key) is None:
             from calcforge.calc.engine.errors import SMathError
 
             raise SMathError(f"{name} is in an earlier calculation section and not global.")
@@ -330,13 +399,11 @@ class DocumentBook:
 
             raise SMathError(f"{name} is {e.error.code} in its table.")
 
-    def function(self, name: str, nargs: int):
+    def function(self, name: str, nargs: int, at_key=None):
         """A table used as a lookup: name(x), name(x, "heading"), name(x, y)."""
-        sheet = self.workbook.sheet(name)
-        if sheet is None or not 1 <= nargs <= 3 or not _ident_ok(name):
-            return None
-        used = sheet.used_area()
-        if not self.readable(sheet, used if used is not None else (0, 0, 0, 0), self.reading_at):
+        at_key = self.reading_at if at_key is None else at_key
+        sheet = self._lookup_sheet(name, nargs)
+        if sheet is None or not self._lookup_readable(sheet, at_key):
             return None
 
         def look(args):

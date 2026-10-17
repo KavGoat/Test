@@ -8209,6 +8209,10 @@ class MainWindow(QMainWindow):
         # on the page is picked in the list, without either sending the choice
         # back to the other and fighting over it.
         self.markups_panel.follow_the_canvas()
+        # the Variables panel's bold rows: the definitions the picked equation reads
+        panel = getattr(self, "variables_panel", None)
+        if panel is not None:
+            panel.selection_changed()
         # The box round a group and the handles are painted over the canvas
         # rather than by the items, and Qt only repaints the part of the
         # canvas that changed. Selecting something changed no part of it, so
