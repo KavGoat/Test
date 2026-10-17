@@ -1995,7 +1995,7 @@ class PreferencesDialog(QDialog):
         self.result_threshold.setValue(int(prefs.result_threshold))
         self.result_threshold.setToolTip("Longer numbers are shown with a power of ten")
         form.addRow("Threshold", self.result_threshold)
-        self.result_trailing = QCheckBox("Trailing zeros")
+        self.result_trailing = QCheckBox("Trailing Zeros")
         self.result_trailing.setChecked(bool(prefs.result_trailing_zeros))
         form.addRow("", self.result_trailing)
         self.result_fractions = QComboBox()

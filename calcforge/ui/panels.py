@@ -3313,7 +3313,7 @@ class PropertiesPanel(QScrollArea):
         threshold.setObjectName("equationThreshold")
         threshold.setRange(0, 15)
         threshold.setValue(fmt.threshold)
-        threshold.setToolTip("Exponential threshold: longer numbers are shown with a "
+        threshold.setToolTip("Exponential Threshold: longer numbers are shown with a "
                              "power of ten")
         threshold.valueChanged.connect(lambda n: change(
             f"Exponential threshold: {n}", set_fmt(threshold=n)))
@@ -3326,15 +3326,15 @@ class PropertiesPanel(QScrollArea):
         fractions.currentIndexChanged.connect(lambda _i: change(
             "Fractions", set_fmt(fractions=fractions.currentData())))
         form.addRow("Fractions:", fractions)
-        for title, attr in (("Trailing zeros", "trailing_zeros"),
+        for title, attr in (("Trailing Zeros", "trailing_zeros"),
                             ("Significant figures", "significant")):
             box = QCheckBox(title)
             box.setChecked(getattr(fmt, attr))
             box.toggled.connect(lambda on, a=attr, t=title: change(t, set_fmt(**{a: on})))
             form.addRow("", box)
         rounding = QComboBox()
-        rounding.addItem("Half to even", True)
-        rounding.addItem("Away from zero", False)
+        rounding.addItem("Half to Even", True)
+        rounding.addItem("Away from Zero", False)
         rounding.setCurrentIndex(0 if fmt.half_even else 1)
         rounding.currentIndexChanged.connect(lambda _i: change(
             "Rounding", set_fmt(half_even=rounding.currentData())))
@@ -3366,17 +3366,17 @@ class PropertiesPanel(QScrollArea):
                                 ("Italic", "italic", region.italic),
                                 ("Underline", "underline", region.underline),
                                 ("Border", "border", region.border),
-                                ("Display input data", "show_input", region.show_input),
-                                ("Ignore units", "ignore_units", region.ignore_units)):
+                                ("Display Input Data", "show_input", region.show_input),
+                                ("Ignore Units", "ignore_units", region.ignore_units)):
             box = QCheckBox(title)
             box.setChecked(on)
             box.toggled.connect(lambda value, a=attr, t=title: change(
                 t, lambda r: setattr(r, a, value)))
             form.addRow("", box)
-        disabled = QCheckBox("Disable evaluation")
+        disabled = QCheckBox("Disable Evaluation")
         disabled.setChecked(not region.enabled)
         disabled.toggled.connect(lambda value: change(
-            "Disable evaluation", lambda r: setattr(r, "enabled", not value)))
+            "Disable Evaluation", lambda r: setattr(r, "enabled", not value)))
         form.addRow("", disabled)
 
     def _add_geometry(self, item) -> None:

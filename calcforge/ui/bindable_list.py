@@ -252,12 +252,12 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'canvas.global_read_by_later_calc_sections':
         ('Equation Global (Read by Later Calc Sections)', 'Calculation', 'always'),
     'canvas.equation.display_input_data':
-        ('Equation ▸ Display input data', 'Calculation', 'always'),
-    'canvas.equation.go_to_definition': ('Equation ▸ Go to definition', 'Calculation', 'always'),
-    'canvas.equation.show_description': ('Equation ▸ Show description', 'Calculation', 'always'),
+        ('Equation ▸ Display Input Data', 'Calculation', 'always'),
+    'canvas.equation.go_to_definition': ('Equation ▸ Go to Definition', 'Calculation', 'always'),
+    'canvas.equation.show_description': ('Equation ▸ Show Description', 'Calculation', 'always'),
     'canvas.equation.disable_evaluation':
-        ('Equation ▸ Disable evaluation', 'Calculation', 'always'),
-    'canvas.equation.ignore_units': ('Equation ▸ Ignore units', 'Calculation', 'always'),
+        ('Equation ▸ Disable Evaluation', 'Calculation', 'always'),
+    'canvas.equation.ignore_units': ('Equation ▸ Ignore Units', 'Calculation', 'always'),
     'canvas.equation.optimization.symbolic':
         ('Equation ▸ Optimization ▸ Symbolic', 'Calculation', 'always'),
     'canvas.equation.optimization.numeric':
@@ -265,7 +265,7 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'canvas.equation.optimization.none':
         ('Equation ▸ Optimization ▸ None', 'Calculation', 'always'),
     'canvas.decimal_places.trailing_zeros':
-        ('Decimal Places ▸ Trailing zeros', 'Calculation', 'always'),
+        ('Decimal Places ▸ Trailing Zeros', 'Calculation', 'always'),
     'canvas.significant_figures': ('Significant Figures', 'Calculation', 'always'),
     'canvas.decimal_places.0': ('Decimal Places ▸ 0', 'Calculation', 'always'),
     'canvas.decimal_places.1': ('Decimal Places ▸ 1', 'Calculation', 'always'),
@@ -290,37 +290,37 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'canvas.decimal_places.15':
         ('Decimal Places ▸ 15', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.0':
-        ('Equation ▸ Exponential threshold ▸ 0', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 0', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.1':
-        ('Equation ▸ Exponential threshold ▸ 1', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 1', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.2':
-        ('Equation ▸ Exponential threshold ▸ 2', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 2', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.3':
-        ('Equation ▸ Exponential threshold ▸ 3', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 3', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.4':
-        ('Equation ▸ Exponential threshold ▸ 4', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 4', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.5':
-        ('Equation ▸ Exponential threshold ▸ 5', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 5', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.6':
-        ('Equation ▸ Exponential threshold ▸ 6', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 6', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.7':
-        ('Equation ▸ Exponential threshold ▸ 7', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 7', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.8':
-        ('Equation ▸ Exponential threshold ▸ 8', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 8', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.9':
-        ('Equation ▸ Exponential threshold ▸ 9', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 9', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.10':
-        ('Equation ▸ Exponential threshold ▸ 10', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 10', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.11':
-        ('Equation ▸ Exponential threshold ▸ 11', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 11', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.12':
-        ('Equation ▸ Exponential threshold ▸ 12', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 12', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.13':
-        ('Equation ▸ Exponential threshold ▸ 13', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 13', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.14':
-        ('Equation ▸ Exponential threshold ▸ 14', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 14', 'Calculation', 'always'),
     'canvas.equation.exponential_threshold.15':
-        ('Equation ▸ Exponential threshold ▸ 15', 'Calculation', 'always'),
+        ('Equation ▸ Exponential Threshold ▸ 15', 'Calculation', 'always'),
     'canvas.equation.fractions.decimal':
         ('Equation ▸ Fractions ▸ Decimal', 'Calculation', 'always'),
     'canvas.equation.fractions.fraction':
@@ -329,11 +329,11 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'canvas.equation.fractions.default':
         ('Equation ▸ Fractions ▸ Default', 'Calculation', 'always'),
     'canvas.equation.fractions.use_mixed_numbers':
-        ('Equation ▸ Fractions ▸ Use mixed numbers', 'Calculation', 'always'),
+        ('Equation ▸ Fractions ▸ Use Mixed Numbers', 'Calculation', 'always'),
     'canvas.equation.rounding.half_to_even':
-        ('Equation ▸ Rounding ▸ Half to even', 'Calculation', 'always'),
+        ('Equation ▸ Rounding ▸ Half to Even', 'Calculation', 'always'),
     'canvas.equation.rounding.away_from_zero':
-        ('Equation ▸ Rounding ▸ Away from zero', 'Calculation', 'always'),
+        ('Equation ▸ Rounding ▸ Away from Zero', 'Calculation', 'always'),
     'canvas.equation.font.8_pt': ('Equation ▸ Font ▸ 8 pt', 'Calculation', 'always'),
     'canvas.equation.font.9_pt': ('Equation ▸ Font ▸ 9 pt', 'Calculation', 'always'),
     'canvas.equation.font.10_pt': ('Equation ▸ Font ▸ 10 pt', 'Calculation', 'always'),

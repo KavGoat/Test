@@ -595,7 +595,7 @@ def test_context_menu_items_match_site(v):
     assert first == ["Decimal Places", "Significant Figures",
                      "Global (Read by Later Calc Sections)", "-"]
     places = dict(x for x in whole if not isinstance(x, str))["Decimal Places"]
-    assert places[:2] == ["Trailing zeros", "-"]
+    assert places[:2] == ["Trailing Zeros", "-"]
     assert places[2:] == [str(n) if n != 4 else "4 *" for n in range(16)]
     t = _menu_titles(_equation_menu(v, item))
     top = [x if isinstance(x, str) else x[0] for x in t]
@@ -603,17 +603,17 @@ def test_context_menu_items_match_site(v):
     # on the menu the Equation submenu sits in); Font … Border are decision 20's.
     # Decimal places (with its Significant figures mode) is the one lifted out.
     assert top[:top.index("Rounding") + 1] == [
-        "Display input data", "-", "Go to definition", "Show description",
-        "Disable evaluation", "-", "Ignore units", "-", "Optimization",
-        "Exponential threshold", "Fractions", "Rounding"]
+        "Display Input Data", "-", "Go to Definition", "Show Description",
+        "Disable Evaluation", "-", "Ignore Units", "-", "Optimization",
+        "Exponential Threshold", "Fractions", "Rounding"]
     assert "Decimal places" not in top, "lifted to the top, not copied"
     sub = dict(x for x in t if not isinstance(x, str))
     assert sub["Optimization"] == ["Symbolic", "Numeric", "None"]
-    assert sub["Exponential threshold"] == [str(n) if n != 5 else "5 *" for n in range(16)]
+    assert sub["Exponential Threshold"] == [str(n) if n != 5 else "5 *" for n in range(16)]
     # the document's own choice is marked *, as in Decimal Places
     assert sub["Fractions"] == ["Decimal *", "Fraction", "Auto", "Default", "-",
-                                "Use mixed numbers"]
-    assert sub["Rounding"] == ["Half to even", "Away from zero"]
+                                "Use Mixed Numbers"]
+    assert sub["Rounding"] == ["Half to Even", "Away from Zero"]
 
 
 @pytest.mark.parametrize("typed,path,shown", [
@@ -621,13 +621,13 @@ def test_context_menu_items_match_site(v):
     ("2/3=", ("Decimal places", "0"), "1"),
     ("1234.5678=", ("Decimal places", "Significant figures mode"), "1235"),
     ("0.012345=", ("Decimal places", "Significant figures mode"), "0.01235"),
-    ("1.5=", ("Decimal places", "Trailing zeros"), "1.5000"),
-    ("12345=", ("Exponential threshold", "2"), "1.2345·10^4"),
-    ("1.23*10^9=", ("Exponential threshold", "15"), "1230000000"),
+    ("1.5=", ("Decimal places", "Trailing Zeros"), "1.5000"),
+    ("12345=", ("Exponential Threshold", "2"), "1.2345·10^4"),
+    ("1.23*10^9=", ("Exponential Threshold", "15"), "1230000000"),
     ("0.75=", ("Fractions", "Auto"), "3/4"),
     ("2+3=", ("Optimization", "None"), "2+3"),
-    ("5'm+2=", ("Ignore units",), "7"),
-    ("5'm*2'kg=", ("Ignore units",), "10"),
+    ("5'm+2=", ("Ignore Units",), "7"),
+    ("5'm*2'kg=", ("Ignore Units",), "10"),
 ])
 def test_context_menu_options_match_site(v, typed, path, shown):
     v.type_at(18, 18, typed)
@@ -643,7 +643,7 @@ def test_context_menu_fractions_and_mixed(v):
     v.calc.leave()
     _trigger(_equation_menu(v, item), "Fractions", "Fraction")
     assert display_text(item.region.display) == "7/3"
-    _trigger(_equation_menu(v, item), "Fractions", "Use mixed numbers")
+    _trigger(_equation_menu(v, item), "Fractions", "Use Mixed Numbers")
     assert display_text(item.region.display) == "2 1/3"
     _trigger(_equation_menu(v, item), "Fractions", "Default")
     assert display_text(item.region.display) == "2.3333"
@@ -660,7 +660,7 @@ def test_default_rounding_is_half_to_even_on_the_binary_value(v):
     v.calc.leave()
     _option(v, item, "Decimal places", "2")
     assert display_text(item.region.display) == "0.12"  # a true tie: to even
-    _trigger(_equation_menu(v, item), "Rounding", "Away from zero")
+    _trigger(_equation_menu(v, item), "Rounding", "Away from Zero")
     assert display_text(item.region.display) == "0.13"
 
 
@@ -671,18 +671,18 @@ def test_display_input_and_disable_evaluation(v):
     use = v.focused_item
     v.calc.leave()
     wide = use._view.frame_rect().width()
-    _trigger(_equation_menu(v, use), "Display input data")
+    _trigger(_equation_menu(v, use), "Display Input Data")
     assert not use.region.show_input
     assert use._view.frame_rect().width() < wide       # only the result shows
     v.focus_item(use)
     assert use._view.frame_rect().width() >= wide      # the input shows again while editing
     v.calc.leave()
     top = [it for it in v.items.values() if it.region.y == 18][0]
-    _trigger(_equation_menu(v, top), "Disable evaluation")
+    _trigger(_equation_menu(v, top), "Disable Evaluation")
     assert not top.region.enabled
     assert use.region.error is not None and use.region.error.message == "x - not defined."
     v.focus_item(use)
-    _trigger(_equation_menu(v, use), "Go to definition")
+    _trigger(_equation_menu(v, use), "Go to Definition")
     assert v.focused_item is use  # x is no longer defined anywhere
 
 

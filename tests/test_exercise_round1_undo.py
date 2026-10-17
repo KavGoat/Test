@@ -593,7 +593,7 @@ def test_fractions_ticks_one_choice(win):
     equation = next(a.menu() for a in menu.actions() if a.text() == "Equation")
     fractions = next(a.menu() for a in equation.actions() if a.text() == "Fractions")
     ticked = [a.text() for a in fractions.actions() if a.isCheckable() and a.isChecked()
-              and a.text() != "Use mixed numbers"]
+              and a.text() != "Use Mixed Numbers"]
     assert ticked == ["Default"]
 
 

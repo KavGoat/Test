@@ -1,9 +1,9 @@
 """An equation's settings (decision 20): SMath's right-click menu.
 
 The menu is WebSMath's (its ``WorksheetView.context_menu``, SMath Cloud's
-item for item): Display input data, Go to definition, Show description,
-Disable evaluation, Ignore units, Optimization, Decimal places, Exponential
-threshold, Fractions and Rounding — and for a plot, Plot settings, Grid, Axes
+item for item): Display Input Data, Go to Definition, Show Description,
+Disable Evaluation, Ignore Units, Optimization, Decimal Places, Exponential
+Threshold, Fractions and Rounding — and for a plot, Plot settings, Grid, Axes
 and Graph by points. Font and colour are added, as decision 20 asks.
 
 A setting changes every selected equation, and is one undo step. The
@@ -101,7 +101,7 @@ def fill(window, menu: QMenu, item) -> None:
     # Lifted here from Equation ▸, not copied: one place for each.
     places = menu.addMenu("Decimal Places")
     places.setObjectName("menuDecimalPlaces")
-    check(places, "Trailing zeros", fmt.trailing_zeros,
+    check(places, "Trailing Zeros", fmt.trailing_zeros,
           set_fmt(trailing_zeros=not fmt.trailing_zeros))
     places.addSeparator()
     for n in range(16):
@@ -119,16 +119,16 @@ def fill(window, menu: QMenu, item) -> None:
     made_global.setToolTip("Its variables carry on past calc section breaks")
     menu.addSeparator()
     equation = menu.addMenu("Equation")
-    check(equation, "Display input data", region.show_input,
+    check(equation, "Display Input Data", region.show_input,
           lambda r: setattr(r, "show_input", not r.show_input))
     equation.addSeparator()
-    equation.addAction("Go to definition", lambda: go_to_definition(window, item))
-    description = equation.addAction("Show description")
+    equation.addAction("Go to Definition", lambda: go_to_definition(window, item))
+    description = equation.addAction("Show Description")
     description.setEnabled(False)          # as WebSMath: not supported yet
-    check(equation, "Disable evaluation", not region.enabled,
+    check(equation, "Disable Evaluation", not region.enabled,
           lambda r: setattr(r, "enabled", not r.enabled))
     equation.addSeparator()
-    check(equation, "Ignore units", region.ignore_units,
+    check(equation, "Ignore Units", region.ignore_units,
           lambda r: setattr(r, "ignore_units", not r.ignore_units))
     equation.addSeparator()
     optimization = equation.addMenu("Optimization")
@@ -137,7 +137,7 @@ def fill(window, menu: QMenu, item) -> None:
         check(optimization, title, current == key,
               lambda r, k=key: setattr(r, "optimization", k), f"Optimization: {title}")
 
-    threshold = equation.addMenu("Exponential threshold")
+    threshold = equation.addMenu("Exponential Threshold")
     for n in range(16):
         check(threshold, f"{n} *" if n == base.threshold else str(n), fmt.threshold == n,
               set_fmt(threshold=n), f"Exponential threshold: {n}")
@@ -152,11 +152,11 @@ def fill(window, menu: QMenu, item) -> None:
     check(fractions, "Default", region.fmt is None, lambda r: setattr(r, "fmt", None),
           "Result format: default")
     fractions.addSeparator()
-    check(fractions, "Use mixed numbers", fmt.mixed, set_fmt(mixed=not fmt.mixed),
+    check(fractions, "Use Mixed Numbers", fmt.mixed, set_fmt(mixed=not fmt.mixed),
           enabled=fmt.fractions != "decimal")
     rounding = equation.addMenu("Rounding")
-    check(rounding, "Half to even", fmt.half_even, set_fmt(half_even=True))
-    check(rounding, "Away from zero", not fmt.half_even, set_fmt(half_even=False))
+    check(rounding, "Half to Even", fmt.half_even, set_fmt(half_even=True))
+    check(rounding, "Away from Zero", not fmt.half_even, set_fmt(half_even=False))
 
     equation.addSeparator()
     font = equation.addMenu("Font")

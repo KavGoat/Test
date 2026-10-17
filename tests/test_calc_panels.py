@@ -213,7 +213,7 @@ def test_fractions_and_trailing_zeros(win):
     menu_action(right_click(win, item), "Equation", "Fractions", "Fraction").trigger()
     assert display_text(item.region.display) == "1/4"
     menu_action(right_click(win, item), "Equation", "Fractions", "Default").trigger()
-    menu_action(right_click(win, item), "Decimal Places", "Trailing zeros").trigger()
+    menu_action(right_click(win, item), "Decimal Places", "Trailing Zeros").trigger()
     assert display_text(item.region.display) == "0.2500"
 
 
@@ -221,10 +221,10 @@ def test_disable_evaluation_undefines_what_it_defined(win):
     first = an_equation(win, "p7:5", y=120)
     used = an_equation(win, "p7*2=", y=160)
     assert display_text(used.region.display) == "10"
-    menu_action(right_click(win, first), "Equation", "Disable evaluation").trigger()
+    menu_action(right_click(win, first), "Equation", "Disable Evaluation").trigger()
     assert not first.region.enabled
     assert used.region.error is not None, "p7 is no longer defined"
-    menu_action(right_click(win, first), "Equation", "Disable evaluation").trigger()
+    menu_action(right_click(win, first), "Equation", "Disable Evaluation").trigger()
     assert display_text(used.region.display) == "10"
 
 
@@ -263,7 +263,7 @@ def test_font_colour_and_they_survive_saving(win, tmp_path):
 def test_go_to_definition(win):
     first = an_equation(win, "q9:3", y=120)
     used = an_equation(win, "q9+1=", y=200)
-    menu_action(right_click(win, used), "Equation", "Go to definition").trigger()
+    menu_action(right_click(win, used), "Equation", "Go to Definition").trigger()
     assert win.view.calc.item is first
 
 
