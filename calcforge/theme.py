@@ -97,6 +97,11 @@ QToolBar QToolButton:hover {{ background: {accent_soft}; }}
 QToolBar QToolButton:pressed {{ background: {accent_deep}; }}
 QToolBar QToolButton:checked {{ background: {picked}; color: {picked_ink}; }}
 QToolBar QToolButton::menu-indicator {{ width: 0; }}
+/* the Properties toolbar's colours as Revu's: a framed button, the colour
+   a square inside it (Line:, Fill:, the text's) */
+QToolBar QToolButton[revuSwatch="true"] {{
+    border: 1px solid {field_edge}; border-radius: 2px; padding: 2px; margin: 2px 1px;
+}}
 /* Markup | Calc: two plain buttons as Revu's own toggles (the status bar's
    page modes): flat, square, the one on filled with Revu's deep blue */
 QWidget#modeSwitch QToolButton {{

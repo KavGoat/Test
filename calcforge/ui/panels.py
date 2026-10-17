@@ -24,7 +24,8 @@ from ..items.media import ImageItem
 from ..items.snapshot import SnapshotItem
 from ..items.measure import CountItem, MeasureItem
 from ..items.shapes import PolyItem, RectItem
-from ..items.text import STAMP_PRESETS, CalloutItem, NoteItem, StampItem, TextItem
+from ..items.text import (STAMP_PRESETS, CalloutItem, NoteItem, StampItem, TextItem,
+                          TypewriterItem, _TextBase)
 from .icons import drawn_icon, icon, visible_ink
 from .stylecaps import CLOUD, CORNER
 from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
@@ -33,7 +34,9 @@ from .widgets import (ColorButton, PatternCombo, UnitCombo, arrow_combo,
                       big_pattern_dropdown, set_arrow)
 
 
-def _line_style_icon(name: str, colour: str, width: float) -> QIcon:
+def _line_style_icon(name: str, colour: str, width: float, cloud: bool = False) -> QIcon:
+    """A line style's sample across the box — for a cloud, its scallops
+    drawn in that style, as Revu's list shows a cloud's."""
     colour = visible_ink(colour)
     def draw(painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -45,8 +48,42 @@ def _line_style_icon(name: str, colour: str, width: float) -> QIcon:
             pen.setDashPattern(dashes)
             pen.setCapStyle(Qt.FlatCap)
         painter.setPen(pen)
-        painter.drawLine(4, 17, 146, 17)
+        if cloud:
+            from .propbar import _scallop_path
+            painter.drawPath(_scallop_path(3.0, 147.0, 27.0, 12.0))
+        else:
+            painter.drawLine(4, 17, 146, 17)
     return drawn_icon(draw, 150, 34)
+
+
+def line_style_name(name: str) -> str:
+    """What a line style is called in the lists: one's own as it was named."""
+    from ..items import linestyles
+    return name if name in linestyles.CUSTOM else name.title()
+
+
+def fill_line_style_combo(combo, colour: str, width: float, current: str = "",
+                          cloud: bool = False) -> None:
+    """A line-style list as Revu's: Manage… at the top, then every style
+    drawn (one's own among them) — for a cloud, drawn as its scallops."""
+    from ..items.linestyles import MANAGE
+    combo.blockSignals(True)
+    combo.clear()
+    combo.addItem("Manage…", MANAGE)
+    combo.insertSeparator(combo.count())
+    for name in DASH_ARRAYS:
+        combo.addItem(_line_style_icon(name, colour, width, cloud), line_style_name(name), name)
+    combo.setProperty("cloudStyles", bool(cloud))
+    combo.setCurrentIndex(line_style_index(combo, current))
+    combo.setToolTip(combo.currentText())
+    combo.blockSignals(False)
+
+
+def line_style_index(combo, name: str) -> int:
+    """Where *name* is in a line-style list — Solid when it is not there (a
+    style of somebody else's, drawn from the dashes the markup carries)."""
+    found = combo.findData(name or "solid")
+    return found if found >= 0 else max(combo.findData("solid"), 0)
 
 
 #: Each pattern's swatch, drawn once for its ink. The Properties panel fills
@@ -1430,10 +1467,10 @@ class MarkupsPanel(QWidget):
             width.addAction(f"{value:g} pt", lambda v=value: self.batch_style(
                 lambda style: setattr(style, "width", v), "Line width"))
         lines = menu.addMenu("Line style")
+        from ..items import linestyles
         for name in DASH_ARRAYS:
             lines.addAction(name, lambda n=name: self.batch_style(
-                lambda style: (setattr(style, "line_style", n),
-                               setattr(style, "dash_array", ())), "Line style"))
+                lambda style: linestyles.apply(style, n), "Line style"))
         size = menu.addMenu("Font size")
         for value in (6, 8, 10, 12, 14, 18, 24):
             size.addAction(f"{value} pt", lambda v=value: self.batch_style(
@@ -3277,13 +3314,10 @@ class PropertiesPanel(QScrollArea):
             line_style.setObjectName("lineStyle")
             big_pattern_dropdown(line_style, QSize(76, 22))
             line_style.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            for name in DASH_ARRAYS:
-                line_style.addItem(_line_style_icon(name, style.stroke, style.width),
-                                   name.title(), name)
-            line_style.setCurrentIndex(max(line_style.findData(style.line_style), 0))
-            line_style.currentIndexChanged.connect(lambda _index: self._apply(
-                lambda i: (setattr(i.style, "line_style", line_style.currentData()),
-                           setattr(i.style, "dash_array", ())), "Line style"))
+            fill_line_style_combo(line_style, style.stroke, style.width, style.line_style,
+                                  cloud=CLOUD in controls)
+            line_style.currentIndexChanged.connect(
+                lambda _index: self._line_style_chosen(line_style, style))
             form.addRow("Style:", line_style)
             spacing = _spin(style.dash_scale, 0.1, 50.0, 2, 0.25)
             spacing.setObjectName("dashSpacing")
@@ -3320,6 +3354,19 @@ class PropertiesPanel(QScrollArea):
             form.addRow("Corner Radius:", radius)
 
 
+    def _line_style_chosen(self, combo, style) -> None:
+        """A line style from the list — or Manage…, which opens Line Styles
+        and leaves the markup's own style as it was."""
+        from ..items import linestyles
+        name = combo.currentData()
+        if name == linestyles.MANAGE:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(line_style_index(combo, style.line_style))
+            combo.blockSignals(False)
+            QTimer.singleShot(0, self.window.manage_line_styles)
+            return
+        self._apply(lambda i: linestyles.apply(i.style, name), "Line style")
+
     def _add_breaks(self, item: PolyItem) -> None:
         for segment in sorted(item.broken):
             form = self._group(f"Break {segment + 1}")
@@ -3353,7 +3400,7 @@ class PropertiesPanel(QScrollArea):
             lambda i: setattr(i.style, "font_family", font.family()), "Font"))
         form.addRow("Font:", family)
 
-        size = _spin(style.font_size, 3.0, 96.0, 1, 0.5)
+        size = _spin(style.font_size, 1.0, 144.0, 1, 0.5)    # Revu: 1 to 144
         if isinstance(first, MeasureItem):
             size.setObjectName("measurementTextSize")
         elif isinstance(first, CountItem):
@@ -3361,30 +3408,49 @@ class PropertiesPanel(QScrollArea):
         else:
             size.setObjectName("fontSize")
         size.valueChanged.connect(lambda value: self._slide(
-            lambda i: setattr(i.style, "font_size", value), "Font size"))
-        form.addRow("Font Size:", size)
+            lambda i: (setattr(i.style, "font_size", value),
+                       setattr(i.style, "font_auto", False)), "Font size"))
+        if isinstance(first, (TextItem, CalloutItem)) and not isinstance(first, TypewriterItem):
+            # Revu's Auto: the largest size that fits the box
+            auto = QCheckBox("Auto")
+            auto.setObjectName("fontAutoPanel")
+            auto.setToolTip("The words set at the largest size that fits the box")
+            auto.setChecked(bool(style.font_auto))
+            size.setEnabled(not style.font_auto)
+            auto.toggled.connect(lambda on: (size.setEnabled(not on), self._apply(
+                lambda i: setattr(i.style, "font_auto", bool(on)), "Auto font size")))
+            form.addRow("Font Size:", _row(size, auto, stretch_first=True))
+        else:
+            form.addRow("Font Size:", size)
 
         colour = ColorButton(style.text_color, label="Text Color")
         colour.colorChanged.connect(lambda value: self._apply(
             lambda i: setattr(i.style, "text_color", value), "Text colour"))
         form.addRow("Text Color:", _row(colour))
 
+        # Revu's Font Style: Bold, Italic, Underline, Strikethrough — and for
+        # words in a box, Superscript and Subscript (one or the other)
         weights = []
-        for label, attribute, tip in (("B", "bold", "Bold"), ("I", "italic", "Italic"),
-                                      ("U", "underline", "Underline")):
+        kinds = [("B", "bold", "Bold"), ("I", "italic", "Italic"),
+                 ("U", "underline", "Underline"), ("S", "strikethrough", "Strikethrough")]
+        if isinstance(first, _TextBase):
+            kinds += [("x²", "superscript", "Superscript"), ("x₂", "subscript", "Subscript")]
+        buttons = {}
+        for label, attribute, tip in kinds:
             button = QToolButton()
             button.setText(label)
             button.setToolTip(tip)
             button.setObjectName(f"fontStyle_{attribute}")
             button.setCheckable(True)
-            button.setChecked(getattr(style, attribute))
+            button.setChecked(bool(getattr(style, attribute)))
             font = button.font()
             font.setBold(attribute == "bold")
             font.setItalic(attribute == "italic")
             font.setUnderline(attribute == "underline")
+            font.setStrikeOut(attribute == "strikethrough")
             button.setFont(font)
-            button.toggled.connect(lambda on, a=attribute: self._apply(
-                lambda i: setattr(i.style, a, on), "Font style"))
+            button.toggled.connect(lambda on, a=attribute: self._font_style(a, on, buttons))
+            buttons[attribute] = button
             weights.append(button)
         form.addRow("Font Style:", _row(*weights))
 
@@ -3465,7 +3531,32 @@ class PropertiesPanel(QScrollArea):
         end.currentIndexChanged.connect(lambda _i: self._apply(
             lambda i: setattr(i.style, "arrow_end", end.currentData()), "Arrow"))
         form.addRow("End:", end)
+        self._add_start_size(form, first)
         self._add_arrow_size(form, first)
+
+    def _font_style(self, attribute: str, on: bool, buttons: dict) -> None:
+        """One Font Style button: superscript and subscript are one or the other."""
+        other = {"superscript": "subscript", "subscript": "superscript"}.get(attribute)
+        if on and other in buttons:
+            buttons[other].blockSignals(True)
+            buttons[other].setChecked(False)
+            buttons[other].blockSignals(False)
+        self._apply(lambda i: i.style.set_font_style(attribute, on), "Font style")
+
+    def _add_start_size(self, form, first: MarkupItem) -> None:
+        """Revu sizes each end on its own: the start's."""
+        size = QDoubleSpinBox()
+        size.setObjectName("arrowStartSize")
+        size.setRange(0.25, 4.0)
+        size.setSingleStep(0.25)
+        size.setValue(first.style.start_size())
+        size.setSuffix(" ×")
+        size.setToolTip("The start's line-end size, independent of line thickness")
+        size.valueChanged.connect(
+            lambda value: self._slide(
+                lambda item: setattr(item.style, "arrow_start_size", value),
+                "Start size"))
+        form.addRow("Start Size:", size)
 
     def _add_arrow_size(self, form, first: MarkupItem) -> None:
         size = QDoubleSpinBox()
@@ -3475,10 +3566,13 @@ class PropertiesPanel(QScrollArea):
         size.setValue(first.style.arrow_size)
         size.setSuffix(" ×")
         size.setToolTip("Arrowhead size, independent of line thickness")
+        def end(item, value) -> None:
+            # the start keeps its size: each end is sized on its own
+            if float(item.style.arrow_start_size or 0.0) <= 0:
+                item.style.arrow_start_size = float(item.style.arrow_size or 1.0)
+            item.style.arrow_size = value
         size.valueChanged.connect(
-            lambda value: self._slide(
-                lambda item: setattr(item.style, "arrow_size", value),
-                "Arrowhead size"))
+            lambda value: self._slide(lambda item: end(item, value), "Arrowhead size"))
         form.addRow("End Size:", size)
 
     def _add_size(self, item) -> None:
@@ -3650,12 +3744,46 @@ class PropertiesPanel(QScrollArea):
                                      coalesce=typing()))
         form.addRow("Counts as:", subject)
 
+        if item.kind not in ("dimension", "calibrate", "angle"):
+            # Revu's Measurement Properties: this measurement's own units
+            # (the Units ▾ on the Properties toolbar sets the same)
+            from ..items.measure import AREA_UNITS, LENGTH_UNITS, VOLUME_UNITS
+            from .propbar import _unit_words
+            scale = self.window.current_page().scale
+            rows = [("length", "Length:", LENGTH_UNITS, scale.display_unit)]
+            if item.kind in ("area", "volume", "perimeter"):
+                rows.append(("area", "Area:", AREA_UNITS, scale.area_unit))
+            if item.kind == "volume" or (item.depth_text and item.kind in ("area",
+                                                                            "perimeter")):
+                rows.append(("volume", "Volume:", VOLUME_UNITS,
+                             scale.area_unit.replace("^2", "^3")
+                             if scale.area_unit.endswith("^2") else ""))
+            for key, words, units, page_unit in rows:
+                own = QComboBox()
+                own.setObjectName(f"measureOwn{key.title()}Unit")
+                own.addItem(f"Page ({_unit_words(page_unit)})" if page_unit else "Page", "")
+                for unit_name in units:
+                    own.addItem(_unit_words(unit_name), unit_name)
+                found = own.findData(item.units.get(key, ""))
+                if found < 0:
+                    own.addItem(item.units.get(key, ""), item.units.get(key, ""))
+                    found = own.count() - 1
+                own.setCurrentIndex(found)
+                own.setToolTip("What this measurement is written in: the page's "
+                               "units, or its own")
+                own.activated.connect(lambda _i, k=key, box=own: self._apply(
+                    lambda i: (i.set_unit(k, box.currentData() or ""),
+                               i.refresh(page=self.window.current_page())),
+                    "Measurement units"))
+                form.addRow(words, own)
         if item.kind in ("area", "volume", "perimeter"):
             unit = UnitCombo(self.window.current_page().scale.area_unit)
             unit.setObjectName("measureAreaUnit")
+            unit.setToolTip("The page's area unit: every area on the page that has "
+                            "none of its own")
             unit.unitChanged.connect(self.window.set_area_unit)
-            form.addRow("Area Unit:", unit)
-        if item.kind == "volume":
+            form.addRow("Page Area:", unit)
+        if item.kind in ("volume", "area", "perimeter"):
             depth = QLineEdit(item.depth_text)
             depth.setPlaceholderText("e.g. 150 mm")
             typing_depth = self._typing_run(depth)

@@ -280,8 +280,13 @@ def _text_look(annotation: dict) -> dict:
             look["bold"] = True
         if re.search(r"font\s*:\s*[^;]*\bitalic\b", settings):
             look["italic"] = True
-        if re.search(r"text-decoration\s*:\s*underline", settings):
+        if re.search(r"text-decoration\s*:[^;]*\bunderline", settings):
             look["underline"] = True
+        if re.search(r"text-decoration\s*:[^;]*\bline-through", settings):
+            look["strikethrough"] = True
+        script = re.search(r"vertical-align\s*:\s*(super|sub)\b", settings)
+        if script:
+            look["superscript" if script.group(1) == "super" else "subscript"] = True
     # /DA sets the colour the words are painted in: "1 0 0 rg" is red.
     appearance = annotation.get("DA")
     if isinstance(appearance, str) and "text_color" not in look:

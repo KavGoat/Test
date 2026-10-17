@@ -8183,10 +8183,16 @@ def test_the_style_toolbar_and_the_properties_panel_agree(window):
         # and Totals (ui/propbar.py) are about the markup, not its pen
         from calcforge.ui import propbar
         markup_groups = {propbar.SHAPE, propbar.HIGHLIGHT, propbar.CUTOUT,
-                         propbar.UNITS, propbar.MEASURE, propbar.TOTALS}
+                         propbar.UNITS, propbar.MEASURE, propbar.TOTALS,
+                         propbar.AUTO_FONT}           # Revu's "A" is part of the font
         on_the_toolbar = {field for field, actions in window._style_widgets.items()
                           if any(action.isVisible() for action in actions)} - markup_groups
         in_the_panel = capabilities(item)
+        if getattr(item, "kind", "") in ("area", "volume") and item.TYPE == "measure":
+            # Revu's area bar has no Font: Line, Fill, Hatch, Units, Caption,
+            # Totals (the user's screenshot, 2026-10-16). Its caption's font is
+            # in the Properties panel.
+            in_the_panel = in_the_panel - {"font"}
         if on_the_toolbar != in_the_panel:
             disagreed.append(f"{tool.key}: toolbar {sorted(on_the_toolbar)} "
                              f"vs panel {sorted(in_the_panel)}")

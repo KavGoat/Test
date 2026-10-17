@@ -112,6 +112,7 @@ STATE_BY_NAME = {
     "flatten selection": "rect", "flatten": "rect", "set as default": "rect",
     "selected markups": "rect", "lock (revu's key)": "rect",
     "bold": "textbox", "italic": "textbox", "underline": "textbox", "align left": "textbox",
+    "strikethrough": "textbox", "superscript": "textbox", "subscript": "textbox",
     "align center": "textbox", "align right": "textbox", "increase font size": "textbox",
     "decrease font size": "textbox", "auto-size": "textbox", "text": "textbox",
     # several
@@ -248,6 +249,13 @@ DIALOG_OPENERS = {
     "dialogs.add_viewport()": ("fresh", ["menu", ["Tools", "Measure", "Viewports…"]]),
     "hatchpatterns.manage_hatches()": ("rect", ["toolbar", "Properties", "Hatch pattern, drawn over the fill in its own colour",
                                                 {"choose": "Manage…"}]),
+    # Line Styles: the line-style list's Manage…, as Hatch Patterns is the hatch list's
+    "linestyledialog.manage_line_styles()": ("rect", ["toolbar", "Properties", "Solid",
+                                                      {"choose": "Manage…"}]),
+    "linestyledialog.new_style()": ("rect", ["toolbar", "Properties", "Solid",
+                                             {"choose": "Manage…",
+                                              "inside": {"title": "Line Styles",
+                                                         "click": "New…"}}]),
     "hatchpatterns.new_pattern()": ("rect", ["toolbar", "Properties", "Hatch pattern, drawn over the fill in its own colour",
                                              {"choose": "Manage…",
                                               "inside": {"title": "Hatch Patterns",
@@ -544,7 +552,8 @@ def build_commands(path: str) -> list[dict]:
                 if label == "Bookmark":
                     state = "textbox"
                 if rest == "Appearance" and label in ("Font", "Font Size", "Text Color", "B",
-                                                      "I", "U", "Alignment", "Margin"):
+                                                      "I", "U", "S", "x²", "x₂", "Auto",
+                                                      "Alignment", "Margin"):
                     state = "textbox"
             elif panel == "Maths":
                 state = "equation_editing" if values else "calc_mode"

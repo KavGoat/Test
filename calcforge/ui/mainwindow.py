@@ -45,7 +45,8 @@ from . import dialogs
 from .commands import DocumentStructureCommand
 from . import bindable
 from .icons import icon
-from .panels import (_hatch_icon, _line_style_icon, fill_hatch_combo, hatch_index,
+from .panels import (_hatch_icon, fill_hatch_combo, hatch_index,
+                     fill_line_style_combo, line_style_index,
                      BookmarksPanel, MarkupsPanel, PagesPanel, PropertiesPanel, ToolSetsPanel)
 from .docks import PanelDock, load_panel_state, save_panel_state
 from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_order,
@@ -611,6 +612,7 @@ _SHORTCUT_GROUPS = {
     "text_left": "Text", "text_center": "Text", "text_right": "Text",
     "font_increase": "Text", "font_decrease": "Text",
     "bold": "Text", "italic": "Text", "underline": "Text",
+    "strikethrough": "Text", "superscript": "Text", "subscript": "Text",
     "zoom_in": "View", "zoom_out": "View", "zoom_sel": "View",
     "fit_page": "View", "fit_width": "View", "actual_size": "View",
     "prev_page": "View", "next_page": "View", "grid": "View", "snap": "View",
@@ -708,6 +710,8 @@ class MainWindow(QMainWindow):
         self._syncing_view = False
         from ..items import hatches
         hatches.load_custom()          # the hatch patterns of one's own, from before
+        from ..items import linestyles
+        linestyles.load_custom()       # and the line styles
         self._undo_clean_slot = lambda _clean: self.update_title()
         self._connected_undo_stacks = []
         keep_the_wheel_with_the_scroller(QApplication.instance())
@@ -1265,6 +1269,13 @@ class MainWindow(QMainWindow):
                   tip="Italicise the words picked out, or the whole markup")
         self._act("underline", "Underline", self.toggle_underline, "Ctrl+U",
                   tip="Underline the words picked out, or the whole markup")
+        # Revu's other Font Styles (its Font toolbar and Properties panel)
+        self._act("strikethrough", "Strikethrough", self.toggle_strikethrough, "",
+                  tip="Strike through the words picked out, or the whole markup")
+        self._act("superscript", "Superscript", self.toggle_superscript, "",
+                  tip="Set the words picked out, or the whole markup, above the line")
+        self._act("subscript", "Subscript", self.toggle_subscript, "",
+                  tip="Set the words picked out, or the whole markup, below the line")
         self._act("text_left", "Align Left",
                   lambda: self.format_content(alignment="left"), "Ctrl+Alt+Left")
         self._act("text_center", "Align Centre",
@@ -2342,7 +2353,9 @@ class MainWindow(QMainWindow):
                          self.act_ungroup))
         text_menu = edit_menu.addMenu("Text")
         text_menu.setObjectName("menuText")
-        fill(text_menu, (self.act_bold, self.act_italic, self.act_underline, None,
+        fill(text_menu, (self.act_bold, self.act_italic, self.act_underline,
+                         self.act_strikethrough, self.act_superscript, self.act_subscript,
+                         None,
                          self.act_text_left, self.act_text_center, self.act_text_right,
                          None, self.act_font_increase, self.act_font_decrease))
         # Revu's Pan, Select and Snapshot are on its Edit menu
@@ -6812,6 +6825,10 @@ class MainWindow(QMainWindow):
         shown = set(supported or {STROKE, FILL, FILL_OPACITY, WIDTH, DASH, OPACITY})
         from . import propbar
         shown |= propbar.extras_shown(items, active, supported)
+        if isinstance(active, MeasureItem) and active.kind in ("area", "volume"):
+            # Revu's area bar has no Font (its caption's font is in the
+            # Properties panel): Line, Fill, Hatch, Units, Caption, Totals
+            shown.discard(FONT)
         if items:
             names = {self._type_name(i) for i in items}
             kind = names.pop() if len(names) == 1 else f"{len(items)} markups"
@@ -6832,7 +6849,19 @@ class MainWindow(QMainWindow):
         if isinstance(active, ContentsItem):
             hidden.add(self.font_family_combo)
         if isinstance(active, CalloutItem):
-            hidden |= {self.arrow_start_combo, self.arrow_start_label_action}
+            hidden |= {self.arrow_start_combo, self.arrow_start_label_action,
+                       self.arrow_start_size_spin}
+        # Revu shows an end's size only once the end has something drawn on it
+        if active is not None and active.style.arrow_start == "none":
+            hidden.add(self.arrow_start_size_spin)
+        if active is not None and active.style.arrow_end == "none":
+            hidden.add(self.arrow_size_spin)
+        # a cloud's line styles are drawn as its scallops, as Revu's are
+        cloud = CLOUD in supported
+        if bool(self.dash_combo.property("cloudStyles")) != cloud:
+            fill_line_style_combo(self.dash_combo, _bar_ink(), 1,
+                                  active.style.line_style if active is not None else "",
+                                  cloud)
         changed = False
         for field, actions in self._style_widgets.items():
             for action in actions:
@@ -6864,6 +6893,8 @@ class MainWindow(QMainWindow):
                     (self.fill_button, active.style.fill, "set_color"),
                     (self.width_spin, active.style.width, "setValue"),
                     (self.arrow_size_spin, active.style.arrow_size, "setValue"),
+                    (self.arrow_start_size_spin, active.style.start_size(), "setValue"),
+                    (self.font_auto_button, bool(active.style.font_auto), "setChecked"),
                     (self.arrow_start_combo,
                      max(self.arrow_start_combo.findData(active.style.arrow_start), 0),
                      "setCurrentIndex"),
@@ -6871,7 +6902,7 @@ class MainWindow(QMainWindow):
                      max(self.arrow_end_combo.findData(active.style.arrow_end), 0),
                      "setCurrentIndex"),
                     (self.dash_combo,
-                     max(self.dash_combo.findData(active.style.line_style), 0),
+                     line_style_index(self.dash_combo, active.style.line_style),
                      "setCurrentIndex"),
                     (self.dash_scale_spin, active.style.dash_scale, "setValue"),
                     (self.font_spin, active.style.font_size, "setValue"),
@@ -7374,9 +7405,20 @@ class MainWindow(QMainWindow):
                            "Line width")
 
     def _style_arrow_size(self, value: float) -> None:
+        """End ▾'s size. The start keeps the size it had: Revu sizes each end
+        on its own, and a markup whose start followed the end is given its
+        own start size first."""
+        def mutate(style) -> None:
+            if float(style.arrow_start_size or 0.0) <= 0:
+                style.arrow_start_size = float(style.arrow_size or 1.0)
+            style.arrow_size = value
+        self._style_change(ARROW_SIZE, mutate, "Arrowhead size")
+
+    def _style_arrow_start_size(self, value: float) -> None:
+        """Start ▾'s size, its own."""
         self._style_change(
-            ARROW_SIZE, lambda style: setattr(style, "arrow_size", value),
-            "Arrowhead size")
+            ARROW_SIZE, lambda style: setattr(style, "arrow_start_size", value),
+            "Start size")
 
     def _style_line_ending(self, attribute: str, value: str) -> None:
         if self._edit_markup_style(lambda item: setattr(item.style, attribute, value)):
@@ -7390,15 +7432,57 @@ class MainWindow(QMainWindow):
                 return
         self._style_change(ARROW_SIZE, lambda style: setattr(style, attribute, value),
                            "Line ending")
+        # an end with something on it shows its size, as Revu's does
+        self._refresh_style_controls()
 
     def _style_dash(self, value: str) -> None:
-        self._style_change(DASH, lambda style: (setattr(style, "line_style", value),
-                                               setattr(style, "dash_array", ())),
-                           "Line style")
+        from ..items import linestyles
+        if value == linestyles.MANAGE:
+            # Manage… opens Line Styles; the markup keeps its style
+            self.dash_combo.blockSignals(True)
+            self.dash_combo.setCurrentIndex(
+                line_style_index(self.dash_combo, self._line_style_shown()))
+            self.dash_combo.blockSignals(False)
+            QTimer.singleShot(0, self, self.manage_line_styles)
+            return
+        self._style_change(DASH, lambda style: linestyles.apply(style, value), "Line style")
+
+    def _line_style_shown(self) -> str:
+        chosen = self.selected_items()
+        return (chosen[0].style.line_style if chosen else self.default_style.line_style) \
+            or "solid"
+
+    def manage_line_styles(self):
+        """Revu's line-style Manage…: import a .lin, write a style, take one
+        out. The line lists are filled again after. Returned so a test can
+        drive it."""
+        from .linestyledialog import LineStylesDialog
+        dialog = LineStylesDialog(self, _bar_ink())
+        dialog.finished.connect(lambda *_: self._line_styles_changed())
+        if self.interactive_prompts:
+            dialog.exec()
+        return dialog
+
+    def _line_styles_changed(self) -> None:
+        fill_line_style_combo(self.dash_combo, _bar_ink(), 1, self._line_style_shown(),
+                              bool(self.dash_combo.property("cloudStyles")))
+        self.refresh_selection()
 
     def _style_font(self, value: float) -> None:
-        self._style_change(FONT, lambda style: setattr(style, "font_size", value),
-                           "Font size")
+        """Font size ▾. A size picked is the size: Auto goes off, as Revu's does."""
+        def mutate(style) -> None:
+            style.font_size = value
+            style.font_auto = False
+        self._style_change(FONT, mutate, "Font size")
+        self.font_auto_button.blockSignals(True)
+        self.font_auto_button.setChecked(False)
+        self.font_auto_button.blockSignals(False)
+
+    def _style_font_auto(self, on: bool) -> None:
+        """Revu's "A": the words set at the largest size that fits the box."""
+        self._style_change(FONT, lambda style: setattr(style, "font_auto", bool(on)),
+                           "Auto font size")
+        self._refresh_style_controls()      # the size it came to, in the size box
 
     def _style_hatch(self, value: str) -> None:
         from .hatchpatterns import MANAGE
@@ -7547,14 +7631,41 @@ class MainWindow(QMainWindow):
 
     def _fill_caption_menu(self) -> None:
         items = [i for i in self.selected_items() if isinstance(i, MeasureItem)]
+        first = items[0] if items else None
         self._filling_caption = True
         try:
             for action in (self.caption_show_action, self.caption_inline_action):
                 action.setEnabled(bool(items))
-            self.caption_show_action.setChecked(bool(items) and items[0].show_label)
-            self.caption_inline_action.setChecked(bool(items) and items[0].label_angle is None)
+            self.caption_show_action.setChecked(bool(items) and first.show_label)
+            self.caption_inline_action.setChecked(bool(items) and first.label_angle is None)
+            # Revu's values: those this kind of measurement can show, ticked
+            # when shown; the ones that need a depth greyed until it has one
+            offered = first.caption_choices() if first is not None else ()
+            shown = first.caption_shown() if first is not None else ()
+            for part, action in self.caption_part_actions.items():
+                action.setVisible(part in offered)
+                action.setEnabled(part in offered and first.caption_available(part))
+                action.setChecked(part in shown)
         finally:
             self._filling_caption = False
+
+    def _caption_part(self, part: str, on: bool) -> None:
+        """Caption ▾: one of Revu's values shown or not, as one undo step."""
+        if getattr(self, "_filling_caption", False):
+            return
+        items = [i for i in self.selected_items()
+                 if isinstance(i, MeasureItem) and part in i.caption_choices()]
+        if not items:
+            return
+        self.view.begin_snapshot(self.view.involved_frames(*items))
+        for item in items:
+            item.prepareGeometryChange()
+            item.set_caption_part(part, on)
+            item.refresh()
+            item.touch()
+            item.update()
+        self.view.commit_snapshot("Caption")
+        self.properties_panel.show_items(self.selected_items())
 
     def _measure_page_index(self) -> int:
         """The page of the selected measurement (the current page otherwise)."""
@@ -7565,30 +7676,80 @@ class MainWindow(QMainWindow):
                     return index
         return self.current_index
 
+    def _measures_for_units(self) -> list:
+        return [i for i in self.selected_items()
+                if isinstance(i, MeasureItem) and i.kind not in ("dimension", "calibrate")]
+
     def _fill_units_panel(self) -> None:
+        """Units ▾ for the selected measurement — or, with a measuring tool in
+        hand and nothing selected, for the measurements it draws next."""
+        from ..items.measure import AREA, PERIMETER, VOLUME
+        from .propbar import _unit_words
         page = self.document.pages[self._measure_page_index()]
-        for combo, unit in ((self.units_length_combo, page.scale.display_unit),
-                            (self.units_area_combo, page.scale.area_unit)):
+        items = self._measures_for_units()
+        first = items[0] if items else self._style_default_item()
+        if not isinstance(first, MeasureItem):
+            first = None
+        own = dict(first.units) if first is not None else {}
+        if not items and first is not None:
+            own = dict(self._next_measure_units())
+        page_units = {"length": page.scale.display_unit, "area": page.scale.area_unit,
+                      "volume": page.scale.area_unit.replace("^2", "^3")
+                      if page.scale.area_unit.endswith("^2") else ""}
+        kind = first.kind if first is not None else ""
+        wanted = {"length": True,
+                  "area": kind in (AREA, VOLUME, PERIMETER),
+                  "volume": kind == VOLUME or bool(first is not None and first.depth_text
+                                                   and kind in (AREA, PERIMETER))}
+        for key, combo in self.units_combos.items():
             combo.blockSignals(True)
+            shown = page_units[key]
+            combo.setItemText(0, f"Page ({_unit_words(shown)})" if shown else "Page")
+            unit = own.get(key, "")
             found = combo.findData(unit)
             if found < 0:
-                combo.addItem(unit, unit)
+                combo.addItem(_unit_words(unit), unit)
                 found = combo.count() - 1
             combo.setCurrentIndex(found)
+            combo.setEnabled(first is not None)
             combo.blockSignals(False)
+            self._units_form.setRowVisible(combo, wanted[key])
+        self.units_note.setText("For the selected measurements" if items
+                                else "For the next measurements drawn with this tool")
 
-    def _units_chosen(self) -> None:
-        """Units ▾: write the page's measurements in other units."""
-        index = self._measure_page_index()
-        page = self.document.pages[index]
-        scale = PageScale.from_dict(page.scale.to_dict())
-        length = self.units_length_combo.currentData()
-        area = self.units_area_combo.currentData()
-        if scale.display_unit == length and scale.area_unit == area:
+    def _next_measure_units(self) -> dict:
+        """The units the tool in hand gives its next measurements (Revu: until
+        another tool is picked)."""
+        kept = getattr(self, "_measure_units_next", None)
+        if kept and kept[0] == self.view.tool_key:
+            return kept[1]
+        return {}
+
+    def _units_chosen(self, key: str = "length") -> None:
+        """Units ▾: the selected measurements written in other units — their
+        own, saved with them; "Page" puts them back on the page's. One undo
+        step. The value an equation reads is the same quantity whatever the
+        unit (6250 mm or 6.25 m)."""
+        combo = self.units_combos[key]
+        unit = combo.currentData() or ""
+        items = self._measures_for_units()
+        if not items:
+            if isinstance(self._style_default_item(), MeasureItem):
+                units = dict(self._next_measure_units())
+                units[key] = unit
+                self._measure_units_next = (self.view.tool_key,
+                                            {k: v for k, v in units.items() if v})
             return
-        scale.display_unit, scale.area_unit = length, area
-        self.set_page_scale(scale, [index])
-        self.refresh_page_measurements(page)
+        if all(i.units.get(key, "") == unit for i in items):
+            return
+        self.view.begin_snapshot(self.view.involved_frames(*items))
+        for item in items:
+            item.prepareGeometryChange()
+            item.set_unit(key, unit)
+            item.refresh()
+            item.touch()
+            item.update()
+        self.view.commit_snapshot("Measurement units")
         self.refresh_selection()
 
     def _fill_totals(self, items: list) -> None:
@@ -7794,7 +7955,11 @@ class MainWindow(QMainWindow):
         if isinstance(item, MeasureItem):
             item.style.width = style.width
             item.style.line_style = style.line_style
+            item.style.dash_array = tuple(style.dash_array or ())
             item.style.arrow_size = style.arrow_size
+            item.style.arrow_start_size = style.arrow_start_size
+            for key, unit in self._next_measure_units().items():
+                item.set_unit(key, unit)
             return
         if style.stroke:
             item.style.stroke = style.stroke
@@ -7807,12 +7972,14 @@ class MainWindow(QMainWindow):
         item.style.line_style = style.line_style
         item.style.opacity = style.opacity
         item.style.fill_opacity = style.fill_opacity
+        item.style.dash_array = tuple(style.dash_array or ())
         item.style.arrow_size = style.arrow_size
+        item.style.arrow_start_size = style.arrow_start_size
         item.style.text_color = style.text_color
         item.style.font_family = style.font_family
-        item.style.bold = style.bold
-        item.style.italic = style.italic
-        item.style.underline = style.underline
+        for name in Style.FONT_STYLES:
+            setattr(item.style, name, getattr(style, name))
+        item.style.font_auto = style.font_auto
         item.style.align = style.align
         if HATCH in capabilities(item):
             item.style.hatch = style.hatch
@@ -9828,8 +9995,9 @@ class MainWindow(QMainWindow):
         "opacity": ("opacity",),
         "fill_opacity": ("fill_opacity",),
         "font": ("font_family", "font_size", "bold", "italic", "underline",
+                 "strikethrough", "superscript", "subscript", "font_auto",
                  "text_color", "align", "valign"),
-        "arrow_size": ("arrow_size", "arrow_start", "arrow_end"),
+        "arrow_size": ("arrow_size", "arrow_start_size", "arrow_start", "arrow_end"),
     }
 
     def format_painter(self) -> None:
@@ -10441,9 +10609,22 @@ class MainWindow(QMainWindow):
         """Underline the words, in the same four places Bold looks in."""
         return self._toggle_text_style("underline")
 
+    def toggle_strikethrough(self) -> bool:
+        """Strike the words through (Revu's Strikethrough), where Bold looks."""
+        return self._toggle_text_style("strikethrough")
+
+    def toggle_superscript(self) -> bool:
+        """Set the words above the line (Revu's Superscript)."""
+        return self._toggle_text_style("superscript")
+
+    def toggle_subscript(self) -> bool:
+        """Set the words below the line (Revu's Subscript)."""
+        return self._toggle_text_style("subscript")
+
     def _toggle_text_style(self, which: str) -> bool:
-        """Bold, italic or underline, wherever the words happen to be."""
-        if self._format_equations(which):
+        """A Font Style — bold, italic, underline, strikethrough, superscript
+        or subscript — wherever the words happen to be."""
+        if which in ("bold", "italic", "underline") and self._format_equations(which):
             return True
         if self._style_the_selected_run(which):
             return True
@@ -10456,7 +10637,7 @@ class MainWindow(QMainWindow):
             self.view.begin_snapshot(self.view.involved_frames(*items))
             wanted = not all(getattr(i.style, which) for i in items)
             for markup in items:
-                setattr(markup.style, which, wanted)
+                markup.style.set_font_style(which, wanted)
                 markup.apply_style()
                 markup.touch()
                 markup.update()
@@ -10465,7 +10646,7 @@ class MainWindow(QMainWindow):
         if not hasattr(item, "style") or item.locked:
             return False
         self.view.begin_snapshot(self.view.involved_frames(item))
-        setattr(item.style, which, not getattr(item.style, which))
+        item.style.set_font_style(which, not getattr(item.style, which))
         if hasattr(item, "apply_style"):
             item.apply_style()
         item.touch()
@@ -10493,6 +10674,14 @@ class MainWindow(QMainWindow):
             fmt.setFontWeight(QFont.Normal if current.bold() else QFont.Bold)
         elif which == "italic":
             fmt.setFontItalic(not current.italic())
+        elif which == "strikethrough":
+            fmt.setFontStrikeOut(not current.strikeOut())
+        elif which in ("superscript", "subscript"):
+            level = (QTextCharFormat.AlignSuperScript if which == "superscript"
+                     else QTextCharFormat.AlignSubScript)
+            fmt.setVerticalAlignment(QTextCharFormat.AlignNormal
+                                     if cursor.charFormat().verticalAlignment() == level
+                                     else level)
         else:
             fmt.setFontUnderline(not current.underline())
         cursor.mergeCharFormat(fmt)
@@ -10729,9 +10918,8 @@ class MainWindow(QMainWindow):
         self._refresh_status_icons()
         # the style bar's line and hatch samples, in the theme's ink: drawn
         # near-black they were invisible on the dark bar (the user, 2026-10-01)
-        for index in range(self.dash_combo.count()):
-            self.dash_combo.setItemIcon(
-                index, _line_style_icon(self.dash_combo.itemData(index), _bar_ink(), 1))
+        fill_line_style_combo(self.dash_combo, _bar_ink(), 1, self._line_style_shown(),
+                              bool(self.dash_combo.property("cloudStyles")))
         for index in range(self.hatch_combo.count()):
             if self.hatch_combo.itemData(index) in HATCH_PATTERNS:   # not Manage…
                 self.hatch_combo.setItemIcon(

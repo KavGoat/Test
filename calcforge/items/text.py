@@ -446,11 +446,42 @@ class _TextBase(MarkupItem):
         self.auto_size = False
         try:
             self.doc.setHtml(html)
+            self._unpin_the_box_size()
             self.exact_sizes()
         finally:
             self.auto_size = growing
         if growing:
             self._fit_height()
+
+    def _unpin_the_box_size(self) -> None:
+        """Let the runs take the box's own size again after loading.
+
+        Saved rich text carries the box's size on its body, and Qt hands that
+        to every run as a size of its own — so after opening a file, a new
+        size from the toolbar (or Auto's) changed nothing. A run sized on its
+        own is sized in points and keeps it; only the body's size, in pixels,
+        is let go, and the box's font gives back exactly the same size.
+        """
+        from PySide6.QtGui import QTextFormat
+        cursor = QTextCursor(self.doc)
+        block = self.doc.firstBlock()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                fragment = it.fragment()
+                it += 1
+                fmt = fragment.charFormat()
+                if not fmt.hasProperty(QTextFormat.FontPixelSize) \
+                        or fmt.hasProperty(QTextFormat.FontPointSize):
+                    continue
+                for prop in (QTextFormat.FontPixelSize, QTextFormat.FontLetterSpacing,
+                             QTextFormat.FontLetterSpacingType):
+                    fmt.clearProperty(prop)
+                cursor.setPosition(fragment.position())
+                cursor.setPosition(fragment.position() + fragment.length(),
+                                   QTextCursor.KeepAnchor)
+                cursor.setCharFormat(fmt)
+            block = block.next()
 
     def exact_sizes(self) -> None:
         """Draw runs sized in points at exactly that many page units.
@@ -491,7 +522,9 @@ class _TextBase(MarkupItem):
 
     def _on_contents_changed(self) -> None:
         self.prepareGeometryChange()
-        if self.auto_size:
+        if self.style.font_auto:
+            self._fit_font()
+        elif self.auto_size:
             self._fit_height()
         self.touch()
         self.update()
@@ -504,12 +537,71 @@ class _TextBase(MarkupItem):
         option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
         self.doc.setDefaultTextOption(option)
         self.doc.setTextWidth(max(self.text_rect().width(), 8.0))
+        self._apply_script()
         if self._editor is not None:
             self._editor.setDefaultTextColor(self.style.text_qcolor())
         self.prepareGeometryChange()
-        if self.auto_size:
+        if self.style.font_auto:
+            self._fit_font()
+        elif self.auto_size:
             self._fit_height()
         self.update()
+
+    # Revu's Superscript and Subscript for the whole box: every run set above
+    # or below the line. Turned off again, the runs go back on the line; a
+    # run raised on its own (typed after ^ or _) is left alone otherwise.
+    _script_applied = ""
+
+    def _apply_script(self) -> None:
+        wanted = ("super" if self.style.superscript else
+                  "sub" if self.style.subscript else "")
+        if wanted == self._script_applied:
+            return
+        fmt = QTextCharFormat()
+        fmt.setVerticalAlignment({"super": QTextCharFormat.AlignSuperScript,
+                                  "sub": QTextCharFormat.AlignSubScript}.get(
+            wanted, QTextCharFormat.AlignNormal))
+        cursor = QTextCursor(self.doc)
+        cursor.select(QTextCursor.Document)
+        blocked = self.doc.blockSignals(True)
+        try:
+            cursor.mergeCharFormat(fmt)
+            cursor.mergeBlockCharFormat(fmt)
+        finally:
+            self.doc.blockSignals(blocked)
+        self._script_applied = wanted
+
+    #: Revu's range for Auto: from 1 point to 144, to a tenth of a point.
+    AUTO_FONT_RANGE = (1.0, 144.0)
+
+    def _fit_font(self) -> None:
+        """Revu's Auto font size: the largest size, to a tenth of a point,
+        at which the words fit the box. The box keeps its size."""
+        if getattr(self, "_fitting_font", False):
+            return
+        self._fitting_font = True
+        try:
+            rect = self.text_rect()
+            room = max(rect.height(), 1.0)
+            self.doc.setTextWidth(max(rect.width(), 8.0))
+            low, high = (int(value * 10) for value in self.AUTO_FONT_RANGE)
+            probe = self.style.copy()
+
+            def fits(tenths: int) -> bool:
+                probe.font_size = tenths / 10.0
+                self.doc.setDefaultFont(probe.font())
+                return self.doc.size().height() <= room + 0.01
+            best = low
+            while low <= high:
+                middle = (low + high) // 2
+                if fits(middle):
+                    best, low = middle, middle + 1
+                else:
+                    high = middle - 1
+            self.style.font_size = best / 10.0
+            self.doc.setDefaultFont(self.style.font())
+        finally:
+            self._fitting_font = False
 
     def text_rect(self) -> QRectF:
         left, top, right, bottom = self.margins()
