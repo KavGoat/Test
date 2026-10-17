@@ -140,6 +140,7 @@ PLACES = {
     "variables": "Variables panel ▸ right-click a row",
     "ruler": "Right-click a ruler",
     "styles": "Markup Styles toolbar ▸ right-click a style",
+    "print": "File ▸ Print… dialog",
     "panel": "Panel button",
     "button": "Button",
 }
@@ -224,6 +225,10 @@ BUILDERS: dict[str, Callable] = {
     "variables": lambda window: window.variables_panel.build_menu(),
     "ruler": _ruler_menu,
     "styles": _styles_menu,
+    # the Print dialog's Defaults ▾, while the dialog is up
+    "print": lambda window: (window.print_dialog.build_defaults_menu()
+                             if getattr(window, "print_dialog", None) is not None
+                             and window.print_dialog.isVisible() else None),
 }
 
 
@@ -241,6 +246,7 @@ BUTTON_ROOTS = (
     ("propbar", lambda w: w.style_bar),
     ("styles", lambda w: w.markup_styles.bar),
     ("status", lambda w: w.statusBar()),
+    ("print", lambda w: getattr(w, "print_dialog", None)),
 )
 BUTTON_CONTEXTS = {name for name, _root in BUTTON_ROOTS} | {"tablebar"}
 BUTTON_PLACES = {"thumbnails": "Thumbnails panel", "bookmarks": "Bookmarks panel",
@@ -248,7 +254,8 @@ BUTTON_PLACES = {"thumbnails": "Thumbnails panel", "bookmarks": "Bookmarks panel
                  "search": "Search panel", "pagepanel": "Page panel", "maths": "Maths panel",
                  "variablespanel": "Variables panel", "properties": "Properties panel",
                  "propbar": "Properties toolbar", "styles": "Markup Styles toolbar",
-                 "status": "Status bar", "tablebar": "Style bar, with a table open"}
+                 "status": "Status bar", "tablebar": "Style bar, with a table open",
+                 "print": "File ▸ Print… dialog"}
 
 
 def is_field(button: QAbstractButton) -> bool:

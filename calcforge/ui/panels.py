@@ -1332,6 +1332,15 @@ class MarkupsPanel(QWidget):
         return all(row[column] in allowed
                    for column, allowed in self.column_filters.items())
 
+    def filtered_out(self, document) -> list:
+        """The markups the list's filter (its search box and its column
+        filters) leaves out — those Print's Dim Filtered Markups tones down."""
+        needle = self.filter.text().strip().lower()
+        if not needle and not self.column_filters:
+            return []
+        return [item for _index, item, row in self.all_rows(document)
+                if not self._shown(row, needle)]
+
     def all_rows(self, document) -> list:
         """(page index, item, row) for every markup, before any filtering."""
         found = []

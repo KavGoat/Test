@@ -17,7 +17,7 @@ import pytest
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QGroupBox, QMenu, QWidget
+from PySide6.QtWidgets import QAbstractButton, QApplication, QGroupBox, QMenu, QWidget
 
 from calcforge.core.document import LANDSCAPE, MM_TO_PT
 from calcforge.io import printing
@@ -195,15 +195,15 @@ def test_ctrl_p_opens_revus_print_dialog_with_its_sections(win):
     dialog = ctrl_p(win)
     assert dialog.windowTitle() == "Print"
     titles = [box.title() for box in dialog.findChildren(QGroupBox)]
-    assert titles == ["Preview", "Printer", "Page Range", "Options"]
+    assert titles == ["Untitled", "Printer", "Pages (1)", "Options"]
     assert isinstance(dialog.pages, PagesRange)
     assert dialog.pages.which() == PagesRange.ALL
     assert [dialog.stream.itemText(i) for i in range(dialog.stream.count())] == [
-        "Document & Markups", "Document Only", "Markups Only"]
+        "Document & Markup", "Document Only", "Markup Only"]
     assert [dialog.scaling.itemText(i) for i in range(dialog.scaling.count())] == [
         "None", "Fit to Paper", "Reduce to Paper", "Custom Scale", "Fit to Margins",
         "Reduce to Margins"]
-    assert dialog.rotation.itemText(0) == "Auto"
+    assert dialog.rotation.itemText(0) == "Auto-Rotate 90"
     for name in ("printerProperties", "printToFile", "printGetWindow", "printAuto",
                  "printCopies", "printCollate", "printReverse", "printCentre", "printDim",
                  "printDefaults", "printGo", "printCancel"):
@@ -211,7 +211,7 @@ def test_ctrl_p_opens_revus_print_dialog_with_its_sections(win):
     assert dialog.centre.text() == "Centre"               # UK spelling
     assert PDF_PRINTER in [dialog.printer.itemText(i) for i in range(dialog.printer.count())]
     ready(dialog)
-    assert dialog.page_of.text() == "1 of 1"
+    assert dialog.page_of.text() == "1 (1 of 1)"
     # Esc is Cancel
     QTest.keyClick(dialog, Qt.Key_Escape)
     pump()
@@ -272,7 +272,8 @@ def test_thumbnail_right_click_print_pages_opens_with_selected(win, tmp_path):
     assert dialog.pages.which() == PagesRange.SELECTED
     assert dialog.pages.pages() == [1, 2]
     ready(dialog)
-    assert dialog.page_of.text() == "1 of 2"
+    assert dialog.page_of.text() == "2 (1 of 2)"
+    assert dialog.range_box.title() == "Pages (2)"
     out = print_to(dialog, tmp_path / "selected.pdf")
     assert sheets(out) == [(595, 842), (595, 842)]
 
@@ -304,7 +305,7 @@ def test_options_by_mouse_and_keyboard_change_the_preview(win):
     type_into(dialog.x, "40")
     moved = preview_picture(dialog)
     assert moved != halved
-    # Print by the keyboard: Down from Document & Markups to Document Only
+    # Print by the keyboard: Down from Document & Markup to Document Only
     dialog.stream.setFocus()
     QTest.keyClick(dialog.stream, Qt.Key_Down)
     pump()
@@ -318,9 +319,13 @@ def test_options_by_mouse_and_keyboard_change_the_preview(win):
     assert not dialog.collate.isEnabled()
     type_into(dialog.copies, "3")
     assert dialog.copies.value() == 3 and dialog.collate.isEnabled()
-    # Auto off by the mouse: Size and Portrait / Landscape come alive
-    click(dialog.auto)
+    # Auto off (Revu's default): Size and Portrait / Landscape are live;
+    # Auto on by the mouse greys them, and off again
     assert dialog.size.isEnabled() and dialog.landscape.isEnabled()
+    click(dialog.auto)
+    assert not dialog.size.isEnabled() and not dialog.landscape.isEnabled()
+    click(dialog.auto)
+    assert dialog.size.isEnabled()
     click(dialog.landscape)
     assert dialog.options().landscape
     turned = preview_picture(dialog)
@@ -337,7 +342,7 @@ def test_the_preview_shows_the_stream_chosen(win):
     pick(dialog.stream, "Document Only")
     ready(dialog)
     assert _reds(dialog.preview_image(win.document.pages[0])) == 0
-    pick(dialog.stream, "Markups Only")
+    pick(dialog.stream, "Markup Only")
     ready(dialog)
     assert _reds(dialog.preview_image(win.document.pages[0])) == red
 
@@ -356,24 +361,37 @@ def test_preview_steps_through_the_pages_by_mouse_and_page_down(win):
     pages(win, 3)
     dialog = ctrl_p(win)
     ready(dialog)
-    assert dialog.page_of.text() == "1 of 3" and not dialog.prev_button.isEnabled()
+    assert dialog.page_of.text() == "1 (1 of 3)" and not dialog.prev_button.isEnabled()
     QTest.mouseClick(dialog.next_button, Qt.LeftButton)
-    assert dialog.page_of.text() == "2 of 3"
+    assert dialog.page_of.text() == "2 (2 of 3)"
     QTest.keyClick(dialog, Qt.Key_PageDown)
-    assert dialog.page_of.text() == "3 of 3" and not dialog.next_button.isEnabled()
+    assert dialog.page_of.text() == "3 (3 of 3)" and not dialog.next_button.isEnabled()
     QTest.mouseClick(dialog.first_button, Qt.LeftButton)
-    assert dialog.page_of.text() == "1 of 3"
+    assert dialog.page_of.text() == "1 (1 of 3)"
     QTest.mouseClick(dialog.last_button, Qt.LeftButton)
-    assert dialog.page_of.text() == "3 of 3"
+    assert dialog.page_of.text() == "3 (3 of 3)"
     QTest.keyClick(dialog, Qt.Key_PageUp)
-    assert dialog.page_of.text() == "2 of 3"
-    # a Custom range typed into the Pages box: the preview follows it
+    assert dialog.page_of.text() == "2 (2 of 3)"
+    # a page number typed into the box goes to it
+    dialog.page_of.setFocus()
+    QTest.keyClick(dialog.page_of, Qt.Key_A, Qt.ControlModifier)
+    QTest.keyClicks(dialog.page_of, "3")
+    QTest.keyClick(dialog.page_of, Qt.Key_Return)
+    pump()
+    assert dialog.page_of.text() == "3 (3 of 3)"
+    # Custom by the keyboard: its range box appears, typed into, followed
+    assert not dialog.pages.range.isVisible()
+    dialog.pages.combo.setFocus()
+    QTest.keyClick(dialog.pages.combo, Qt.Key_End)
+    pump()
+    assert dialog.pages.which() == PagesRange.CUSTOM and dialog.pages.range.isVisible()
     dialog.pages.range.setFocus()
     QTest.keyClick(dialog.pages.range, Qt.Key_A, Qt.ControlModifier)
     QTest.keyClicks(dialog.pages.range, "1, 3")
     pump()
     assert dialog.pages.which() == PagesRange.CUSTOM
-    assert dialog.page_of.text() == "1 of 2"
+    assert dialog.page_of.text() == "1 (1 of 2)"
+    assert dialog.range_box.title() == "Pages (2)"
 
 
 def test_the_preview_is_quick(win):
@@ -401,6 +419,8 @@ def test_prints_every_page_on_its_own_paper_with_auto(win, tmp_path):
     win.document.pages[1].setup.apply_size("A3")
     win.document.pages[1].setup.orientation = LANDSCAPE
     dialog = ctrl_p(win)
+    assert not dialog.auto.isChecked()               # Revu's default: the Size chosen
+    click(dialog.auto)
     out = print_to(dialog, tmp_path / "auto.pdf")
     assert sheets(out) == [(595, 842), (round(A3_LANDSCAPE[0]), 842)]
 
@@ -411,20 +431,20 @@ def test_the_three_streams(win, tmp_path):
     an_equation(win, "12345+67890=", 80, 100)
     equation_box = (60, 80, 260, 140)
     printed = {}
-    for words in ("Document & Markups", "Document Only", "Markups Only"):
+    for words in ("Document & Markup", "Document Only", "Markup Only"):
         dialog = ctrl_p(win)
         pick(dialog.stream, words)
         printed[words] = print_to(dialog, tmp_path / f"{dialog.stream.currentData()}.pdf")
-    both, document, markups = (printed[k] for k in ("Document & Markups", "Document Only",
-                                                    "Markups Only"))
-    # Document & Markups: the markup and the equation
+    both, document, markups = (printed[k] for k in ("Document & Markup", "Document Only",
+                                                    "Markup Only"))
+    # Document & Markup: the markup and the equation
     box = red_box(both)
     assert box is not None and abs(box[0] - 300) < 3 and abs(box[2] - 500) < 3
     assert darkest(both, equation_box) < 100
     # Document Only: the equation (page content), no markup
     assert red_box(document) is None
     assert darkest(document, equation_box) < 100
-    # Markups Only: the markup on blank paper, no equation
+    # Markup Only: the markup on blank paper, no equation
     assert red_box(markups) is not None
     assert darkest(markups, equation_box) > 240
     assert rect.printable
@@ -437,15 +457,15 @@ def test_streams_with_a_drawings_own_annotations(win, tmp_path):
     assert page.markup_annotations, "the square came in as a markup"
     content, theirs = (70, 610, 230, 690), (330, 590, 530, 710)
     printed = {}
-    for words in ("Document & Markups", "Document Only", "Markups Only"):
+    for words in ("Document & Markup", "Document Only", "Markup Only"):
         dialog = ctrl_p(win)
         pick(dialog.stream, words)
         printed[words] = print_to(dialog, tmp_path / f"d_{dialog.stream.currentData()}.pdf")
-    both = printed["Document & Markups"]
+    both = printed["Document & Markup"]
     assert darkest(both, content) < 60 and red_box(both) is not None
     document = printed["Document Only"]
     assert darkest(document, content) < 60 and red_box(document) is None
-    markups = printed["Markups Only"]
+    markups = printed["Markup Only"]
     assert darkest(markups, content) > 240
     box = red_box(markups)
     assert box is not None and box[0] > theirs[0] - 5 and box[2] < theirs[2] + 5
@@ -472,8 +492,8 @@ def test_page_scaling_really_scales(win, tmp_path):
     cases = {}
     for words, value in (("Custom Scale", "50"), ("Fit to Margins", None), ("None", None)):
         dialog = ctrl_p(win)
-        click(dialog.auto)                      # onto A4 paper, chosen
-        assert dialog.size.currentText() == "A4"
+        assert not dialog.auto.isChecked()      # onto A4 paper, chosen
+        assert dialog.size.currentText() == "A4 (210 x 297 mm)"
         pick(dialog.scaling, words)
         if value:
             type_into(dialog.custom_scale, value)
@@ -497,7 +517,7 @@ def test_rotation_auto_turns_a_landscape_page_onto_portrait_paper(win, tmp_path)
     pump()
     a_rect(win, at=(50, 50), size=(200, 100))
     dialog = ctrl_p(win)
-    click(dialog.auto)
+    assert dialog.rotation.currentText() == "Auto-Rotate 90"
     out = print_to(dialog, tmp_path / "turned.pdf")
     assert sheets(out) == [(595, 842)]
     box = red_box(out)
@@ -508,8 +528,7 @@ def test_rotation_auto_turns_a_landscape_page_onto_portrait_paper(win, tmp_path)
     assert abs(box[1] - 50 * scale) < 4 and abs(box[3] - 250 * scale) < 4
     # and 0° leaves it as it lies (cropped by Fit to Paper's scale only)
     dialog = ctrl_p(win)
-    click(dialog.auto)
-    pick(dialog.rotation, "0°")
+    pick(dialog.rotation, "No Rotation")
     flat = red_box(print_to(dialog, tmp_path / "flat.pdf"))
     assert flat[2] - flat[0] > flat[3] - flat[1]
 
@@ -519,6 +538,7 @@ def test_copies_collate_and_reverse(win, tmp_path):
     win.document.pages[1].setup.apply_size("A3")
     pump()
     dialog = ctrl_p(win)
+    click(dialog.auto)                               # each page on its own paper
     type_into(dialog.copies, "2")
     assert dialog.collate.isChecked()
     collated = print_to(dialog, tmp_path / "collated.pdf")
@@ -545,7 +565,7 @@ def test_the_per_page_and_per_markup_print_ticks_are_honoured(win, tmp_path):
     rect.printable = False                    # Properties ▸ General ▸ Print, off
     dialog = ctrl_p(win)
     ready(dialog)
-    assert dialog.page_of.text() == "1 of 2"             # page 2 is left out
+    assert dialog.page_of.text() == "1 (1 of 2)"         # page 2 is left out
     out = print_to(dialog, tmp_path / "ticks.pdf")
     assert len(sheets(out)) == 2
     assert red_box(out, 0) is None                       # its markup is left out
@@ -580,7 +600,7 @@ def test_defaults_and_the_last_options_remembered(win, tmp_path):
     a_rect(win)
     dialog = ctrl_p(win)
     assert dialog.options() == PrintOptions()            # first time: the defaults
-    pick(dialog.stream, "Markups Only")
+    pick(dialog.stream, "Markup Only")
     pick(dialog.scaling, "Reduce to Paper")
     click(dialog.dim)
     type_into(dialog.copies, "2")
@@ -591,11 +611,10 @@ def test_defaults_and_the_last_options_remembered(win, tmp_path):
     assert (chosen.stream, chosen.scaling, chosen.dim, chosen.copies, chosen.reverse) == (
         printing.MARKUPS, printing.REDUCE_PAPER, True, 2, True)
     assert again.printer.currentText() == PDF_PRINTER
-    # Defaults, by the mouse
-    QTest.mouseClick(again.defaults, Qt.LeftButton)
-    pump()
+    # Defaults ▾ Restore Defaults, by the mouse (none saved: CalcForge's own)
+    _open_menu_and_pick(again.defaults, "Restore Defaults")
     assert again.options() == PrintOptions()
-    assert again.stream.currentText() == "Document & Markups"
+    assert again.stream.currentText() == "Document & Markup"
     assert again.scaling.currentText() == "Fit to Paper"
     # cancelled: what was printed last is what comes back
     QTest.mouseClick(again.findChild(QWidget, "printCancel"), Qt.LeftButton)
@@ -653,13 +672,13 @@ def test_streams_on_a_spreadsheet_page(win, tmp_path):
     frame.add_markup(box, QPointF(200, 300))
     pump()
     printed = {}
-    for words in ("Document & Markups", "Document Only", "Markups Only"):
+    for words in ("Document & Markup", "Document Only", "Markup Only"):
         dialog = ctrl_p(win)
         dialog.pages.set_custom("2")
         pick(dialog.stream, words)
         printed[words] = print_to(dialog, tmp_path / f"s_{dialog.stream.currentData()}.pdf")
-    both, document, markups = (printed[k] for k in ("Document & Markups", "Document Only",
-                                                    "Markups Only"))
+    both, document, markups = (printed[k] for k in ("Document & Markup", "Document Only",
+                                                    "Markup Only"))
     assert grey_ink(both) > 0 and red_box(both) is not None
     assert grey_ink(document) > 0 and red_box(document) is None
     assert grey_ink(markups) == 0 and red_box(markups) is not None
@@ -710,7 +729,325 @@ def test_the_preview_of_a_drawing_follows_the_stream(win, tmp_path):
     ready(dialog)
     document = dialog.preview_image(page)
     assert _blacks(document) > 0 and _reds(document) == 0
-    pick(dialog.stream, "Markups Only")
+    pick(dialog.stream, "Markup Only")
     ready(dialog)
     markups = dialog.preview_image(page)
     assert _blacks(markups) == 0 and _reds(markups) > 0
+
+
+# ---------------------------------------------------------------------------
+# Revu 21's own dialog (the user's photo, docs/qa/revu_shots/print_dialog.jpg)
+# ---------------------------------------------------------------------------
+
+def _below(a, b) -> bool:
+    """Whether widget *a* sits below widget *b* in the dialog."""
+    return a.mapTo(a.window(), QPoint(0, 0)).y() > b.mapTo(b.window(), QPoint(0, 0)).y()
+
+
+def _x(widget) -> int:
+    return widget.mapTo(widget.window(), QPoint(0, 0)).x()
+
+
+def test_laid_out_as_revus_photo(win):
+    dialog = ctrl_p(win)
+    ready(dialog)
+    assert dialog.findChild(QGroupBox, "printDocument").title() == "Untitled"
+    assert dialog.page_size.text() == "21.00 x 29.70 Centimetres"
+    assert dialog.page_of.text() == "1 (1 of 1)"
+    assert dialog.pages.combo.currentText() == "All Pages (1 - 1)"
+    assert not dialog.pages.range.isVisible()            # one compact box, as Revu's
+    assert dialog.size.currentText() == "A4 (210 x 297 mm)"
+    assert dialog.stream.currentText() == "Document & Markup"
+    assert dialog.rotation.currentText() == "Auto-Rotate 90"
+    assert dialog.scaling.currentText() == "Fit to Paper"
+    assert dialog.custom_scale.text().replace(" ", " ") == "100 %"
+    # the Options in Revu's order, top to bottom
+    order = [dialog.size, dialog.portrait, dialog.stream, dialog.copies, dialog.rotation,
+             dialog.scaling, dialog.custom_scale, dialog.centre, dialog.dim,
+             dialog.dim_filtered, dialog.spaces, dialog.links, dialog.greyscale]
+    for upper, lower in zip(order, order[1:]):
+        assert _below(lower, upper), (lower.objectName(), upper.objectName())
+    assert [t.text() for t in order[8:]] == [
+        "Dim Page Content", "Dim Filtered Markups", "Print Spaces",
+        "Print Visible Hyperlinks", "Print in Greyscale"]
+    assert dialog.dim_filtered.isChecked()               # as Revu's ships
+    # declined in Revu's audit: shown, greyed, saying why
+    assert not dialog.spaces.isEnabled() and "declined" in dialog.spaces.toolTip()
+    assert not dialog.add_files.isEnabled() and "declined" in dialog.add_files.toolTip()
+    # the bottom row: Defaults ▾, Advanced, Add Files ▾ ... Print, Cancel
+    cancel = dialog.findChild(QWidget, "printCancel")
+    xs = [_x(w) for w in (dialog.defaults, dialog.advanced_button, dialog.add_files,
+                          dialog.go_button, cancel)]
+    assert xs == sorted(xs)
+    assert dialog.defaults.menu() is not None and dialog.add_files.menu() is not None
+    assert dialog.go_button.property("accent") is True
+    # it fits a screen of 800 × 600
+    hint = dialog.minimumSizeHint()
+    assert hint.width() <= 800 and hint.height() <= 600, hint
+
+
+def _colourful(path, index=0, dpi=50) -> int:
+    with pymupdf.open(path) as pdf:
+        pix = pdf[index].get_pixmap(dpi=dpi)
+    samples, n, count = pix.samples, pix.n, 0
+    for i in range(0, len(samples) - 2, n):
+        r, g, b = samples[i], samples[i + 1], samples[i + 2]
+        if max(r, g, b) - min(r, g, b) > 24:
+            count += 1
+    return count
+
+
+def test_print_in_greyscale(win, tmp_path):
+    a_rect(win, at=(300, 400))
+    dialog = ctrl_p(win)
+    colour = print_to(dialog, tmp_path / "colour.pdf")
+    assert _colourful(colour) > 0
+    dialog = ctrl_p(win)
+    click(dialog.greyscale)
+    assert dialog.greyscale.isChecked()
+    ready(dialog)
+    assert dialog.preview_image(win.document.pages[0]).isGrayscale()
+    grey = print_to(dialog, tmp_path / "grey.pdf")
+    assert _colourful(grey) == 0
+    assert grey_ink(grey) > 0                            # the rectangle, in grey
+    assert sheets(grey) == [(595, 842)]
+
+
+def _blues(path, index=0, dpi=72) -> int:
+    with pymupdf.open(path) as pdf:
+        pix = pdf[index].get_pixmap(dpi=dpi)
+    samples, n, count = pix.samples, pix.n, 0
+    for i in range(0, len(samples) - 2, n):
+        r, g, b = samples[i], samples[i + 1], samples[i + 2]
+        if b > 150 and r < 120 and b - r > 60:
+            count += 1
+    return count
+
+
+def test_print_visible_hyperlinks(win, tmp_path):
+    from calcforge.items.link import LinkItem
+    frame = win.document.pages[0].frame
+    frame.add_markup(LinkItem(QRectF(0, 0, 200, 60)), QPointF(150, 300))
+    pump()
+    dialog = ctrl_p(win)
+    assert not dialog.links.isChecked()
+    plain = print_to(dialog, tmp_path / "nolinks.pdf")
+    assert _blues(plain) == 0                            # a link is for clicking
+    dialog = ctrl_p(win)
+    dialog.links.setFocus()
+    QTest.keyClick(dialog.links, Qt.Key_Space)           # ticked by the keyboard
+    pump()
+    assert dialog.links.isChecked()
+    ready(dialog)
+    shown = print_to(dialog, tmp_path / "links.pdf")
+    assert _blues(shown) > 0
+
+
+def test_dim_filtered_markups(win, tmp_path):
+    kept = a_rect(win, at=(100, 100))
+    filtered = a_rect(win, at=(100, 500))
+    kept.subject, filtered.subject = "Keep me", "Leave me out"
+    win.show_panel("dock_markups", True) if hasattr(win, "show_panel") else None
+    panel = win.markups_panel
+    panel.rebuild(win.document)
+    panel.filter.setFocus()
+    QTest.keyClicks(panel.filter, "keep")                # the Markups List's filter, typed
+    pump()
+    assert panel.filtered_out(win.document) == [filtered]
+
+    def strength(path, top):
+        box = (90, top - 10, 310, top + 130)
+        with pymupdf.open(path) as pdf:
+            pix = pdf[0].get_pixmap(dpi=72, clip=pymupdf.Rect(*box))
+        samples, n = pix.samples, pix.n
+        return min(samples[i + 1] for i in range(0, len(samples) - 2, n))  # green: red ink
+
+    dialog = ctrl_p(win)
+    assert dialog.dim_filtered.isChecked()
+    dimmed = print_to(dialog, tmp_path / "dimmed.pdf")
+    assert strength(dimmed, 100) < 80                    # printed as it is
+    assert strength(dimmed, 500) > 120                   # toned down
+    dialog = ctrl_p(win)
+    click(dialog.dim_filtered)
+    assert not dialog.dim_filtered.isChecked()
+    plain = print_to(dialog, tmp_path / "plain.pdf")
+    assert strength(plain, 500) < 80                     # no longer dimmed
+
+
+def test_auto_rotate_270_turns_the_other_way(win, tmp_path):
+    win.document.pages[0].setup.apply_size("A3")
+    win.document.pages[0].setup.orientation = LANDSCAPE
+    win.go_to_page(0)
+    pump()
+    a_rect(win, at=(50, 50), size=(200, 100))
+    dialog = ctrl_p(win)
+    assert [dialog.rotation.itemText(i) for i in range(dialog.rotation.count())] == [
+        "Auto-Rotate 90", "Auto-Rotate 270", "No Rotation", "Rotate 90", "Rotate 180",
+        "Rotate 270"]
+    pick(dialog.rotation, "Auto-Rotate 270")
+    box = red_box(print_to(dialog, tmp_path / "turned270.pdf"))
+    scale = min(A4[0] / 842, A4[1] / 1191)
+    # a quarter anticlockwise: the page's top-left corner at the paper's bottom left
+    assert abs(box[0] - 50 * scale) < 4 and abs(box[2] - 150 * scale) < 4
+    assert abs(box[1] - (1191 - 250) * scale) < 4 and abs(box[3] - (1191 - 50) * scale) < 4
+
+
+def _open_menu_and_pick(button, words):
+    """Click a button that opens a menu, and click *words* in it."""
+    picked = []
+
+    def choose():
+        menu = QApplication.activePopupWidget()
+        if not isinstance(menu, QMenu) or picked:
+            return
+        timer.stop()
+        picked.append([a.text() for a in menu.actions() if not a.isSeparator()])
+        entry = next(a for a in menu.actions() if a.text() == words)
+        QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier, menu.actionGeometry(entry).center())
+
+    timer = QTimer()
+    timer.setInterval(5)
+    timer.timeout.connect(choose)
+    timer.start()
+    QTest.mouseClick(button, Qt.LeftButton)
+    import time
+    give_up = time.monotonic() + 5
+    while not picked and time.monotonic() < give_up:
+        pump(1)                                  # the menu opens from the event loop
+    timer.stop()
+    pump()
+    assert picked, "no menu opened"
+    return picked[0]
+
+
+def test_defaults_menu_save_restore_and_factory(win):
+    dialog = ctrl_p(win)
+    pick(dialog.scaling, "Reduce to Paper")
+    click(dialog.greyscale)
+    entries = _open_menu_and_pick(dialog.defaults, "Save as Default")
+    assert entries == ["Restore Defaults", "Save as Default", "Factory Defaults"]
+    pick(dialog.scaling, "None")
+    click(dialog.dim)
+    _open_menu_and_pick(dialog.defaults, "Restore Defaults")
+    chosen = dialog.options()
+    assert (chosen.scaling, chosen.greyscale, chosen.dim) == (printing.REDUCE_PAPER, True, False)
+    _open_menu_and_pick(dialog.defaults, "Factory Defaults")
+    assert dialog.options() == PrintOptions()
+    # the saved default is what a first print starts from
+    dialog.reject()
+    from calcforge.settings import app_settings
+    app_settings().remove("print/options")
+    again = ctrl_p(win)
+    assert again.options().scaling == printing.REDUCE_PAPER
+
+
+def _images(path, index=0) -> int:
+    with pymupdf.open(path) as pdf:
+        return len(pdf[index].get_images())
+
+
+def test_advanced_printing_engines(win, tmp_path):
+    a_rect(win, at=(300, 400))                           # an opaque outline
+    dialog = ctrl_p(win)
+    QTest.mouseClick(dialog.advanced_button, Qt.LeftButton)
+    pump()
+    advanced = QApplication.activeModalWidget()
+    assert advanced is dialog.advanced_dialog and advanced.windowTitle() == "Advanced Printing"
+    assert advanced.findChild(QWidget, "advancedPrinter").text() == PDF_PRINTER
+    assert [advanced.engine.itemText(i) for i in range(advanced.engine.count())] == [
+        "Image/Vector/Grid", "Vector", "Image", "Grid"]
+    assert not advanced.data_type.isEnabled() and "spooler" in advanced.data_type.toolTip()
+    pick(advanced.engine, "Image")
+    type_into(advanced.dpi, "100")
+    assert advanced.dpi.value() == 100
+    QTest.mouseClick(advanced.findChild(QWidget, "advancedOk"), Qt.LeftButton)
+    pump()
+    assert dialog.advanced.engine == printing.ENGINE_IMAGE and dialog.advanced.dpi == 100
+    image = print_to(dialog, tmp_path / "image.pdf")
+    assert _images(image) == 1 and red_box(image) is not None
+    # kept for that printer
+    dialog = ctrl_p(win)
+    assert dialog.advanced.engine == printing.ENGINE_IMAGE
+    # Image Band Limit: a picture over it goes in bands of Image Band Size
+    QTest.mouseClick(dialog.advanced_button, Qt.LeftButton)
+    pump()
+    advanced = dialog.advanced_dialog
+    type_into(advanced.band_limit, "1")
+    type_into(advanced.band_size, "0.5")
+    QTest.mouseClick(advanced.findChild(QWidget, "advancedOk"), Qt.LeftButton)
+    banded = print_to(dialog, tmp_path / "bands.pdf")
+    assert _images(banded) > 1
+    # Grid: a picture for each Grid Size square of the page
+    dialog = ctrl_p(win)
+    QTest.mouseClick(dialog.advanced_button, Qt.LeftButton)
+    pump()
+    advanced = dialog.advanced_dialog
+    pick(advanced.engine, "Grid")
+    type_into(advanced.grid_size, "4")
+    QTest.mouseClick(advanced.findChild(QWidget, "advancedOk"), Qt.LeftButton)
+    gridded = print_to(dialog, tmp_path / "grid.pdf")
+    across, down = -(-A4[0] // 288), -(-A4[1] // 288)     # 4 in squares, rounded up
+    assert _images(gridded) == across * down
+    # Defaults, then Vector: no pictures at all
+    dialog = ctrl_p(win)
+    QTest.mouseClick(dialog.advanced_button, Qt.LeftButton)
+    pump()
+    advanced = dialog.advanced_dialog
+    QTest.mouseClick(advanced.defaults, Qt.LeftButton)
+    assert advanced.options() == printing.AdvancedOptions()
+    pick(advanced.engine, "Vector")
+    QTest.mouseClick(advanced.findChild(QWidget, "advancedOk"), Qt.LeftButton)
+    vector = print_to(dialog, tmp_path / "vector.pdf")
+    assert _images(vector) == 0 and red_box(vector) is not None
+
+
+def test_image_vector_grid_sends_only_see_through_parts_as_pictures(win, tmp_path):
+    rect = a_rect(win, at=(300, 400))
+    dialog = ctrl_p(win)
+    assert dialog.advanced.engine == printing.ENGINE_MIXED     # Revu's default
+    opaque = print_to(dialog, tmp_path / "opaque.pdf")
+    assert _images(opaque) == 0
+    rect.style.fill = "#2080ff"                          # filled at its fill opacity
+    rect.update()
+    dialog = ctrl_p(win)
+    clear = print_to(dialog, tmp_path / "clear.pdf")
+    count = _images(clear)
+    assert 0 < count <= 16                               # the inch squares it covers,
+    assert count < (A4[0] // 72 + 1) * (A4[1] // 72 + 1) / 4   # not the whole page
+    assert red_box(clear) is not None
+
+
+def test_the_dialogs_commands_can_be_given_keys(win):
+    from calcforge.ui import bindable
+    from calcforge.ui.bindable_list import COMMANDS
+    dialog = ctrl_p(win)
+    ids = {b.property(bindable.BUTTON) for b in dialog.findChildren(QAbstractButton)
+           if b.property(bindable.BUTTON)}
+    assert ids and ids <= set(COMMANDS), ids - set(COMMANDS)
+    menu = dialog.build_defaults_menu()
+    win.commands.decorate(menu)
+    entries = {a.property(bindable.COMMAND) for a in menu.actions() if not a.isSeparator()}
+    assert entries == {"print.restore_defaults", "print.save_as_default",
+                       "print.factory_defaults"}
+    for command_id in ids | entries:
+        assert win.commands.places(command_id), command_id
+    dialog.reject()
+    # a key given to Get Window works while the dialog is up
+    win.shortcuts.set_sequence("print.get_window", "Ctrl+Shift+F9")
+    win.commands.apply()
+    dialog = ctrl_p(win)
+    QTest.keyClick(dialog, Qt.Key_F9, Qt.ControlModifier | Qt.ShiftModifier)
+    pump()
+    assert not dialog.isVisible()                        # stepped aside for Get Window
+    QTest.keyClick(win.view.viewport(), Qt.Key_Escape)
+    pump()
+    assert dialog.isVisible()
+    # and one given to Defaults ▸ Factory Defaults
+    win.shortcuts.set_sequence("print.factory_defaults", "Ctrl+Shift+F8")
+    win.commands.apply()
+    dialog.reject()
+    dialog = ctrl_p(win)
+    click(dialog.dim)
+    QTest.keyClick(dialog, Qt.Key_F8, Qt.ControlModifier | Qt.ShiftModifier)
+    pump()
+    assert not dialog.dim.isChecked()

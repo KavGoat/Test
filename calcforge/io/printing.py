@@ -30,8 +30,10 @@ from ..core.document import MM_TO_PT, PAGE_SIZES
 
 # what prints (Revu's Print box)
 BOTH, DOCUMENT, MARKUPS = "both", "document", "markups"
-STREAMS = ((BOTH, "Document & Markups"), (DOCUMENT, "Document Only"),
-           (MARKUPS, "Markups Only"))
+# Revu 21's own words (the user's photo of its Print dialog, 2026-10-17:
+# "Document & Markup"; the manual says "Markups")
+STREAMS = ((BOTH, "Document & Markup"), (DOCUMENT, "Document Only"),
+           (MARKUPS, "Markup Only"))
 
 # Page Scaling, in Revu's order
 NONE, FIT_PAPER, REDUCE_PAPER, CUSTOM, FIT_MARGINS, REDUCE_MARGINS = (
@@ -40,9 +42,21 @@ SCALINGS = ((NONE, "None"), (FIT_PAPER, "Fit to Paper"), (REDUCE_PAPER, "Reduce 
             (CUSTOM, "Custom Scale"), (FIT_MARGINS, "Fit to Margins"),
             (REDUCE_MARGINS, "Reduce to Margins"))
 
-# Rotation: Auto turns the page to suit the paper
-AUTO = "auto"
-ROTATIONS = ((AUTO, "Auto"), ("0", "0°"), ("90", "90°"), ("180", "180°"), ("270", "270°"))
+# Rotation, in Revu's words: Auto-Rotate turns a page that lies the other
+# way to the paper, a quarter clockwise (90) or anticlockwise (270)
+AUTO, AUTO_270 = "auto90", "auto270"
+ROTATIONS = ((AUTO, "Auto-Rotate 90"), (AUTO_270, "Auto-Rotate 270"), ("0", "No Rotation"),
+             ("90", "Rotate 90"), ("180", "Rotate 180"), ("270", "Rotate 270"))
+
+#: How far a markup the Markups List's filter leaves out is toned down when
+#: Dim Filtered Markups is ticked: drawn at this opacity (Revu's Filtered
+#: Annotation Dim, in its Markups List preferences).
+FILTERED_OPACITY = 0.3
+
+# Advanced: Revu's printing engines (menus__file__advanced-printing.txt)
+ENGINE_MIXED, ENGINE_VECTOR, ENGINE_IMAGE, ENGINE_GRID = "mixed", "vector", "image", "grid"
+ENGINES = ((ENGINE_MIXED, "Image/Vector/Grid"), (ENGINE_VECTOR, "Vector"),
+           (ENGINE_IMAGE, "Image"), (ENGINE_GRID, "Grid"))
 
 #: The margin a printer that reports none (a PDF file) is given, so Fit to
 #: Margins and the preview's red margin lines still mean something: a
@@ -68,7 +82,10 @@ class PrintOptions:
     x_mm: float = 0.0                     # the content's top-left corner on the
     y_mm: float = 0.0                     # paper, when Centre is off
     dim: bool = False                     # Dim Page Content
-    auto_size: bool = True                # Auto: paper from each page's own size
+    dim_filtered: bool = True             # Dim Filtered Markups
+    links: bool = False                   # Print Visible Hyperlinks
+    greyscale: bool = False               # Print in Greyscale
+    auto_size: bool = False               # Auto: paper from each page's own size
     paper: str = "A4"                     # Size, by name...
     paper_w_pt: float = 210.0 * MM_TO_PT  # ...and by size, portrait, in points
     paper_h_pt: float = 297.0 * MM_TO_PT
@@ -103,10 +120,46 @@ class PrintOptions:
             made.stream = BOTH
         if made.scaling not in dict(SCALINGS):
             made.scaling = FIT_PAPER
+        if made.rotation == "auto":            # remembered before Revu's words
+            made.rotation = AUTO
         if made.rotation not in dict(ROTATIONS):
             made.rotation = AUTO
         made.copies = min(max(made.copies, 1), 999)
         made.custom_scale = min(max(made.custom_scale, 1.0), 1000.0)
+        return made
+
+
+@dataclass
+class AdvancedOptions:
+    """Revu's Advanced Printing, kept for each printer: the printing engine,
+    its grid, and how an image goes to the printer."""
+
+    engine: str = ENGINE_MIXED
+    grid_in: float = 1.0                  # Grid Size, inches
+    dpi: int = 300                        # resolution of what is sent as an image
+    band_limit_mb: float = 12.0           # Image Band Limit
+    band_size_mb: float = 4.0             # Image Band Size
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AdvancedOptions":
+        made = cls()
+        for field in fields(cls):
+            if field.name in data:
+                try:
+                    setattr(made, field.name, type(getattr(made, field.name))(
+                        float(data[field.name]) if field.name != "engine"
+                        else str(data[field.name])))
+                except (TypeError, ValueError):
+                    pass
+        if made.engine not in dict(ENGINES):
+            made.engine = ENGINE_MIXED
+        made.grid_in = min(max(made.grid_in, 0.1), 20.0)
+        made.dpi = int(min(max(made.dpi, 72), 1200))
+        made.band_limit_mb = min(max(made.band_limit_mb, 1.0), 1024.0)
+        made.band_size_mb = min(max(made.band_size_mb, 0.5), made.band_limit_mb)
         return made
 
 
@@ -152,13 +205,15 @@ class Placement:
 
 
 def _rotation(options: PrintOptions, source: QRectF, paper: QSizeF) -> int:
-    if options.rotation != AUTO:
+    if options.rotation not in (AUTO, AUTO_270):
         return int(options.rotation) % 360
     across, down = source.width(), source.height()
     if abs(across - down) < 0.5 or abs(paper.width() - paper.height()) < 0.5:
         return 0
     # Revu turns the page when it lies the other way to the paper
-    return 90 if (across > down) != (paper.width() > paper.height()) else 0
+    if (across > down) == (paper.width() > paper.height()):
+        return 0
+    return 90 if options.rotation == AUTO else 270
 
 
 def place(page_size: QSizeF, paper: QSizeF, options: PrintOptions,
@@ -224,12 +279,17 @@ def dim_veil() -> QColor:
 
 
 def draw_page(painter: QPainter, page, stream: str = BOTH, dim: bool = False,
-              clip: Optional[QRectF] = None, draft: str = "") -> bool:
+              clip: Optional[QRectF] = None, draft: str = "", links: bool = False,
+              dimmed=()) -> bool:
     """*page* drawn the way it prints, in page points on *painter* — the
-    export's own drawing of it, in the stream asked for. With *dim*, the
-    page content is washed out under the markups (Revu's Dim Page Content).
-    *draft*: for the preview's small picture (render_page's *draft*);
-    says whether the page drew everything (False while a "background"
+    export's own drawing of it, in the stream asked for.
+
+    *dim*: the page content washed out under the markups (Revu's Dim Page
+    Content). *links*: the links' rectangles drawn as they show on screen
+    (Print Visible Hyperlinks). *dimmed*: markups drawn toned down — those
+    the Markups List's filter leaves out, under Dim Filtered Markups.
+    *draft*: for the preview's small picture (render_page's *draft*).
+    Says whether the page drew everything (False while a "background"
     draft's picture of the PDF is still coming)."""
     frame = page.frame
     if frame is None:
@@ -238,16 +298,49 @@ def draw_page(painter: QPainter, page, stream: str = BOTH, dim: bool = False,
     painter.setRenderHint(QPainter.Antialiasing, True)
     painter.setRenderHint(QPainter.TextAntialiasing, True)
     painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-    if not dim or stream == MARKUPS:
-        frame.render_page(painter, whole, for_print=True,
-                          stream="" if stream == BOTH else stream, draft=draft)
-        return not frame.draft_waiting if draft else True
-    frame.render_page(painter, whole, for_print=True, stream=DOCUMENT, draft=draft)
-    complete = not frame.draft_waiting if draft else True
-    painter.fillRect(clip if clip is not None else whole, dim_veil())
-    if stream == BOTH:
-        frame.render_page(painter, whole, for_print=True, stream=MARKUPS, draft=draft)
-    return complete
+    toned = [item for item in frame.markups() if item in dimmed] if dimmed else []
+    before = [item.opacity() for item in toned]
+    for item in toned:
+        item.setOpacity(item.opacity() * FILTERED_OPACITY)
+    try:
+        if not dim or stream == MARKUPS:
+            frame.render_page(painter, whole, for_print=True,
+                              stream="" if stream == BOTH else stream, draft=draft,
+                              links=links)
+            return not frame.draft_waiting if draft else True
+        frame.render_page(painter, whole, for_print=True, stream=DOCUMENT, draft=draft,
+                          links=links)
+        complete = not frame.draft_waiting if draft else True
+        painter.fillRect(clip if clip is not None else whole, dim_veil())
+        if stream == BOTH:
+            frame.render_page(painter, whole, for_print=True, stream=MARKUPS, draft=draft,
+                              links=links)
+        return complete
+    finally:
+        for item, opacity in zip(toned, before):
+            item.setOpacity(opacity)
+
+
+def see_through(page, dimmed=()) -> list:
+    """The parts of *page* (page points) where something is drawn see-through
+    — a markup with opacity, a filled one at its fill opacity, a highlighter,
+    one toned down by Dim Filtered Markups: what Image/Vector/Grid sends to
+    the printer as pictures."""
+    frame = page.frame
+    if frame is None:
+        return []
+    found = []
+    for item in frame.markups():
+        if not item.isVisible() or not item.printable:
+            continue
+        style = getattr(item, "style", None)
+        clear = item in dimmed or item.opacity() < 0.999
+        if style is not None:
+            clear = clear or style.opacity < 0.999 or style.blend == "multiply" \
+                or (bool(style.fill) and style.fill_opacity < 0.999)
+        if clear:
+            found.append(item.mapRectToParent(item.boundingRect()))
+    return found
 
 
 def sheet_order(pages: list, options: PrintOptions) -> list:
@@ -301,9 +394,112 @@ def printable_pages(document, indexes: list) -> list:
     return out
 
 
+def _cells(area: QRectF, step: float) -> list:
+    """*area* cut into squares *step* points across, from its top left."""
+    out = []
+    step = max(step, 1.0)
+    y = area.top()
+    while y < area.bottom() - 1e-6:
+        x = area.left()
+        while x < area.right() - 1e-6:
+            out.append(QRectF(x, y, min(step, area.right() - x), min(step, area.bottom() - y)))
+            x += step
+        y += step
+    return out
+
+
+def _bands(area: QRectF, dpi: float, advanced: "AdvancedOptions") -> list:
+    """*area* as the image bands it goes to the printer in: all of it when
+    it is within the Image Band Limit, else strips of the Image Band Size."""
+    k = dpi / 72.0
+    row_bytes = max(area.width() * k, 1.0) * 4
+    total = row_bytes * max(area.height() * k, 1.0)
+    if total <= advanced.band_limit_mb * 1024 * 1024:
+        return [QRectF(area)]
+    rows = max(int(advanced.band_size_mb * 1024 * 1024 / row_bytes), 1)
+    step = rows / k
+    out, y = [], area.top()
+    while y < area.bottom() - 1e-6:
+        out.append(QRectF(area.left(), y, area.width(), min(step, area.bottom() - y)))
+        y += step
+    return out
+
+
+def _raster_cell(painter: QPainter, device: QTransform, sheet, placed: Placement,
+                 options: PrintOptions, dpi: float, cell: QRectF, dimmed) -> None:
+    """One part of the paper (*cell*, paper points) drawn as a picture at
+    *dpi* — in grey for Print in Greyscale — and sent as that."""
+    import math
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QImage
+    k = dpi / 72.0
+    across = max(int(math.ceil(cell.width() * k)), 1)
+    down = max(int(math.ceil(cell.height() * k)), 1)
+    image = QImage(across, down, QImage.Format_ARGB32_Premultiplied)
+    image.fill(Qt.white)
+    drawing = QPainter(image)
+    try:
+        drawing.setTransform(placed.transform * QTransform.fromTranslate(-cell.left(), -cell.top())
+                             * QTransform.fromScale(k, k))
+        drawing.setClipRect(placed.clip)
+        draw_page(drawing, sheet, options.stream, options.dim, placed.clip,
+                  links=options.links, dimmed=dimmed)
+    finally:
+        drawing.end()
+    if options.greyscale:
+        image = image.convertToFormat(QImage.Format_Grayscale8)
+    painter.save()
+    painter.setTransform(device)
+    painter.setClipping(False)
+    painter.drawImage(QRectF(cell.left(), cell.top(), across / k, down / k), image)
+    painter.restore()
+
+
+def paint_sheet(painter: QPainter, resolution: float, sheet, placed: Placement,
+                options: PrintOptions, advanced: Optional["AdvancedOptions"] = None,
+                dimmed=()) -> None:
+    """One sheet of paper, by the printing engine chosen (Advanced):
+    Vector draws everything as it is drawn; Image sends the sheet as a
+    picture, in bands; Grid as pictures a Grid Size square; Image/Vector/Grid
+    draws as Vector and sends the squares where something is see-through as
+    pictures. Print in Greyscale sends the whole sheet as a grey picture —
+    there is no other way to turn a drawing's colours grey."""
+    advanced = advanced or AdvancedOptions()
+    device = QTransform.fromScale(resolution / 72.0, resolution / 72.0)
+    paper = QRectF(0, 0, placed.paper.width(), placed.paper.height())
+    content = placed.content_rect().intersected(paper)
+    if content.isEmpty():
+        return
+    dpi = float(min(advanced.dpi, resolution))
+    engine = advanced.engine
+    if options.greyscale or engine in (ENGINE_IMAGE, ENGINE_GRID):
+        cells = _cells(content, advanced.grid_in * 72.0) if engine == ENGINE_GRID \
+            else _bands(content, dpi, advanced)
+        for cell in cells:
+            _raster_cell(painter, device, sheet, placed, options, dpi, cell, dimmed)
+        return
+    painter.save()
+    painter.setTransform(placed.transform * device)
+    painter.setClipRect(placed.clip)
+    draw_page(painter, sheet, options.stream, options.dim, placed.clip,
+              links=options.links, dimmed=dimmed)
+    painter.restore()
+    if engine != ENGINE_MIXED or options.stream == DOCUMENT:
+        return
+    regions = [placed.transform.mapRect(box.intersected(placed.clip))
+               for box in see_through(sheet, dimmed)]
+    regions = [box for box in regions if not box.isEmpty()]
+    if not regions:
+        return
+    for cell in _cells(QRectF(content), advanced.grid_in * 72.0):
+        if any(cell.intersects(box) for box in regions):
+            _raster_cell(painter, device, sheet, placed, options, dpi, cell, dimmed)
+
+
 def print_pages(printer, pages: list, options: PrintOptions,
                 window: Optional[QRectF] = None,
-                progress: Optional[Callable[[int, int], bool]] = None) -> int:
+                progress: Optional[Callable[[int, int], bool]] = None,
+                advanced: Optional["AdvancedOptions"] = None, filtered=()) -> int:
     """Print *pages* (already the printable ones, in range order) with
     *options* onto *printer*; how many sheets came out.
 
@@ -311,7 +507,8 @@ def print_pages(printer, pages: list, options: PrintOptions,
     same on every printer and in a file. Under Auto each page gets its own
     paper where the printer can change paper during a job (a PDF file can);
     a printer that cannot keeps the first page's paper and the others are
-    placed on it by Page Scaling.
+    placed on it by Page Scaling. *filtered*: the markups the Markups List's
+    filter leaves out, toned down under Dim Filtered Markups.
     """
     sheets = sheet_order(pages, options)
     if not sheets:
@@ -321,6 +518,12 @@ def print_pages(printer, pages: list, options: PrintOptions,
     except Exception:                                  # noqa: BLE001
         pass
     from PySide6.QtPrintSupport import QPrinter
+    if options.greyscale:
+        try:
+            printer.setColorMode(QPrinter.GrayScale)
+        except Exception:                              # noqa: BLE001
+            pass
+    dimmed = frozenset(filtered) if options.dim_filtered else frozenset()
     can_change = getattr(printer, "outputFormat", lambda: None)() == QPrinter.PdfFormat
     margins = printer_margins(printer)
     painter = QPainter()
@@ -344,13 +547,8 @@ def print_pages(printer, pages: list, options: PrintOptions,
             paper = current_paper
             placed = place(QSizeF(float(sheet.width_pt), float(sheet.height_pt)),
                            paper, options, margins, window)
-            device = QTransform.fromScale(printer.resolution() / 72.0,
-                                          printer.resolution() / 72.0)
-            painter.save()
-            painter.setTransform(placed.transform * device)
-            painter.setClipRect(placed.clip)
-            draw_page(painter, sheet, options.stream, options.dim, placed.clip)
-            painter.restore()
+            paint_sheet(painter, printer.resolution(), sheet, placed, options,
+                        advanced, dimmed)
             done += 1
             if progress is not None and not progress(done, len(sheets)):
                 break
@@ -360,6 +558,6 @@ def print_pages(printer, pages: list, options: PrintOptions,
     return done
 
 
-__all__ = ["PrintOptions", "Placement", "place", "paper_for", "paper_points",
+__all__ = ["PrintOptions", "AdvancedOptions", "Placement", "paint_sheet", "see_through", "place", "paper_for", "paper_points",
            "draw_page", "print_pages", "printable_pages", "sheet_order",
            "printer_margins", "STREAMS", "SCALINGS", "ROTATIONS", "PAPERS"]

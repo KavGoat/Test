@@ -321,6 +321,8 @@ class PageFrame(QGraphicsObject):
         self._draft = ""
         #: a "background" draft drew without the PDF, whose picture is coming
         self.draft_waiting = False
+        #: links are drawn on paper too (Print Visible Hyperlinks)
+        self.print_links = False
         # A page carrying a great many markups from its file (a Bluebeam set
         # with hundreds on a sheet) has its file draw the untouched ones with
         # the page, in the page's own squares, on every core at once; a page
@@ -1314,7 +1316,8 @@ class PageFrame(QGraphicsObject):
     # -- rendering ---------------------------------------------------------
     def render_page(self, painter: QPainter, target: QRectF, for_print: bool = True,
                     pdf_overlay: bool = False, without_markups: bool = False,
-                    layer: str = "", stream: str = "", draft: str = "") -> None:
+                    layer: str = "", stream: str = "", draft: str = "",
+                    links: bool = False) -> None:
         """Draw the whole page into *target*, hiding editing chrome.
 
         *layer* picks one of the two drawings a save puts into the page as
@@ -1345,6 +1348,10 @@ class PageFrame(QGraphicsObject):
         processes draw for the canvas (pdftiles), which is often there
         already; when it is not, it is asked for, nothing of the PDF is
         drawn, and ``draft_waiting`` says so until it arrives.
+
+        *links*: the links' rectangles are drawn on paper too, as they show
+        on screen (Print's Print Visible Hyperlinks); else a link is only for
+        clicking.
         """
         scene = self.scene()
         if scene is None:
@@ -1363,6 +1370,8 @@ class PageFrame(QGraphicsObject):
         self._items_only = layer == "calc"
         self._print_stream = stream if for_print else ""
         previous_draft = self._draft
+        previous_links = self.print_links
+        self.print_links = bool(links)
         self._draft = draft or ""
         if draft:
             self.draft_waiting = False
@@ -1426,6 +1435,7 @@ class PageFrame(QGraphicsObject):
             self._items_only = False
             self._print_stream = previous_stream
             self._draft = previous_draft
+            self.print_links = previous_links
 
     def _render_sheet_page(self, painter: QPainter, target: QRectF, for_print: bool,
                            layer: str, stream: str = "") -> None:

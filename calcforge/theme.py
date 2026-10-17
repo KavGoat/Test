@@ -236,6 +236,11 @@ QPushButton {{
 QPushButton:hover {{ background: {accent_soft}; border-color: {accent_edge}; }}
 QPushButton:pressed {{ background: {accent_deep}; }}
 QPushButton:default {{ border-color: {accent}; }}
+/* the dialog's verb in Revu's blue (Print) */
+QPushButton[accent="true"] {{ background: {accent}; border-color: {accent}; color: #ffffff; }}
+QPushButton[accent="true"]:hover {{ background: {accent_edge}; border-color: {accent_edge}; }}
+QPushButton[accent="true"]:disabled {{ background: {chrome}; border-color: {field_edge};
+    color: {ink_faint}; }}
 
 /* --- lists and tables ---------------------------------------------------- */
 QTreeWidget, QTableWidget, QListWidget, QTreeView, QTableView {{
@@ -372,7 +377,8 @@ QListWidget#toolGrid::item:hover {{ background: #cfd6de; }}
 QListWidget#toolGrid::item:selected {{ background: #b9cde3; }}
 QLabel#toolSetName {{ color: {ink}; font-weight: 600; }}
 QTreeWidget#toolChestTree::item {{ padding: 0; }}
-QLabel:disabled {{ color: {ink_faint}; }}
+QLabel:disabled, QCheckBox:disabled, QRadioButton:disabled,
+QPushButton:disabled {{ color: {ink_faint}; }}
 """
 
 def _arrow_files(ink: str, name: str) -> dict:

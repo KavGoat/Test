@@ -57,12 +57,16 @@ class LinkItem(MarkupItem):
 
     def paint_content(self, painter: QPainter) -> None:
         frame = self.parentItem()
-        if getattr(frame, "print_mode", False):
-            return                     # a link is for clicking, not for paper
-        painter.save()
+        printing = getattr(frame, "print_mode", False)
+        if printing and not getattr(frame, "print_links", False):
+            return                     # a link is for clicking, not for paper...
+        painter.save()                 # ...unless Print Visible Hyperlinks is ticked
         pen = QPen(QColor(self.style.stroke or "#1971c2"))
-        pen.setCosmetic(True)
-        pen.setWidthF(1.0)
+        if printing:
+            pen.setWidthF(0.75)        # a hairline on screen; on paper, a thin line
+        else:
+            pen.setCosmetic(True)
+            pen.setWidthF(1.0)
         pen.setStyle(Qt.DashLine)
         painter.setPen(pen)
         fill = QColor(self.style.stroke or "#1971c2")
