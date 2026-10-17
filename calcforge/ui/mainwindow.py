@@ -4395,6 +4395,11 @@ class MainWindow(QMainWindow):
         self.view._shown_page = index
         self.scene.show_page(index)           # Single Page / Side-by-Side: its spread
         self.view.go_to_page_top(index)
+        # Zoomed out, that scroll can leave a later page in the middle of the
+        # window, which its scroll reports as the page in view: the page
+        # asked for is the one gone to, in the page box and Thumbnails alike.
+        self.current_index = index
+        self.view._shown_page = index
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
         self.page_spin.blockSignals(False)

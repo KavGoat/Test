@@ -14,6 +14,7 @@ import math
 import pymupdf
 import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt, QTimer
+from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialogButtonBox, QMenu
 
@@ -1059,3 +1060,47 @@ def test_scrolling_keeps_the_run_picked_in_thumbnails(six):
     wheel(w, 30, Qt.ControlModifier)
     assert w.current_index < 5
     assert w.selected_pages() == [w.current_index]
+
+
+def outline_drawn(window, row):
+    """Whether the strip shows the accent outline round thumbnail *row*:
+    the strip is rendered and the top edge of that row's frame looked at."""
+    from calcforge.app import current_theme
+    from calcforge.theme import tokens
+    listed = window.pages_panel.list
+    listed.scrollToItem(listed.item(row))
+    settle()
+    saved, listed.in_view_row = listed.in_view_row, row
+    frame = listed.in_view_frame()                 # where row's outline would go
+    listed.in_view_row = saved
+    picture = listed.viewport().grab().toImage()
+    accent = QColor(tokens(current_theme())["accent"])
+    seen = picture.pixelColor(frame.center().x(), frame.top() + 1)
+    return (abs(seen.red() - accent.red()) < 40 and abs(seen.green() - accent.green()) < 40
+            and abs(seen.blue() - accent.blue()) < 40)
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_the_page_in_view_is_outlined_in_thumbnails(six, theme):
+    """The page in view has its own outline in the strip, apart from the
+    picked run, and it follows scrolling, zooming and going to a page; with
+    one page picked the highlight alone says it (no doubled marker)."""
+    w = six
+    w.toggle_theme(theme == "dark")
+    listed = w.pages_panel.list
+    assert listed.in_view_row == 3 and listed.in_view_outlined()     # page 4, in the run
+    assert outline_drawn(w, 3) and not outline_drawn(w, 2)
+    for _ in range(3):
+        press(w, Qt.Key_PageDown)                   # scrolled on to page 6
+    assert w.current_index == 5 and listed.in_view_row == 5
+    assert w.selected_pages() == [1, 2, 3]
+    assert outline_drawn(w, 5) and not outline_drawn(w, 3) and not outline_drawn(w, 4)
+    wheel(w, -12)                                   # zoomed out: it follows the view
+    assert listed.in_view_row == w.current_index
+    assert outline_drawn(w, w.current_index)
+    press(w, Qt.Key_Left, Qt.ControlModifier)       # gone to: picked alone
+    here = w.current_index
+    assert w.selected_pages() == [here] and listed.in_view_row == here
+    assert not listed.in_view_outlined()            # the highlight is enough
+    assert not outline_drawn(w, here)
+    w.toggle_theme(False)
