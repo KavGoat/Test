@@ -731,9 +731,10 @@ to a rename or a move, so there is no regression finding. The renames:
   closes the window, and empties the clipboard and the settings. It also
   restores quit-on-last-window-closed and the application's palette and style
   sheet.
-- **Fair failures.** The window is reused from test to test. A failure is
-  judged again on a window built for it alone, so a result never depends on
-  the order xdist runs tests in.
+- **No re-runs** (since round 1c, below). A failure fails. It is also
+  written to `<tmp>/test_every_command-failures.txt` with the job that ran
+  before it in the same worker, so an order-dependent failure leads to its
+  cause.
 - **Stable xfail keys.** `known_failures.json` is keyed by where the command
   is, its name and its way in (`exercise.job_keys`), not by M0123-style ids,
   which shift whenever a line is added. A command that is not found now says
@@ -761,3 +762,32 @@ and the file passes without an xfail. The `nokey` rows are skipped.
   the gliding pointer, and 968 s at d3a71f7, with more failures to re-run.
 - The full suite at `-n 3` on a7656be with this file: 1328 s (22 min),
   about 6,260 passed, 588 skipped, 0 failed. The file is about 45 % of that.
+
+## Round 1c: no re-runs, and what the re-run was hiding
+
+Round 1b re-ran a failing test on a fresh window. That re-run is gone: a
+failure that depends on what ran before is a bug a person can hit too, and
+"flake" is not a root cause.
+
+I ran the full suite at `-n 3` on eebcff1 without the re-run, three times, and
+fixed each cause before the next run. Every failure was in this file and was
+a harness fault. None was an app bug. The causes:
+
+| Job (and the job before it in its worker) | First failure | Cause | Fix |
+|---|---|---|---|
+| T0044#0 Measure ▸ Sketch to Scale Rectangle (after T0043#0) | not reached: no 'Sketch to Scale Rectangle' on the Measure bar | A family button shows the member last picked (an earlier job chose Ellipse), so the face read "Sketch to Scale Ellipse" | A person takes the member from the button's arrow menu, and so does the harness now |
+| P0078#0 Maths ▸ All functions… (after P0077#0) | not reached: the control is not on screen | P0077 presses every Maths button, and the section headers are buttons too: Arithmetic was rolled up | reset() puts each Maths section back as it was |
+| K0742#0 F7 Check Spelling | hung (4 min) in `check_spelling` → `SpellingDialog.exec()` | Handled dialogs were remembered by `id()`. The next word's dialog was built where the last one had been freed, got the same id, and was taken as already handled | Handled dialogs and popups are marked on the object itself, with the run they belong to |
+| R0275#1 Alignment | the worker died: a segmentation fault in `close_strays()`, while iterating `topLevelWidgets()` | Closing one stray window freed others (a dialog's popups), and the next wrapper in that old list pointed at freed memory | One stray at a time, from a fresh list; MainWindows are disposed of properly; `shutdown()` does the same |
+| R0277#0 Add to Tool Chest ▸ Choose a Tool Set… | hung in `QInputDialog.getItem` | A dialog built in C++ where an earlier one was freed can come back as the old, dead Python wrapper; `isValid()` called it gone, so it was not closed | The watcher asks Qt for the active dialog again, at the moment it handles it |
+| D0003#0 and #1 Rules Manager; K0637#0 Ctrl+O | D0003#1 hung in `rules_manager()`; D0003#0 and K0637#0 killed their worker | The hang report showed the dialog watchers off: their timers were gone and the last tick was 713 s earlier. `tests/test_exercise_round1_undo.py` borrows this module's helpers and sets `exercise.APP` itself. In a worker that ran it before this file's next batch, `app()` took "APP is set" to mean "started" and turned no watcher on, so the first dialog was never closed. D0003#0's crash dump shows `close_strays()` meeting that unclosed dialog. K0637#0 died in an earlier run, before crashes were logged, so its cause is likely but not shown | `app()` keeps its own started flag. This is exactly the order-dependence a silent re-run would have hidden |
+| T0183#0 Borders ▸ All Borders (after T0182#0) | not reached: no menu opened | The Borders menu took over 0.6 s to show on the loaded machine, and the wait gave up | It waits up to 3 s for the menu, by looking, not by a fixed sleep |
+
+**Diagnostics kept in the file:**
+- A crash or hang leaves `<tmp>/test_every_command-hang-<job>-<pid>.txt`.
+  It holds `faulthandler`'s stacks, plus the state of the harness's dialog
+  watchers 15 s before the worker is ended.
+- Every failure is listed in `<tmp>/test_every_command-failures.txt`, with
+  the job before it.
+
+**Result.** Full suite at `-n 3`, no re-run: SUITE16.
