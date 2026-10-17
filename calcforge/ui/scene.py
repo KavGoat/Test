@@ -315,6 +315,12 @@ class PageFrame(QGraphicsObject):
         self.show_all_viewports = False
         self._pdf_overlay = False
         self._items_only = False
+        #: Print's stream while a page is drawn for it (render_page)
+        self._print_stream = ""
+        #: and whether that drawing is only the preview's small picture
+        self._draft = ""
+        #: a "background" draft drew without the PDF, whose picture is coming
+        self.draft_waiting = False
         # A page carrying a great many markups from its file (a Bluebeam set
         # with hundreds on a sheet) has its file draw the untouched ones with
         # the page, in the page's own squares, on every core at once; a page
@@ -452,6 +458,37 @@ class PageFrame(QGraphicsObject):
         self._sharp_region = QRectF()
         self._sharp_scale = 0.0
 
+    def _paint_their_annotations(self, painter: QPainter, scale: float) -> bool:
+        """The markups the page's own file still draws — those nobody has
+        changed — and nothing else of it, for Print's Markups Only."""
+        page = self.page
+        if page.pdf_key is None or page.pdf_page_index is None \
+                or not getattr(page, "pdf_annotations", True):
+            return False
+        theirs = set(getattr(page, "markup_annotations", ()) or ()) \
+            - set(self.left_to_us(for_print=True, drawing=True))
+        if not theirs:
+            return False
+        data = self.document.asset(page.pdf_key)
+        if not data:
+            return False
+        from ..io import pdfio
+
+        whole = self.page_rect()
+        step = max(min(scale, 8.0), 0.2 if self._draft else 1.0)
+        region, step = _region_to_draw(whole, whole, step, pdfio.MOST_LIVE_PIXELS)
+        drawn = pdfio.LIVE.draw_annotations(page.pdf_key, data, int(page.pdf_page_index),
+                                            whole, region, step, tuple(theirs))
+        if drawn is None or drawn.isNull():
+            return False
+        painter.save()
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.drawImage(region, drawn, QRectF(drawn.rect()))
+        painter.restore()
+        # the split annotations it drew itself: their strokes stay out
+        self.file_drew_split = frozenset(theirs)
+        return True
+
     def paint_the_pdf(self, painter: QPainter, looking_at: QRectF,
                       scale: float, consumer=None) -> bool:
         """Draw the source page under the markups. Says whether it drew.
@@ -484,12 +521,29 @@ class PageFrame(QGraphicsObject):
         # the file's itself.
         without = (self.left_to_us(for_print=True, drawing=True) if self.print_mode
                    else self.markups_drawn_alone())
+        if self.print_mode and self._print_stream == "document":
+            # Print's Document Only: none of the file's own markups either
+            without = tuple(sorted(set(getattr(page, "markup_annotations", ()) or ())))
         painter.save()
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         drew = False
+        if self.print_mode and self._draft == "background":
+            # Print's preview: the render processes' picture of the page
+            sheet = pdftiles.TILES.sheet(page.pdf_key, data, index, whole, shown,
+                                         ask=True, without=tuple(without))
+            if sheet is None:
+                self.draft_waiting = True
+                painter.restore()
+                return False
+            painter.drawPixmap(whole, sheet, QRectF(sheet.rect()))
+            self.file_drew_split = frozenset(
+                getattr(page, "markup_annotations", ()) or ()) - set(without) \
+                if shown else frozenset()
+            painter.restore()
+            return True
         if self.print_mode:
             # One render, at the resolution being printed, synchronously.
-            step = max(min(scale, 8.0), 1.0)
+            step = max(min(scale, 8.0), 0.2 if self._draft else 1.0)
             region, step = _region_to_draw(
                 QRectF(looking_at).intersected(whole) or whole, whole, step,
                 pdfio.MOST_LIVE_PIXELS)
@@ -738,6 +792,11 @@ class PageFrame(QGraphicsObject):
     def paint(self, painter: QPainter, option, widget=None) -> None:
         if self._items_only:
             return                        # the equations' own layer: nothing of the page
+        if self._print_stream == "markups" and self.print_mode:
+            # Print's Markups Only: none of the page, but the markups its own
+            # file still draws
+            self._paint_their_annotations(painter, _painted_scale(painter))
+            return
         if self.is_sheet:
             # a spreadsheet page: its grid draws itself (items/sheetpage.py),
             # continuous with the pages above and below it; only the markups'
@@ -1255,7 +1314,7 @@ class PageFrame(QGraphicsObject):
     # -- rendering ---------------------------------------------------------
     def render_page(self, painter: QPainter, target: QRectF, for_print: bool = True,
                     pdf_overlay: bool = False, without_markups: bool = False,
-                    layer: str = "") -> None:
+                    layer: str = "", stream: str = "", draft: str = "") -> None:
         """Draw the whole page into *target*, hiding editing chrome.
 
         *layer* picks one of the two drawings a save puts into the page as
@@ -1270,19 +1329,43 @@ class PageFrame(QGraphicsObject):
         has been flattened into the sheet, which is part of it now. That is what an export wants when the markups that are still
         markups are going into the file as real annotations instead of being
         painted into it.
+
+        *stream* is Print's choice of what prints (Revu: Document & Markups,
+        Document Only, Markups Only): ``"document"`` is the page as
+        *without_markups* draws it, and the annotations its own file draws are
+        left out too; ``"markups"`` is every markup on clear paper — no page,
+        no header or footer, no equations or tables (CalcForge's calc and
+        sheet layers are page content), nothing flattened, and the markups
+        nobody has changed drawn by their file as always.
+
+        *draft*: a small picture of the print (Print's preview). ``"now"``:
+        the page's PDF is drawn at the resolution the picture has, not at
+        72 dpi or more as paper wants — a tenth of the work on a large sheet.
+        ``"background"``: the small picture of the whole page the render
+        processes draw for the canvas (pdftiles), which is often there
+        already; when it is not, it is asked for, nothing of the PDF is
+        drawn, and ``draft_waiting`` says so until it arrives.
         """
         scene = self.scene()
         if scene is None:
             return
+        if stream == "document":
+            without_markups = True
         if self.is_sheet and self.sheet_rect is not None:
-            self._render_sheet_page(painter, target, for_print, layer)
+            self._render_sheet_page(painter, target, for_print, layer, stream)
             return
         previous = self.print_mode
         previous_overlay = self._pdf_overlay
+        previous_stream = self._print_stream
         self.print_mode = for_print
         self.file_drew_split = frozenset()
         self._pdf_overlay = bool(pdf_overlay)
         self._items_only = layer == "calc"
+        self._print_stream = stream if for_print else ""
+        previous_draft = self._draft
+        self._draft = draft or ""
+        if draft:
+            self.draft_waiting = False
         # The selection is *hidden* for the render, not cleared and put back.
         # Putting it back is how a page thumbnail resurrected a selection the
         # reader had since let go of: the thumbnail is drawn from a queued
@@ -1310,6 +1393,9 @@ class PageFrame(QGraphicsObject):
                           and not item.from_drawing
                           # equations are page drawing, not annotations
                           and not getattr(item, "IS_CALC", False))
+                      or (stream == "markups"
+                          and (item.flattened or item.from_drawing
+                               or getattr(item, "IS_CALC", False)))
                       or (for_print and (not item.printable
                                          or (pdf_overlay and item.from_drawing)))]
             for item in hidden:
@@ -1338,14 +1424,20 @@ class PageFrame(QGraphicsObject):
             self.print_mode = previous
             self._pdf_overlay = previous_overlay
             self._items_only = False
+            self._print_stream = previous_stream
+            self._draft = previous_draft
 
     def _render_sheet_page(self, painter: QPainter, target: QRectF, for_print: bool,
-                           layer: str) -> None:
+                           layer: str, stream: str = "") -> None:
         """A spreadsheet page on paper: its slice of the grid inside the
         margins (scaled down for Fit to page width), title rows repeated, the
         markups over it, and the running header and footer. Its grid and its
         markups are CalcForge's own drawing (the calc layer): they are taken
-        off and rebuilt from the record when the file is opened here."""
+        off and rebuilt from the record when the file is opened here.
+
+        Print's *stream*: ``"document"`` is the grid, the header and footer
+        and whatever is page content over it (equations, flattened markups);
+        ``"markups"`` is the markups alone, where the grid put them."""
         from ..items.sheetpage import run_item_for
         scene = self.scene()
         run = run_item_for(self)
@@ -1359,7 +1451,7 @@ class PageFrame(QGraphicsObject):
             painter.save()
             painter.translate(target.topLeft())
             painter.scale(sx, sy)
-            if layer in ("", "sheet"):
+            if layer in ("", "sheet") and stream != "markups":
                 # header and footer, on the paper
                 self._as_paper = True
                 try:
@@ -1368,14 +1460,29 @@ class PageFrame(QGraphicsObject):
                     self._as_paper = False
             placed = None
             if layer in ("", "calc") and run is not None:
-                placed = run.paint_page(painter, self)
+                if stream == "markups":
+                    # where the grid goes, without drawing it
+                    scrap_image = QImage(1, 1, QImage.Format_ARGB32)
+                    scrap = QPainter(scrap_image)
+                    scrap.setTransform(painter.transform())
+                    try:
+                        placed = run.paint_page(scrap, self)
+                    finally:
+                        scrap.end()
+                else:
+                    placed = run.paint_page(painter, self)
             painter.restore()
             if layer in ("", "calc") and run is not None and placed is not None:
                 # the markups over the grid, where its cells went on the paper
                 source, inner = placed
                 inner = QRectF(target.left() + inner.left() * sx, target.top() + inner.top() * sy,
                                inner.width() * sx, inner.height() * sy)
-                markups = [m for m in self.markups() if m is not run and m.printable and m.isVisible()]
+                def page_content(m) -> bool:
+                    return bool(m.flattened or m.from_drawing or getattr(m, "IS_CALC", False))
+
+                markups = [m for m in self.markups() if m is not run and m.printable and m.isVisible()
+                           and not (stream == "document" and not page_content(m))
+                           and not (stream == "markups" and page_content(m))]
                 if markups:
                     hidden = []
                     for item in self.markups():

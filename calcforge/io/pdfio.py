@@ -143,6 +143,25 @@ class PdfSource:
         engine.close(self.doc)
 
 
+def _within_the_cap(region, scale: float) -> float:
+    """*scale*, eased down just enough that *region* drawn at it stays
+    within MOST_LIVE_PIXELS.
+
+    The callers size the scale to the cap in floating point, and rounding
+    each side to whole pixels can then land a few hundred pixels over it. A
+    region over the cap used to be refused outright — and a whole A4 drawing
+    printed at 1200 dpi came to 16,001,154 pixels against 16,000,000, so every
+    imported page printed on a real printer came out blank. A hair less sharp
+    is the right answer, not nothing.
+    """
+    across = max(region.width() * scale, 1.0)
+    down = max(region.height() * scale, 1.0)
+    pixels = (int(round(across)) + 1) * (int(round(down)) + 1)
+    if pixels > MOST_LIVE_PIXELS:
+        scale *= (MOST_LIVE_PIXELS / pixels) ** 0.5 * 0.999
+    return scale
+
+
 class LivePages:
     """The source PDFs a document has pages from, kept open to draw from.
 
@@ -216,14 +235,47 @@ class LivePages:
             return None
         if without:
             engine.leave_out(document[index], without)
-        across = max(int(round(region.width() * scale)), 1)
-        down = max(int(round(region.height() * scale)), 1)
-        if across * down > MOST_LIVE_PIXELS:
-            return None
+        scale = _within_the_cap(region, scale)
         return to_image(engine.render_region(
             document, index,
             (region.left(), region.top(), region.right(), region.bottom()),
             scale, annotations))
+
+    def draw_annotations(self, key: str, data: bytes, index: int, whole,
+                         region, scale: float, keep: tuple):
+        """Only the annotations *keep* names, on a clear background, drawn
+        the way their own file draws them — the page's own drawing left out
+        (Print's Markups Only: the markups nobody has changed are still drawn
+        by their file, and with the page gone they would be gone too).
+
+        A copy of its own for each set kept: its page content is emptied and
+        every other annotation hidden, and neither can be taken back.
+        """
+        keep = tuple(sorted(set(keep)))
+        if not keep or not key or not data:
+            return None
+        held = (key, ("annotations only",) + keep)
+        document = self._open.get(held)
+        if document is None:
+            try:
+                document = engine.open_bytes(data)
+            except PdfError:
+                return None
+            if not 0 <= index < document.page_count:
+                engine.close(document)
+                return None
+            engine.without_page_content(document, index)
+            others = [number for number in engine.annotation_xrefs(document, index)
+                      if number not in keep]
+            engine.leave_out(document[index], tuple(others))
+            self._open[held] = document
+        if not 0 <= index < document.page_count:
+            return None
+        scale = _within_the_cap(region, scale)
+        return to_image(engine.render_region(
+            document, index,
+            (region.left(), region.top(), region.right(), region.bottom()),
+            scale, True, alpha=True))
 
     def forget(self, key: str = "") -> None:
         if key:

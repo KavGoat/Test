@@ -15,7 +15,6 @@ from PySide6.QtCore import (QBuffer, QByteArray, QEvent, QIODevice, QMimeData, Q
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont, QFontInfo, QImage, QPixmap,
                            QKeySequence, QPainter, QTextBlockFormat,
                            QTextCharFormat, QTextCursor, QTransform, QUndoStack)
-from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
 from PySide6.QtWidgets import (QAbstractButton, QTabBar, QApplication, QComboBox,
                                QDoubleSpinBox, QFontComboBox,
                                QFileDialog, QGraphicsItem, QHBoxLayout,
@@ -1126,8 +1125,11 @@ class MainWindow(QMainWindow):
                   tip="Export Images: every printable page as an image")
         self._act("export_markups", "Markups Summary…", self.export_markups,
                   tip="Export the document's markup list")
-        self._act("print", "Print…", self.print_document, "Ctrl+P", "print")
-        self._act("preview", "Print Preview…", self.print_preview)
+        self._act("print", "Print…", self.print_document, "Ctrl+P", "print",
+                  tip="Print: Revu's Print dialog, with a preview of each page")
+        self._act("preview", "Print Preview…", self.print_preview,
+                  tip="Print Preview: the Print dialog, whose preview shows each "
+                      "page as it will print")
         self._act("quit", "Exit", self.close, "Ctrl+Q")
 
         # Undo and redo come from the stack itself rather than from _act, so
@@ -5881,26 +5883,11 @@ class MainWindow(QMainWindow):
 
         self._structural_change("Reset all page labels", mutate, preserve_view=True)
 
-    def print_pages(self, index: Optional[int] = None) -> None:
-        """Revu's Print Pages…: the print dialog with these pages chosen."""
+    def print_pages(self, index: Optional[int] = None) -> "PrintDialog":
+        """Revu's Print Pages…: the Print dialog with these pages chosen —
+        Selected, the run picked out in Thumbnails or the page right-clicked."""
         chosen = self.pages_acted_on(index)
-        printer = self._printer()
-        first, last = chosen[0] + 1, chosen[-1] + 1
-        printer.setPrintRange(QPrinter.PageRange)
-        printer.setFromTo(first, last)
-        dialog = QPrintDialog(printer, self)
-        dialog.setMinMax(1, len(self.document.pages))
-        dialog.setOption(QPrintDialog.PrintPageRange, True)
-        if dialog.exec() != QPrintDialog.Accepted:
-            return
-        pages = None
-        if printer.printRange() == QPrinter.PageRange and \
-                (printer.fromPage(), printer.toPage()) == (first, last):
-            pages = [self.document.pages[i] for i in chosen]   # a picked set, gaps kept
-        try:
-            export_io.print_document(self.document, printer, pages)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Print", str(exc))
+        return self.open_print_dialog(chosen, "selected")
 
     def rename_page(self, index: int) -> None:
         """Revu's Rename Page Label: the label is edited in place on the page's
@@ -10625,28 +10612,43 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(f"Exported {count} markup(s)")
 
 
-    def _printer(self) -> QPrinter:
-        printer = QPrinter(QPrinter.HighResolution)
-        printer.setDocName(self.document.title or "CalcForge document")
-        return printer
+    def open_print_dialog(self, selected=None, which: Optional[str] = None) -> "PrintDialog":
+        """Revu's Print dialog, its preview folded in, shown over the window
+        (File ▸ Print…, File ▸ Print Preview… and Print Pages… all open it).
+        *selected*: the pages Selected stands for, when it is offered —
+        else what Thumbnails has picked out."""
+        from .printdialog import PrintDialog, RANGE_KEY
+        from .widgets import PagesRange
+        from ..settings import app_settings
 
-    def print_document(self) -> None:
-        printer = self._printer()
-        dialog = QPrintDialog(printer, self)
-        if dialog.exec() != QPrintDialog.Accepted:
-            return
-        try:
-            export_io.print_document(self.document, printer)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Print", str(exc))
+        if selected is None:
+            selected = self.thumbnail_selection()
+        if which is None:
+            remembered = str(app_settings().value(RANGE_KEY, PagesRange.ALL))
+            which = remembered if remembered in (PagesRange.ALL, PagesRange.CURRENT) \
+                else PagesRange.ALL
+        old = getattr(self, "print_dialog", None)
+        if old is not None:
+            # the last one is let go only now, so what it printed can still
+            # be read after it closed
+            try:
+                old.close()
+                old.deleteLater()
+            except RuntimeError:
+                pass
+        dialog = PrintDialog(self, self.current_index, selected, which)
+        self.print_dialog = dialog
+        dialog.show()
+        return dialog
 
-    def print_preview(self) -> None:
-        printer = self._printer()
-        preview = QPrintPreviewDialog(printer, self)
-        preview.resize(1000, 800)
-        preview.paintRequested.connect(
-            lambda device: export_io.print_document(self.document, device))
-        preview.exec()
+    def print_document(self) -> "PrintDialog":
+        """File ▸ Print… (Ctrl+P): Revu's Print dialog."""
+        return self.open_print_dialog()
+
+    def print_preview(self) -> "PrintDialog":
+        """File ▸ Print Preview…: the same Print dialog — Revu has no
+        separate preview; its Print dialog has one (the user, Round 3)."""
+        return self.open_print_dialog()
 
     # ==================================================================
     # view toggles

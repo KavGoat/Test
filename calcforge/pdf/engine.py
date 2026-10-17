@@ -322,13 +322,14 @@ def render_page(document: "pymupdf.Document", index: int,
 
 def render_region(document: "pymupdf.Document", index: int,
                   region: tuple[float, float, float, float], scale: float,
-                  annotations: bool = True) -> Optional[Raster]:
+                  annotations: bool = True, alpha: bool = False) -> Optional[Raster]:
     """Part of a page, at *scale* pixels to the display point.
 
     *region* is in display points. Only the piece asked for is drawn — MuPDF
     clips before it rasterises — which is how a reader shows a detail of an A1
     sheet sharply without ever making a picture of the whole sheet at that
-    size.
+    size. *alpha*: on a clear background (a page's annotations alone, laid
+    over something else — Print's Markups Only).
     """
     try:
         page = document[index]
@@ -336,7 +337,7 @@ def render_region(document: "pymupdf.Document", index: int,
         if clip.is_empty:
             return None
         pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
-                                 clip=clip, annots=annotations)
+                                 clip=clip, annots=annotations, alpha=alpha)
     except Exception:                                  # noqa: BLE001
         drain_messages()
         return None
