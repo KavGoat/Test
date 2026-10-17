@@ -32,80 +32,9 @@ def _buttons(dialog: QDialog) -> QDialogButtonBox:
     return box
 
 
-class PageSetupDialog(QDialog):
-    """Paper size, orientation and margins."""
-
-    def __init__(self, setup: PageSetup, parent=None, multiple_pages: bool = False):
-        super().__init__(parent)
-        self.setWindowTitle("Page Setup")
-        self.setup = PageSetup.from_dict(setup.to_dict())
-        layout = QVBoxLayout(self)
-
-        form = QFormLayout()
-        self.size = QComboBox()
-        self.size.addItems(list(PAGE_SIZES) + ["Custom"])
-        self.size.setCurrentText(setup.size_name if setup.size_name in PAGE_SIZES else "Custom")
-        self.size.currentTextChanged.connect(self._size_changed)
-        form.addRow("Paper", self.size)
-
-        sizes = QHBoxLayout()
-        self.width = QDoubleSpinBox()
-        self.width.setRange(20, 2000)
-        self.width.setSuffix(" mm")
-        self.width.setValue(setup.width_mm)
-        self.height = QDoubleSpinBox()
-        self.height.setRange(20, 2000)
-        self.height.setSuffix(" mm")
-        self.height.setValue(setup.height_mm)
-        sizes.addWidget(self.width)
-        sizes.addWidget(QLabel("×"))
-        sizes.addWidget(self.height)
-        holder = QWidget()
-        holder.setLayout(sizes)
-        form.addRow("Size", holder)
-
-        self.orientation = QComboBox()
-        self.orientation.addItems(["portrait", "landscape"])
-        self.orientation.setCurrentText(setup.orientation)
-        form.addRow("Orientation", self.orientation)
-        layout.addLayout(form)
-
-        margins = QGroupBox("Margins")
-        margin_form = QFormLayout(margins)
-        self.margins = {}
-        for key, label, value in (("margin_left", "Left", setup.margin_left),
-                                  ("margin_top", "Top", setup.margin_top),
-                                  ("margin_right", "Right", setup.margin_right),
-                                  ("margin_bottom", "Bottom", setup.margin_bottom)):
-            spin = QDoubleSpinBox()
-            spin.setRange(0, 100)
-            spin.setSuffix(" mm")
-            spin.setValue(value)
-            margin_form.addRow(label, spin)
-            self.margins[key] = spin
-        layout.addWidget(margins)
-
-        self.apply_all = QCheckBox("All pages")
-        self.apply_all.setToolTip("Apply to every page")
-        self.apply_all.setEnabled(multiple_pages)
-        layout.addWidget(self.apply_all)
-        layout.addWidget(_buttons(self))
-
-
-    def _size_changed(self, name: str) -> None:
-        if name in PAGE_SIZES:
-            width, height = PAGE_SIZES[name]
-            self.width.setValue(width)
-            self.height.setValue(height)
-
-    def result_setup(self) -> PageSetup:
-        setup = PageSetup(size_name=self.size.currentText(),
-                          width_mm=self.width.value(),
-                          height_mm=self.height.value(),
-                          orientation=self.orientation.currentText())
-        for key, spin in self.margins.items():
-            setattr(setup, key, spin.value())
-        return setup
+# Revu's Page Setup — the media, the content resized onto it, a Preview and
+# the Pages range — lives in pagesetup.py; the old name stays for what used it.
+from .pagesetup import PageSetupDialog  # noqa: E402,F401
 
 
 # The shared Pages control (Revu's All Pages / Current / Selected / Custom)

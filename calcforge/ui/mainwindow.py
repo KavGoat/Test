@@ -4964,10 +4964,12 @@ class MainWindow(QMainWindow):
         self.mark_modified()
 
     def _structural_change(self, description: str, mutate,
-                           preserve_view: bool = False) -> bool:
+                           preserve_view: bool = False, bookmarks: bool = False) -> bool:
         """Change the pages as one undo step; False if nothing changed (and
-        nothing was recorded)."""
+        nothing was recorded). With *bookmarks*, where the bookmarks point is
+        part of the step too (Page Setup moves it)."""
         before = self._structure_snapshot()
+        marks_before = [mark.to_dict() for mark in self.document.bookmarks]
         scroll = (self.view.horizontalScrollBar().value(),
                   self.view.verticalScrollBar().value())
         mutate()
@@ -4992,6 +4994,16 @@ class MainWindow(QMainWindow):
             return False
         restore = (lambda snapshot: self._restore_structure(snapshot, True)) \
             if preserve_view else self._restore_structure
+        if bookmarks:
+            before["bookmarks"] = marks_before
+            after["bookmarks"] = [mark.to_dict() for mark in self.document.bookmarks]
+            pages_back = restore
+
+            def restore(snapshot, pages_back=pages_back):
+                from ..core.document import Bookmark
+                self.document.bookmarks = [Bookmark.from_dict(mark)
+                                           for mark in snapshot.get("bookmarks", [])]
+                pages_back(snapshot)
         self.undo_stack.push(DocumentStructureCommand(before, after, description,
                                                       restore))
         self.mark_modified()
@@ -5282,28 +5294,94 @@ class MainWindow(QMainWindow):
             self.current_index = self.document.move_pages(source, count, target)
         self._structural_change("Reorder pages", mutate)
 
-    def page_setup(self) -> None:
-        dialog = dialogs.PageSetupDialog(self.current_page().setup, self,
-                                         len(self.document.pages) > 1)
-        if dialog.exec() != dialogs.QDialog.Accepted:
-            return
-        setup = dialog.result_setup()
-        pages = self.document.pages if dialog.apply_all.isChecked() else [self.current_page()]
-        from .sheetpages import with_runs
-        pages = with_runs(self.document, pages)      # a spreadsheet's paper is its run's
+    # -- Page Setup (Revu's: the paper, and the content resized onto it) ------
+    def page_setup_dialog(self, state: Optional[dict] = None) -> "dialogs.PageSetupDialog":
+        """Revu's Page Setup for the page in view (or the pages picked out in
+        Thumbnails); not yet shown. After Get Line it comes back as it was
+        left, with the Rotation the line asked for."""
+        which = self.current_index
+        dialog = dialogs.PageSetupDialog(
+            self.current_page().setup, self, len(self.document.pages) > 1,
+            document=self.document, current=which,
+            selected=self.thumbnail_selection(), state=state)
+        if state is None:
+            self._pages_preset(dialog.pages, self._pages_for(), which)
+        return dialog
 
-        if all(page.setup.to_dict() == setup.to_dict() for page in pages):
+    def page_setup(self, state: Optional[dict] = None) -> None:
+        """Document ▸ Page Setup…: new paper for the chosen pages, their
+        drawing, markups, equations and tables scaled, moved and turned onto
+        it (Auto Scale, Scale, Offset, Rotation, Centre, Fit to Media)."""
+        if not isinstance(state, dict):
+            state = None          # a button's or an action's "checked", not a state
+        dialog = self.page_setup_dialog(state)
+        answer = dialog.exec()
+        if answer == dialog.PICK:
+            # Get Line: a line dragged on the drawing, then this again
+            self._scale_dialog_state = None
+            self.select_tool("calibrate")
+            self._page_setup_state = dialog.state()
+            self.status_hint.setText("Page Setup: drag along a line on the drawing that "
+                                     "should be level — Esc goes back to Page Setup")
+            return
+        if answer != dialogs.QDialog.Accepted:
+            return
+        self.finish_page_setup(dialog)
+
+    def page_setup_line(self, start: QPointF, end: QPointF) -> None:
+        """Get Line's line, dragged on the page: Page Setup comes back with
+        the Rotation that makes it level."""
+        state = getattr(self, "_page_setup_state", None)
+        self._page_setup_state = None
+        if state is None:
+            return
+        from .pagesetup import level_rotation
+        state["rotation"] = level_rotation(start, end)
+        self.select_tool("select")
+        QTimer.singleShot(0, lambda: self.page_setup(state=state))
+
+    def finish_page_setup(self, dialog) -> bool:
+        """Apply *dialog*'s Page Setup to the pages it chose; one undo step."""
+        pages = dialog.page_indexes()
+        if not pages:
+            self.status_hint.setText("Page Setup: those pages are not in this document")
+            return False
+        return self.apply_page_setup(dialog.plan(), pages)
+
+    def apply_page_setup(self, plan, pages: list, preserve_view: bool = False,
+                         description: str = "Page Setup") -> bool:
+        """Give *pages* (indexes) the paper and placement *plan* says (a
+        pagesetup.Plan). False, and nothing recorded, if it changes nothing."""
+        from . import pagesetup
+        changes = pagesetup.changes_for(self.document, plan, pages)
+        if not changes:
             # OK with nothing changed changes nothing: not the view, not the
             # history (QA F-28)
             self.status_hint.setText("Page Setup: nothing changed")
-            return
+            return False
 
         def mutate():
-            for page in pages:
-                page.setup = PageSetup.from_dict(setup.to_dict())
-        if self._structural_change("Page setup", mutate):
+            pagesetup.carry_out(self, changes)
+        try:
+            done = self._structural_change(description, mutate, preserve_view=preserve_view,
+                                           bookmarks=True)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Page Setup", str(exc))
+            return False
+        if not done:
+            return False
+        if not preserve_view:
             self.view.fit_page()
             self._note_view_after_change()
+        # the scale label, the lists and the Page panel came up to date with
+        # the pages; the Properties of what is picked out follow
+        self.refresh_selection()
+        count = len({id(change.page) for change in changes})
+        size = changes[0].setup
+        self.status_hint.setText(
+            f"Page Setup: {count} page{'s' if count != 1 else ''} now "
+            f"{size.width_pt * 25.4 / 72:.0f} × {size.height_pt * 25.4 / 72:.0f} mm")
+        return True
 
     def _note_view_after_change(self) -> None:
         """The view settled after the last page change was recorded (a fit,
@@ -5317,17 +5395,20 @@ class MainWindow(QMainWindow):
                              "v": self.view.verticalScrollBar().value()}
 
     def set_page_setup(self, setup: PageSetup, all_pages: bool = False) -> None:
-        """Give the current page (or every page) this paper; one undo step."""
-        pages = self.document.pages if all_pages else [self.current_page()]
-        from .sheetpages import with_runs
-        pages = with_runs(self.document, pages)
-        if all(page.setup.to_dict() == setup.to_dict() for page in pages):
-            return
+        """Give the current page (or every page) this paper; one undo step.
 
-        def mutate():
-            for page in pages:
-                page.setup = PageSetup.from_dict(setup.to_dict())
-        self._structural_change("Page setup", mutate, preserve_view=True)
+        The Page panel's paper and margin boxes and the Paper Size menu: the
+        paper changes and what is on it stays where it is on the page (as
+        Page Setup with its Clear), the file's page given the same paper so
+        the saved PDF shows it."""
+        from .pagesetup import MARGIN_KEYS, Plan
+        indexes = list(range(len(self.document.pages))) if all_pages \
+            else [self.current_index]
+        plan = Plan(media=(setup.size_name, setup.width_mm, setup.height_mm,
+                           setup.orientation),
+                    margins={key: getattr(setup, key) for key in MARGIN_KEYS},
+                    keep_content=True)
+        self.apply_page_setup(plan, indexes, preserve_view=True)
 
     def set_page_scale(self, scale: PageScale, pages: Optional[list] = None) -> None:
         """Give the current page — or each of *pages*, by index — this scale,
@@ -5670,21 +5751,15 @@ class MainWindow(QMainWindow):
 
     def set_page_size(self, index: Optional[int] = None, name: str = "A4") -> None:
         """Put one page onto a different sheet of paper, keeping its way up."""
+        from .pagesetup import Plan
         which = self.page_index(index)
         page = self.document.pages[which]
-        orientation = page.setup.orientation
-
-        def mutate():
-            setup = PageSetup.from_name(name, orientation)
-            setup.margin_left = page.setup.margin_left
-            setup.margin_top = page.setup.margin_top
-            setup.margin_right = page.setup.margin_right
-            setup.margin_bottom = page.setup.margin_bottom
-            page.setup = setup
-            self.current_index = which
-        if self._structural_change(f"Page size {name}", mutate):
-            self.view.fit_page()
-            self._note_view_after_change()
+        width, height = PAGE_SIZES.get(name, PAGE_SIZES["A4"])
+        # the paper changes and what is on it stays where it is, as the Page
+        # panel's paper boxes do; the file's page gets the same paper
+        plan = Plan(media=(name, width, height, page.setup.orientation), keep_content=True)
+        self.current_index = which
+        self.apply_page_setup(plan, [which], description=f"Page size {name}")
 
     def _rebuild_current_page_menu(self) -> None:
         self.current_page_menu.clear()
@@ -6453,6 +6528,12 @@ class MainWindow(QMainWindow):
         if key != "crop":
             # Crop Pages' Get Window was given up: the Crop tool crops again
             self._crop_dialog_state = None
+        pending = getattr(self, "_page_setup_state", None)
+        if pending is not None and key != "calibrate":
+            # Page Setup's Get Line given up (Esc, another tool): the dialog
+            # comes back as it was left, as Revu's does
+            self._page_setup_state = None
+            QTimer.singleShot(0, lambda: self.page_setup(state=pending))
         self.put_the_format_painter_down()
         self.view.set_tool(key)
         action = self.tool_actions.get(key)

@@ -3911,6 +3911,14 @@ class PageView(QGraphicsView):
             draft.refresh(page=self.page())
         if isinstance(draft, MeasureItem):
             if draft.kind == CALIBRATE:
+                if getattr(self.window, "_page_setup_state", None) is not None:
+                    # Page Setup's Get Line: the line goes back to the dialog
+                    start = draft.mapToParent(draft.points[0])
+                    end = draft.mapToParent(draft.points[-1])
+                    detach(draft)
+                    self.window.page_setup_line(start, end)
+                    self.finish_tool()
+                    return
                 detach(draft)
                 length = math.hypot(draft.points[-1].x(), draft.points[-1].y())
                 self.window.calibrate_scale(length)
