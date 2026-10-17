@@ -710,6 +710,8 @@ class MainWindow(QMainWindow):
         self._undo_clean_slot = lambda _clean: self.update_title()
         self._connected_undo_stacks = []
         keep_the_wheel_with_the_scroller(QApplication.instance())
+        from . import release as _release
+        _release.keep_dialogs_with_their_parents()     # (once; see there)
         self.document = Document()
         self.undo_stack = QUndoStack(self)
         self.undo_stack.setUndoLimit(200)
@@ -7122,6 +7124,8 @@ class MainWindow(QMainWindow):
             self._last_format_dialog = dialog
             return
         dialog.exec()
+        from .release import done_with
+        done_with(dialog)
 
     def insert_block(self) -> None:
         """A calculation block round the selected equations (on the page of the

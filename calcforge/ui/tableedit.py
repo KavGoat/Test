@@ -2617,6 +2617,7 @@ class TableEditing:
         else:
             menu = self.cell_menu()
         menu.exec(global_pos)
+        menu.deleteLater()          # closed: not kept as a hidden window of the view
         return True
 
     def _clipboard_entries(self, menu) -> None:

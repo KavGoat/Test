@@ -204,9 +204,12 @@ class ChangeColorsDialog(QDialog):
 def change_multiple_colors(window, items) -> int:
     """Open the dialog for *items*; how many colours were changed."""
     dialog = ChangeColorsDialog(window, items)
+    from .release import done_with
     if dialog.exec() != QDialog.Accepted:
+        done_with(dialog)
         return 0
     changed = dialog.apply()
+    done_with(dialog)
     if hasattr(window, "refresh_selection"):
         window.refresh_selection()
     return changed

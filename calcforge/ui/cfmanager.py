@@ -658,7 +658,10 @@ class RulesManager(QDialog):
         if not getattr(window, "interactive_prompts", True):
             hook = getattr(window, "answer_rule_dialog", None)
             return bool(hook(dialog)) if hook is not None else False
-        return dialog.exec() == QDialog.Accepted
+        accepted = dialog.exec() == QDialog.Accepted
+        from .release import done_with
+        done_with(dialog)
+        return accepted
 
     # -- Applies to, by dragging over the cells ---------------------------------------------------
     def pick_cells(self, index: int) -> None:
@@ -745,4 +748,6 @@ def new_rule(tables):
     if dialog.exec() == QDialog.Accepted:
         from .datatools import add_rule
         add_rule(tables, dialog.rule())
+    from .release import done_with
+    done_with(dialog)
     return dialog

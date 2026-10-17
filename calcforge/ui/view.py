@@ -5858,6 +5858,7 @@ class PageView(QGraphicsView):
             self.selectionChanged.emit()
         menu = self.window.build_context_menu(item, scene_pos)
         menu.exec(event.globalPos())
+        menu.deleteLater()          # closed: not kept as a hidden window of the view
 
 
 def _as_written(data: dict) -> dict:

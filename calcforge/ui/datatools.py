@@ -33,7 +33,10 @@ def _show(window, dialog) -> bool:
     if not getattr(window, "interactive_prompts", True):
         window._last_data_dialog = dialog
         return False
-    return dialog.exec() == QDialog.Accepted
+    accepted = dialog.exec() == QDialog.Accepted
+    from .release import done_with
+    done_with(dialog)              # answered: its results are read before it goes
+    return accepted
 
 
 def _ranges(tables) -> list:

@@ -16,6 +16,8 @@ def build_application(argv: list[str]) -> QApplication:
     QApplication.setOrganizationName(ORGANISATION)
     QApplication.setApplicationDisplayName(APP_NAME)
     application = QApplication(argv)
+    from .ui.release import keep_dialogs_with_their_parents
+    keep_dialogs_with_their_parents()
     # First start: MarkForge's shortcuts, tool sets, layout, dark mode and
     # markup defaults come across once, before anything reads them.
     migrate_from_markforge()

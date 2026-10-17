@@ -243,9 +243,11 @@ def sheet_page_setup(window, index: int) -> None:
     if not getattr(window, "interactive_prompts", True):
         window._last_data_dialog = dialog
         return
-    if dialog.exec() != QDialog.Accepted:
-        return
-    apply_dialog(window, item, dialog)
+    accepted = dialog.exec() == QDialog.Accepted
+    if accepted:
+        apply_dialog(window, item, dialog)
+    from .release import done_with
+    done_with(dialog)
 
 
 def apply_dialog(window, item, dialog: SheetLayoutDialog) -> None:

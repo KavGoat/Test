@@ -183,6 +183,8 @@ def ask_create_from_selection(tables) -> None:
         return
     if dialog.exec() == QDialog.Accepted:
         create_from_selection(tables, **dialog.choice())
+    from .release import done_with
+    done_with(dialog)
 
 
 class _Nothing:
@@ -341,6 +343,8 @@ class NameManagerDialog(QDialog):
             return
         if dialog.exec() == QDialog.Accepted:
             self.apply_editor(dialog, dn)
+        from .release import done_with
+        done_with(dialog)
 
     def apply_editor(self, dialog: NameDialog, dn=None) -> Optional[str]:
         name, refers, scope, comment = dialog.values()
@@ -367,6 +371,8 @@ def name_manager(tables) -> None:
         window._last_data_dialog = dialog
         return
     dialog.exec()
+    from .release import done_with
+    done_with(dialog)
 
 
 # -- the Name Box ---------------------------------------------------------------------------------

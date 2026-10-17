@@ -196,7 +196,9 @@ class SheetTabs(QWidget):
         return menutidy.tidy(menu)
 
     def _menu(self, pos) -> None:
-        self.build_menu(self.bar.tabAt(pos)).exec(self.bar.mapToGlobal(pos))
+        menu = self.build_menu(self.bar.tabAt(pos))
+        menu.exec(self.bar.mapToGlobal(pos))
+        menu.deleteLater()
 
     def delete_sheet(self, index: int) -> None:
         """Excel's Delete on a sheet tab: the sheet's pages go (asked first)."""

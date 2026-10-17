@@ -51,6 +51,41 @@ def _valid(thing) -> bool:
         return False
 
 
+def keep_dialogs_with_their_parents() -> None:
+    """QDialog.exec() hands the dialog's ownership to Python (PySide 6.11),
+    though Qt still has it as its parent's child. Python then deletes it
+    whenever the garbage collector next finds it unreachable — which can be
+    in the middle of PySide turning a list of the application's windows into
+    Python objects, leaving a freed window in that list: a segmentation fault
+    walking QApplication.topLevelWidgets() after the sort, rules and other
+    table dialogs (exercise runs, 2026-10-17). Once it has run, a dialog
+    with a parent is given back to its parent, as it was before exec()."""
+    from PySide6.QtWidgets import QDialog
+    if getattr(QDialog.exec, "_given_back", False):
+        return
+    shown = QDialog.exec
+
+    def exec_and_give_back(dialog, *args, **kwargs):
+        try:
+            return shown(dialog, *args, **kwargs)
+        finally:
+            if _valid(dialog) and shiboken6.ownedByPython(dialog):
+                parent = dialog.parentWidget()
+                if parent is not None:
+                    dialog.setParent(parent, dialog.windowFlags())
+
+    exec_and_give_back._given_back = True
+    exec_and_give_back.__doc__ = shown.__doc__
+    QDialog.exec = exec_and_give_back
+
+
+def done_with(dialog) -> None:
+    """A dialog that has been answered and will not be shown again goes
+    (not left as a hidden window of its parent until the parent goes)."""
+    if _valid(dialog):
+        dialog.deleteLater()
+
+
 def release_scene(scene) -> None:
     """Take a canvas apart: nothing on it is drawn, timed or told again."""
     if not _valid(scene):

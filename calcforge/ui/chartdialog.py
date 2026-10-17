@@ -398,6 +398,8 @@ def edit_chart(window, chart: ChartItem) -> None:
         return
     if dialog.exec() == QDialog.Accepted:
         apply_dialog(window, chart, dialog)
+    from .release import done_with
+    done_with(dialog)
 
 
 def apply_dialog(window, chart: ChartItem, dialog: ChartDialog) -> None:
