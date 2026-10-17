@@ -864,8 +864,13 @@ _RESTORE: dict = {}
 
 
 def app():
+    """The application, with the harness's recorders and dialog watchers on.
+    Started is its own flag, not "APP is set": another test file borrows this
+    module's helpers and sets APP itself (test_exercise_round1_undo.py), and a
+    worker that ran it first then had no watchers — the next dialog was never
+    closed and the worker hung or crashed (D0003, gate on eebcff1)."""
     global APP
-    if APP is None:
+    if not _RESTORE.get("started"):
         _sandbox()
         from PySide6.QtWidgets import QApplication
         APP = QApplication.instance()
@@ -882,7 +887,21 @@ def app():
         faulthandler.enable()
         install_recorders()
         Watch.start()
+        from calcforge.ui import scene as scene_module
+        _RESTORE["dimmer"] = dict(scene_module.DIMMER)     # app-wide, not per window
+        _RESTORE["started"] = True
     return APP
+
+
+def restore_globals() -> None:
+    """State the app keeps for the whole process rather than per window:
+    View ▸ Dim Content's on/off and level (scene.DIMMER). A command that left
+    it on dimmed the next test file's pages (test_view_workspace.py's dimmer
+    test, gate on eebcff1)."""
+    if "dimmer" in _RESTORE:
+        from calcforge.ui import scene as scene_module
+        scene_module.DIMMER.clear()
+        scene_module.DIMMER.update(_RESTORE["dimmer"])
 
 
 def shutdown() -> None:
@@ -890,7 +909,7 @@ def shutdown() -> None:
     recorders, no window, no clipboard, no tool sets or settings written by
     the commands, the application's own palette. Safe to call twice."""
     global APP, WIN, BASELINE
-    if APP is None:
+    if not _RESTORE.get("started"):
         return
     QtCore, QtGui, QtWidgets = qt()[0], qt()[1], qt()[2]
     import shiboken6
@@ -910,13 +929,20 @@ def shutdown() -> None:
         dispose(WIN)
     WIN = BASELINE = None
     from calcforge.ui.mainwindow import MainWindow
-    for widget in QtWidgets.QApplication.topLevelWidgets():
-        if not shiboken6.isValid(widget):
-            continue
+    handled = set()
+    for _ in range(60):                        # a fresh list each time (close_strays)
+        left = [w for w in QtWidgets.QApplication.topLevelWidgets()
+                if shiboken6.isValid(w) and id(w) not in handled and (
+                    isinstance(w, MainWindow) or (w.isVisible() and w.isWindow()))]
+        if not left:
+            break
+        widget = left[0]
+        handled.add(id(widget))
         if isinstance(widget, MainWindow):
             dispose(widget)                    # New Window's, Exit's, any left
-        elif widget.isVisible() and widget.isWindow():
+        else:
             widget.close()
+            pump()
     pump(3)
     QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
     pump()
@@ -937,7 +963,9 @@ def shutdown() -> None:
         settings.sync()
     except Exception:  # noqa: BLE001
         pass
+    restore_globals()
     CURRENT.clear()
+    _RESTORE.clear()                           # started: no
     APP = None
 
 
@@ -1063,6 +1091,7 @@ class Watch:
     @classmethod
     def reset(cls, policy="cancel", inside=None):
         cls.seen = set()
+        cls.run += 1
         cls.policy = policy
         cls.handled_first = False
         cls.navigating = False
@@ -1074,13 +1103,47 @@ class Watch:
         if CURRENT.get("t0") and not CURRENT.get("t_ui"):
             CURRENT["t_ui"] = time.perf_counter()
 
+    # Which dialogs and popups were already handled is marked on the object
+    # itself, with the run it was seen in: an id() is reused as soon as the
+    # object is freed, and Check Spelling's next word's dialog, built where the
+    # last one was, was taken for handled and left the run hanging.
+    run = 0
+
+    @classmethod
+    def mark_seen(cls, widget, on=True):
+        import shiboken6
+        if shiboken6.isValid(widget):
+            widget.setProperty("qaSeenInRun", cls.run if on else -1)
+
+    @classmethod
+    def was_seen(cls, widget):
+        return widget.property("qaSeenInRun") == cls.run
+
+    last_tick = 0.0
+    last_modal = ""
+
+    @classmethod
+    def state(cls) -> str:
+        """For a hang report: are the watchers alive, and what did they last see."""
+        import shiboken6
+        timers = [t for t in (cls.modal_timer, cls.popup_timer)]
+        alive = [t is not None and shiboken6.isValid(t) and t.isActive() for t in timers]
+        return (f"watch timers active {alive}; last modal tick "
+                f"{time.perf_counter() - cls.last_tick:.1f} s ago; last modal seen "
+                f"{cls.last_modal!r}; navigating {cls.navigating}; run {cls.run}; "
+                f"policy {cls.policy}")
+
     @classmethod
     def modal_tick(cls):
         QtCore, QtGui, QtWidgets, QTest = qt()
+        cls.last_tick = time.perf_counter()
         modal = QtWidgets.QApplication.activeModalWidget()
-        if modal is None or id(modal) in cls.seen or not modal.isVisible():
+        if modal is not None:
+            cls.last_modal = f"{type(modal).__name__} {modal.windowTitle()} seen=" \
+                f"{modal.property('qaSeenInRun')} visible={modal.isVisible()}"
+        if modal is None or cls.was_seen(modal) or not modal.isVisible():
             return
-        cls.seen.add(id(modal))
+        cls.mark_seen(modal)
         cls.note_ui()
         QtCore.QTimer.singleShot(60, lambda m=modal: cls.handle_modal(m))
 
@@ -1102,6 +1165,14 @@ class Watch:
     def _handle_modal(cls, modal):
         import shiboken6
         QtCore, QtGui, QtWidgets, QTest = qt()
+        # The dialog is asked for again rather than trusted from the tick: a
+        # dialog built in C++ (QInputDialog.getItem) where the last one was
+        # freed can come back as the old, dead Python wrapper, which isValid()
+        # calls gone — and the dialog was left open (R0277 hung, gate on
+        # eebcff1, on its fourth Add to Tool Set dialog in a row).
+        current = QtWidgets.QApplication.activeModalWidget()
+        if current is not None and current.isVisible():
+            modal = current
         if not shiboken6.isValid(modal) or not modal.isVisible():
             return
         record = describe_dialog(modal)
@@ -1123,7 +1194,7 @@ class Watch:
                 def press(b=button, m=modal):
                     QTest.mouseClick(b, QtCore.Qt.LeftButton)
                     # the parent is handled again (cancelled) once its child closed
-                    QtCore.QTimer.singleShot(150, lambda: cls.seen.discard(id(m)))
+                    QtCore.QTimer.singleShot(150, lambda: cls.mark_seen(m, False))
                 QtCore.QTimer.singleShot(0, press)
                 return
         if plan and plan.get("done") and not plan.get("child_seen") and \
@@ -1164,6 +1235,10 @@ class Watch:
     def ensure_closed(cls, modal, record, tries=0):
         import shiboken6
         QtCore, QtGui, QtWidgets, QTest = qt()
+        current = QtWidgets.QApplication.activeModalWidget()   # (see _handle_modal)
+        if current is not None and current.isVisible() and \
+                QtWidgets.QWidget.windowTitle(current) == record.get("title"):
+            modal = current
         if not shiboken6.isValid(modal) or not modal.isVisible():
             return
         if record.get("pressed") != "Esc" and tries == 0:
@@ -1197,9 +1272,9 @@ class Watch:
                 popup.close()
             return
         cls.navigating_since = 0.0
-        if popup is None or id(popup) in cls.seen or not popup.isVisible():
+        if popup is None or cls.was_seen(popup) or not popup.isVisible():
             return
-        cls.seen.add(id(popup))
+        cls.mark_seen(popup)
         cls.note_ui()
         QtCore.QTimer.singleShot(60, lambda p=popup: cls.handle_popup(p))
 
@@ -1217,7 +1292,7 @@ class Watch:
         QtCore, QtGui, QtWidgets, QTest = qt()
         if not shiboken6.isValid(popup) or not popup.isVisible() or cls.navigating:
             if shiboken6.isValid(popup) and cls.navigating:
-                cls.seen.discard(id(popup))
+                cls.mark_seen(popup, False)
             return
         kind = type(popup).__name__
         record = dict(kind=kind, title=getattr(popup, "title", lambda: "")() if isinstance(
@@ -1407,7 +1482,10 @@ def chrome_state(win) -> dict:
     loose = [(action, action.isChecked()) for action in win.findChildren(QtGui.QAction)
              if action.isCheckable() and id(action) not in tool_ids
              and not action.objectName() and action.actionGroup() is not None]
-    return dict(checks=checks, docks=docks, bars=bars, loose=loose)
+    # Maths panel sections opened or rolled up (their headers are buttons too)
+    sections = {id(b): b.isChecked() for b in win.findChildren(
+        qt()[2].QToolButton, "mathsSectionHeader")}
+    return dict(checks=checks, docks=docks, bars=bars, loose=loose, sections=sections)
 
 
 def restore_chrome(win) -> list[str]:
@@ -1435,6 +1513,11 @@ def restore_chrome(win) -> list[str]:
         if shiboken6.isValid(action) and was and not action.isChecked():
             moved.append(clean(action.text()))
             action.trigger()                   # the one that was on comes back on
+    for header in win.findChildren(qt()[2].QToolButton, "mathsSectionHeader"):
+        was = BASELINE.get("sections", {}).get(id(header))
+        if was is not None and header.isChecked() != was:
+            moved.append(f"maths section {header.text()}")
+            header.setChecked(was)             # toggled: the section opens or rolls up
     if now["docks"] != BASELINE["docks"] or now["bars"] != BASELINE["bars"]:
         moved.append("layout")
         try:
@@ -1479,39 +1562,37 @@ def close_strays(win) -> list[str]:
         except Exception:  # noqa: BLE001
             pass
         pump()
-    def a_stray():
+    # One window at a time, from a fresh list each time: closing one can free
+    # others there and then, and a list taken before still holds them. The
+    # workers that crashed in this loop (R0275, D0003, gate on eebcff1) were
+    # the app's: the Markup Styles bar left freed buttons in the
+    # application's window list (fixed in 3ec54f1).
+    handled = set()
+    for _ in range(40):
+        stray = None
         for widget in QtWidgets.QApplication.topLevelWidgets():
-            if widget is win or not shiboken6.isValid(widget) or not widget.isVisible():
+            if not shiboken6.isValid(widget) or id(widget) in handled:
                 continue
-            if widget is toplevel(win) or isinstance(widget, QtWidgets.QDockWidget):
+            if widget is win or widget is toplevel(win) or not widget.isVisible():
                 continue
-            if isinstance(widget, MainWindow) or (
-                    widget.isWindow() and not isinstance(widget, QtWidgets.QMenu)
-                    and type(widget).__name__ not in ("QToolTip", "QTipLabel")):
-                return widget
-        return None
-
-    # One at a time, the list asked for again after each: closing a window
-    # can free other top-level widgets there and then (its canvas is taken
-    # apart as it closes), and a list taken before still holds them. Going on
-    # down it crashed the worker in this loop (gate f78d03c at "Cut cells";
-    # again at "Cut" with three runs side by side).
-    for _ in range(12):
-        widget = a_stray()
-        if widget is None:
+            if isinstance(widget, (QtWidgets.QDockWidget, QtWidgets.QMenu)) or \
+                    type(widget).__name__ in ("QToolTip", "QTipLabel"):
+                continue
+            if isinstance(widget, MainWindow) or widget.isWindow():
+                stray = widget
+                break
+        if stray is None:
             break
-        if isinstance(widget, MainWindow):
-            widget.confirm_discard = lambda: True
-            widget.document.modified = False
+        handled.add(id(stray))
+        if isinstance(stray, MainWindow):
             closed.append("second window")
-            widget.close()
-            widget.deleteLater()
+            dispose(stray)
         else:
-            closed.append(f"window {type(widget).__name__} {widget.windowTitle()}")
-            widget.close()
-            if widget.isVisible():
-                widget.hide()             # one that will not close is not asked twice
-        pump()
+            closed.append(f"window {type(stray).__name__} {stray.windowTitle()}")
+            stray.close()
+            if stray.isVisible():
+                stray.hide()              # one that will not close is not asked twice
+            pump()
     pump()
     return closed
 
@@ -1554,6 +1635,12 @@ def reset(win) -> list[str]:
         notes.append(f"closing tabs: {error!r}")
     notes += restore_chrome(win)
     notes += forget_settings(win)
+    if "dimmer" in _RESTORE:
+        from calcforge.ui import scene as scene_module
+        if scene_module.DIMMER != _RESTORE["dimmer"]:
+            notes.append("dimmer")
+            restore_globals()
+            win.view.viewport().update()
     if win.isFullScreen() or win.isMaximized() or win.isMinimized():
         win.showNormal()
         notes.append("window state")
@@ -2803,6 +2890,13 @@ def via_toolbar(win, entry, outcome):
                 outcome["overflow"] = True
                 return via_overflow(win, bar, action, outcome)
             return press_widget(win, widget, outcome)
+    # a family button shows the member last used (Sketch to Scale Rectangle
+    # becomes "… Ellipse" once that was picked): a person takes the one they
+    # want from its arrow menu
+    family = button_offering(bar, label)
+    if family is not None:
+        outcome["family_menu"] = clean(family.text()) or family.toolTip()
+        return menu_button(family, outcome, [label])
     raise NotReached(f"no '{label}' on toolbar {entry['bar']}")
 
 
@@ -2876,12 +2970,16 @@ def open_then_walk(opener, path, outcome, each_index=None, kind=None):
     """Queue the walk through the menu, then open it (which may block)."""
     QtCore, QtGui, QtWidgets, QTest = qt()
     done = {"ran": False, "ok": False}
+    # A button's menu can take more than half a second to show on a loaded
+    # machine (T0183 Borders ▸ All Borders gave up after 0.6 s, gate on
+    # eebcff1): wait up to 3 s for it, by looking, not by a fixed sleep.
+    tries = [0]
 
-    def navigate(tries=[0]):
+    def navigate():
         menu = QtWidgets.QApplication.activePopupWidget()
         if not isinstance(menu, QtWidgets.QMenu):
             tries[0] += 1
-            if tries[0] < 20:
+            if tries[0] < 100:
                 QtCore.QTimer.singleShot(30, navigate)
                 return
             done["ran"] = True
@@ -2894,10 +2992,7 @@ def open_then_walk(opener, path, outcome, each_index=None, kind=None):
     Watch.navigating = True
     QtCore.QTimer.singleShot(60, navigate)
     opener()
-    for _ in range(100):
-        if done["ran"]:
-            break
-        settle(10)
+    wait_for(lambda: done["ran"], 4.0)
     Watch.navigating = False
     if not done["ran"]:
         outcome["error"] = "no menu opened"

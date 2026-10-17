@@ -28,6 +28,7 @@ Keyboard Shortcuts with no key bound are skipped).
 """
 import faulthandler
 import tempfile
+import threading
 import json
 import os
 import sys
@@ -127,6 +128,18 @@ def problems_of(ex, command, entry, result):
     return problems or [f"{what}: failed"]
 
 
+PREVIOUS = {"job": None}        # the job this worker ran before the current one
+FAILURES = os.path.join(tempfile.gettempdir(), "test_every_command-failures.txt")
+
+
+def note_failure(job, previous, problems):
+    """One line per failed job: the job, the one before it in this worker, and
+    the first problem, so an order-dependent failure can be traced."""
+    first = problems[0].replace("\n", " ")[:400]
+    with open(FAILURES, "a", encoding="utf-8") as handle:
+        handle.write(f"{job}\tafter {previous}\tworker {os.getpid()}\t{first}\n")
+
+
 def run_entry(ex, command, entry):
     win = ex.window()                   # a new one if the last command closed it
     ex.set_theme(win, "light")
@@ -142,23 +155,32 @@ def run_entry(ex, command, entry):
 def test_every_command(exercise, command, index):
     ex = exercise
     entry = dict(command["entries"][index])
+    job = f"{command['id']}#{index}"
     # A hang ends the worker loudly; xdist drops a dead worker's stderr, so the
     # stacks go to a file named after the job as well (in the temp folder).
     hang_log = open(os.path.join(tempfile.gettempdir(), "test_every_command-hang-"
                                  f"{command['id']}-{index}-{os.getpid()}.txt"), "w")
     faulthandler.dump_traceback_later(240, exit=True, file=hang_log)
+    faulthandler.enable(file=hang_log, all_threads=True)    # a crash too
+    # and, before the hang timer ends the worker, what the harness's dialog
+    # watchers were doing (Python state only: read from another thread)
+    watchdog = threading.Timer(225, lambda: (hang_log.write(
+        f"\n{job}: {ex.Watch.state()}\n"), hang_log.flush()))
+    watchdog.daemon = True
+    watchdog.start()
     try:
         problems = run_entry(ex, command, entry)
         if problems:
-            # The window is reused from command to command, and reset() puts
-            # back everything known to matter; anything it misses would make a
-            # result depend on which test xdist ran before this one. So a
-            # failure is judged again on a window built for it alone.
-            ex.dispose(ex.WIN)
-            ex.WIN = None
-            problems = run_entry(ex, command, entry)
+            # No re-run: a result that depends on what ran before is still a
+            # bug a person can hit. What ran before in this worker is written
+            # down with it, to find the leak (a window left filtering events,
+            # a setting left behind) rather than call it a flake.
+            note_failure(job, PREVIOUS["job"], problems)
         assert not problems, "\n".join(problems)
     finally:
+        watchdog.cancel()
         faulthandler.cancel_dump_traceback_later()
+        faulthandler.disable()          # as pytest.ini has it, between these tests
         hang_log.close()
         os.remove(hang_log.name)
+        PREVIOUS["job"] = job
