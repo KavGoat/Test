@@ -713,6 +713,45 @@ class PagesPanel(QWidget):
         menu = self.window.page_menu(index)
         menu.exec(self.list.viewport().mapToGlobal(point))
 
+    def show_current(self, row: int) -> None:
+        """Make *row* the page in view in the strip, as going to a page does
+        (a key, a scroll, Go to Page): it alone is picked out — unless it is
+        one of a run picked out, which stays picked. The row already current
+        (the one just clicked) is left as the click left it.
+
+        QListWidget.setCurrentRow only swaps the row it last picked by
+        itself: rows picked any other way (a run re-picked after a rebuild,
+        pasted pages shown where they landed) stayed picked, so going on to
+        another page added it to them, and Page Setup or Set Scale opened on
+        "Selected" for pages nobody had picked (2026-10-17)."""
+        listed = self.list
+        entry = listed.item(row)
+        if entry is None or listed.currentRow() == row:
+            return
+        from PySide6.QtCore import QItemSelectionModel
+        index = listed.indexFromItem(entry)
+        flags = (QItemSelectionModel.NoUpdate if entry.isSelected()
+                 else QItemSelectionModel.ClearAndSelect)
+        was = listed.blockSignals(True)
+        listed.selectionModel().setCurrentIndex(index, flags)
+        listed.blockSignals(was)
+
+    def pick(self, rows) -> None:
+        """Pick out *rows* again after a rebuild (the page in view stays the
+        current one)."""
+        listed = self.list
+        rows = [row for row in rows if 0 <= row < listed.count()]
+        if not rows or rows == [listed.currentRow()]:
+            return                      # the rebuild already picked it alone
+        from PySide6.QtCore import QItemSelection, QItemSelectionModel
+        chosen = QItemSelection()
+        for row in rows:
+            index = listed.model().index(row, 0)
+            chosen.select(index, index)
+        was = listed.blockSignals(True)
+        listed.selectionModel().select(chosen, QItemSelectionModel.ClearAndSelect)
+        listed.blockSignals(was)
+
     def _row_changed(self, row: int) -> None:
         if not self._suppress and row >= 0:
             self.pageSelected.emit(row)

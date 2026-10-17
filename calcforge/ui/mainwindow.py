@@ -4378,9 +4378,7 @@ class MainWindow(QMainWindow):
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
         self.page_spin.blockSignals(False)
-        self.pages_panel.list.blockSignals(True)
-        self.pages_panel.list.setCurrentRow(index)
-        self.pages_panel.list.blockSignals(False)
+        self.pages_panel.show_current(index)
         self.refresh_scale_label()
         self.refresh_selection()
         self._sync_other_windows(True)
@@ -4890,9 +4888,7 @@ class MainWindow(QMainWindow):
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
         self.page_spin.blockSignals(False)
-        self.pages_panel.list.blockSignals(True)
-        self.pages_panel.list.setCurrentRow(index)
-        self.pages_panel.list.blockSignals(False)
+        self.pages_panel.show_current(index)
         self.refresh_scale_label()
         self._sync_other_windows(True)
 
@@ -4970,6 +4966,11 @@ class MainWindow(QMainWindow):
         part of the step too (Page Setup moves it)."""
         before = self._structure_snapshot()
         marks_before = [mark.to_dict() for mark in self.document.bookmarks]
+        # the run picked out in Thumbnails, which a change to those pages that
+        # leaves them where they are keeps picked (Page Setup, Crop Pages, as
+        # Set Scale and Flatten already did)
+        picked = self.selected_pages()
+        order = [page.uid for page in self.document.pages]
         scroll = (self.view.horizontalScrollBar().value(),
                   self.view.verticalScrollBar().value())
         mutate()
@@ -4987,6 +4988,8 @@ class MainWindow(QMainWindow):
         self.current_index = target
         self.view._shown_page = target
         self.follow_scrolled_page(target)
+        if len(picked) > 1 and [page.uid for page in self.document.pages] == order:
+            self.pages_panel.pick(picked)
         after = self._structure_snapshot(reuse=getattr(self, "_written_pages", None))
         if after["pages"] == before["pages"]:
             # nothing about the pages changed (Page Setup OK'd as it was, say):
@@ -5186,7 +5189,7 @@ class MainWindow(QMainWindow):
         # Land on it, and say where it went: a page inserted somewhere out of
         # sight is a page nobody can find.
         self.go_to_page(target)
-        self.pages_panel.list.setCurrentRow(target)
+        self.pages_panel.show_current(target)
         self.status_hint.setText(f"Page pasted in as page {target + 1}")
 
     def _pages_for(self, index: Optional[int] = None) -> list[int]:
@@ -5354,6 +5357,7 @@ class MainWindow(QMainWindow):
         pagesetup.Plan). False, and nothing recorded, if it changes nothing."""
         from . import pagesetup
         changes = pagesetup.changes_for(self.document, plan, pages)
+        picked = self.selected_pages()
         if not changes:
             # OK with nothing changed changes nothing: not the view, not the
             # history (QA F-28)
@@ -5373,6 +5377,8 @@ class MainWindow(QMainWindow):
         if not preserve_view:
             self.view.fit_page()
             self._note_view_after_change()
+            if len(picked) > 1:
+                self.pages_panel.pick(picked)   # the fit scrolled past other pages
         # the scale label, the lists and the Page panel came up to date with
         # the pages; the Properties of what is picked out follow
         self.refresh_selection()
@@ -5428,10 +5434,7 @@ class MainWindow(QMainWindow):
             # Thumbnails stay picked
             picked = self.selected_pages()
             self.pages_panel.rebuild(self.document, self.current_index)
-            listed = self.pages_panel.list
-            for row in picked:
-                if 0 <= row < listed.count():
-                    listed.item(row).setSelected(True)
+            self.pages_panel.pick(picked)
         self.apply_scale_change()
 
     def insert_pages_dialog(self, index: Optional[int] = None,

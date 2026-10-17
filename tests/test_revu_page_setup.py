@@ -51,9 +51,7 @@ def drawn(window, tmp_path):
     window.show()
     window.activateWindow()
     window.open_from_command_line(str(path))
-    for page in window.document.pages:
-        page.scale = PageScale.from_ratio(100)
-    window.apply_scale_change()
+    window.set_page_scale(PageScale.from_ratio(100), [0, 1, 2])
     window.go_to_page(0)
     window.view.set_zoom(1.0)
     window.view.go_to_page_top(0)
@@ -845,3 +843,73 @@ def test_fifty_pages_go_quickly(window, tmp_path):
     window.undo_stack.undo()
     assert time.perf_counter() - started < 4.0
     assert size_of(window, 49) == pytest.approx(A4_WIDE, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# Thumbnails: going to another page picks it alone (2026-10-17)
+# ---------------------------------------------------------------------------
+
+def pick_in_thumbnails(window, first, last):
+    """Click one thumbnail and Shift-click another, as a person picks a run."""
+    listed = window.pages_panel.list
+    for row, modifier in ((first, Qt.NoModifier), (last, Qt.ShiftModifier)):
+        listed.scrollToItem(listed.item(row))
+        rect = listed.visualItemRect(listed.item(row))
+        QTest.mouseClick(listed.viewport(), Qt.LeftButton, modifier, rect.center())
+    settle()
+
+
+def press(window, key, modifiers=Qt.NoModifier):
+    window.activateWindow()
+    settle()
+    QTest.keyClick(window.view, key, modifiers)
+    settle()
+
+
+def test_set_scale_then_another_page_picks_that_page_alone(drawn):
+    """Set Scale on All Pages re-picked page 1 in Thumbnails, and every page
+    gone to after it was added to it: Page Setup then opened on Selected."""
+    from calcforge.ui.dialogs import ScaleDialog
+    w = drawn
+    failures = []
+
+    def apply_to_all(dialog):
+        pick(dialog.pages.combo, "All Pages")
+        click(dialog.apply_button)
+    when_modal(ScaleDialog, apply_to_all, failures)
+    w.act_scale.trigger()
+    settle()
+    assert not failures, failures
+    assert w.selected_pages() == [0]
+    press(w, Qt.Key_End)
+    assert w.selected_pages() == [2]
+    press(w, Qt.Key_Left, Qt.ControlModifier)
+    assert w.selected_pages() == [1]
+    seen = {}
+    page_setup(w, lambda d: seen.update(which=d.pages.which(), pages=d.page_indexes()),
+               ok=False)
+    assert seen == {"which": "current", "pages": [1]}
+
+
+@pytest.mark.parametrize("command", ["page setup", "crop pages", "set scale"])
+def test_a_run_stays_picked_after_a_command_and_going_on_replaces_it(drawn, command):
+    w = drawn
+    pick_in_thumbnails(w, 0, 1)
+    assert w.selected_pages() == [0, 1]
+    if command == "page setup":
+        page_setup(w, lambda d: pick(d.media, "A3"))
+        assert size_of(w, 1) == pytest.approx(A3_WIDE, abs=0.01)
+    elif command == "crop pages":
+        dialog = w.crop_pages_dialog()
+        assert dialog.page_indexes() == [0, 1]
+        for box in dialog.findChildren(type(w.page_panel.width_mm)):
+            box.setValue(10.0)
+        w.finish_crop_pages(dialog)
+        assert size_of(w, 1)[0] < A4_WIDE[0] - 1
+    else:
+        w.set_page_scale(PageScale.from_ratio(50), [0, 1])
+    assert w.selected_pages() == [0, 1]            # what it was done to, still picked
+    press(w, Qt.Key_End)
+    assert w.selected_pages() == [2]               # and going on picks the page alone
+    press(w, Qt.Key_Home)
+    assert w.selected_pages() == [0]
