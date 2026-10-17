@@ -57,7 +57,12 @@ BUILTIN_CONSTANTS = {
 
 # Names and functions the equations don't define themselves but the
 # document's tables and sheets offer (calcforge/sheet/docbook.py): an object
-# with value(name), has(name), function(name, nargs) and names(), or None.
+# with value(name, key), has(name, key), function(name, nargs, key),
+# defined_at(name, key), function_at(name, nargs, key) and names(), or None.
+# A table's names are defined where the table is in the document, so they
+# take their turn with the equations' definitions in reading order: the
+# latest definition before an equation is the one it reads, whichever kind
+# it is (IndexedContext.entry).
 EXTERNAL = None
 
 
@@ -109,6 +114,10 @@ class Context:
         out = self.parent.function_arities() if self.parent is not None else {}
         out.update({n: k for n, k in self.funcs})
         return out
+
+    def reading_key(self):
+        """Where in the worksheet this is read (None: nowhere in particular)."""
+        return self.parent.reading_key() if self.parent is not None else None
 
 
 class DefinitionIndex:
@@ -227,6 +236,10 @@ class DefinitionIndex:
         return {n: k for (n, k), lst in self.funcs.items() if self.last_entry(lst, key) is not None}
 
 
+# The value of an entry whose definition is in the document's tables.
+TABLES = object()
+
+
 class IndexedContext(Context):
     """What one region sees: its own definitions over the index at its key."""
 
@@ -235,19 +248,57 @@ class IndexedContext(Context):
         self.index = index
         self.key = key
 
+    def reading_key(self):
+        return self.key
+
+    # The one rule for which definition a region reads (SMath's, extended
+    # to the document's tables and sheets): the latest one before it in
+    # reading order — page by page, top to bottom — that it can see. The
+    # equations' own (equations, measurement variables, calculation-block
+    # members, globals) are in the index; a table's names are defined at
+    # its top-left corner (EXTERNAL.defined_at).
+    def _equation_entry(self, name: str):
+        return self.index.last_entry(self.index.vars.get(name), self.key)
+
+    def _function_entry(self, name: str, nargs: int):
+        return self.index.last_entry(self.index.funcs.get((name, nargs)), self.key)
+
+    def entry(self, name: str):
+        """The definition of *name* in force here, as (reading key, value),
+        the value being TABLES when it is a table's; None when nothing
+        before here defines it."""
+        found = self._equation_entry(name)
+        if EXTERNAL is not None:
+            at = EXTERNAL.defined_at(name, self.key)
+            if at is not None and (found is None or at > found[0]):
+                return at, TABLES
+        return found
+
     def lookup(self, name: str):
         if name in self.vars:
             return self.vars[name]
-        return self.index.var_before(name, self.key)
+        found = self.entry(name)
+        # a table's value is fetched by the evaluator (EXTERNAL.value)
+        return None if found is None or found[1] is TABLES else found[1]
 
     def has(self, name: str) -> bool:
-        if name in self.vars or self.index.var_before(name, self.key) is not None:
+        if name in self.vars or self.entry(name) is not None:
             return True
-        return EXTERNAL is not None and EXTERNAL.has(name)
+        # known from an earlier section too: its value then says why it can't be read
+        return EXTERNAL is not None and EXTERNAL.has(name, self.key)
 
     def function(self, name: str, nargs: int):
         f = self.funcs.get((name, nargs))
-        return f if f is not None else self.index.func_before(name, nargs, self.key)
+        if f is not None:
+            return f
+        found = self._function_entry(name, nargs)
+        if found is None:
+            return None
+        if EXTERNAL is not None:
+            at = EXTERNAL.function_at(name, nargs, self.key)
+            if at is not None and at > found[0]:
+                return None           # a table of that name, put after it, is the lookup now
+        return found[1]
 
     def any_function(self, name: str):
         for (n, k), f in self.funcs.items():
@@ -407,12 +458,18 @@ class Evaluator:
             self.reads.add(n.name)
         v = ctx.lookup(n.name)
         if v is None:
+            if EXTERNAL is not None:
+                # a table's name: the definition in force here (defined
+                # after any equation's), or, with none before, a table's
+                # after it — though not over a built-in constant then
+                key = ctx.reading_key()
+                if n.name not in BUILTIN_CONSTANTS or (
+                        key is not None and EXTERNAL.defined_at(n.name, key) is not None):
+                    v = EXTERNAL.value(n.name, key)
+                    if v is not None:
+                        return v
             if n.name in BUILTIN_CONSTANTS:
                 return BUILTIN_CONSTANTS[n.name]
-            if EXTERNAL is not None:
-                v = EXTERNAL.value(n.name)
-                if v is not None:
-                    return v
             raise err("not_defined", n.name, node=n)
         if isinstance(v, Lazy):
             try:
@@ -550,7 +607,7 @@ class Evaluator:
         if name == "":
             raise err("syntax", node=n)
         if EXTERNAL is not None:
-            table = EXTERNAL.function(name, len(n.args))
+            table = EXTERNAL.function(name, len(n.args), ctx.reading_key())
             if table is not None:
                 try:
                     return table([self.eval(a, ctx) for a in n.args])

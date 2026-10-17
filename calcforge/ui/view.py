@@ -1038,6 +1038,16 @@ class PageView(QGraphicsView):
             pass
         if window is not None and hasattr(window, "end_canvas_sessions"):
             window.end_canvas_sessions(self)
+        tables = getattr(self, "tables", None)
+        if tables is not None:
+            # a sheet or table open on the canvas going out: what it shows
+            # outside itself (formula bar, tips, unit box) goes with it
+            try:
+                if tables.item is not None:
+                    tables.close()          # what was being typed is kept, as leaving does
+                tables.end_session()
+            except RuntimeError:
+                pass
         self._search_marks = []
         self._snapshot = []
 
@@ -1090,17 +1100,16 @@ class PageView(QGraphicsView):
 
         self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self._zooming = True
-        with self.zoom_scroll():
-            self._zoom = factor
-            self.apply_view_transform()
-            self._update_desk_margin()
-            # Where that page point landed, and how far it has to come back.
-            landed = self.viewportTransform().map(keep_scene)
-            drift = landed - keep_view
-            self.horizontalScrollBar().setValue(
-                self.horizontalScrollBar().value() + round(drift.x()))
-            self.verticalScrollBar().setValue(
-                self.verticalScrollBar().value() + round(drift.y()))
+        self._zoom = factor
+        self.apply_view_transform()
+        self._update_desk_margin()
+        # Where that page point landed, and how far it has to come back.
+        landed = self.viewportTransform().map(keep_scene)
+        drift = landed - keep_view
+        self.horizontalScrollBar().setValue(
+            self.horizontalScrollBar().value() + round(drift.x()))
+        self.verticalScrollBar().setValue(
+            self.verticalScrollBar().value() + round(drift.y()))
         self._zooming = False
         self.zoomChanged.emit(factor)
 
@@ -1162,28 +1171,7 @@ class PageView(QGraphicsView):
         frame = self.frame()
         return frame.mapRectToScene(frame.page_rect()) if frame is not None else None
 
-    #: How many zooms (and fits) are scrolling the view right now: the page
-    #: they scroll onto is not one the reader went to (window.follow_scrolled_page).
-    zoom_scrolling = 0
-
-    def zoom_scroll(self):
-        """Scrolling done by a zoom or a fit, for its length."""
-        from contextlib import contextmanager
-
-        @contextmanager
-        def held():
-            self.zoom_scrolling += 1
-            try:
-                yield
-            finally:
-                self.zoom_scrolling -= 1
-        return held()
-
     def fit_page(self) -> None:
-        with self.zoom_scroll():
-            self._fit_page()
-
-    def _fit_page(self) -> None:
         rect = self.page_scene_rect()
         if rect is None or rect.width() <= 0 or rect.height() <= 0:
             return
@@ -1194,10 +1182,6 @@ class PageView(QGraphicsView):
         self.centerOn(rect.center())
 
     def fit_width(self) -> None:
-        with self.zoom_scroll():
-            self._fit_width()
-
-    def _fit_width(self) -> None:
         rect = self.page_scene_rect()
         if rect is None or rect.width() <= 0:
             return
@@ -1271,10 +1255,6 @@ class PageView(QGraphicsView):
         return scene.index_at(middle)
 
     def zoom_to_selection(self) -> None:
-        with self.zoom_scroll():
-            self._zoom_to_selection()
-
-    def _zoom_to_selection(self) -> None:
         items = self.scene().selectedItems() if self.scene() else []
         if not items:
             return

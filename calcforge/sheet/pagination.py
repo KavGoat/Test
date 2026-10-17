@@ -8,7 +8,8 @@ title rows (Print Titles) repeat at the top of every page after the first.
 
 A sheet's page options live in ``sheet.page``:
 
-    {"fit_width": False, "fit_tall": 0, "scale": 100, "print_area": None or [t, l, b, r],
+    {"rows": None or the number of rows the sheet has,
+     "fit_width": False, "fit_tall": 0, "scale": 100, "print_area": None or [t, l, b, r],
      "titles": None or [first_row, last_row], "title_cols": None or [first, last],
      "breaks": [row, ...], "col_breaks": [col, ...],
      "center_h": False, "center_v": False,
@@ -18,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-DEFAULTS = {"fit_width": False, "fit_tall": 0, "scale": 100, "print_area": None, "titles": None,
+DEFAULTS = {"rows": None, "fit_width": False, "fit_tall": 0, "scale": 100, "print_area": None, "titles": None,
             "title_cols": None, "breaks": [], "col_breaks": [],
             "center_h": False, "center_v": False, "print_gridlines": False,
             "print_headings": False}
@@ -67,9 +68,20 @@ class Paging:
         return group * max(1, len(self.slices)) + slice_index
 
 
-def paginate(sheet, setup, pages_wanted: int = 1) -> Paging:
-    """The run's pages: at least pages_wanted, and as many as its content needs."""
+def paginate(sheet, setup, pages_wanted: int = 1, count_rows: bool = True) -> Paging:
+    """The run's pages: as many as its rows need (the user, 2026-10-17: a
+    sheet has as many rows as it has, and the pages follow them, as in
+    Excel). With a print area, its pages and only its pages, as Excel counts
+    them: the rows above it are shown on its first page and the rows below
+    on its last, outside the blue line, never printed.
+
+    A sheet that doesn't say how many rows it has yet (made before rows were
+    counted) has at least pages_wanted pages, as before; the run then
+    records the rows those pages hold (SheetRunItem.relayout)."""
     opts = options(sheet)
+    rows = opts.get("rows") if count_rows else None
+    if rows is not None:
+        pages_wanted = 1
     left, top, width, height = setup.content_rect_pt
     headings = opts["print_headings"]
     if headings:
@@ -127,6 +139,8 @@ def paginate(sheet, setup, pages_wanted: int = 1) -> Paging:
     titles_h = sum(sheet.height(r) for r in range(titles[0], titles[1] + 1)) if titles else 0.0
     breaks = set(int(b) for b in opts["breaks"])
     last_needed = data[2] if data is not None else 0
+    if rows is not None:
+        last_needed = max(last_needed, int(rows) - 1)
     if area:
         last_needed = max(last_needed, area[2])
     elif breaks:
@@ -139,7 +153,8 @@ def paginate(sheet, setup, pages_wanted: int = 1) -> Paging:
     def slice_rows(scale: float, wanted: int) -> list:
         room = height / scale
         slices = []
-        row = 0
+        # a print area's pages start at its top row (Excel)
+        row = first_row if area else 0
         while True:
             start = row
             shown_from = max(start, first_row)
@@ -149,19 +164,32 @@ def paginate(sheet, setup, pages_wanted: int = 1) -> Paging:
                 h = sheet.height(row)
                 if row > start and (used + h > avail + 0.01 or row in breaks):
                     break
+                if row > start and rows is not None and row > last_needed and \
+                        not (area and row <= area[2]):
+                    break                # the sheet's last row: its last page ends there
                 used += h
                 row += 1
                 if row - start > 5000:
                     break
             slices.append((start, row - 1))
+            if area and row > area[2]:
+                break                    # the print area's last page
             if len(slices) >= wanted and row > last_needed:
                 break
             if len(slices) > 2000:
                 break
+        if area and slices:
+            # what lies outside it is shown, not printed: the rows above on
+            # its first page, the rows below on its last
+            a, b = slices[0]
+            slices[0] = (0, b)
+            a, b = slices[-1]
+            slices[-1] = (a, max(b, last_needed))
         return slices
 
     def counted(slices) -> int:
-        return len([s for s in slices if s[0] <= last_needed and s[1] >= first_row])
+        return len(slices) if area else \
+            len([s for s in slices if s[0] <= last_needed and s[1] >= first_row])
 
     scale = adjust
     if fitting:
@@ -202,6 +230,13 @@ def paginate(sheet, setup, pages_wanted: int = 1) -> Paging:
 
 def pages_needed(sheet, setup) -> int:
     return paginate(sheet, setup, 1).pages
+
+
+def rows_of(sheet, setup, pages: int) -> int:
+    """How many rows *pages* pages of the sheet hold, as laid out now (for a
+    sheet that doesn't count its rows yet, and for a page added by hand)."""
+    probe = paginate(sheet, setup, pages, count_rows=False)
+    return probe.slices[-1][1] + 1 if probe.slices else 1
 
 
 def page_of_row(paging: Paging, row: int) -> int:

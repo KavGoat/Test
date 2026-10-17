@@ -332,6 +332,8 @@ class TableItem(MarkupItem):
         if self.sheet is None:
             return
         from ..sheet.store import sheet_to_dict
+        from ..ui.tableedit import table_left
+        table_left(self.uid)
 
         self._data = sheet_to_dict(self.sheet)
         book = self._book

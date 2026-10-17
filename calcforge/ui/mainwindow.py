@@ -4353,6 +4353,11 @@ class MainWindow(QMainWindow):
         self.view._shown_page = index
         self.scene.show_page(index)           # Single Page / Side-by-Side: its spread
         self.view.go_to_page_top(index)
+        # Zoomed out, that scroll can leave a later page in the middle of the
+        # window, which its scroll reports as the page in view: the page
+        # asked for is the one gone to, in the page box and Thumbnails alike.
+        self.current_index = index
+        self.view._shown_page = index
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
         self.page_spin.blockSignals(False)
@@ -4865,10 +4870,11 @@ class MainWindow(QMainWindow):
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
         self.page_spin.blockSignals(False)
-        # a zoom or a fit scrolls past pages on the way: the run picked out
-        # in Thumbnails stays picked, only the page in view moves
-        self.pages_panel.show_current(
-            index, keep_run=getattr(self.view, "zoom_scrolling", 0) > 0)
+        # Scrolled to, zoomed or fitted onto: a run picked out in Thumbnails
+        # stays picked and only the page in view moves; Page Setup, Delete
+        # and the rest still act on the run until another thumbnail is
+        # clicked (the user, 2026-10-17). One page picked follows the view.
+        self.pages_panel.show_current(index, keep_run=True)
         self.refresh_scale_label()
         self._sync_other_windows(True)
 
@@ -8180,6 +8186,10 @@ class MainWindow(QMainWindow):
         # on the page is picked in the list, without either sending the choice
         # back to the other and fighting over it.
         self.markups_panel.follow_the_canvas()
+        # the Variables panel's bold rows: the definitions the picked equation reads
+        panel = getattr(self, "variables_panel", None)
+        if panel is not None:
+            panel.selection_changed()
         # The box round a group and the handles are painted over the canvas
         # rather than by the items, and Qt only repaints the part of the
         # canvas that changed. Selecting something changed no part of it, so

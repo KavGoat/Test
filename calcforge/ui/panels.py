@@ -155,6 +155,46 @@ class PageListWidget(QListWidget):
         super().__init__(parent)
         self.external_drop_row: int | None = None
         self.scale = 1.0
+        # The page in view, outlined in the accent: a run picked out stays
+        # picked while the reader scrolls on, so the strip needs a marker of
+        # its own for where they are (the user, 2026-10-17).
+        self.in_view_row = -1
+        self.itemSelectionChanged.connect(lambda: self.viewport().update())
+
+    # -- the page in view -----------------------------------------------------
+    def set_in_view(self, row: int) -> None:
+        if row != self.in_view_row:
+            self.in_view_row = row
+            self.viewport().update()
+
+    def in_view_outlined(self) -> bool:
+        """Whether the page in view is drawn outlined: not when it is the one
+        page picked out, whose highlight already says where the reader is."""
+        entry = self.item(self.in_view_row) if self.in_view_row >= 0 else None
+        if entry is None:
+            return False
+        picked = self.selectedItems()
+        return not (len(picked) == 1 and picked[0] is entry)
+
+    def in_view_frame(self) -> QRect:
+        """Where the outline goes: round the page's picture in its cell."""
+        entry = self.item(self.in_view_row) if self.in_view_row >= 0 else None
+        if entry is None:
+            return QRect()
+        from PySide6.QtWidgets import QStyle, QStyleOptionViewItem
+        option = QStyleOptionViewItem()
+        self.initViewItemOption(option)
+        option.rect = self.visualItemRect(entry)
+        option.icon = entry.icon()
+        option.text = entry.text()
+        option.features |= (QStyleOptionViewItem.HasDecoration
+                            | QStyleOptionViewItem.HasDisplay)
+        picture = entry.icon().actualSize(self.iconSize())
+        option.decorationSize = picture if picture.isValid() else self.iconSize()
+        box = self.style().subElementRect(QStyle.SE_ItemViewItemDecoration, option, self)
+        if not box.isValid() or box.isEmpty():
+            box = option.rect
+        return box.adjusted(-3, -3, 3, 3).intersected(option.rect.adjusted(1, 1, -1, -1))
 
     def cell_size(self) -> QSize:
         return QSize(max(int(self.CELL_WIDTH * self.scale), 24),
@@ -288,6 +328,16 @@ class PageListWidget(QListWidget):
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
+        if self.in_view_outlined():
+            from ..app import current_theme
+            from ..theme import tokens
+            frame = self.in_view_frame()
+            painter = QPainter(self.viewport())
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setPen(QPen(QColor(tokens(current_theme())["accent"]), 2.0))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(QRectF(frame).adjusted(1, 1, -1, -1), 2, 2)
+            painter.end()
         if self.external_drop_row is None:
             return
         start, end = self.drop_indicator_line(self.external_drop_row)
@@ -752,9 +802,10 @@ class PagesPanel(QWidget):
 
     def show_current(self, row: int, keep_run: bool = False) -> None:
         """Make *row* the page in view in the strip, as going to a page does
-        (a key, a scroll, Go to Page): it alone is picked out — unless it is
-        one of a run picked out, which stays picked. A row clicked or keyed
-        to in the strip itself is left as the strip picked it.
+        (Home/End, Ctrl+arrows, the page box): it alone is picked out —
+        unless it is one of a run picked out, which stays picked. A row
+        clicked or keyed to in the strip itself is left as the strip picked
+        it.
 
         QListWidget.setCurrentRow only swaps the row it last picked by
         itself: rows picked any other way (a run re-picked after a rebuild,
@@ -762,12 +813,14 @@ class PagesPanel(QWidget):
         another page added it to them, and Page Setup or Set Scale opened on
         "Selected" for pages nobody had picked (2026-10-17).
 
-        *keep_run*: the page came into view because the view was zoomed or
-        fitted, which scrolls past other pages on the way. A run picked out
-        stays picked and only the current row moves; a zoom to look closer
-        is not a choice of pages (2026-10-17)."""
+        *keep_run*: the page came into view by scrolling, zooming or
+        fitting rather than being gone to. A run picked out stays picked and
+        only the current row moves — scrolling to look is not a choice of
+        pages (the user, 2026-10-17); one page picked follows the view."""
         listed = self.list
         entry = listed.item(row)
+        if entry is not None:
+            listed.set_in_view(row)      # the outline goes where the reader is
         if entry is None or self._following_the_strip:
             return                      # the strip itself chose it: as it chose
         from PySide6.QtCore import QItemSelectionModel
@@ -854,6 +907,7 @@ class PagesPanel(QWidget):
                              f"\nScale {page.scale.label}")
             self.list.addItem(entry)
         self.list.setCurrentRow(current)
+        self.list.in_view_row = current
         self._suppress = False
         self._draw_what_is_on_screen()
 
