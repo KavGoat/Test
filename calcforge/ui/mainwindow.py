@@ -4908,10 +4908,11 @@ class MainWindow(QMainWindow):
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
         self.page_spin.blockSignals(False)
-        # a zoom or a fit scrolls past pages on the way: the run picked out
-        # in Thumbnails stays picked, only the page in view moves
-        self.pages_panel.show_current(
-            index, keep_run=getattr(self.view, "zoom_scrolling", 0) > 0)
+        # Scrolled to, zoomed or fitted onto: a run picked out in Thumbnails
+        # stays picked and only the page in view moves; Page Setup, Delete
+        # and the rest still act on the run until another thumbnail is
+        # clicked (the user, 2026-10-17). One page picked follows the view.
+        self.pages_panel.show_current(index, keep_run=True)
         self.refresh_scale_label()
         self._sync_other_windows(True)
 
