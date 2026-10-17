@@ -132,36 +132,47 @@ def test_clicks_go_to_the_cells_in_markup_mode_and_markups_win(w):
     assert box.isSelected()
 
 
-def test_going_past_the_last_page_adds_one(w):
+def test_going_past_the_last_row_adds_one_row(w):
+    """↓ or Enter on the sheet's last row adds one row (the user,
+    2026-10-17, replacing 2026-10-10's whole page); a page comes with it
+    only when the rows run past the page, as in Excel."""
     run = sheet_page(w)
     n = run.paging.slices[0][1] + 1            # rows on a page
+    assert run.size[0] == n, "a fresh sheet: a page of rows"
     open_at(w, run, "A1")
     w.view.tables.select((n - 1, 0))
     key(w, Qt.Key_Down)
-    assert w.view.tables.active == (n, 0), "on to the row below the last page"
-    assert len(w.document.pages) == 3, "and the page it is on (2026-10-10)"
+    (run,) = runs(w)
+    assert w.view.tables.active == (n, 0), "on to the row below the last one"
+    assert run.size[0] == n + 1, "one row more, not a page of them"
+    assert len(w.document.pages) == 3, "the page that row needs"
+    assert run.paging.slices == [(0, n - 1), (n, n)]
     type_text(w, "next")
     enter(w)
-    assert len(w.document.pages) == 3
-    assert [p.sheet for p in w.document.pages[1:]] == [run.uid, run.uid]
     (run,) = runs(w)
+    assert run.size[0] == n + 2 and len(w.document.pages) == 3, "Enter on the last row: one more"
+    assert [p.sheet for p in w.document.pages[1:]] == [run.uid, run.uid]
     assert value(run, n, 0) == "next"
-    assert run.paging.slices[1][0] == n
     # page 2 sits right under page 1: one continuous grid
     f1, f2 = (w.document.pages[i].frame for i in (1, 2))
     assert f2.scenePos().y() == pytest.approx(f1.scenePos().y() + f1.page_rect().height())
-    w.undo_stack.undo()
+    w.undo_stack.undo()                       # the row Enter added
     pump()
     (run,) = runs(w)
-    assert value(run, n, 0) is None
-    assert len(w.document.pages) == 3, "the typing is undone; the page stays a step longer"
-    w.undo_stack.undo()
+    assert run.size[0] == n + 1 and value(run, n, 0) == "next"
+    w.undo_stack.undo()                       # the typing
     pump()
-    assert len(w.document.pages) == 2
-    w.undo_stack.redo()
-    w.undo_stack.redo()
+    (run,) = runs(w)
+    assert value(run, n, 0) is None and len(w.document.pages) == 3
+    w.undo_stack.undo()                       # the row ↓ added, and its page
     pump()
-    assert len(w.document.pages) == 3 and value(runs(w)[0], n, 0) == "next"
+    (run,) = runs(w)
+    assert run.size[0] == n and len(w.document.pages) == 2
+    for _ in range(3):
+        w.undo_stack.redo()
+    pump()
+    (run,) = runs(w)
+    assert len(w.document.pages) == 3 and value(run, n, 0) == "next" and run.size[0] == n + 2
 
 
 def test_empty_pages_at_the_end_are_kept(w):
@@ -196,8 +207,13 @@ def test_markups_move_with_inserted_rows_even_onto_the_next_page(w):
     assert where.y() == pytest.approx(target.y(), abs=0.01)
     w.undo_stack.undo()
     pump()
-    (box2,) = [m for m in w.document.pages[1].frame.markups() if isinstance(m, RectItem)]
-    assert box2.pos().y() == pytest.approx(near_end.y())
+    # back over row 51, on the page that holds it
+    (run,) = runs(w)
+    (box2,) = [m for p in w.document.pages if p.frame is not None
+               for m in p.frame.markups() if isinstance(m, RectItem)]
+    back = run.mapFromScene(box2.scenePos())
+    assert back.x() == pytest.approx(near_end.x(), abs=0.01)
+    assert back.y() == pytest.approx(near_end.y(), abs=0.01)
 
 
 def test_a_taller_row_pushes_the_markups_below_it_down(w):
@@ -338,14 +354,15 @@ def test_manual_breaks_and_a_dragged_automatic_break(w):
 def test_a_break_takes_back_the_page_it_made(w):
     """No surprise rows (the user, 2026-10-15): a break puts the rows after
     it on the next page — there even on an empty sheet — and removing it
-    takes back the page it added, in one undo step; a page the user added
-    stays."""
+    takes back the page it added, in one undo step. A page the user added
+    added its rows, which stay (2026-10-17: the pages follow the rows)."""
     run = sheet_page(w)
     assert len(w.document.pages) == 2
     sheetlayout.insert_break(w, run, 10)
     pump()
     (run,) = runs(w)
-    assert run.paging.slices == [(0, 9), (10, 57)], "the rows after the break: the next page"
+    # the sheet's 48 rows, the ones after the break on the next page
+    assert run.paging.slices == [(0, 9), (10, 47)], "the rows after the break: the next page"
     assert len(w.document.pages) == 3
     sheetlayout.remove_break(w, run, 10)
     pump()
@@ -374,7 +391,8 @@ def test_a_break_takes_back_the_page_it_made(w):
     pump()
     (run,) = runs(w)
     frames = run.run_frames()
-    assert len(frames) == 4, "the break's page, then the empty one added by hand"
+    # the 96 rows: 48 on the first page, 12 up to the break, the rest after it
+    assert run.paging.slices == [(0, 47), (48, 59), (60, 95)] and len(frames) == 3
     box = RectItem("rect", QRectF(50, 50, 40, 40))
     frames[2].add_markup(box)
     sheetlayout.remove_break(w, run, 60)

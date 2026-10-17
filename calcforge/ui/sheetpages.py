@@ -1,9 +1,12 @@
 """Spreadsheet pages in the window: making them, growing them, and keeping
 each run of them one sheet (items/sheetpage.py, docs/SPREADSHEET_DESIGN.md).
 
-* A run of consecutive spreadsheet pages is one sheet; typing past its last
-  page adds one (in the same undo step as the typing), and pages left empty
-  at its end are kept (the user's choice).
+* A run of consecutive spreadsheet pages is one sheet with as many rows as
+  it has (the user, 2026-10-17, replacing "pages left empty at its end are
+  kept"): its pages follow its rows, its print area and its breaks, as
+  Excel's page count does. A row added past the last page adds a page; a
+  page left with no rows (and nothing drawn on it) goes, in the same undo
+  step as the change.
 * No ordinary page goes into the middle of a run, and a reorder may not
   split one: a run moves as a whole.
 * Paper and orientation are the run's, not a page's: turning one page turns
@@ -101,22 +104,41 @@ def settle(window) -> None:
 
 
 def short_runs(window) -> list:
-    """Runs whose cells need more pages than they have: [(item, extra)]."""
+    """Runs whose pages don't match what their rows need: [(item, change)],
+    more pages wanted (change > 0), or empty pages at the end to take away
+    (change < 0: only pages with nothing drawn on them go)."""
+    from ..items.sheetpage import SheetRunItem
     out = []
     for item in run_items(window.scene):
         if item.sheet is None:
             continue
-        if item.relayout():
-            out.append((item, item.paging.pages - len(item.run_frames())))
+        item.relayout()
+        frames = item.run_frames()
+        need = max(1, item.paging.pages)
+        if need > len(frames):
+            out.append((item, need - len(frames)))
+            continue
+        spare = 0
+        for frame in reversed(frames[need:]):
+            if any(not isinstance(m, SheetRunItem) for m in frame.markups()):
+                break                   # something drawn on it: it stays
+            spare += 1
+        if spare:
+            out.append((item, -spare))
     return out
 
 
 def add_run_pages(window, short: list) -> None:
-    """Give each run the pages its cells need (after its last page)."""
+    """Give each run the pages its rows need (after its last page), or take
+    away the empty ones it no longer needs (a negative count)."""
     document = window.document
     for item, extra in short:
         frames = item.run_frames()
-        if not frames or extra <= 0:
+        if not frames or not extra:
+            continue
+        if extra < 0:
+            for frame in frames[extra:]:
+                document.remove_page(document.index_of(frame.page))
             continue
         last = document.index_of(frames[-1].page)
         for k in range(extra):
@@ -142,7 +164,17 @@ def insert_sheet_page(window, index: Optional[int] = None, before: bool = False,
     here = document.pages[which]
     if here.sheet is not None and not new_sheet:
         # on a run, it is one more page of it, at its end (the sheet grows
-        # downwards; a page never goes in ahead of its first)
+        # downwards; a page never goes in ahead of its first): a page's
+        # worth of rows more, and the page they need
+        from ..items.sheetpage import run_item_for
+        from ..sheet.pagination import rows_of
+        from . import sheetlayout
+        item = run_item_for(here.frame) if here.frame is not None else None
+        if item is not None and item.sheet is not None:
+            frames = item.run_frames()
+            rows = rows_of(item.sheet, frames[0].page.setup, len(frames) + 1)
+            sheetlayout.change_options(window, item, "Insert spreadsheet page", rows=rows)
+            return
         run = here.sheet
         pages = run_of(document, which)
         target = pages[-1] + 1

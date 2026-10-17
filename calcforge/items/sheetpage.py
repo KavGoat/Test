@@ -141,6 +141,13 @@ class SheetRunItem(TableItem):
         anchors = self._anchors if self._anchors is not None else self.capture_anchors()
         self._anchors = None
         setup = frames[0].page.setup
+        if (sheet.page or {}).get("rows") is None:
+            # a sheet made before rows were counted: it has the rows its
+            # pages hold now, and from here on its pages follow its rows
+            from ..sheet.pagination import rows_of
+            page = dict(sheet.page or {})
+            page["rows"] = rows_of(sheet, setup, len(frames))
+            sheet.page = page
         self.paging = paging = paginate(sheet, setup, len(frames))
         self.prepareGeometryChange()
         self._edges = None
@@ -541,7 +548,13 @@ class SheetRunItem(TableItem):
             if b < r0 or a > r1:
                 continue
             for j, (g0, g1) in enumerate(paging.groups):
+                if area:                     # the label in what prints of the page
+                    a, b = max(a, area[0]), min(b, area[1])
+                    if a > b:
+                        continue
                 box = QRectF(xs[g0], ys[a], xs[g1 + 1] - xs[g0], ys[b + 1] - ys[a])
+                if box.height() < 52:
+                    continue                 # a page of a row or two: no room to say so
                 painter.drawText(box, Qt.AlignCenter, f"Page {paging.index_of(i, j) + 1}")
 
     def _paint_breaks(self, painter: QPainter) -> None:

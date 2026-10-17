@@ -1441,6 +1441,16 @@ class Workbook:
                 if delta > 0:
                     return i + delta if i >= at else i
                 return None if at <= i < at - delta else (i + delta if i >= at - delta else i)
+            if axis == "row" and page.get("rows") is not None:
+                # a sheet has as many rows as it has: an inserted row is one
+                # more, a deleted one fewer (the user, 2026-10-17)
+                rows = int(page["rows"])
+                if delta > 0:
+                    rows = rows + delta if at < rows else max(rows, at + delta)
+                else:
+                    rows = max(1, rows - max(0, min(rows, at - delta) - at))
+                used = sheet.data_area()          # (the cells have moved already)
+                page["rows"] = max(rows, used[2] + 1) if used is not None else rows
             if axis == "row" and page.get("breaks"):
                 page["breaks"] = sorted({m for m in (mv(b) for b in page["breaks"]) if m})
             if axis == "col" and page.get("col_breaks"):

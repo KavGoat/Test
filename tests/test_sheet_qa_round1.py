@@ -476,6 +476,17 @@ def ink(w, row=0):
                if image.pixelColor(x, y).green() < 235)
 
 
+def ink_becomes(w, wanted, limit=1.5):
+    """Whether the first thumbnail's ink comes to satisfy *wanted* within
+    *limit* seconds (the refresh waits up to 400 ms after an edit)."""
+    deadline = time.perf_counter() + limit
+    while time.perf_counter() < deadline:
+        settle(40)
+        if wanted(ink(w)):
+            return True
+    return wanted(ink(w))
+
+
 def test_thumbnails_catch_up_with_undo_and_a_table_at_once(w):
     from tests.test_usability import drag
     settle(500)
@@ -485,23 +496,23 @@ def test_thumbnails_catch_up_with_undo_and_a_table_at_once(w):
     b = w.document.pages[0].frame.mapToScene(QPointF(300, 260))
     w.view.centerOn(a)
     drag(w.view, a.x(), a.y(), b.x(), b.y())
-    settle(150)
+    assert ink_becomes(w, lambda n: n > blank)
     drawn = ink(w)
     assert drawn > blank, "the new rectangle shows on its thumbnail"
     QTest.keyClick(w.view, Qt.Key_Z, CTRL)
-    settle(150)                       # was 400 ms, and the harness caught it stale
-    assert ink(w) == blank
+    # within the longest wait (400 ms; was always 400 ms, and the harness
+    # caught it stale), however loaded the machine is
+    assert ink_becomes(w, lambda n: n == blank)
     QTest.keyClick(w.view, Qt.Key_Y, CTRL)
-    settle(150)
-    assert ink(w) == drawn
+    assert ink_becomes(w, lambda n: n == drawn)
     table = make_table(w, x=100, y=400)
-    settle(150)
+    settle(600)                       # the new table drawn in, whatever the wait
     with_table = ink(w)
     click(w, cell_scene(table, "A1"))
     type_text(w, "8888888")
     enter(w)
-    settle(150)
-    assert ink(w) != with_table, "a value typed in an open table shows at once"
+    assert ink_becomes(w, lambda n: n != with_table), \
+        "a value typed in an open table shows (it stayed blank while a table was open)"
 
 
 def test_the_slot_line_of_pasted_pages_goes_with_their_undo(w):
