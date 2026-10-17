@@ -769,18 +769,19 @@ Round 1b re-ran a failing test on a fresh window. That re-run is gone: a
 failure that depends on what ran before is a bug a person can hit too, and
 "flake" is not a root cause.
 
-I ran the full suite at `-n 3` on eebcff1 without the re-run, three times, and
-fixed each cause before the next run. Every failure was in this file and was
-a harness fault. None was an app bug. The causes:
+I ran the full suite at `-n 3` on eebcff1 without the re-run, four times, and
+fixed each cause before the next run. All but one of the failures were in this
+file. The causes:
 
 | Job (and the job before it in its worker) | First failure | Cause | Fix |
 |---|---|---|---|
 | T0044#0 Measure ▸ Sketch to Scale Rectangle (after T0043#0) | not reached: no 'Sketch to Scale Rectangle' on the Measure bar | A family button shows the member last picked (an earlier job chose Ellipse), so the face read "Sketch to Scale Ellipse" | A person takes the member from the button's arrow menu, and so does the harness now |
 | P0078#0 Maths ▸ All functions… (after P0077#0) | not reached: the control is not on screen | P0077 presses every Maths button, and the section headers are buttons too: Arithmetic was rolled up | reset() puts each Maths section back as it was |
 | K0742#0 F7 Check Spelling | hung (4 min) in `check_spelling` → `SpellingDialog.exec()` | Handled dialogs were remembered by `id()`. The next word's dialog was built where the last one had been freed, got the same id, and was taken as already handled | Handled dialogs and popups are marked on the object itself, with the run they belong to |
-| R0275#1 Alignment | the worker died: a segmentation fault in `close_strays()`, while iterating `topLevelWidgets()` | Closing one stray window freed others (a dialog's popups), and the next wrapper in that old list pointed at freed memory | One stray at a time, from a fresh list; MainWindows are disposed of properly; `shutdown()` does the same |
+| R0275#1 Alignment; D0003#0 Rules Manager (twice) | the worker died: a segmentation fault in `close_strays()`, while iterating `topLevelWidgets()` | **An app bug**, fixed on main in 3ec54f1 while this round ran: the Markup Styles bar's `QToolBar.clear()` left freed buttons in the application's window list, and walking that list crashed | Going one stray at a time from a fresh list (here and in 3ec54f1's own change to this loop) did not stop it; the app fix did |
 | R0277#0 Add to Tool Chest ▸ Choose a Tool Set… | hung in `QInputDialog.getItem` | A dialog built in C++ where an earlier one was freed can come back as the old, dead Python wrapper; `isValid()` called it gone, so it was not closed | The watcher asks Qt for the active dialog again, at the moment it handles it |
-| D0003#0 and #1 Rules Manager; K0637#0 Ctrl+O | D0003#1 hung in `rules_manager()`; D0003#0 and K0637#0 killed their worker | The hang report showed the dialog watchers off: their timers were gone and the last tick was 713 s earlier. `tests/test_exercise_round1_undo.py` borrows this module's helpers and sets `exercise.APP` itself. In a worker that ran it before this file's next batch, `app()` took "APP is set" to mean "started" and turned no watcher on, so the first dialog was never closed. D0003#0's crash dump shows `close_strays()` meeting that unclosed dialog. K0637#0 died in an earlier run, before crashes were logged, so its cause is likely but not shown | `app()` keeps its own started flag. This is exactly the order-dependence a silent re-run would have hidden |
+| D0003#1 Rules Manager (and K0637#0 Ctrl+O, in an earlier run, before crashes were logged) | hung in `rules_manager()` | The hang report showed the dialog watchers off: their timers were gone and the last tick was 713 s earlier. `tests/test_exercise_round1_undo.py` borrows this module's helpers and sets `exercise.APP` itself. In a worker that ran it before this file's next batch, `app()` took "APP is set" to mean "started" and turned no watcher on, so the first dialog was never closed | `app()` keeps its own started flag. This is exactly the order-dependence a silent re-run would have hidden |
+| test_view_workspace.py: the dimmer test (another file) | the page was already dimmed before the test dimmed it | View ▸ Dimmer is app-wide state (`scene.DIMMER`), and this file's Dimmer commands left it on at a new level | reset() and shutdown() put `scene.DIMMER` back |
 | T0183#0 Borders ▸ All Borders (after T0182#0) | not reached: no menu opened | The Borders menu took over 0.6 s to show on the loaded machine, and the wait gave up | It waits up to 3 s for the menu, by looking, not by a fixed sleep |
 
 **Diagnostics kept in the file:**
@@ -790,4 +791,15 @@ a harness fault. None was an app bug. The causes:
 - Every failure is listed in `<tmp>/test_every_command-failures.txt`, with
   the job before it.
 
-**Result.** Full suite at `-n 3`, no re-run: SUITE16.
+**Result.** I ran the full suite at `-n 3` on 809f334 (with 3ec54f1's fix)
+merged with this file, with no re-run: 1318 s (22 min). About 6,230 passed,
+588 skipped, 1 failed: R0217#0 (cell ▸ Data ▸ Custom Sort…).
+- R0217#0's worker died with the same signature as the bug 3ec54f1 fixed: a
+  segmentation fault in `close_strays()` while walking
+  `QApplication.topLevelWidgets()`. The application's window list still
+  holds a freed widget after a table-cell dialog.
+- It did not reproduce in three parallel processes, each running all 178
+  table-cell right-click jobs twice.
+- It stays a failure (no re-run, no xfail). It is a finding for whoever
+  continues 3ec54f1's gdb hunt. D0003 (Rules Manager, also a table-cell
+  dialog) crashed the same way on eebcff1.
