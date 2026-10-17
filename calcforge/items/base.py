@@ -791,6 +791,9 @@ class MarkupItem(QGraphicsObject):
         # what the markup measures as its own box.
         self.their_box: tuple = ()
         self._their_look = None
+        #: an ink annotation's whole drawing by its file, on its first stroke,
+        #: while the Markups List's filter dims it (filterdim.py)
+        self._whole_look = None
         # One stroke of an annotation that came apart into several markups
         # (a multi-stroke ink line): while all of them are untouched the page
         # draws the annotation, on screen, and they draw nothing there.
@@ -1233,18 +1236,36 @@ class MarkupItem(QGraphicsObject):
             self._their_look.prepareGeometryChange()
             self._their_look.setVisible(wanted)
 
-    def paint_their_file(self, painter: QPainter, box=None) -> None:
+    def show_whole_annotation(self, box) -> None:
+        """Draw the ink annotation this stroke came from whole, by its file,
+        in *box* (page points) — or stop, with None. Its first stroke does
+        this while the Markups List's filter dims it, so it is dimmed with
+        its real curves rather than the strokes' straight-line reading."""
+        if box is None:
+            if self._whole_look is not None:
+                self._whole_look.setVisible(False)
+            return
+        if self._whole_look is None:
+            self._whole_look = _TheirLook(self, number=self.split_from)
+        self._whole_look.prepareGeometryChange()
+        self._whole_look.box = QRectF(box)
+        self._whole_look.setVisible(True)
+
+    def paint_their_file(self, painter: QPainter, box=None, number=None) -> None:
         """On screen, a markup nobody has changed is drawn by its own file:
         its annotation alone, in squares the render processes draw, laid in
         its place among the other markups — so one taken over and moved does
         not suddenly cover those the file draws on top of it (Calcs.pdf,
-        2026-10-01). The page itself is drawn without its markups."""
+        2026-10-01). The page itself is drawn without its markups.
+        *number*: another annotation than this markup's own (an ink line's,
+        drawn whole on its first stroke)."""
         frame = self.parentItem()
         page = getattr(frame, "page", None)
-        if (page is None or not self.from_annotation or getattr(frame, "print_mode", False)
+        number = number or self.from_annotation
+        if (page is None or not number or getattr(frame, "print_mode", False)
                 or not getattr(page, "pdf_key", None) or page.pdf_page_index is None
                 or not getattr(page, "pdf_annotations", True)
-                or self.from_annotation not in set(page.markup_annotations or ())):
+                or number not in set(page.markup_annotations or ())):
             return
         data = frame.document.asset(page.pdf_key)
         if not data:
@@ -1261,7 +1282,7 @@ class MarkupItem(QGraphicsObject):
         whole = frame.page_rect()
         tiles = pdftiles.TILES.annotation_tiles(
             page.pdf_key, data, int(page.pdf_page_index), whole, _painted_scale(painter),
-            box, self.from_annotation, box)
+            box, number, box)
         if not tiles:
             return
         painter.setWorldTransform(back * painter.worldTransform())
@@ -1903,9 +1924,14 @@ class _TheirLook(QGraphicsItem):
 
     MARKUP_LOOK = True
     _baked_rect = None
+    #: another annotation than its markup's own, in a box of its own (an ink
+    #: line drawn whole on its first stroke: MarkupItem.show_whole_annotation)
+    number = None
+    box = None
 
-    def __init__(self, markup):
+    def __init__(self, markup, number=None):
         super().__init__(markup)
+        self.number = number
         self.setAcceptedMouseButtons(Qt.NoButton)
         self.setAcceptHoverEvents(False)
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
@@ -1913,6 +1939,8 @@ class _TheirLook(QGraphicsItem):
 
     def _page_box(self) -> QRectF:
         markup = self.parentItem()
+        if self.box is not None:
+            return QRectF(self.box)
         if markup.their_box:
             return QRectF(*markup.their_box)
         return markup.mapRectToParent(markup.boundingRect()).adjusted(-12, -12, 12, 12)
@@ -1926,6 +1954,8 @@ class _TheirLook(QGraphicsItem):
         markup = self.parentItem()
         if markup is None or markup.parentItem() is None:
             return QRectF()
+        if self.box is not None:
+            return markup.mapRectFromParent(self.box).adjusted(-2, -2, 2, 2)
         if not markup.their_box:
             return markup.mapRectFromParent(self._page_box()).adjusted(-2, -2, 2, 2)
         # the same while its markup stays where it is and its box is the same
@@ -1943,7 +1973,16 @@ class _TheirLook(QGraphicsItem):
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         markup = self.parentItem()
-        if markup is None or not markup.still_theirs:
+        if markup is None:
+            return
+        if self.number:
+            if markup.split_theirs:          # every stroke untouched still
+                painter.save()
+                markup.paint_their_file(painter, self._page_box().adjusted(-1, -1, 1, 1),
+                                        self.number)
+                painter.restore()
+            return
+        if not markup.still_theirs:
             return
         engine = painter.paintEngine()
         if (markup.style.blend == "multiply" and engine is not None

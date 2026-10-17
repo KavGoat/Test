@@ -471,6 +471,24 @@ class PageFrame(QGraphicsObject):
             - set(self.left_to_us(for_print=True, drawing=True))
         if not theirs:
             return False
+        toned = theirs & set(self._dimmed_numbers)
+        drew = self._draw_annotations_alone(painter, theirs - toned, scale)
+        if toned:
+            from .filterdim import opacity
+            drew = self._draw_annotations_alone(painter, toned, scale, opacity()) or drew
+        # the split annotations it drew itself: their strokes stay out
+        self.file_drew_split = frozenset(theirs)
+        return drew
+
+    def _draw_annotations_alone(self, painter: QPainter, numbers, scale: float,
+                                strength: float = 1.0) -> bool:
+        """The file's own drawing of the annotations *numbers*, and nothing
+        else of the page, at *strength* — for Print's Markups Only, and for
+        the ones Dim Filtered Markups tones down."""
+        numbers = tuple(sorted(set(numbers)))
+        page = self.page
+        if not numbers or page.pdf_key is None or page.pdf_page_index is None:
+            return False
         data = self.document.asset(page.pdf_key)
         if not data:
             return False
@@ -480,15 +498,15 @@ class PageFrame(QGraphicsObject):
         step = max(min(scale, 8.0), 0.2 if self._draft else 1.0)
         region, step = _region_to_draw(whole, whole, step, pdfio.MOST_LIVE_PIXELS)
         drawn = pdfio.LIVE.draw_annotations(page.pdf_key, data, int(page.pdf_page_index),
-                                            whole, region, step, tuple(theirs))
+                                            whole, region, step, numbers)
         if drawn is None or drawn.isNull():
             return False
         painter.save()
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        if strength < 1.0:
+            painter.setOpacity(painter.opacity() * strength)
         painter.drawImage(region, drawn, QRectF(drawn.rect()))
         painter.restore()
-        # the split annotations it drew itself: their strokes stay out
-        self.file_drew_split = frozenset(theirs)
         return True
 
     def paint_the_pdf(self, painter: QPainter, looking_at: QRectF,
@@ -523,9 +541,15 @@ class PageFrame(QGraphicsObject):
         # the file's itself.
         without = (self.left_to_us(for_print=True, drawing=True) if self.print_mode
                    else self.markups_drawn_alone())
+        toned: tuple = ()
         if self.print_mode and self._print_stream == "document":
             # Print's Document Only: none of the file's own markups either
             without = tuple(sorted(set(getattr(page, "markup_annotations", ()) or ())))
+        elif self.print_mode and self._dimmed_numbers and shown:
+            # Print's Dim Filtered Markups: the file's own ones among them are
+            # left out of the page and drawn alone, toned down, after it
+            toned = tuple(sorted(set(self._dimmed_numbers) - set(without)))
+            without = tuple(sorted(set(without) | set(toned)))
         painter.save()
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         drew = False
@@ -538,10 +562,13 @@ class PageFrame(QGraphicsObject):
                 painter.restore()
                 return False
             painter.drawPixmap(whole, sheet, QRectF(sheet.rect()))
-            self.file_drew_split = frozenset(
-                getattr(page, "markup_annotations", ()) or ()) - set(without) \
-                if shown else frozenset()
+            self.file_drew_split = (frozenset(
+                getattr(page, "markup_annotations", ()) or ()) - set(without)
+                | frozenset(toned)) if shown else frozenset()
             painter.restore()
+            if toned:
+                from .filterdim import opacity
+                self._draw_annotations_alone(painter, toned, scale, opacity())
             return True
         if self.print_mode:
             # One render, at the resolution being printed, synchronously.
@@ -555,9 +582,13 @@ class PageFrame(QGraphicsObject):
                 painter.drawImage(region, drawn, QRectF(drawn.rect()))
                 drew = True
                 # the split annotations it drew itself: their strokes stay out
-                self.file_drew_split = frozenset(
-                    getattr(page, "markup_annotations", ()) or ()) - set(without) \
-                    if shown else frozenset()
+                # (and those drawn alone, toned down, below)
+                self.file_drew_split = (frozenset(
+                    getattr(page, "markup_annotations", ()) or ()) - set(without)
+                    | frozenset(toned)) if shown else frozenset()
+            if toned:
+                from .filterdim import opacity
+                self._draw_annotations_alone(painter, toned, scale, opacity())
             painter.restore()
             return drew
 
@@ -773,7 +804,7 @@ class PageFrame(QGraphicsObject):
             for item in self.markups():
                 if not item.isVisible():
                     continue
-                if getattr(item, "still_theirs", False) and item.filter_dimmed:
+                if item.filter_dimmed:
                     continue                  # drawn alone, dimmed (filterdim.py)
                 if getattr(item, "still_theirs", False):
                     numbers.discard(item.from_annotation)
@@ -788,8 +819,10 @@ class PageFrame(QGraphicsObject):
                     and item.from_annotation in numbers
                     and item.style.blend == "multiply" and item.isVisible()):
                 numbers.discard(item.from_annotation)
-            elif getattr(item, "split_theirs", False) and item.isVisible():
-                # an annotation in several strokes, all untouched
+            elif getattr(item, "split_theirs", False) and item.isVisible() \
+                    and not item.filter_dimmed:
+                # an annotation in several strokes, all untouched (unless the
+                # Markups List's filter dims it: drawn alone, filterdim.py)
                 numbers.discard(item.split_from)
         return tuple(sorted(numbers))
 
@@ -1363,9 +1396,36 @@ class PageFrame(QGraphicsObject):
         if scene is None:
             return
         from .filterdim import undimmed
-        with undimmed(self, dimmed):
-            self._render_page(painter, target, for_print, pdf_overlay, without_markups,
-                              layer, stream, draft, links)
+        previous = self._dimmed_numbers
+        self._dimmed_numbers = frozenset(self.annotations_among(dimmed)) if dimmed \
+            else frozenset()
+        try:
+            with undimmed(self, dimmed):
+                self._render_page(painter, target, for_print, pdf_overlay, without_markups,
+                                  layer, stream, draft, links)
+        finally:
+            self._dimmed_numbers = previous
+
+    #: while a page prints with Dim Filtered Markups: the file's own
+    #: annotations among the markups toned down (render_page)
+    _dimmed_numbers: frozenset = frozenset()
+
+    def annotations_among(self, markups) -> set:
+        """The page's own annotations that *markups* are, nobody having
+        changed them: one markup still its file's, or an ink line every one
+        of whose strokes is among them."""
+        markups = set(markups or ())
+        numbers, strokes = set(), {}
+        for item in self.markups():
+            if getattr(item, "still_theirs", False) and item.from_annotation:
+                if item in markups:
+                    numbers.add(item.from_annotation)
+            elif getattr(item, "split_theirs", False) and item.split_from:
+                strokes.setdefault(item.split_from, []).append(item)
+        for number, pieces in strokes.items():
+            if all(piece in markups for piece in pieces):
+                numbers.add(number)
+        return numbers & set(getattr(self.page, "markup_annotations", ()) or ())
 
     def _render_page(self, painter: QPainter, target: QRectF, for_print: bool,
                      pdf_overlay: bool, without_markups: bool, layer: str, stream: str,

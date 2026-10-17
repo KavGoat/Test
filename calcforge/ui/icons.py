@@ -745,6 +745,11 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         _pen(painter, ACCENT, 1.4)
         for y in (14, 18, 22):
             painter.drawLine(QPointF(4, y), QPointF(20, y))
+    elif name == "filter_list":
+        # Revu's Filter List: a funnel
+        _pen(painter, INK, 1.5)
+        painter.drawPolygon(QPolygonF([QPointF(4, 5), QPointF(20, 5), QPointF(14, 12.5),
+                                       QPointF(14, 19), QPointF(10, 21), QPointF(10, 12.5)]))
     elif name == "dimmer":
         # Revu's Dimmer: a circle half filled
         _pen(painter, INK, 1.5)

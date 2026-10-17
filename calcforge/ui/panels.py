@@ -27,6 +27,7 @@ from ..items.measure import CountItem, MeasureItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.text import (STAMP_PRESETS, CalloutItem, NoteItem, StampItem, TextItem,
                           TypewriterItem, _TextBase)
+from ..settings import app_settings
 from .icons import drawn_icon, icon, visible_ink
 from .stylecaps import CLOUD, CORNER
 from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
@@ -141,6 +142,15 @@ def hatch_index(combo, key: str) -> int:
 DIM_AFTER_MS = 90
 #: How long after the last key in its search box the Markups List follows.
 LIST_AFTER_MS = 120
+#: Whether the Markups List's Filter List was last on (as Revu remembers it).
+FILTER_LIST_KEY = "markups_list/filter_list"
+
+
+def _remembered_filter_list() -> bool:
+    """On unless it was turned off: CalcForge's headings have always had
+    their filters showing."""
+    value = app_settings().value(FILTER_LIST_KEY, True)
+    return value if isinstance(value, bool) else str(value).lower() in ("true", "1")
 
 
 class PageListWidget(QListWidget):
@@ -1181,6 +1191,8 @@ class _FilterHeader(QHeaderView):
         painter.save()
         super().paintSection(painter, rect, logical)
         painter.restore()
+        if not self.panel.filter_list_on():
+            return                     # Filter List off: no filters on the headings
         button = QRect(rect.right() - self.BUTTON - 2, rect.top() + (rect.height() - self.BUTTON) // 2,
                        self.BUTTON, self.BUTTON)
         filtered = logical in self.panel.column_filters
@@ -1204,7 +1216,8 @@ class _FilterHeader(QHeaderView):
         if event.button() == Qt.LeftButton:
             point = event.position().toPoint()
             logical = self.logicalIndexAt(point)
-            if logical >= 0 and self.filter_rect(logical).contains(point):
+            if logical >= 0 and self.panel.filter_list_on() \
+                    and self.filter_rect(logical).contains(point):
                 self.filterClicked.emit(logical, self.mapToGlobal(
                     self.filter_rect(logical).bottomLeft()))
                 event.accept()
@@ -1214,7 +1227,7 @@ class _FilterHeader(QHeaderView):
     def mouseReleaseEvent(self, event) -> None:                  # noqa: N802
         point = event.position().toPoint()
         logical = self.logicalIndexAt(point)
-        if (event.button() == Qt.LeftButton and logical >= 0
+        if (event.button() == Qt.LeftButton and logical >= 0 and self.panel.filter_list_on()
                 and self.filter_rect(logical).contains(point)):
             event.accept()             # the press opened the filter: no sort
             return
@@ -1262,6 +1275,21 @@ class MarkupsPanel(QWidget):
         self._list_timer.timeout.connect(lambda: self.rebuild(self.window.document))
         self.filter.textChanged.connect(lambda _: self._list_timer.start())
         top.addWidget(self.filter, 1)
+        # Revu's Filter List, beside the search: the filter on each column's
+        # heading shown, or hidden with the filters kept but not used ("To
+        # toggle off filtering without losing the filters you've set")
+        self.filter_list = QToolButton()
+        self.filter_list.setObjectName("markupsFilterList")
+        self.filter_list.setText("Filter List")
+        self.filter_list.setIcon(icon("filter_list", 16))
+        self.filter_list.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.filter_list.setAutoRaise(True)
+        self.filter_list.setCheckable(True)
+        self.filter_list.setToolTip("Filter List: a filter on each column's heading; "
+                                    "off, the filters are kept but not used")
+        self.filter_list.setChecked(_remembered_filter_list())
+        self.filter_list.toggled.connect(self.set_filter_list)
+        top.addWidget(self.filter_list)
         layout.addLayout(top)
         top = QHBoxLayout()
         self.group_by = QComboBox()
@@ -1306,7 +1334,8 @@ class MarkupsPanel(QWidget):
         header.setContextMenuPolicy(Qt.CustomContextMenu)
         header.customContextMenuRequested.connect(
             lambda point: self.filter_menu(header.logicalIndexAt(point),
-                                           header.mapToGlobal(point)))
+                                           header.mapToGlobal(point))
+            if self.filter_list_on() else None)
         self.tree.setSortingEnabled(True)
         # Page 1 first, as Revu lists them (Qt starts a sorted list descending)
         self.tree.sortByColumn(0, Qt.AscendingOrder)
@@ -1350,17 +1379,37 @@ class MarkupsPanel(QWidget):
                 getattr(item, "value_text", ""), item.author,
                 item.modified[:10], _comment_of(item)]
 
+    def filter_list_on(self) -> bool:
+        """Whether Filter List is on: the column filters shown and used."""
+        return self.filter_list.isChecked()
+
+    def active_filters(self) -> dict:
+        """The column filters in use: none while Filter List is off (they
+        are kept, to come back when it is turned on)."""
+        return self.column_filters if self.filter_list_on() else {}
+
+    def set_filter_list(self, on: bool) -> None:
+        """Filter List on or off: the headings' filters shown or hidden, the
+        filters used or set aside, and the page's dimming following."""
+        if self.filter_list.isChecked() != bool(on):
+            self.filter_list.setChecked(bool(on))       # comes back here
+            return
+        settings = app_settings()
+        settings.setValue(FILTER_LIST_KEY, bool(on))
+        self.tree.header().viewport().update()
+        self.rebuild(self.window.document)
+
     def _shown(self, row: list[str], needle: str) -> bool:
         if needle and not any(needle in str(cell).lower() for cell in row):
             return False
         return all(row[column] in allowed
-                   for column, allowed in self.column_filters.items())
+                   for column, allowed in self.active_filters().items())
 
     def filtered_out(self, document) -> list:
         """The markups the list's filter (its search box and its column
         filters) leaves out — those Print's Dim Filtered Markups tones down."""
         needle = self.filter.text().strip().lower()
-        if not needle and not self.column_filters:
+        if not needle and not self.active_filters():
             return []
         return [item for _index, item, row in self.all_rows(document)
                 if not self._shown(row, needle)]
@@ -1384,7 +1433,7 @@ class MarkupsPanel(QWidget):
         building them again would change them."""
         return (self.filter.text().strip().lower(), self.group_by.currentData() or "Page",
                 tuple(sorted((column, tuple(sorted(allowed)))
-                             for column, allowed in self.column_filters.items())),
+                             for column, allowed in self.active_filters().items())),
                 tuple(index for index, page in enumerate(document.pages)
                       if page.frame is not None),
                 tuple((index, item.uid, item.locked, _icon_for(item), tuple(row))
@@ -1408,7 +1457,7 @@ class MarkupsPanel(QWidget):
         self._dim_soon()
 
     def _dim_soon(self) -> None:
-        if self._any_dimmed or self.filter.text().strip() or self.column_filters:
+        if self._any_dimmed or self.filter.text().strip() or self.active_filters():
             self._dim_timer.start()
 
     def dim_filtered_now(self) -> int:
@@ -1422,6 +1471,7 @@ class MarkupsPanel(QWidget):
         return changed
 
     def rebuild(self, document) -> None:
+        self.filter_list.setIcon(icon("filter_list", 16))      # in the theme's ink
         needle = self.filter.text().strip().lower()
         grouping = self.group_by.currentData() or "Page"
         found = self.all_rows(document)

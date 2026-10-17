@@ -23,9 +23,16 @@ How each kind of markup is dimmed:
   it leaves out one taken over, and it is drawn alone, by its own file, from
   the annotation squares the render processes make — so it can be dimmed;
 * an annotation that came in as several strokes (an ink line nobody has
-  changed) is drawn whole by the page's render, which alone has its curves;
-  the strokes are a straight-line reading of it, so it is left at full
-  strength rather than shown as something it is not.
+  changed) is drawn whole by the page's render, which alone has its curves
+  (the strokes are a straight-line reading of them). While every one of its
+  strokes is filtered out, the page leaves it out and its first stroke draws
+  it whole, by its file, from the annotation squares — its real curves,
+  dimmed (MarkupItem.show_whole_annotation).
+
+On paper the same is done for Print's Dim Filtered Markups: the file's own
+annotations among the toned-down markups are left out of the page's print
+render and drawn alone, by their file, at the dim level
+(PageFrame.annotations_among, _draw_annotations_alone).
 """
 from __future__ import annotations
 
@@ -58,10 +65,18 @@ def apply(document, filtered) -> int:
             continue
         moved = []
         crowd = False
+        # an ink line in several strokes is dimmed only as a whole: when every
+        # one of its strokes is filtered out
+        strokes: dict = {}
+        for item in frame.markups():
+            if getattr(item, "split_theirs", False) and item.split_from:
+                strokes.setdefault(item.split_from, []).append(item)
+        whole = {number: all(piece in filtered for piece in pieces)
+                 for number, pieces in strokes.items()}
         for item in frame.markups():
             want = item in filtered
-            if getattr(item, "split_theirs", False):
-                want = False                 # drawn whole by the page: see above
+            if getattr(item, "split_theirs", False) and item.split_from:
+                want = whole.get(item.split_from, False)
             target = level if want else 1.0
             if is_dimmed(item) == want and abs(item.opacity() - target) < 1e-6:
                 continue
@@ -72,6 +87,18 @@ def apply(document, filtered) -> int:
                 crowd = True
                 if hasattr(item, "sync_their_look"):
                     item.sync_their_look()
+        for number, pieces in strokes.items():
+            if not any(piece in moved for piece in pieces):
+                continue
+            crowd = True                      # the page leaves it out, or takes it back
+            host = pieces[0]
+            if whole[number]:
+                box = pieces[0].mapRectToParent(pieces[0].boundingRect())
+                for piece in pieces[1:]:
+                    box = box.united(piece.mapRectToParent(piece.boundingRect()))
+                host.show_whole_annotation(box.adjusted(-12, -12, 12, 12))
+            else:
+                host.show_whole_annotation(None)
         if not moved:
             continue
         changed += len(moved)

@@ -268,3 +268,151 @@ def test_the_preference_is_in_preferences(win):
         assert dialog.result_preferences().filtered_dim_percent == 75
     finally:
         dialog.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# Revu's Filter List toggle
+# ---------------------------------------------------------------------------
+
+def test_filter_list_toggles_the_column_filters_without_losing_them(win):
+    from calcforge.ui.panels import FILTER_LIST_KEY
+    from calcforge.settings import app_settings
+    a_rect(win, (100, 100), "Alpha")
+    beta = a_rect(win, (300, 100), "Beta")
+    panel = win.markups_panel
+    button = panel.filter_list
+    assert button.text() == "Filter List" and button.isCheckable() and button.isChecked()
+    assert "kept" in button.toolTip()
+    # beside the search box, as in Revu
+    assert abs(button.geometry().center().y() - panel.filter.geometry().center().y()) < 6
+    assert button.x() > panel.filter.x()
+    subject = panel.COLUMNS.index("Subject")
+    panel.set_column_filter(subject, {"Alpha"})
+    settle(win)
+    assert filterdim.is_dimmed(beta)
+    assert panel.tree.topLevelItem(0).childCount() == 1
+    # off, by a click: everything listed and at full strength, the filter kept
+    QTest.mouseClick(button, Qt.LeftButton)
+    settle(win)
+    assert not button.isChecked() and not panel.filter_list_on()
+    assert panel.column_filters == {subject: {"Alpha"}}
+    assert panel.tree.topLevelItem(0).childCount() == 2
+    assert not filterdim.is_dimmed(beta)
+    assert colour_at(win, (340, 120)).green() < 40
+    # the headings' filters are not there to click
+    header = panel.tree.header()
+    seen = []
+    header.filterClicked.connect(lambda *a: seen.append(a))
+    QTest.mouseClick(header.viewport(), Qt.LeftButton, Qt.NoModifier,
+                     header.filter_rect(subject).center())
+    assert not seen
+    assert str(app_settings().value(FILTER_LIST_KEY)).lower() in ("false", "0")
+    # on again, by a key given to it in Keyboard Shortcuts
+    win.shortcuts.set_sequence("markupslist.filter_list", "Ctrl+Shift+F7")
+    win.commands.apply()
+    win.activateWindow()
+    win.view.setFocus()
+    QTest.keyClick(win.view.viewport(), Qt.Key_F7, Qt.ControlModifier | Qt.ShiftModifier)
+    settle(win)
+    assert button.isChecked()
+    assert panel.tree.topLevelItem(0).childCount() == 1
+    assert filterdim.is_dimmed(beta)
+    QTest.mouseClick(header.viewport(), Qt.LeftButton, Qt.NoModifier,
+                     header.filter_rect(subject).center())
+    pump()
+    assert seen                                           # the funnel answers again
+    for popup in QApplication.topLevelWidgets():
+        if popup.isVisible() and popup.inherits("QMenu"):
+            popup.close()
+
+
+# ---------------------------------------------------------------------------
+# an ink line in several strokes, on screen and on paper
+# ---------------------------------------------------------------------------
+
+def _ink_drawing(path):
+    """A drawing with somebody's ink line of two curved strokes, and a
+    square of theirs."""
+    import math
+    with pymupdf.open() as pdf:
+        page = pdf.new_page(width=595, height=842)
+        strokes = []
+        for row in (0, 1):
+            strokes.append([(100 + t * 4, 400 + row * 120 + 40 * math.sin(t / 8.0))
+                            for t in range(0, 80)])
+        ink = page.add_ink_annot(strokes)
+        ink.set_colors(stroke=(1, 0, 0))
+        ink.set_border(width=6)
+        ink.set_info(subject="Ink")
+        ink.update()
+        square = page.add_rect_annot(pymupdf.Rect(100, 150, 200, 220))
+        square.set_colors(stroke=(1, 0, 0), fill=(1, 0, 0))
+        square.set_info(subject="Keep")
+        square.update()
+        pdf.save(path)
+    return str(path)
+
+
+def _ink_point():
+    import math
+    t = 40
+    return (100 + t * 4, 400 + 40 * math.sin(t / 8.0))
+
+
+def test_an_ink_line_in_strokes_is_dimmed_with_its_real_curves(win, tmp_path):
+    win.open_from_command_line(_ink_drawing(tmp_path / "ink.pdf"))
+    pump(0.3)
+    frame = win.document.pages[0].frame
+    strokes = [m for m in frame.markups() if getattr(m, "split_theirs", False)]
+    assert len(strokes) == 2, "the ink line came in as two strokes"
+    settle(win, 2.0)
+    assert colour_at(win, _ink_point()).green() < 60
+    search(win, "keep")
+    settle(win, 2.5)
+    assert all(filterdim.is_dimmed(m) for m in strokes)
+    assert all(m.split_theirs for m in strokes)                  # nothing taken over
+    number = strokes[0].split_from
+    assert number in frame.markups_drawn_alone()                 # the page leaves it out
+    look = strokes[0]._whole_look
+    assert look is not None and look.isVisible()                 # drawn whole, by its file
+    faded = colour_at(win, _ink_point())
+    assert faded.red() > 200 and 90 < faded.green() < 220, faded.name()
+    assert colour_at(win, (150, 185)).green() < 60               # the square, kept
+    search(win, "")
+    settle(win, 2.5)
+    assert not look.isVisible() and number not in frame.markups_drawn_alone()
+    assert colour_at(win, _ink_point()).green() < 60
+
+
+def test_print_dims_their_untouched_annotations_too(win, tmp_path):
+    from tests.test_print_dialog import click, ctrl_p, print_to
+    win.open_from_command_line(_ink_drawing(tmp_path / "ink.pdf"))
+    pump(0.3)
+    search(win, "ink")                       # the square is left out
+    settle(win, 2.0)
+    frame = win.document.pages[0].frame
+    square = next(m for m in frame.markups() if getattr(m, "still_theirs", False))
+    assert filterdim.is_dimmed(square)
+
+    def green(path, point):
+        with pymupdf.open(path) as pdf:
+            return pdf[0].get_pixmap(dpi=72).pixel(int(point[0]), int(point[1]))[1]
+
+    dialog = ctrl_p(win)
+    assert dialog.dim_filtered.isChecked()
+    dimmed = print_to(dialog, tmp_path / "dimmed.pdf")
+    assert 90 < green(dimmed, (150, 185)) < 220         # their square, toned down
+    assert green(dimmed, _ink_point()) < 60             # the ink line, as it is
+    dialog = ctrl_p(win)
+    click(dialog.dim_filtered)
+    plain = print_to(dialog, tmp_path / "plain.pdf")
+    assert green(plain, (150, 185)) < 60
+    # and the ink line, in strokes, toned down when it is the one left out
+    search(win, "keep")
+    settle(win, 2.0)
+    dialog = ctrl_p(win)
+    click(dialog.dim_filtered)
+    assert dialog.dim_filtered.isChecked()
+    inked = print_to(dialog, tmp_path / "ink_dimmed.pdf")
+    assert 90 < green(inked, _ink_point()) < 220
+    assert green(inked, (150, 185)) < 60

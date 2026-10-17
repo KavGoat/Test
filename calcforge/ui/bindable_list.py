@@ -636,6 +636,7 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'maths.table_of_all_constants': ('Maths: Table of all constants…', 'Calculation', 'calc'),
     # -- markupslist -----------------------------------------------------------
     'markupslist.all': ('Markups List: Clear Column Filters (All)', 'Panels', 'always'),
+    'markupslist.filter_list': ('Markups List: Filter List', 'Panels', 'always'),
     'markupslist.csv': ('Markups List: Export CSV', 'Panels', 'always'),
     # -- status ----------------------------------------------------------------
     'status.first_page': ('First Page', 'View', 'always'),
