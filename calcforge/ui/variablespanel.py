@@ -10,7 +10,10 @@ give the equations: each defined name (W_total) and each column a table's
 headings name (Loads.Load), with its value; clicking one goes to its cells.
 
 A name defined twice has two rows: SMath allows redefining, and which
-definition an equation sees depends on where it is.
+definition an equation sees depends on where it is — the latest one before
+it in reading order, whether an equation, a measurement or a table defines
+it (the user's report, 2026-10-17). The one in force at the selected
+equation (at the end of the document when none is selected) is bold.
 
 With calc section breaks (2026-10-11) the rows come section by section,
 under a heading for each; a global one is marked, and right-click makes a
@@ -43,6 +46,7 @@ class VariableRow:
     cells: Optional[tuple] = None   # a table's: (sheet name, (top, left, bottom, right))
     section: int = 1            # the calc section it is in (1-based)
     is_global: bool = False     # read by later sections too
+    key: Optional[tuple] = None  # where it is defined in reading order
 
 
 def _split_value(shown: str) -> tuple:
@@ -84,7 +88,7 @@ def variable_rows(document) -> list:
             shown, problem = _value_text(worksheet, region, value, fmt)
             number, unit = _split_value(shown)
             rows.append(VariableRow(name, number, unit, page, where, error or problem,
-                                    region.id, source, None, section, made))
+                                    region.id, source, None, section, made, region.key))
         for (name, arity), _body in region.defined_funcs.items():
             rows.append(VariableRow(f"{name}({', '.join(['·'] * arity)})", "function", "",
                                     page, where, error, region.id, source, None, section, made))
@@ -164,7 +168,8 @@ def table_rows(document) -> list:
         page = homes.get(sheet.id, 0) if sheet is not None else 0
         name = dn.name + (f" ({home.name})" if home is not None else "")
         rows.append(VariableRow(name, text, unit, page, f"Page {page}" if page else "",
-                                error, -1, "Table", cells, **placed(sheet, cells)))
+                                error, -1, "Table", cells, **placed(sheet, cells),
+                                key=book._key(sheet) if sheet is not None else None))
     for sheet in wb.sheets:
         if sheet.kind != "table" or not sheet.size:
             continue
@@ -179,8 +184,50 @@ def table_rows(document) -> list:
             cells = (sheet.name, (1, col, max(1, height - 1), col))
             rows.append(VariableRow(f"{sheet.name}.{_ident(cell.value)}", text, unit, page,
                                     f"Page {page}" if page else "", error, -1, "Table",
-                                    cells, **placed(sheet, cells)))
+                                    cells, **placed(sheet, cells), key=book._key(sheet)))
     return rows
+
+
+def in_force(document, rows: list, region=None) -> dict:
+    """For each name defined more than once: the index in *rows* of the
+    definition in force at *region* — what an equation just after it would
+    read (its own definition included), by the evaluator's own rule
+    (IndexedContext.entry) — or at the end of the document when *region* is
+    None. A name nothing there reads is left out."""
+    from ..calc.docsheet import sheet_for
+    from ..calc.engine import evaluator
+    from ..calc.engine.evaluator import TABLES, IndexedContext
+    from ..calc.worksheet import ScopedContext
+
+    worksheet = sheet_for(document).worksheet
+    by_name: dict = {}
+    for index, row in enumerate(rows):
+        if row.key is not None and "(" not in row.name:
+            by_name.setdefault(row.name, []).append(index)
+    twice = {name: found for name, found in by_name.items() if len(found) > 1}
+    if not twice:
+        return {}
+    evaluator.EXTERNAL = worksheet.external          # this document's tables
+    if region is not None and region in worksheet.regions:
+        y, x, rid = region.key
+        just_after = (y, x, rid + 0.5)
+        scope = worksheet.scope_of.get(region.id)
+        ctx = ScopedContext(worksheet.index, just_after, worksheet._scoped.get(scope)) \
+            if scope is not None else IndexedContext(worksheet.index, just_after)
+    else:
+        ctx = IndexedContext(worksheet.index, (float("inf"),))
+    out = {}
+    for name, found in twice.items():
+        entry = ctx.entry(name)
+        if entry is None:
+            continue
+        table = entry[1] is TABLES
+        for index in found:
+            row = rows[index]
+            if (row.source == "Table") == table and tuple(row.key) == tuple(entry[0]):
+                out[name] = index
+                break
+    return out
 
 
 def _value_text(worksheet, region, value, fmt) -> tuple:
@@ -250,6 +297,12 @@ class VariablesPanel(QWidget):
         self.tree.itemClicked.connect(lambda node, _col: self.go_to(node))
         self.tree.itemActivated.connect(lambda node, _col: self.go_to(node))
         lay.addWidget(self.tree, 1)
+        # what the bold rows mean, shown while a name is defined more than once
+        self.in_force_note = QLabel()
+        self.in_force_note.setWordWrap(True)
+        self.in_force_note.setStyleSheet("color:#6b7280;")
+        self.in_force_note.hide()
+        lay.addWidget(self.in_force_note)
         self.empty = QLabel("No variables yet: define one with  name : value  in an equation.")
         self.empty.setWordWrap(True)
         self.empty.setStyleSheet("color:#6b7280;")
@@ -317,9 +370,70 @@ class VariablesPanel(QWidget):
         self.tree.addTopLevelItem(head)
         head.setFirstColumnSpanned(True)          # the heading across the whole row
 
+    # -- which definition is in force -----------------------------------------------------
+    def reading_point(self):
+        """The equation the bold rows are for: the one being typed in, or the
+        one picked on the page; None (the end of the document) otherwise."""
+        from ..items.calc import CalcItem
+
+        view = self.window.view
+        item = getattr(getattr(view, "calc", None), "item", None)
+        if item is None and view.scene() is not None:
+            picked = [i for i in view.scene().selectedItems()
+                      if isinstance(i, CalcItem) and getattr(i, "region", None) is not None]
+            item = picked[0] if len(picked) == 1 else None
+        return getattr(item, "region", None) if item is not None else None
+
+    def selection_changed(self) -> None:
+        """Another equation picked: the bold rows follow it."""
+        if self.isVisible() and self.rows:
+            self._mark_in_force()
+
+    def _mark_in_force(self) -> None:
+        region = self.reading_point()
+        try:
+            force = in_force(self.window.document, self.rows, region)
+        except Exception:  # noqa: BLE001  (the list itself still shows)
+            force = {}
+        where = "the selected equation" if region is not None else "the end of the document"
+        chosen = set(force.values())
+        from PySide6.QtGui import QPalette
+        accent = self.palette().color(QPalette.Link)       # the theme's accent, both themes
+        for index in range(self.tree.topLevelItemCount()):
+            node = self.tree.topLevelItem(index)
+            i = node.data(0, Qt.UserRole)
+            if i is None:
+                continue
+            row = self.rows[i]
+            font = node.font(0)
+            font.setBold(i in chosen)
+            node.setFont(0, font)
+            if not row.error:
+                # in force: bold in the accent colour (a heading is bold in the ink)
+                node.setData(0, Qt.ForegroundRole, QBrush(accent) if i in chosen else None)
+            tip = node.data(1, Qt.UserRole) or ""
+            if row.name in force:
+                if i in chosen:
+                    tip += f"\nIn force at {where}."
+                else:
+                    other = self.rows[force[row.name]]
+                    if tuple(row.key) < tuple(other.key):
+                        tip += (f"\nNot in force at {where}: replaced by the "
+                                f"{other.source.lower()} on page {other.page}.")
+                    else:
+                        tip += f"\nNot in force at {where}."
+            for column in range(len(COLUMNS)):
+                node.setToolTip(column, tip)
+        upto = "up to it" if region is not None else "in the document"
+        self.in_force_note.setText(f"Bold blue: the definition in force at {where} (the "
+                                   f"latest {upto}, page by page, top to bottom).")
+        self.in_force_note.setVisible(bool(force))
+
     def _fill(self) -> None:
         from .calcsections import BAND, has_sections, sections
         wanted = self.filter.text().strip().lower()
+        current = self.tree.currentItem()
+        current = current.data(0, Qt.UserRole) if current is not None else None
         self.tree.clear()
         document = self.window.document
         listed = sections(document) if has_sections(document) else []
@@ -349,8 +463,12 @@ class VariablesPanel(QWidget):
                 tip += f"\n{row.error}"
             for column in range(len(COLUMNS)):
                 node.setToolTip(column, tip)
+            node.setData(1, Qt.UserRole, tip)
             self.tree.addTopLevelItem(node)
+            if index == current:
+                self.tree.setCurrentItem(node)
         self.empty.setVisible(not self.rows)
+        self._mark_in_force()
 
     # -- global or not (calc sections) ------------------------------------------------------
     def _menu(self, pos) -> None:
