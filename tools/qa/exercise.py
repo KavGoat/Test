@@ -1563,9 +1563,10 @@ def close_strays(win) -> list[str]:
             pass
         pump()
     # One window at a time, from a fresh list each time: closing one can free
-    # others (a menu's tear-off, a window's own popups), and a wrapper taken
-    # from an older list may point at freed memory that shiboken does not know
-    # about — reading it crashed a worker (R0275, gate on eebcff1).
+    # others there and then, and a list taken before still holds them. The
+    # workers that crashed in this loop (R0275, D0003, gate on eebcff1) were
+    # the app's: the Markup Styles bar left freed buttons in the
+    # application's window list (fixed in 3ec54f1).
     handled = set()
     for _ in range(40):
         stray = None
@@ -1589,6 +1590,8 @@ def close_strays(win) -> list[str]:
         else:
             closed.append(f"window {type(stray).__name__} {stray.windowTitle()}")
             stray.close()
+            if stray.isVisible():
+                stray.hide()              # one that will not close is not asked twice
             pump()
     pump()
     return closed

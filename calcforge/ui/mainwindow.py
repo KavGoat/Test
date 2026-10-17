@@ -1056,6 +1056,12 @@ class MainWindow(QMainWindow):
         self._act("dim_content", "Dim Content", self.set_dimmer, "Ctrl+F5", checkable=True,
                   tip="Tone down the page's own content so the markups stand out "
                       "(on screen only)")
+        # the dimmer is every open drawing's: a window opened while it is on
+        # shows its tick, not a dimmed page under a cleared one
+        from .scene import DIMMER
+        self.act_dim_content.blockSignals(True)
+        self.act_dim_content.setChecked(bool(DIMMER["on"]))
+        self.act_dim_content.blockSignals(False)
         self.dimmer_levels = QActionGroup(self)
         self.dimmer_levels.setExclusive(True)
         for percent in range(0, 101, 10):
@@ -4244,6 +4250,14 @@ class MainWindow(QMainWindow):
             self._filters_the_application = False
         for timer in self.findChildren(QTimer):
             timer.stop()
+        # nor is anything drawn for it while Qt has yet to delete it (a
+        # harness without an event loop never does): the Thumbnails went on
+        # drawing the pages of a closed window's document as the page cache
+        # finished them
+        panel = getattr(self, "pages_panel", None)
+        if panel is not None and hasattr(panel, "let_go"):
+            panel.let_go()
+        self.hide()
         self.deleteLater()
 
     # ==================================================================
@@ -4756,6 +4770,8 @@ class MainWindow(QMainWindow):
     # -- remembering it ------------------------------------------------
     def note_layout_change(self) -> None:
         """Something moved; write the arrangement out in a moment."""
+        if getattr(self, "_closed_for_good", False):
+            return                  # its panels going with it are not a change
         timer = getattr(self, "_layout_timer", None)
         if timer is not None:
             timer.start()

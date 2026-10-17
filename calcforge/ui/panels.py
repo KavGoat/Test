@@ -802,6 +802,20 @@ class PagesPanel(QWidget):
                 continue
             entry.setIcon(self._thumbnail(document.pages[index], document))
 
+    def let_go(self) -> None:
+        """Its window has closed for good: no more pages drawn for it, and
+        no more clipboard watching."""
+        import warnings
+        from ..io import pdftiles
+        for signal, slot in ((pdftiles.TILES.sheetReady, self._page_was_drawn),
+                             (QApplication.clipboard().dataChanged, self._clipboard_changed)):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                try:
+                    signal.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass
+
     def _page_was_drawn(self, key) -> None:
         """Fill in the row whose page has just been drawn, and only that one."""
         document = getattr(self.window, "document", None)

@@ -166,3 +166,13 @@ def fresh_symbolic_hook():
     sym.defined_above = lambda: set()
     yield
     sym.defined_above = lambda: set()
+
+
+@pytest.fixture(autouse=True)
+def dimmer_off():
+    """No test inherits Dim Content from the one before (it is every open
+    drawing's, held by the scene module, not by a window)."""
+    from calcforge.ui import scene
+    scene.DIMMER.update(on=False, level=0.4)
+    yield
+    scene.DIMMER.update(on=False, level=0.4)

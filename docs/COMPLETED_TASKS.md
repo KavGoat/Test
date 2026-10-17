@@ -3,6 +3,18 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-16 (later) — every command exercised and bindable; the QA round's bugs fixed (pushed at 3ec54f1)
+
+- Full test run on 3ec54f1: all tests pass with `-n 3`, including tests/test_every_command.py (2204 commands, 2729 ways in, no known failures); 14/14 planted bugs caught.
+- Keyboard Shortcuts lists 778 commands — menu bar, right-click menus, toolbars, panel buttons — any usual key, saved at once (tests/test_every_command_is_bindable.py).
+- Crashes: Offset then New PDF then drawing; closed windows' leftover Markup Styles buttons freed under the window list. A closed window is hidden and quiet at once.
+- Undo: one step per text box, callout, Cloud+, typed value, insert and link; Cancel changes nothing; undo puts back the view and the selection; Ctrl+Z works after New.
+- Documents keep their own search marks and view rotation; New Window and Split View no longer slow down over a session (closed windows were never deleted).
+- Shapes: no group resize; Sketch to Scale Rectangle and Ellipse beside plain ones in paper units; text box by drag; ellipse to polygon; group menus; leaders; scale prompt only for measures; locked selection shows.
+- Spreadsheet: empty-clipboard paste, Excel's Insert/Delete Cells dialogs, header guess, format box, Comment column, thumbnails catch up, edge drags size on release with a guide line; recalc 2.0→0.3 s, insert row 6→1.5 s, xlsx open 5.6→1.3 s.
+- User items: style text applies on placement; Variable and Global atop a cell's menu; Decimal Places, Significant Figures and Global atop an equation's; the stuck "=" unit box; SMath-style Variable boxes; panels left or right only; no stale red cross; Dim Content ticked in a window opened while dimmed.
+- Not yet tried on Windows: the menus inside the native title bar.
+
 ## 2026-10-16 — rounds 2–4 merged and gated (pushed at dbc632f)
 
 - Split View: a tab dragged to the other pane opens no copy and leaves no blank tab, and the emptied pane ends the split (tests/test_split_tabs.py).
