@@ -42,6 +42,24 @@ from ..sheet.style import Border
 REF_COLOURS = ["#1f6fd1", "#d1281f", "#7b2fb0", "#1d8a3a", "#c76a00", "#008b8b", "#b0306e"]
 
 
+import weakref
+
+# every open-for-its-cells session, told when a table or sheet leaves its canvas
+_SESSIONS: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def table_left(uid: str) -> None:
+    """A table or sheet with *uid* left its canvas (its pages deleted, an
+    undo, a document closed): each session working in it checks, once the
+    event loop is back, whether it came back (a page rebuilt puts the same
+    table back under the same uid) and, if not, ends (the user, 2026-10-17:
+    the formula tip stayed showing after the workbook's pages went)."""
+    from PySide6.QtCore import QTimer
+    for session in list(_SESSIONS):
+        if session._uid == uid:
+            QTimer.singleShot(0, session.check_gone)
+
+
 def _alive(item) -> bool:
     try:
         return item is not None and item.scene() is not None
@@ -366,6 +384,7 @@ class TableEditing:
 
     def __init__(self, view):
         self.view = view
+        _SESSIONS.add(self)
         self._item: Optional[TableItem] = None
         self._uid: Optional[str] = None
         self.anchor = (0, 0)
@@ -386,8 +405,11 @@ class TableEditing:
     @property
     def item(self) -> Optional[TableItem]:
         item = self._item
-        if item is not None and _alive(item):
-            return item
+        try:
+            if item is not None and _alive(item) and item.scene() is self.view.scene():
+                return item
+        except RuntimeError:
+            pass
         if self._uid is None:
             return None
         # rebuilt by undo or redo: the same table under the same uid
@@ -399,9 +421,62 @@ class TableEditing:
                     other.opened = True
                     self._show_selection()
                     return other
+        # gone for good: nothing of it may stay showing
+        self.end_session()
+        return None
+
+    def check_gone(self) -> None:
+        """After a table left the canvas: end the session if it didn't come back."""
+        try:
+            _ = self.item
+        except RuntimeError:
+            pass                           # the view itself is gone
+
+    def end_session(self) -> None:
+        """The sheet or table being worked in has gone, or its canvas has:
+        put down everything it showed outside itself, without writing to it
+        — the cell's text box, the formula tip and list, the hover tip, the
+        unit box, the copy's marching ants, a guide line, and the formula
+        bar's Name Box, formula and unit (the user, 2026-10-17)."""
+        from PySide6.QtWidgets import QToolTip
         self._item = None
         self._uid = None
-        return None
+        self._hide_help()
+        if self._formula_help is not None:
+            try:
+                self._formula_help.list.hide()
+            except RuntimeError:
+                pass
+        QToolTip.hideText()
+        self.hover_tip = None
+        editor, self.editor = self.editor, None
+        self.editing_cell = None
+        self.point = None
+        if editor is not None:
+            try:
+                editor.hide()
+                editor.deleteLater()
+            except RuntimeError:
+                pass
+        box = self._result_unit
+        if box is not None and not box._done:
+            box._done = True
+            try:
+                box.list.hide()
+                box.hide()
+            except RuntimeError:
+                pass
+        self.drag = None
+        self.size_guide = None
+        self.insert_drag = None
+        self.copied = None
+        self.held_format = None
+        self.highlight_ranges = None
+        try:
+            self.refresh_bar()
+            self._refresh_controls()
+        except RuntimeError:
+            pass
 
     held_format = None          # Format Painter: the looks being carried
 
@@ -506,6 +581,8 @@ class TableEditing:
 
     def close(self) -> None:
         self.settle_result_unit()
+        if self._uid is not None and self.item is None:
+            return                         # it had gone: end_session put it all down
         item = self.item
         self._hide_help()
         if self.editor is not None:
@@ -570,22 +647,22 @@ class TableEditing:
         if m is not None:
             self.active = (m[0], m[1])
         if _is_run(item) and self.active[0] >= item.size[0] and self.anchor == self.edge:
-            # Enter or ↓ off the last page: the sheet goes on to a new page
-            # there, as Excel's page layout view always has the next one
-            self._add_run_page()
+            # Enter or ↓ off the last row: the sheet gets one more row (the
+            # user, 2026-10-17: a row, not a page); a page only when the
+            # rows run past the page
+            self._add_run_row()
         self._show_selection()
 
-    def _add_run_page(self) -> None:
-        """One more page at the end of the spreadsheet being typed in (an
-        undo step of its own; an empty page at the end is kept)."""
-        from . import sheetpages
+    def _add_run_row(self) -> None:
+        """One more row at the end of the spreadsheet being typed in, as
+        its own undo step; a new page with it only if the page is full."""
+        from . import sheetlayout
         window = self.view.window
         item = self.item
-        if item is None or not hasattr(window, "_structure_snapshot"):
+        if item is None or item.sheet is None:
             return
-        before = window._structure_snapshot()
-        sheetpages.add_run_pages(window, [(item, 1)])
-        window.record_structure_change(before, "Add page")
+        rows = max(int((item.sheet.page or {}).get("rows") or 0), item.size[0]) + 1
+        sheetlayout.change_options(window, item, "Add row", rows=rows)
         item = self.item
         if item is not None:
             self._item = item

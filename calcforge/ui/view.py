@@ -1038,6 +1038,16 @@ class PageView(QGraphicsView):
             pass
         if window is not None and hasattr(window, "end_canvas_sessions"):
             window.end_canvas_sessions(self)
+        tables = getattr(self, "tables", None)
+        if tables is not None:
+            # a sheet or table open on the canvas going out: what it shows
+            # outside itself (formula bar, tips, unit box) goes with it
+            try:
+                if tables.item is not None:
+                    tables.close()          # what was being typed is kept, as leaving does
+                tables.end_session()
+            except RuntimeError:
+                pass
         self._search_marks = []
         self._snapshot = []
 

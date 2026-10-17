@@ -29,12 +29,11 @@ def change_options(window, item, label: str, **changes) -> None:
         return
     view = window.view
     run = getattr(item, "run_frames", None)
-    spare = _spare_pages(item) if run is not None else 0
     view.begin_snapshot(run() if run is not None else view.involved_frames(item))
     sheet.workbook.set_page_options(sheet, **changes)
     if run is not None:
         item.relayout()
-        if _fit_run(window, item, spare, label):
+        if _fit_run(window, item, 0, label):
             return
     view.commit_snapshot(label)
 
@@ -50,11 +49,12 @@ def _spare_pages(item) -> int:
 
 
 def _fit_run(window, item, spare: int, label: str) -> bool:
-    """The run's pages as many as its cells and breaks need, plus the ones
-    the user added: a break removed takes back the page it made (the user,
-    2026-10-15: "new surprise rows get added"), and a page added by hand
-    stays an empty page at the end. Only empty pages at the run's end go;
-    all in the same undo step as the change. True when pages changed."""
+    """The run's pages as many as its rows, print area and breaks need: a
+    break removed takes back the page it made (the user, 2026-10-15: "new
+    surprise rows get added"), a print area has its pages and no others
+    (2026-10-17), and a page added by hand added the rows it holds. Only
+    empty pages at the run's end go; all in the same undo step as the
+    change. True when pages changed."""
     from ..items.sheetpage import SheetRunItem
     from ..sheet.pagination import pages_needed
     from . import sheetpages

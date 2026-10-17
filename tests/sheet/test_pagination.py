@@ -123,7 +123,8 @@ def test_print_area_and_titles():
     assert paging.titles == (0, 1)
     # the print area starts below the titles, so they repeat on every page,
     # the first too (Excel), and each page holds two rows fewer for them
-    first = paging.slices[0][1] - paging.slices[0][0] + 1
+    # (the rows above it are on its first page too, shown and not printed)
+    first = paging.slices[0][1] - paging.print_rows[0] + 1
     second = paging.slices[1][1] - paging.slices[1][0] + 1
     wb.set_page_options(sheet, titles=None)
     plain = paginate(sheet, a4())
