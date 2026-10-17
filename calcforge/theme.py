@@ -177,7 +177,7 @@ QAbstractItemView {{
 }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus,
 QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {accent}; }}
-QLineEdit:disabled, QComboBox:disabled {{ color: {ink_faint}; }}
+QLineEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled {{ color: {ink_faint}; }}
 QComboBox::drop-down {{ border: 0; width: 18px; }}
 QComboBox::down-arrow {{ image: url("{arrow_vee}"); width: 10px; height: 10px; }}
 
@@ -311,6 +311,17 @@ QRadioButton::indicator:checked {{
         stop:0 {accent}, stop:0.5 {accent}, stop:0.56 {field}, stop:1 {field});
 }}
 QRadioButton::indicator:disabled {{ border-color: {field_edge}; background: {surface}; }}
+/* greyed, but still saying which way it is set: a ticked box or a chosen
+   radio that is greyed out showed as unticked (Print's To File, Collate,
+   Portrait under Auto) */
+QCheckBox::indicator:checked:disabled {{
+    background: {ink_faint}; border-color: {ink_faint}; image: url("{arrow_tick}");
+}}
+QRadioButton::indicator:checked:disabled {{
+    border-color: {ink_faint};
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 {ink_faint}, stop:0.5 {ink_faint}, stop:0.56 {surface}, stop:1 {surface});
+}}
 QToolTip {{
     background: {ink}; color: {field}; border: 0; padding: 6px 8px;
     border-radius: 3px;
