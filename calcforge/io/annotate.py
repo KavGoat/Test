@@ -1192,8 +1192,14 @@ def _rich_text_of(item) -> tuple[str, str]:
     settings = (f"font:{slant}{weight} {_css_family(style.font_family)} {size:g}pt; "
                 f"text-align:{align}; text-valign:{valign}; margin:{margin:g}pt; "
                 f"line-height:{size * 1.15:.1f}pt; color:{colour}")
-    if getattr(style, "underline", False):
-        settings += "; text-decoration:underline"
+    # Revu's Underline and Strikethrough are both text decorations
+    decorations = [word for word, on in (("underline", getattr(style, "underline", False)),
+                                         ("line-through",
+                                          getattr(style, "strikethrough", False))) if on]
+    if decorations:
+        settings += "; text-decoration:" + " ".join(decorations)
+    if getattr(style, "superscript", False) or getattr(style, "subscript", False):
+        settings += "; vertical-align:" + ("super" if style.superscript else "sub")
     document = getattr(item, "doc", None)
     if document is None:
         return settings, ""
@@ -1223,8 +1229,20 @@ def _rich_text_of(item) -> tuple[str, str]:
                 said.append("font-weight:bold")
             if look.fontItalic() and not getattr(style, "italic", False):
                 said.append("font-style:italic")
+            decorated = []
             if look.fontUnderline() and not getattr(style, "underline", False):
-                said.append("text-decoration:underline")
+                decorated.append("underline")
+            if look.fontStrikeOut() and not getattr(style, "strikethrough", False):
+                decorated.append("line-through")
+            if decorated:
+                said.append("text-decoration:" + " ".join(decorated))
+            level = look.verticalAlignment()
+            whole = ("super" if getattr(style, "superscript", False) else
+                     "sub" if getattr(style, "subscript", False) else "")
+            run = ("super" if level == level.AlignSuperScript else
+                   "sub" if level == level.AlignSubScript else "")
+            if run and run != whole:
+                said.append(f"vertical-align:{run}")
             if look.hasProperty(QTextFormat.ForegroundBrush):
                 shade = look.foreground().color().name()
                 if shade.lower() != colour.lower():

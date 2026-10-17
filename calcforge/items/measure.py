@@ -41,6 +41,22 @@ WITNESS_OVERSHOOT = 4.0
 WITNESS_GAP = 2.0
 
 
+#: Revu's Units ▾: the units a measurement can be written in, beside the page's.
+LENGTH_UNITS = ("mm", "cm", "m", "km", "in", "ft", "yd", "mi")
+AREA_UNITS = tuple(f"{unit}^2" for unit in LENGTH_UNITS)
+VOLUME_UNITS = ("mm^3", "cm^3", "m^3", "in^3", "ft^3", "yd^3")
+
+#: Revu's Caption ▾ values, in its order, and what each is called there. An
+#: area can show its perimeter too, and with a depth its volume and wall
+#: area; a volume its area, perimeter and wall area; a perimeter its wall area.
+CAPTION_PARTS = (("label", "Label"), ("length", "Length"), ("area", "Area"),
+                 ("perimeter", "Perimeter"), ("volume", "Volume"),
+                 ("wall_area", "Wall Area"))
+#: Their short names, written before each value when more than one is shown.
+CAPTION_SHORT = {"length": "L", "area": "A", "perimeter": "P", "volume": "V",
+                 "wall_area": "WA"}
+
+
 def _distance(a: QPointF, b: QPointF) -> float:
     return math.hypot(b.x() - a.x(), b.y() - a.y())
 
@@ -118,6 +134,69 @@ class MeasureItem(MarkupItem):
         # the calculations, live, as an equation at the top-left of its box.
         self.variable = ""
         self._variable_link = None
+        # Revu's Units ▾: the units this one is written in, by "length",
+        # "area" and "volume"; one not given is the page's.
+        self.units: dict[str, str] = {}
+        # Revu's Caption ▾: which values are written, by CAPTION_PARTS name.
+        # Empty is the measurement's own value alone, as it always was.
+        self.caption_parts: list[str] = []
+
+    # -- units and caption (Revu's Units ▾ and Caption ▾) -------------------
+    def set_unit(self, key: str, unit: str) -> None:
+        if unit:
+            self.units[key] = unit
+        else:
+            self.units.pop(key, None)
+
+    def primary_part(self) -> str:
+        """The value this kind of measurement is about."""
+        if self.kind in (AREA,):
+            return "area"
+        if self.kind == VOLUME:
+            return "volume"
+        if self.kind == PERIMETER:
+            return "perimeter"
+        return "length"
+
+    def caption_choices(self) -> tuple:
+        """The values Caption ▾ offers for this kind (Revu's)."""
+        if self.kind == AREA:
+            return ("label", "area", "perimeter", "volume", "wall_area")
+        if self.kind == VOLUME:
+            return ("label", "volume", "area", "perimeter", "wall_area")
+        if self.kind == PERIMETER:
+            return ("label", "perimeter", "wall_area")
+        if self.kind in (ANGLE, CALIBRATE, DIMENSION):
+            return ()
+        return ("label", "length")
+
+    def caption_available(self, part: str) -> bool:
+        """Volume and wall area need a depth to be worked out from."""
+        if part in ("volume", "wall_area") and self.kind != VOLUME:
+            return bool(self.depth_text)
+        if part == "wall_area":
+            return bool(self.depth_text)
+        return part in self.caption_choices()
+
+    def caption_shown(self) -> list:
+        """The values written on the drawing, in Revu's order."""
+        if not self.caption_parts:
+            return [self.primary_part()]
+        order = [part for part, _words in CAPTION_PARTS]
+        return sorted((p for p in self.caption_parts if p in self.caption_choices()),
+                      key=order.index)
+
+    def set_caption_part(self, part: str, on: bool) -> None:
+        shown = set(self.caption_shown())
+        if on:
+            shown.add(part)
+        else:
+            shown.discard(part)
+        if not shown & {p for p in self.caption_choices() if p != "label"}:
+            shown.add(self.primary_part())        # never a caption of nothing
+        order = [p for p, _words in CAPTION_PARTS]
+        parts = sorted(shown, key=order.index)
+        self.caption_parts = [] if parts == [self.primary_part()] else parts
 
     # -- identity ----------------------------------------------------------
     def display_name(self) -> str:
@@ -139,6 +218,18 @@ class MeasureItem(MarkupItem):
         if self.kind in (AREA, VOLUME) and len(self.points) >= 3:
             return list(self.points)
         return []
+
+    def hatch_region(self) -> Optional[QPainterPath]:
+        """An area or a volume is hatched as Revu's are: inside its outline,
+        less its cut-outs."""
+        if self.kind not in (AREA, VOLUME) or len(self.points) < 3:
+            return None
+        path = QPainterPath()
+        path.addPolygon(QPolygonF(self.points))
+        path.closeSubpath()
+        if self.cutouts:
+            path = path.subtracted(self.clipped_holes_path())
+        return path
 
     def local_rect(self) -> QRectF:
         if not self.points:
@@ -165,8 +256,9 @@ class MeasureItem(MarkupItem):
             rect = rect.united(QRectF(start, end).normalized())
         if self.show_label:
             centre = self._label_anchor() + self.label_offset
-            half_width = max(len(self.value_text), 6) * self.style.font_size * 0.42
-            half_height = self.style.font_size * 1.1
+            lines = (self.value_text or "").split("\n")
+            half_width = max(max(len(line) for line in lines), 6) * self.style.font_size * 0.42
+            half_height = self.style.font_size * 1.1 * len(lines)
             rect = rect.united(QRectF(centre.x() - half_width, centre.y() - half_height,
                                       half_width * 2, half_height * 2))
         margin = self.style.width + HANDLE_SIZE + 12
@@ -271,7 +363,8 @@ class MeasureItem(MarkupItem):
     def _label_half_width(self) -> float:
         """Half the width the value is written across (as _paint_label)."""
         metrics = QFontMetricsF(self.style.font())
-        return (metrics.horizontalAdvance(self.value_text or "") + 8) / 2
+        return (max(metrics.horizontalAdvance(line)
+                    for line in (self.value_text or "").split("\n")) + 8) / 2
 
     def _handle_gap(self) -> float:
         """How far a handle's centre stands off the words: its own radius,
@@ -360,8 +453,9 @@ class MeasureItem(MarkupItem):
     def label_rect(self) -> QRectF:
         """The box the value is written in, so it can be clicked on."""
         centre = self._label_anchor() + self.label_offset
-        half_width = max(len(self.value_text), 3) * self.style.font_size * 0.34
-        half_height = self.style.font_size * 0.8
+        lines = (self.value_text or "").split("\n")
+        half_width = max(max(len(line) for line in lines), 3) * self.style.font_size * 0.34
+        half_height = self.style.font_size * 0.8 * len(lines)
         return QRectF(centre.x() - half_width, centre.y() - half_height,
                       half_width * 2, half_height * 2)
 
@@ -496,17 +590,21 @@ class MeasureItem(MarkupItem):
 
     def refresh(self, workspace=None, page=None) -> None:
         scale = self.scale_on(page) if page is not None else self.page_scale()
-        kind, raw = self.raw_measure(getattr(scale, "y_factor", 1.0))
+        stretch = getattr(scale, "y_factor", 1.0)
+        kind, raw = self.raw_measure(stretch)
         digits = max(scale.precision, 0)
+        # Revu's Units ▾: this measurement's own units, else the page's
+        length_unit = self.units.get("length") or scale.display_unit
+        area_unit = self.units.get("area") or scale.area_unit
         try:
             if kind == "length":
-                quantity = convert(scale.length(raw), scale.display_unit)
+                quantity = convert(scale.length(raw), length_unit)
             elif kind == "area":
-                quantity = convert(scale.area(raw), scale.area_unit)
+                quantity = convert(scale.area(raw), area_unit)
                 if self.kind == VOLUME and self.depth_text:
-                    depth = parse_unit(self.depth_text)
-                    if depth is not None:
-                        quantity = (quantity * depth).to_reduced_units()
+                    volume = self._volume(scale, raw)
+                    if volume is not None:
+                        quantity = volume
             elif kind == "angle":
                 quantity = Q_(raw, "deg")
             else:
@@ -514,19 +612,80 @@ class MeasureItem(MarkupItem):
         except Exception:
             quantity = None
         self.value = quantity
-        if quantity is None:
-            measured = ""
-        elif kind == "length" and hasattr(scale, "format_length"):
-            # a length is written to the scale's Precision, which may be a
-            # fraction (Revu's Set Scale; the user, 2026-10-15)
-            measured = scale.format_length(quantity, digits)
-        else:
-            measured = format_quantity(quantity, digits, "fixed")
+
+        def written(value, as_length: bool) -> str:
+            if value is None:
+                return ""
+            if as_length and hasattr(scale, "format_length"):
+                # a length is written to the scale's Precision, which may be
+                # a fraction (Revu's Set Scale; the user, 2026-10-15)
+                return scale.format_length(value, digits)
+            return format_quantity(value, digits, "fixed")
+        measured = written(quantity, kind == "length")
         self.measured_text = measured
-        named = f"{self.variable} = {measured}" if self.variable and measured else measured
+        shown = self.caption_shown()
+        primary = self.primary_part()
+        if shown == [primary]:
+            named = f"{self.variable} = {measured}" if self.variable and measured else measured
+        else:
+            values = self._caption_values(scale, stretch, quantity, length_unit, area_unit)
+            several = len([p for p in shown if p != "label"]) > 1
+            lines = []
+            for part in shown:
+                if part == "label":
+                    if self.label:
+                        lines.append(self.label)
+                    continue
+                text = written(values.get(part), part in ("length", "perimeter"))
+                if not text:
+                    continue
+                if part == primary and self.variable:
+                    lines.append(f"{self.variable} = {text}")
+                elif several:
+                    lines.append(f"{CAPTION_SHORT[part]} = {text}")
+                else:
+                    lines.append(text)
+            named = "\n".join(lines)
         self.value_text = self.custom_label or named
         self.update()
         self.sync_variable()
+
+    def _volume(self, scale, raw: float):
+        """The area times the depth, in this measurement's volume unit — or,
+        without one, as it always was: the page's area unit times the depth."""
+        depth = parse_unit(self.depth_text) if self.depth_text else None
+        if depth is None:
+            return None
+        volume = (convert(scale.area(raw), scale.area_unit) * depth).to_reduced_units()
+        unit = self.units.get("volume")
+        return convert(volume, unit) if unit else volume
+
+    def _caption_values(self, scale, stretch: float, own, length_unit: str,
+                        area_unit: str) -> dict:
+        """Every value Caption ▾ can show for this one, worked out."""
+        values = {self.primary_part(): own}
+        if not self.closed or len(self.points) < 2:
+            return values
+        try:
+            points = self.points
+            if abs(stretch - 1.0) > 1e-9:
+                points = [QPointF(p.x(), p.y() * stretch)
+                          for p in (self.mapToParent(q) for q in self.points)]
+            around = sum(_distance(a, b) for a, b in zip(points, points[1:]))
+            around += _distance(points[-1], points[0])
+            perimeter = convert(scale.length(around), length_unit)
+            values["perimeter"] = perimeter
+            if self.kind in (AREA, VOLUME) and len(self.points) >= 3:
+                _kind, raw = self.raw_measure(stretch)
+                area = convert(scale.area(raw), area_unit)
+                values["area"] = area
+                values["volume"] = self._volume(scale, raw)
+            depth = parse_unit(self.depth_text) if self.depth_text else None
+            if depth is not None:
+                values["wall_area"] = convert(perimeter * depth, area_unit)
+        except Exception:                          # noqa: BLE001 — units that do not mix
+            pass
+        return values
 
     # -- a measurement as a variable (decision 24) -------------------------------
     def sync_variable(self) -> None:
@@ -649,7 +808,9 @@ class MeasureItem(MarkupItem):
     def _paint_arrows(self, painter: QPainter) -> None:
         if len(self.points) < 2 or self.closed:
             return
-        size = max(self.style.width * 4.5, 7.0) * max(self.style.arrow_size, 0.1)
+        base = max(self.style.width * 4.5, 7.0)
+        size = base * max(self.style.arrow_size, 0.1)
+        start_size = base * max(self.style.start_size(), 0.1)
         colour = QColor(self.style.stroke)
         colour.setAlphaF(self.style.opacity)
         painter.setBrush(QBrush(colour))
@@ -668,7 +829,7 @@ class MeasureItem(MarkupItem):
                 draw_head(
                     painter,
                     start, math.atan2(start.y() - end.y(), start.x() - end.x()),
-                    size, self.style.arrow_start)
+                    start_size, self.style.arrow_start)
             return
         if self.style.arrow_end != "none":
             tip, previous = self.points[-1], self.points[-2]
@@ -679,7 +840,7 @@ class MeasureItem(MarkupItem):
             tip, following = self.points[0], self.points[1]
             draw_head(painter, tip, math.atan2(tip.y() - following.y(),
                                                         tip.x() - following.x()),
-                                        size, self.style.arrow_start)
+                                        start_size, self.style.arrow_start)
 
     def _paint_label(self, painter: QPainter) -> None:
         """The text, in line with what it measures — or on a leader if moved."""
@@ -689,6 +850,21 @@ class MeasureItem(MarkupItem):
         painter.setFont(font)
         metrics = QFontMetricsF(font)
         text = self.value_text
+        lines = text.split("\n")
+        if len(lines) > 1:
+            # Revu's caption of several values: one to a line, centred
+            painter.save()
+            painter.translate(position)
+            painter.rotate(self.label_rotation())
+            painter.setPen(QPen(self.style.text_qcolor()))
+            step = metrics.height()
+            top = -step * len(lines) / 2
+            for row, line in enumerate(lines):
+                box = QRectF(-metrics.horizontalAdvance(line) / 2 - 4, top + row * step,
+                             metrics.horizontalAdvance(line) + 8, step)
+                painter.drawText(box, Qt.AlignCenter, line)
+            painter.restore()
+            return
         width = metrics.horizontalAdvance(text) + 8
         height = metrics.height() + 4
 
@@ -804,6 +980,10 @@ class MeasureItem(MarkupItem):
         })
         if self.variable:
             data["variable"] = self.variable
+        if self.units:
+            data["units"] = dict(self.units)
+        if self.caption_parts:
+            data["caption_parts"] = list(self.caption_parts)
         return data
 
     def deserialize(self, data: dict) -> None:
@@ -818,6 +998,8 @@ class MeasureItem(MarkupItem):
         self.witness_reach = float(data.get("witness_reach", 0.0) or 0.0)
         self.show_label = bool(data.get("show_label", True))
         self.variable = str(data.get("variable", "") or "")
+        self.units = {str(k): str(v) for k, v in (data.get("units") or {}).items() if v}
+        self.caption_parts = [str(p) for p in data.get("caption_parts") or []]
         self.cutouts_from_data(data)
         self.load_base(data)
         self.refresh()

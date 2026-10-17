@@ -169,12 +169,23 @@ class Style:
     bold: bool = False
     italic: bool = False
     underline: bool = False
+    # Revu's other Font Styles: struck through, and the words set above or
+    # below the line (a whole box's; a run's own is in its rich text).
+    strikethrough: bool = False
+    superscript: bool = False
+    subscript: bool = False
+    # Revu's "A" beside the font size: the words set at the largest size
+    # that fits the box, worked out again as the box or the words change.
+    font_auto: bool = False
     text_color: str = "#111318"
     align: str = "left"
     valign: str = "top"
     arrow_start: str = "none"
     arrow_end: str = "none"
     arrow_size: float = 1.0
+    # The start's own size, as Revu sizes each end on its own. 0 means the
+    # same as the end's (arrow_size): how every markup was before.
+    arrow_start_size: float = 0.0
     blend: str = "normal"              # 'multiply' for highlighter
     corner_radius: float = 0.0
     padding: float = 4.0
@@ -268,8 +279,29 @@ class Style:
         return HATCH_CELL * max(float(self.hatch_scale or 1.0), 1e-12)
 
     def font(self) -> QFont:
-        return page_font(self.font_family, self.font_size, self.bold, self.italic,
+        font = page_font(self.font_family, self.font_size, self.bold, self.italic,
                          self.underline)
+        if self.strikethrough:
+            font.setStrikeOut(True)
+        return font
+
+    #: Revu's Font Style toggles, in its order.
+    FONT_STYLES = ("bold", "italic", "underline", "strikethrough", "superscript",
+                   "subscript")
+
+    def set_font_style(self, name: str, on: bool) -> None:
+        """Turn one Font Style on or off. Superscript and subscript are one
+        or the other, as Revu's are."""
+        setattr(self, name, bool(on))
+        if on and name == "superscript":
+            self.subscript = False
+        elif on and name == "subscript":
+            self.superscript = False
+
+    def start_size(self) -> float:
+        """The start's line-end size: its own, or the end's when it has none."""
+        own = float(self.arrow_start_size or 0.0)
+        return own if own > 0 else float(self.arrow_size or 1.0)
 
     def text_qcolor(self) -> QColor:
         colour = QColor(self.text_color or "#000000")

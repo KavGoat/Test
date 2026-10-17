@@ -395,7 +395,7 @@ def test_dark_mode_line_and_hatch_samples_can_be_seen(window):
     try:
         for combo in (window.dash_combo, window.hatch_combo):
             # a pattern, not "plain" (the hatch list opens with Manage…, then (None))
-            index = combo.findData("horizontal") if combo is window.hatch_combo else 0
+            index = combo.findData("horizontal" if combo is window.hatch_combo else "solid")
             image = combo.itemIcon(index).pixmap(150, 34).toImage()
             inked = [QColor.fromRgba(image.pixel(x, y)) for x in range(image.width())
                      for y in range(image.height())]
@@ -422,7 +422,8 @@ def test_line_and_hatch_pickers_show_only_their_sample(window):
     for combo in (window.dash_combo, window.hatch_combo):
         assert isinstance(combo, PatternCombo)
         assert combo.sizeHint().width() <= 120
-        combo.setCurrentIndex(combo.findData("horizontal") if combo is window.hatch_combo else 1)
+        combo.setCurrentIndex(combo.findData("horizontal" if combo is window.hatch_combo
+                                             else "dash"))
         assert combo.toolTip() == combo.currentText()
         image = combo.grab().toImage()
         assert not image.isNull()
@@ -448,7 +449,7 @@ def test_dark_mode_properties_panel_hatch_and_line_lists_can_be_seen(window):
             combo = window.properties_panel.findChild(QComboBox, name)
             assert combo is not None, name
             # a pattern (the hatch list opens with Manage…, then (None))
-            index = combo.findData("horizontal") if name == "hatchPattern" else 1
+            index = combo.findData("horizontal" if name == "hatchPattern" else "dash")
             image = combo.itemIcon(index).pixmap(150, 34).toImage()
             lightest = max(QColor.fromRgba(image.pixel(x, y)).lightness()
                            for x in range(image.width()) for y in range(image.height())

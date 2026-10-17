@@ -18,12 +18,12 @@ Merged in dcfda5c.
 
 Merged in 6260296 (a9cdcd2). The lead compared the bars type by type
 (scratchpad qa/round5/compare_revu_vs_calcforge.png). Still open:
-- 6.1 Area/rectangle: no Line colour swatch after "Line:". Revu has one. Status: open.
-- 6.2 Area/rectangle: no Hatch ▾. Measurements don't support hatch yet; Revu's rectangle and area do. Status: open.
-- 6.3 Callout: Revu's "A" (text box style) button is missing. Find out what it does in Revu (likely Text Box Properties / autosize) before adding it. Status: open.
-- 6.4 Cloud: Revu shows the scallop pattern in the line-style box and an intensity ▾. CalcForge has a plain style plus an intensity spin. Status: open, small.
-- 6.5 Units ▾ sets the page's units (CalcForge has no per-measurement units). Caption ▾ has no per-value choices. Status: open, a design decision for the user.
-- 6.6 Not in CalcForge: strikethrough, superscript, subscript, line-style Manage…, separate line-end sizes. Status: open, backlog.
+- 6.1 Area/rectangle: no Line colour swatch after "Line:". Revu has one. Status: done — the swatch was there but bare; the bar's colour buttons (Line, Fill, text) are now Revu's framed swatch buttons, and an area and a Sketch to Scale rectangle show it straight after "Line:".
+- 6.2 Area/rectangle: no Hatch ▾. Status: done — area and volume measurements take a hatch (bar, Properties panel), drawn behind the outline less any cut-outs, saved, reopened and written as a PDF pattern that MuPDF draws. Revu's area bar has no Font, so the area's font moved to the Properties panel only, which keeps the bar inside 1280 px.
+- 6.3 Callout: Revu's "A". Status: done — it is Revu's Auto font size (manual: "Auto: automatically adjusts the font size of the text to the maximum value that will fit in the text box"). On the bar after the size for text boxes and callouts, and as Auto beside Font Size in the Properties panel; picking a size turns it off. Sizes now run 1–144 pt, as Revu's.
+- 6.4 Cloud. Status: done — a cloud's line-style list draws every style as scallops, and the size is Revu's ≋ intensity ▾ (0.5–5; a size set in the Properties panel shows as an extra entry).
+- 6.5 Units ▾ / Caption ▾. Status: done — Units ▾ sets the measurement's own Length, Area and Volume units ("Page" follows the page), saved with it, one undo step; with a tool in hand and nothing selected it sets the next measurements'. The Properties panel has the same rows (the page's area unit stays there as Page Area). Precision stays the page scale's, as in Revu. Caption ▾ offers Revu's values: Label, Length or Area, Perimeter, Volume and Wall Area (these two with a depth); several are written one to a line as A =, P =, V =, WA =. Measurement variables keep their real value whatever the display unit.
+- 6.6 Status: done — Strikethrough (Style ▾, Properties, Edit ▸ Text), Superscript and Subscript (Properties, Edit ▸ Text; one or the other), for the whole box or a selected run, written to /DS and /RC; line-style Manage… (Line Styles: Import .lin, New…, Remove, like Hatch Patterns; a markup carries its own dashes, so it opens the same anywhere); a size for each line end (Start ▾ Auto ▾ End ▾ Auto ▾, shown once the end has something on it, and Start Size in the Properties panel).
 
 ## Round 5 — spreadsheet speed (performance agent, 2026-10-16)
 

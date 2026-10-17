@@ -42,12 +42,17 @@ END_SIZES = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0)
 
 # Groups of controls beyond the style fields (stylecaps): shown by what the
 # markup is rather than by what its style has.
+#: Revu's cloud intensities on the bar's ≋ list (the Properties panel's
+#: Size takes any value between 0.1 and 20).
+CLOUD_SIZES = (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0)
+
 SHAPE = "callout_shape"
 HIGHLIGHT = "highlight"
 CUTOUT = "cutout"
 MEASURE = "measure"
 UNITS = "units"
 TOTALS = "totals"
+AUTO_FONT = "font_auto"      # Revu's "A": the words sized to fit the box
 
 
 def _ink() -> str:
@@ -170,6 +175,47 @@ class IconCombo(QComboBox):
             current.paint(painter, x, y, size.width(), size.height())
 
 
+class CloudSizeCombo(ValueCombo):
+    """Revu's cloud intensity ▾: closed, its ≋ picture; open, each size's
+    scallops drawn. A size set elsewhere (the Properties panel's Size) shows
+    as one more entry at the end, as the line-end sizes do."""
+
+    def __init__(self, parent=None):
+        super().__init__(CLOUD_SIZES, lambda v: f"Size {v:g}", 0.1, 20.0, editable=False,
+                         width=52, parent=parent)
+        self.setIconSize(QSize(40, 14))
+        self.face = _cloud_waves_icon()
+        self.view().setMinimumWidth(130)
+        self.refresh_icons()
+        self.setToolTip("Cloud intensity: how big the scallops are")
+
+    def refresh_icons(self) -> None:
+        self.face = _cloud_waves_icon()
+        for index in range(self.count()):
+            data = self.itemData(index)
+            if data is not None:
+                self.setItemIcon(index, _scallop_icon(float(data)))
+
+    def _show(self, value: float) -> None:
+        super()._show(value)
+        if self._custom >= 0:
+            self.setItemIcon(self._custom, _scallop_icon(float(self.itemData(self._custom))))
+
+    def paintEvent(self, _event) -> None:
+        painter = QStylePainter(self)
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        option.currentText = ""
+        option.currentIcon = QIcon()
+        painter.drawComplexControl(QStyle.CC_ComboBox, option)
+        field = self.style().subControlRect(QStyle.CC_ComboBox, option,
+                                            QStyle.SC_ComboBoxEditField, self)
+        size = QSize(22, 18).boundedTo(field.size())
+        self.face.paint(painter, field.x() + (field.width() - size.width()) // 2,
+                        field.y() + (field.height() - size.height()) // 2,
+                        size.width(), size.height())
+
+
 class PopupCombo(QComboBox):
     """Looks like a list box (Revu's "Units ▾", "Style ▾", "Totals: … ▾" and
     the markup's type ▾) and opens a menu or a small panel of its own."""
@@ -233,6 +279,13 @@ def _panel(owner, name: str) -> QFrame:
     return panel
 
 
+def _framed(button):
+    """A colour button framed as Revu's are, its colour a square inside."""
+    button.setProperty("revuSwatch", True)
+    button.setIconSize(QSize(14, 14))
+    return button
+
+
 def _number(spin, width: int):
     spin.setFixedWidth(width)
     spin.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -277,6 +330,57 @@ def _fit_icon() -> QIcon:
     return drawn_icon(draw, 20, 20)
 
 
+def _auto_font_icon() -> QIcon:
+    """Revu's Auto font size: an A in a box whose corners open outwards."""
+    def draw(painter: QPainter) -> None:
+        from PySide6.QtGui import QFont
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(QColor(_ink()), 1.3))
+        for x, y, dx, dy in ((2.5, 2.5, 1, 1), (17.5, 2.5, -1, 1),
+                             (2.5, 17.5, 1, -1), (17.5, 17.5, -1, -1)):
+            painter.drawPolyline(QPolygonF([QPointF(x, y + 4 * dy), QPointF(x, y),
+                                            QPointF(x + 4 * dx, y)]))
+        font = QFont()
+        font.setBold(True)
+        font.setPixelSize(12)
+        painter.setFont(font)
+        painter.drawText(QRectF(0, 0, 20, 20), Qt.AlignCenter, "A")
+    return drawn_icon(draw, 20, 20)
+
+
+def _scallop_path(left: float, right: float, y: float, radius: float):
+    """A run of a cloud's scallops along y, each *radius* high."""
+    from PySide6.QtGui import QPainterPath
+    path = QPainterPath()
+    step = radius * 2
+    x = left
+    path.moveTo(x, y)
+    while x + step <= right + 0.01:
+        path.arcTo(QRectF(x, y - radius, step, step), 180, -180)
+        x += step
+    return path
+
+
+def _cloud_waves_icon() -> QIcon:
+    """Revu's ≋ for the cloud's intensity list: three rows of scallops."""
+    def draw(painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(QColor(_ink()), 1.1))
+        for y in (6.0, 11.0, 16.0):
+            painter.drawPath(_scallop_path(1.0, 21.0, y, 2.5))
+    return drawn_icon(draw, 22, 18)
+
+
+def _scallop_icon(size: float) -> QIcon:
+    """One cloud intensity, drawn: scallops as big as that size makes them."""
+    def draw(painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(QColor(_ink()), 1.2))
+        radius = max(1.5, min(1.5 + size, 6.5))
+        painter.drawPath(_scallop_path(2.0, 38.0, 4.0 + radius, radius))
+    return drawn_icon(draw, 40, 14)
+
+
 def _shape_icon(kind: str) -> QIcon:
     def draw(painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -300,7 +404,7 @@ def build(window) -> QToolBar:
     from ..items.measure import CountItem
     from ..items.text import STAMP_PRESETS
     from .mainwindow import _bar_ink
-    from .panels import _line_style_icon, fill_hatch_combo
+    from .panels import fill_hatch_combo, fill_line_style_combo
     from .stylecaps import (ARROW_SIZE, CLOUD, CORNER, DASH, FILL, FILL_OPACITY, FONT,
                             HATCH, OPACITY, STROKE, SYMBOL, WIDTH)
     from .widgets import ColorButton, PatternCombo, UnboundedSpin, arrow_combo, \
@@ -312,7 +416,8 @@ def build(window) -> QToolBar:
     bar.setObjectName("toolbar_style")
     w._style_widgets = {key: [] for key in (
         STROKE, OPACITY, DASH, CLOUD, WIDTH, CORNER, ARROW_SIZE, FILL, FILL_OPACITY,
-        SHAPE, HATCH, HIGHLIGHT, CUTOUT, SYMBOL, UNITS, MEASURE, FONT, TOTALS)}
+        SHAPE, HATCH, HIGHLIGHT, CUTOUT, SYMBOL, UNITS, MEASURE, FONT, AUTO_FONT,
+        TOTALS)}
 
     w._style_action = {}
 
@@ -339,6 +444,7 @@ def build(window) -> QToolBar:
     put(STROKE, label("Line:"))
     w.stroke_button = ColorButton(style.stroke, True, "Line colour")
     w.stroke_button.colorChanged.connect(w._style_stroke)
+    _framed(w.stroke_button)
     put(STROKE, w.stroke_button)
     w.opacity_spin = _number(QSpinBox(), 60)
     w.opacity_spin.setObjectName("overallOpacity")
@@ -349,25 +455,18 @@ def build(window) -> QToolBar:
     w.opacity_spin.valueChanged.connect(w._style_opacity)
     put(OPACITY, w.opacity_spin)
     w.dash_combo = PatternCombo()
+    w.dash_combo.setObjectName("lineStyleBar")
     big_pattern_dropdown(w.dash_combo)
-    for name in DASH_ARRAYS:
-        w.dash_combo.addItem(_line_style_icon(name, _bar_ink(), 1), name.title(), name)
+    # Revu's: Manage… at the top, then every line style drawn — for a cloud,
+    # drawn as its scallops
+    fill_line_style_combo(w.dash_combo, _bar_ink(), 1)
     w.dash_combo.currentIndexChanged.connect(
         lambda index: w._style_dash(w.dash_combo.itemData(index)) if index >= 0 else None)
     put(DASH, w.dash_combo)
-    cloud_mark = QLabel()
-    cloud_mark.setObjectName("cloudSizeMark")
-    cloud_mark.setPixmap(icon("cloud", 18).pixmap(18, 18))
-    cloud_mark.setToolTip("Cloud size")
-    w._cloud_mark = cloud_mark
-    put(CLOUD, cloud_mark)
-    w.cloud_spin = _number(QDoubleSpinBox(), 66)
+    # Revu's cloud intensity ▾, after the line style
+    w.cloud_spin = CloudSizeCombo()
     w.cloud_spin.setObjectName("cloudSize")
-    w.cloud_spin.setRange(0.1, 20.0)
-    w.cloud_spin.setDecimals(2)
-    w.cloud_spin.setSingleStep(0.25)
     w.cloud_spin.setValue(w.default_cloud_size)
-    w.cloud_spin.setToolTip("Size: how big the cloud's scallops are")
     w.cloud_spin.valueChanged.connect(w._style_cloud)
     put(CLOUD, w.cloud_spin)
     w.width_spin = _number(QDoubleSpinBox(), 80)
@@ -392,31 +491,40 @@ def build(window) -> QToolBar:
         CORNER, lambda s: setattr(s, "corner_radius", value), "Corner radius"))
     put(CORNER, w.corner_spin)
 
-    # -- Start ▾ End ▾ Auto ▾ ----------------------------------------------
+    # -- Start ▾ Auto ▾  End ▾ Auto ▾ — each end its own size, as Revu's ----
     w.arrow_start_combo = _end_combo(arrow_combo(), "Start: ")
     w.arrow_end_combo = _end_combo(arrow_combo(), "End: ")
-    for word, control, attribute in (("Start:", w.arrow_start_combo, "arrow_start"),
-                                     ("End:", w.arrow_end_combo, "arrow_end")):
+
+    def end_size(what: str) -> ValueCombo:
+        box = ValueCombo(END_SIZES, lambda v: f"{v * 100:g}%", 0.25, 4.0, editable=False,
+                         first=("Auto", 1.0), width=64)
+        box.setToolTip(f"{what} size: how big the line's {what.lower()} is — Auto "
+                       "sizes it from the line width")
+        return box
+    w.arrow_start_size_spin = end_size("Start")
+    w.arrow_start_size_spin.setObjectName("arrowStartSize")
+    w.arrow_start_size_spin.setValue(style.start_size())
+    w.arrow_start_size_spin.valueChanged.connect(w._style_arrow_start_size)
+    w.arrow_size_spin = end_size("End")
+    w.arrow_size_spin.setObjectName("arrowSize")
+    w.arrow_size_spin.setValue(style.arrow_size)
+    w.arrow_size_spin.valueChanged.connect(w._style_arrow_size)
+    for word, control, size, attribute in (
+            ("Start:", w.arrow_start_combo, w.arrow_start_size_spin, "arrow_start"),
+            ("End:", w.arrow_end_combo, w.arrow_size_spin, "arrow_end")):
         control.currentIndexChanged.connect(
             lambda _i, name=attribute, box=control: w._style_line_ending(name, box.currentData()))
         word_action = put(ARROW_SIZE, label(word))
         if attribute == "arrow_start":
             w.arrow_start_label_action = word_action
         put(ARROW_SIZE, control)
-    w.arrow_size_spin = ValueCombo(
-        END_SIZES, lambda v: f"{v * 100:g}%", 0.25, 4.0, editable=False,
-        first=("Auto", 1.0), width=64)
-    w.arrow_size_spin.setObjectName("arrowSize")
-    w.arrow_size_spin.setToolTip("End size: how big the line ends are — Auto sizes "
-                                 "them from the line width")
-    w.arrow_size_spin.setValue(style.arrow_size)
-    w.arrow_size_spin.valueChanged.connect(w._style_arrow_size)
-    put(ARROW_SIZE, w.arrow_size_spin)
+        put(ARROW_SIZE, size)
 
     # -- Fill: colour, % -----------------------------------------------------
     put(FILL, label("Fill:"))
     w.fill_button = ColorButton("", True, "Fill colour")
     w.fill_button.colorChanged.connect(w._style_fill)
+    _framed(w.fill_button)
     put(FILL, w.fill_button)
     w.fill_opacity_spin = _number(QSpinBox(), 60)
     w.fill_opacity_spin.setObjectName("fillOpacity")
@@ -487,7 +595,8 @@ def build(window) -> QToolBar:
     # -- Units ▾ and Caption ▾ for a measurement ------------------------------
     w.units_button = PopupCombo("Units", 64)
     w.units_button.setObjectName("measureUnits")
-    w.units_button.setToolTip("Units: what the measurements on this page are written in")
+    w.units_button.setToolTip("Units: what this measurement is written in — "
+                              "the page's, or its own")
     w.units_button.popup_panel = _build_units_panel(w)
     w.units_button.about_to_show = w._fill_units_panel
     put(UNITS, w.units_button)
@@ -495,7 +604,8 @@ def build(window) -> QToolBar:
     w.caption_button.setObjectName("measureCaption")
     w.caption_button.setIconSize(QSize(20, 20))
     w.caption_button.set_face(picture=_caption_icon())
-    w.caption_button.setToolTip("Caption: whether the value is written on the drawing")
+    w.caption_button.setToolTip("Caption: whether it is written on the drawing, "
+                                "and which values")
     caption_menu = QMenu(w.caption_button)
     caption_menu.setObjectName("captionMenu")
     caption_menu.setProperty("cf_context", "propbar.caption")
@@ -503,6 +613,17 @@ def build(window) -> QToolBar:
     w.caption_show_action.setCheckable(True)
     w.caption_show_action.toggled.connect(lambda on: w._measure_setting(
         "show_label", on, "Caption"))
+    caption_menu.addSeparator()
+    # Revu's caption values: what the measurement can show beside its own —
+    # an area its perimeter, and with a depth its volume and wall area
+    from ..items.measure import CAPTION_PARTS
+    w.caption_part_actions = {}
+    for part, words in CAPTION_PARTS:
+        action = caption_menu.addAction(words)
+        action.setCheckable(True)
+        action.setObjectName(f"caption_{part}")
+        action.toggled.connect(lambda on, p=part: w._caption_part(p, on))
+        w.caption_part_actions[part] = action
     caption_menu.addSeparator()
     w.caption_inline_action = caption_menu.addAction("Inline Text")
     w.caption_inline_action.setCheckable(True)
@@ -521,20 +642,30 @@ def build(window) -> QToolBar:
     w.font_family_combo.currentFontChanged.connect(lambda font: w._style_change(
         FONT, lambda s: setattr(s, "font_family", font.family()), "Font"))
     put(FONT, w.font_family_combo)
-    w.font_spin = ValueCombo(FONT_SIZES, lambda v: f"{v:g}", 3.0, 96.0, editable=True,
-                             width=56)
+    w.font_spin = ValueCombo(FONT_SIZES, lambda v: f"{v:g}", 1.0, 144.0, editable=True,
+                             width=58)
     w.font_spin.setObjectName("fontSize")
     w.font_spin.setToolTip("Font size, in points")
     w.font_spin.setValue(style.font_size)
     w.font_spin.valueChanged.connect(w._style_font)
     put(FONT, w.font_spin)
+    w.font_auto_button = QToolButton()
+    w.font_auto_button.setObjectName("fontAuto")
+    w.font_auto_button.setCheckable(True)
+    w.font_auto_button.setIcon(_auto_font_icon())
+    w.font_auto_button.setToolTip("Auto: the font size set to the largest that fits "
+                                  "the box, and kept so as the words or the box change")
+    w.font_auto_button.toggled.connect(w._style_font_auto)
+    put(AUTO_FONT, w.font_auto_button)
     w.text_colour_button = ColorButton(style.text_color, label="Text colour")
+    _framed(w.text_colour_button)
     w.text_colour_button.colorChanged.connect(lambda value: w._style_change(
         FONT, lambda s: setattr(s, "text_color", value), "Text colour"))
     put(FONT, w.text_colour_button)
     w.font_style_button = PopupCombo("Style", 62)
     w.font_style_button.setObjectName("fontStyle")
-    w.font_style_button.setToolTip("Font style: bold, italic, underline; alignment")
+    w.font_style_button.setToolTip("Font style: bold, italic, underline, strikethrough; "
+                                   "alignment")
     w.font_style_button.popup_panel = _build_font_style_panel(w)
     put(FONT, w.font_style_button)
 
@@ -668,7 +799,7 @@ def _build_more_panel(w) -> None:
 
 
 def _build_font_style_panel(w) -> QFrame:
-    """Revu's Style ▾: "Font Style: B I U", and CalcForge's alignment."""
+    """Revu's Style ▾: "Font Style: B I U S", and CalcForge's alignment."""
     from .stylecaps import FONT
     panel = _panel(w, "fontStylePopup")
     row = QHBoxLayout(panel)
@@ -676,7 +807,8 @@ def _build_font_style_panel(w) -> QFrame:
     row.setSpacing(4)
     row.addWidget(QLabel("Font Style:"))
     w.font_buttons = {}
-    for name, text in (("bold", "B"), ("italic", "I"), ("underline", "U")):
+    for name, text in (("bold", "B"), ("italic", "I"), ("underline", "U"),
+                       ("strikethrough", "S")):
         button = QToolButton()
         button.setObjectName(f"fontStyle_{name}")
         button.setText(text)
@@ -684,12 +816,13 @@ def _build_font_style_panel(w) -> QFrame:
         face.setBold(name == "bold")
         face.setItalic(name == "italic")
         face.setUnderline(name == "underline")
+        face.setStrikeOut(name == "strikethrough")
         button.setFont(face)
         button.setCheckable(True)
         button.setAutoRaise(True)
         button.setToolTip(name.capitalize())
         button.toggled.connect(lambda on, field=name: w._style_change(
-            FONT, lambda s: setattr(s, field, on), "Font style"))
+            FONT, lambda s: s.set_font_style(field, on), "Font style"))
         w.font_buttons[name] = button
         row.addWidget(button)
     w.text_align_combo = QComboBox()
@@ -707,29 +840,44 @@ def _build_font_style_panel(w) -> QFrame:
 
 
 def _build_units_panel(w) -> QFrame:
-    """Revu's Units ▾: the length and area units — here the page's, so every
-    measurement on the page is written in them."""
-    from .dialogs import REAL_UNIT_NAMES
+    """Revu's Units ▾: the units this measurement is written in — its
+    length, area and volume — each the page's unless one of its own is
+    picked. The value an equation reads is the same whatever is shown."""
+    from ..items.measure import AREA_UNITS, LENGTH_UNITS, VOLUME_UNITS
     panel = _panel(w, "unitsPopup")
     form = QFormLayout(panel)
     form.setContentsMargins(10, 8, 10, 8)
-    w.units_length_combo = QComboBox()
-    w.units_length_combo.setObjectName("unitsLength")
-    for unit in REAL_UNIT_NAMES:
-        w.units_length_combo.addItem(unit, unit)
-    w.units_area_combo = QComboBox()
-    w.units_area_combo.setObjectName("unitsArea")
-    for unit in ("mm", "cm", "m", "km", "in", "ft", "yd", "mi"):
-        w.units_area_combo.addItem(f"sq {unit}", f"{unit}^2")
-    w.units_length_combo.activated.connect(lambda _i: w._units_chosen())
-    w.units_area_combo.activated.connect(lambda _i: w._units_chosen())
-    form.addRow("Length:", w.units_length_combo)
-    form.addRow("Area:", w.units_area_combo)
-    note = QLabel("For every measurement on this page")
+    w.units_combos = {}
+    for key, words, units in (("length", "Length:", LENGTH_UNITS),
+                              ("area", "Area:", AREA_UNITS),
+                              ("volume", "Volume:", VOLUME_UNITS)):
+        combo = QComboBox()
+        combo.setObjectName(f"units{key.title()}")
+        combo.addItem("Page", "")              # the page's, worked out as it is shown
+        for unit in units:
+            combo.addItem(_unit_words(unit), unit)
+        combo.activated.connect(lambda _i, k=key: w._units_chosen(k))
+        form.addRow(words, combo)
+        w.units_combos[key] = combo
+    w.units_length_combo = w.units_combos["length"]
+    w.units_area_combo = w.units_combos["area"]
+    w.units_volume_combo = w.units_combos["volume"]
+    w._units_form = form
+    note = QLabel("For the selected measurements")
     note.setObjectName("unitsNote")
     form.addRow(note)
+    w.units_note = note
     w.units_popup = panel
     return panel
+
+
+def _unit_words(unit: str) -> str:
+    """A unit as Revu's list writes it: sq m, cu m."""
+    if unit.endswith("^2"):
+        return f"sq {unit[:-2]}"
+    if unit.endswith("^3"):
+        return f"cu {unit[:-2]}"
+    return unit
 
 
 # ---------------------------------------------------------------------------
@@ -751,13 +899,16 @@ def extras_shown(items: list, active, supported: set) -> set:
     """The groups beyond the style fields that this markup (or this tool's
     next markup) has."""
     from ..items.measure import AREA, DIMENSION, VOLUME, CountItem, MeasureItem
-    from ..items.text import CalloutItem, _TextBase
-    from .stylecaps import FILL, STROKE
+    from ..items.text import CalloutItem, TextItem, TypewriterItem, _TextBase
+    from .stylecaps import FILL, FONT, STROKE
     shown = set()
     if active is None or not supported:
         return shown
     if isinstance(active, CalloutItem):
         shown.add(SHAPE)
+    if isinstance(active, (TextItem, CalloutItem)) and not isinstance(active, TypewriterItem) \
+            and FONT in supported:
+        shown.add(AUTO_FONT)              # Revu's "A": the words sized to the box
     always_highlights = getattr(active, "kind", "") in ("highlight", "highlighter")
     if supported & {STROKE, FILL} and not isinstance(active, (_TextBase, CountItem)) \
             and not always_highlights \
@@ -812,7 +963,8 @@ def refresh_icons(window) -> None:
         window.callout_shape_combo.setItemIcon(index, _shape_icon(kind))
     window.highlight_button.setIcon(icon("highlighter", 20))
     window.cutout_button.setIcon(icon("cutout_polygon", 20))
-    window._cloud_mark.setPixmap(icon("cloud", 18).pixmap(18, 18))
+    window.font_auto_button.setIcon(_auto_font_icon())
+    window.cloud_spin.refresh_icons()
     from .widgets import arrow_combo
     fresh = arrow_combo()
     for combo in (window.arrow_start_combo, window.arrow_end_combo):

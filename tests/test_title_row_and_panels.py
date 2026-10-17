@@ -256,11 +256,15 @@ def test_area_measurements_have_units_caption_and_totals(window, qapp):
     assert window.undo_stack.count() == before + 1
     shown_labels = [i.show_label for i in window.selected_items()]
     assert shown_labels == [False, False]
-    # Units ▾: the page's area unit
+    # Units ▾: the selected measurements' own area unit, as Revu's — one undo
+    # step; the page keeps its own
     window._fill_units_panel()
+    before = window.undo_stack.count()
     window.units_area_combo.setCurrentIndex(window.units_area_combo.findData("mm^2"))
-    window._units_chosen()
-    assert window.current_page().scale.area_unit == "mm^2"
+    window._units_chosen("area")
+    assert window.undo_stack.count() == before + 1
+    assert window.current_page().scale.area_unit == "m^2"
+    assert all(i.units.get("area") == "mm^2" for i in window.selected_items())
     assert "mm²" in window.totals_button.currentText()
 
 

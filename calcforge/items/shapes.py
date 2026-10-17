@@ -1152,7 +1152,9 @@ class PolyItem(MarkupItem):
     def _paint_arrows(self, painter: QPainter) -> None:
         if len(self.points) < 2:
             return
-        size = max(self.style.width * 4.0, 7.0) * max(self.style.arrow_size, 0.1)
+        base = max(self.style.width * 4.0, 7.0)
+        size = base * max(self.style.arrow_size, 0.1)
+        start_size = base * max(self.style.start_size(), 0.1)
         colour = QColor(self.style.stroke or "#000000")
         colour.setAlphaF(self.style.opacity)
         painter.setBrush(QBrush(colour))
@@ -1170,7 +1172,7 @@ class PolyItem(MarkupItem):
             tip = self.points[0]
             following = self.points[1]
             angle = math.atan2(tip.y() - following.y(), tip.x() - following.x())
-            draw_head(painter, tip, angle, size, self.style.arrow_start)
+            draw_head(painter, tip, angle, start_size, self.style.arrow_start)
 
     def paint_handles(self, painter: QPainter) -> None:
         # The same three guards the base draws under: not selected, handles

@@ -73,6 +73,8 @@ def capabilities(item, for_default: bool = False) -> set[str]:
         result = {STROKE, WIDTH, DASH, FONT, OPACITY}
         if getattr(item, "closed", False):
             result |= {FILL, FILL_OPACITY}       # an area has no arrowheads
+            if item.kind in ("area", "volume"):
+                result.add(HATCH)                # Revu's area and volume take a hatch
         else:
             result |= {ARROW_SIZE}
         return result

@@ -72,6 +72,11 @@ ALIASES: dict[str, str] = {
     "propbar.bold": "command.bold",
     "propbar.italic": "command.italic",
     "propbar.underline": "command.underline",
+    # Revu's other Font Styles: the Style ▾ and the Properties panel's buttons
+    "propbar.strikethrough": "command.strikethrough",
+    "properties.strikethrough": "command.strikethrough",
+    "properties.superscript": "command.superscript",
+    "properties.subscript": "command.subscript",
     "pagepanel.calibrate": "command.scale",
     "pagepanel.insert_break": "command.insert_page_break",
     "pagepanel.reset_breaks": "command.reset_page_breaks",
@@ -624,6 +629,8 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'propbar.fit_to_text': ('Properties toolbar: Fit to text', 'Markup', 'always'),
     'propbar.add_a_cut_out': ('Properties toolbar: Add a cut-out', 'Markup', 'always'),
     'propbar.count_subject': ('Properties toolbar: Count subject…', 'Markup', 'always'),
+    # Revu's "A" beside the font size: the words sized to fit the box
+    'propbar.auto': ('Properties toolbar: Auto font size', 'Markup', 'always'),
     # -- styles ----------------------------------------------------------------
     'styles.default': ('Markup style: Default', 'Markup', 'always'),
     'styles.add': ('Markup style: Save Current Look as New Style', 'Markup', 'always'),
