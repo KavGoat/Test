@@ -150,7 +150,7 @@ Do not reopen these; the full list is in `docs/tasklist.md`.
   - Revu's keys apply: Home and End go to the first and last page;
     Ctrl+Left/Right turn pages; Ctrl+Y redoes; V picks Select; Shift+V picks
     Pan.
-  - Multiply stays on Ctrl+Shift+D, because Ctrl+M is SMath's matrix key.
+  - Ctrl+M depends on the mode (the user, 2026-10-15): Multiply in Markup mode, Matrix in Calc mode. Ctrl+Shift+D is Revu's Delete Pages.
 - **Markups and the PDF.**
   - Line opacity stays, as in Revu.
   - Colour change touches only the PDF's own line work, never markups.
