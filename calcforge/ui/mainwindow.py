@@ -4365,7 +4365,12 @@ class MainWindow(QMainWindow):
         self.go_to_page(index)
 
     def go_to_page(self, index: int) -> None:
-        if not 0 <= index < len(self.document.pages) or index == self.current_index:
+        if not 0 <= index < len(self.document.pages):
+            return
+        if index == self.current_index:
+            # already in view (a zoom brought it there, leaving a run picked
+            # in Thumbnails): asked for, it is the page picked
+            self.pages_panel.show_current(index)
             return
         # Anything half-finished belongs to the page being left, so it is
         # settled here rather than being carried onto the next one.
@@ -4888,7 +4893,10 @@ class MainWindow(QMainWindow):
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
         self.page_spin.blockSignals(False)
-        self.pages_panel.show_current(index)
+        # a zoom or a fit scrolls past pages on the way: the run picked out
+        # in Thumbnails stays picked, only the page in view moves
+        self.pages_panel.show_current(
+            index, keep_run=getattr(self.view, "zoom_scrolling", 0) > 0)
         self.refresh_scale_label()
         self._sync_other_windows(True)
 

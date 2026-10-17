@@ -713,25 +713,35 @@ class PagesPanel(QWidget):
         menu = self.window.page_menu(index)
         menu.exec(self.list.viewport().mapToGlobal(point))
 
-    def show_current(self, row: int) -> None:
+    def show_current(self, row: int, keep_run: bool = False) -> None:
         """Make *row* the page in view in the strip, as going to a page does
         (a key, a scroll, Go to Page): it alone is picked out — unless it is
-        one of a run picked out, which stays picked. The row already current
-        (the one just clicked) is left as the click left it.
+        one of a run picked out, which stays picked. A row clicked or keyed
+        to in the strip itself is left as the strip picked it.
 
         QListWidget.setCurrentRow only swaps the row it last picked by
         itself: rows picked any other way (a run re-picked after a rebuild,
         pasted pages shown where they landed) stayed picked, so going on to
         another page added it to them, and Page Setup or Set Scale opened on
-        "Selected" for pages nobody had picked (2026-10-17)."""
+        "Selected" for pages nobody had picked (2026-10-17).
+
+        *keep_run*: the page came into view because the view was zoomed or
+        fitted, which scrolls past other pages on the way. A run picked out
+        stays picked and only the current row moves; a zoom to look closer
+        is not a choice of pages (2026-10-17)."""
         listed = self.list
         entry = listed.item(row)
-        if entry is None or listed.currentRow() == row:
-            return
+        if entry is None or self._following_the_strip:
+            return                      # the strip itself chose it: as it chose
         from PySide6.QtCore import QItemSelectionModel
         index = listed.indexFromItem(entry)
-        flags = (QItemSelectionModel.NoUpdate if entry.isSelected()
-                 else QItemSelectionModel.ClearAndSelect)
+        run = keep_run and len(listed.selectedItems()) > 1
+        if entry.isSelected() or run:
+            if listed.currentRow() == row:
+                return
+            flags = QItemSelectionModel.NoUpdate
+        else:
+            flags = QItemSelectionModel.ClearAndSelect
         was = listed.blockSignals(True)
         listed.selectionModel().setCurrentIndex(index, flags)
         listed.blockSignals(was)
@@ -752,9 +762,17 @@ class PagesPanel(QWidget):
         listed.selectionModel().select(chosen, QItemSelectionModel.ClearAndSelect)
         listed.blockSignals(was)
 
+    #: True while a row clicked (or keyed to) in the strip is being gone
+    #: to: the strip has already picked what the click or key meant.
+    _following_the_strip = False
+
     def _row_changed(self, row: int) -> None:
         if not self._suppress and row >= 0:
-            self.pageSelected.emit(row)
+            self._following_the_strip = True
+            try:
+                self.pageSelected.emit(row)
+            finally:
+                self._following_the_strip = False
 
     def _rows_moved(self, _parent, start, end, _dest, row) -> None:
         """A run of pages has been dragged somewhere else in the strip.

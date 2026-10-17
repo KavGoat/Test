@@ -161,9 +161,12 @@ def page_setup(window, steps, opener=from_document_menu, ok=True):
     return seen
 
 
-def pick(combo, text):
-    """Open a dropdown with the mouse and click one of its entries."""
-    QTest.mouseClick(combo, Qt.LeftButton)
+def pick(combo, text, shown=True):
+    """Open a dropdown with the mouse and click one of its entries (an
+    editable one opens from its arrow)."""
+    where = QPoint(combo.width() - 8, combo.height() // 2) if combo.isEditable() \
+        else combo.rect().center()
+    QTest.mouseClick(combo, Qt.LeftButton, Qt.NoModifier, where)
     # a popup ignores a release within a double-click of opening (Qt)
     QTest.qWait(QApplication.doubleClickInterval() + 60)
     view = combo.view()
@@ -174,7 +177,8 @@ def pick(combo, text):
     QTest.mouseMove(view.viewport(), rect.center())
     QTest.mouseClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, rect.center(), 30)
     settle()
-    assert combo.currentText() == text
+    if shown:                      # the zoom box then shows the zoom it came to
+        assert combo.currentText() == text
 
 
 def type_into(spin, text):
@@ -913,3 +917,89 @@ def test_a_run_stays_picked_after_a_command_and_going_on_replaces_it(drawn, comm
     assert w.selected_pages() == [2]               # and going on picks the page alone
     press(w, Qt.Key_Home)
     assert w.selected_pages() == [0]
+
+
+@pytest.fixture
+def six(window, tmp_path):
+    """Six A4 landscape sheets, pages 2-4 picked in Thumbnails by mouse, the
+    view on page 4 at 100 %."""
+    path = tmp_path / "six.pdf"
+    _drawing(path, pages=6)
+    window.show()
+    window.activateWindow()
+    window.open_from_command_line(str(path))
+    window.view.set_zoom(1.0)
+    settle()
+    pick_in_thumbnails(window, 1, 3)
+    assert window.selected_pages() == [1, 2, 3]
+    return window
+
+
+def wheel(window, notches, modifiers=Qt.NoModifier):
+    """Turn the wheel near the top of the view, so a zoom swings the middle
+    of the view onto other pages."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QWheelEvent
+    view = window.view
+    middle = QPointF(view.viewport().rect().center().x(), 20)
+    for _ in range(abs(notches)):
+        event = QWheelEvent(middle, view.viewport().mapToGlobal(middle.toPoint()),
+                            QPoint(0, 0), QPoint(0, 120 if notches > 0 else -120),
+                            Qt.NoButton, modifiers, Qt.NoScrollPhase, False)
+        QApplication.sendEvent(view.viewport(), event)
+        settle(2)
+    view.finish_scrolling()
+    settle()
+
+
+def test_zooming_keeps_the_run_picked_in_thumbnails(six):
+    """A zoom scrolls past other pages on its way: the picked run stays
+    picked and only the page in view moves (the coordinator, 2026-10-17)."""
+    w = six
+    seen = set()
+    w.view.pageChanged.connect(seen.add)            # every page the view passed
+
+    def check(what):
+        assert w.selected_pages() == [1, 2, 3], what
+
+    wheel(w, -12)                                   # the plain wheel zooms out
+    assert w.view.zoom() < 0.5
+    check("wheel out")
+    wheel(w, 12)                                    # and back in
+    check("wheel in")
+    # With Preferences ▸ the wheel set to scroll, Ctrl+wheel is the zoom
+    from calcforge.ui import preferences
+    prefs = preferences.current()
+    was = prefs.wheel
+    prefs.wheel = preferences.WHEEL_SCROLL
+    try:
+        wheel(w, -10, Qt.ControlModifier)
+        assert w.view.zoom() < 0.5
+        check("ctrl+wheel out")
+        wheel(w, 10, Qt.ControlModifier)
+        check("ctrl+wheel in")
+    finally:
+        prefs.wheel = was
+    press(w, Qt.Key_9, Qt.ControlModifier)          # Fit Page
+    check("ctrl+9")
+    press(w, Qt.Key_0, Qt.ControlModifier)          # Fit Width
+    check("ctrl+0")
+    for choice in ("25%", "Fit Page", "200%", "Fit Width"):
+        pick(w.zoom_combo, choice, shown=False)     # the zoom box, by mouse
+        settle()
+        check(choice)
+    assert len(seen - {3}) >= 2, seen               # the zooms did pass other pages
+    # the run is still what Page Setup offers
+    seen_dialog = {}
+    page_setup(w, lambda d: seen_dialog.update(pages=d.page_indexes()), ok=False)
+    assert seen_dialog["pages"] == [1, 2, 3]
+
+
+def test_going_to_a_page_after_a_zoom_still_picks_it_alone(six):
+    w = six
+    wheel(w, -12)
+    assert w.selected_pages() == [1, 2, 3]
+    press(w, Qt.Key_End)
+    assert w.selected_pages() == [5]
+    wheel(w, 12)                                    # one page picked: it follows the view
+    assert w.selected_pages() == [w.current_index]
