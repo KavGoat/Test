@@ -279,3 +279,66 @@ def load_panel_state(docks: list[PanelDock]) -> None:
     for dock in docks:
         dock.set_pinned(dock.objectName() in pinned)
         dock.set_collapsed(dock.objectName() in collapsed)
+
+
+class PanelEdge(QWidget):
+    """The thin edge a hidden panel column leaves at the side of the canvas.
+
+    Double-clicking a panel column's edge hides the column (the user,
+    2026-10-17), as double-clicking the Markups List's bar does; the edge
+    stays, so a double-click on it, or a drag out from it, brings the column
+    back. Shown only while that side has no panel open.
+    """
+
+    doubleClicked = Signal()
+    draggedOut = Signal(int)          # how far, in pixels, away from the edge
+
+    WIDTH = 6
+
+    def __init__(self, side: str, parent=None):
+        super().__init__(parent)
+        self.side = side
+        self.setObjectName(f"panelEdge_{side}")
+        self.setFixedWidth(self.WIDTH)
+        self.setCursor(Qt.SplitHCursor)
+        self.setToolTip("Double-click, or drag, to bring the panels back")
+        self._pressed_at = None
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), self.palette().window())
+        pen = QPen(self.palette().mid().color())
+        pen.setWidth(1)
+        painter.setPen(pen)
+        x = self.width() - 1 if self.side == "left" else 0
+        painter.drawLine(x, 0, x, self.height())
+        middle = self.height() // 2
+        for dy in (-8, -4, 0, 4, 8):                 # the grip, as a splitter's
+            painter.drawPoint(self.width() // 2, middle + dy)
+        painter.end()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._pressed_at = event.globalPosition().x()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        start, self._pressed_at = self._pressed_at, None
+        if start is not None and event.button() == Qt.LeftButton:
+            moved = event.globalPosition().x() - start
+            outward = moved if self.side == "left" else -moved
+            if outward > 8:
+                self.draggedOut.emit(int(outward))
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._pressed_at = None
+            self.doubleClicked.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)

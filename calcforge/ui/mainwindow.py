@@ -838,7 +838,23 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def _build_central(self) -> None:
         central = QWidget()
-        layout = QVBoxLayout(central)
+        # each side of the canvas, the edge a hidden panel column leaves,
+        # to double-click or drag it back by (docks.PanelEdge)
+        from .docks import PanelEdge
+        row = QHBoxLayout(central)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        self.panel_edges = {LEFT: PanelEdge(LEFT), RIGHT: PanelEdge(RIGHT)}
+        inner = QWidget()
+        inner.setObjectName("canvasColumn")
+        row.addWidget(self.panel_edges[LEFT])
+        row.addWidget(inner, 1)
+        row.addWidget(self.panel_edges[RIGHT])
+        for side, edge in self.panel_edges.items():
+            edge.hide()
+            edge.doubleClicked.connect(lambda s=side: self.toggle_panel_column(s))
+            edge.draggedOut.connect(lambda width, s=side: self.open_panel_column(s, width))
+        layout = QVBoxLayout(inner)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
@@ -1887,6 +1903,94 @@ class MainWindow(QMainWindow):
         self.tabify_panels()
         self.note_layout_change()
 
+    # -- a panel column's edge (the user, 2026-10-17) -----------------------
+    # Double-clicking the edge between a panel column and the canvas hides
+    # the column, as double-clicking the Markups List's bar does; the column
+    # leaves a thin edge (docks.PanelEdge) that a double-click or a drag
+    # brings it back from, at the width it had.
+    def open_panel_on(self, side: str):
+        """The panel open on *side*, docked there, or None."""
+        for name, dock in self.docks_by_name.items():
+            if (name in self.PANEL_ICONS and not dock.isHidden() and not dock.isFloating()
+                    and self.dockWidgetArea(dock) == AREAS[side]):
+                return dock
+        return None
+
+    def panel_column_edge(self, side: str) -> Optional[QRect]:
+        """Where the edge between *side*'s panel column and the canvas is,
+        in window coordinates (QMainWindow's own separator), or None."""
+        dock = self.open_panel_on(side)
+        central = self.centralWidget()
+        if dock is None or central is None:
+            return None
+        panel, canvas = dock.geometry(), central.geometry()
+        if side == LEFT:
+            left, right = panel.right() + 1, canvas.left() - 1
+        else:
+            left, right = canvas.right() + 1, panel.left() - 1
+        # the separator, and a pixel or two either side of it
+        return QRect(left - 2, panel.top(), max(right - left + 1, 1) + 4, panel.height())
+
+    def toggle_panel_column(self, side: str) -> None:
+        """Hide *side*'s panel column, or bring it back."""
+        dock = self.open_panel_on(side)
+        if dock is None:
+            self.open_panel_column(side)
+            return
+        memory = getattr(self, "_edge_hidden", {})
+        memory[side] = (dock.objectName(), dock.width())
+        self._edge_hidden = memory
+        self.show_panel(dock.objectName(), False)
+        self.status_hint.setText(
+            f"{'Left' if side == LEFT else 'Right'} panels hidden — double-click the edge "
+            "to bring them back")
+
+    def open_panel_column(self, side: str, width: Optional[int] = None) -> None:
+        """Bring *side*'s panel column back: the panel last open there, at
+        the width it had (or *width*, dragged out from the edge)."""
+        memory = getattr(self, "_edge_hidden", {})
+        name, old_width = memory.pop(side, (None, None))
+        if name is None or name not in self.docks_by_name:
+            hidden = [n for n in getattr(self, "_panels_hidden", None) or []
+                      if self.panel_sides.get(n, LEFT) == side]
+            name = hidden[0] if hidden else ("dock_pages" if side == LEFT else "dock_properties")
+            if self.panel_sides.get(name, LEFT) != side:
+                name = next((n for n in self.PANEL_ICONS
+                             if self.panel_sides.get(n, LEFT) == side), None)
+        if name is None:
+            return
+        self.show_panel(name, True)
+        width = width if width is not None else old_width
+        dock = self.docks_by_name[name]
+        if width:
+            width = max(int(width), 120)
+            self.resizeDocks([dock], [width], Qt.Horizontal)
+            # once it is laid out too: Qt sizes a dock just shown on the next pass
+            QTimer.singleShot(0, self, lambda: self.resizeDocks([dock], [width], Qt.Horizontal))
+
+    def _show_panel_edges(self) -> None:
+        edges = getattr(self, "panel_edges", None)
+        if not edges or not hasattr(self, "docks_by_name") or self._closed_for_good:
+            return                  # (its docks report going as the window goes)
+        import shiboken6
+        if not shiboken6.isValid(self):
+            return
+        for side, edge in edges.items():
+            empty = self.open_panel_on(side) is None
+            if edge.isHidden() == empty:
+                edge.setVisible(empty)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            at = event.position().toPoint()
+            for side in (LEFT, RIGHT):
+                zone = self.panel_column_edge(side)
+                if zone is not None and zone.contains(at):
+                    self.toggle_panel_column(side)
+                    event.accept()
+                    return
+        super().mouseDoubleClickEvent(event)
+
     def _panel_landed_soon(self, name: str) -> None:
         if getattr(self, "_tabifying", False):
             return
@@ -1965,6 +2069,7 @@ class MainWindow(QMainWindow):
         shown yet is not visible, but it has not been closed either, and its
         icon should say so.
         """
+        self._show_panel_edges()
         for name, dock in self.docks_by_name.items():
             if name in self.PANEL_ICONS:
                 self.rail_for(name).show_open(name, not dock.isHidden())
@@ -4588,16 +4693,28 @@ class MainWindow(QMainWindow):
         if open_now:
             self._panels_hidden = open_now
             for name in open_now:
+                dock = self.docks_by_name[name]
+                if not dock.isFloating():
+                    # the width it had, for when it comes back
+                    side = self.panel_sides.get(name, LEFT)
+                    self._edge_hidden = getattr(self, "_edge_hidden", {})
+                    self._edge_hidden.setdefault(side, (name, dock.width()))
                 self.show_panel(name, False)
             self.status_hint.setText("Panels hidden — Shift+F4 brings them back")
             return
         wanted = getattr(self, "_panels_hidden", None) or []
         self._panels_hidden = []
-        if not wanted:
+        # and a column hidden by double-clicking its edge comes back with them
+        edged = getattr(self, "_edge_hidden", {})
+        if not wanted and not edged:
             self.show_all_panels()
             return
         for name in wanted:
             self.show_panel(name, True)
+        for side in list(edged):
+            if self.open_panel_on(side) is None:
+                self.open_panel_column(side)
+        self._edge_hidden = {}
 
     def _apply_mode_keys(self) -> None:
         """A key shared by a Markup-mode and a Calc-mode command (Ctrl+M:
