@@ -311,6 +311,16 @@ QRadioButton::indicator:checked {{
         stop:0 {accent}, stop:0.5 {accent}, stop:0.56 {field}, stop:1 {field});
 }}
 QRadioButton::indicator:disabled {{ border-color: {field_edge}; background: {surface}; }}
+/* greyed but still saying which is chosen (Page Setup's Portrait | Landscape
+   for <Default Page Size>, as Revu's): a greyed choice is not "none" */
+QRadioButton::indicator:checked:disabled {{
+    border-color: {field_edge};
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 {ink_soft}, stop:0.5 {ink_soft}, stop:0.56 {surface}, stop:1 {surface});
+}}
+QCheckBox::indicator:checked:disabled {{
+    background: {ink_soft}; border-color: {field_edge}; image: url("{arrow_tick}");
+}}
 QToolTip {{
     background: {ink}; color: {field}; border: 0; padding: 6px 8px;
     border-radius: 3px;

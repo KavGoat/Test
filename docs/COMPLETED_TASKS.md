@@ -577,3 +577,34 @@ before the number, as in Revu's panel.
 equation with an error now prints and goes into the saved PDF as well as
 showing on screen; a definition with an undefined name keeps saying so as
 soon as it is committed. `test_an_evaluation_error_shows_without_being_selected_and_prints`.
+
+## 2026-10-17 — Revu's Page Setup, with the content really resized
+
+**Page Setup follows Revu's layout and really resizes the content** (the
+user's decision, round 3; audit B7 and B0). Document ▸ Page Setup… (and a
+page's own menu, the canvas menu and the status bar's paper size) opens
+Revu 21's Page Setup tab: Change Media Size (mm) — Media Size
+(<Default Page Size>, the standard sizes, Custom Page Size), Portrait or
+Landscape, Width and Height; Offset X and Y; Scale (%) with Auto Scale;
+Rotation with Get Line; Clear, Centre and Fit to Media (its arrow picks
+where on the paper: Top Left … Bottom Right). Then Revu's Pages range
+(All Pages, Current, Selected, Custom), CalcForge's calculation margins in
+their own "Margins (CalcForge)" group, and a Preview (Media Size, Page Size,
+Scale, the page drawn where it will land, a page navigator). Get Line hands
+over to a line dragged on the drawing and comes back with the Rotation that
+makes it level; Esc comes back unchanged.
+
+What OK does to each page (calcforge/ui/pagesetup.py, calcforge/io/pdfresize.py):
+the page's paper becomes the new size and everything on it is turned,
+scaled and moved onto it in one transform — the PDF page itself (its
+content wrapped in one `cm`, its boxes the new paper, its /Rotate folded in,
+its annotations carried), markups, equations, tables, pictures, viewports
+and bookmarks. Measurements keep their real values: their points scale and
+the page's (and viewports') scale changes by the same factor (1:100 at 50 %
+is 1:200). The saved PDF shows the result in any reader. One undo step,
+which puts everything back exactly; OK with nothing changed adds none. Fifty
+A4 sheets with twenty markups each go to A3 in about 0.8 s (undo 0.45 s).
+The Page panel's paper boxes and the Paper Size menu go through the same
+path with the content left where it is, so the file's page gets the paper
+too and the panel and dialog always agree. Disabled radio buttons and tick
+boxes now still show which is chosen (theme). `tests/test_revu_page_setup.py`.
