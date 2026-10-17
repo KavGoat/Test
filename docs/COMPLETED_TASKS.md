@@ -3,6 +3,18 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-17 — Revu's Print and Page Setup, the Properties toolbar finished, names in reading order (pushed at 8f1c391)
+
+- Full test runs passed at 4f86c8b, 4672a2d, ac8f077 and 8f1c391 (`-n 3`, every-command tests included, no silent re-runs); 14/14 planted bugs caught each time.
+- Print: Revu's dialog — preview, printer, Pages range with Get Window, Document & Markups / Document Only / Markups Only, copies, rotation, page scaling, centre or offset, dim; imported pages no longer print blank at 1200 dpi.
+- Page Setup: Revu's dialog, and the page really resizes — drawing, markups, equations and tables move and scale together, measurements keep their values (page scale follows), one undo step, 50 pages in 0.8 s.
+- Properties toolbar: framed swatches, area hatch, Auto font size ("A"), cloud scallop styles and intensity, units and captions per measurement, strikethrough/superscript/subscript, line-style manager, line-end sizes, hatch colour on every hatch markup, boxes wide enough; Sketch to Scale buttons of their own; no size box on plain shapes.
+- Names: read in document order whatever defines them (equation, named cell, table, measurement); a name defined only below is not defined, as in SMath; the Variables panel marks the one in force.
+- Spreadsheets: rows counted, Insert Row and Enter add one row, pages follow the rows, a print area's pages only; a deleted sheet takes its formula tip and editors with it.
+- Thumbnails: going to a page picks it alone; a picked run stays through scrolling and zooming; the page in view has its own outline.
+- Crashes: dialogs given back to their parents after exec(); answered dialogs and closed menus deleted (96 windows stay 96, not 516).
+- Every-command tests: no silent re-runs; first failures logged; harness order bugs fixed; 2219 commands, 2747 ways in.
+
 ## 2026-10-16 (later) — every command exercised and bindable; the QA round's bugs fixed (pushed at 3ec54f1)
 
 - Full test run on 3ec54f1: all tests pass with `-n 3`, including tests/test_every_command.py (2204 commands, 2729 ways in, no known failures); 14/14 planted bugs caught.
