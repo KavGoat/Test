@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import functools
 
 from PySide6.QtCore import (QByteArray, QEvent, QMimeData, QPoint, QPointF, QRect, QRectF, QSize,
                             QTimer, Qt, Signal)
@@ -135,6 +136,12 @@ def hatch_index(combo, key: str) -> int:
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
+
+#: How long after the Markups List changes the page's dimming follows it.
+DIM_AFTER_MS = 90
+#: How long after the last key in its search box the Markups List follows.
+LIST_AFTER_MS = 120
+
 
 class PageListWidget(QListWidget):
     """A wrapping thumbnail grid whose cells stay centred across the row."""
@@ -1123,8 +1130,10 @@ def _comment_of(item) -> str:
     return ""
 
 
+@functools.lru_cache(maxsize=16384)
 def _natural_key(text: str) -> tuple:
-    """"Page 10" after "Page 9", "12.5" after "9": numbers compared as numbers."""
+    """"Page 10" after "Page 9", "12.5" after "9": numbers compared as numbers.
+    (Kept: sorting a thousand rows asks for each one's a dozen times.)"""
     import re
     return tuple((0, float(part), "") if part[:1].isdigit() else (1, 0.0, part.lower())
                  for part in re.findall(r"\d+(?:\.\d+)?|\D+", text or ""))
@@ -1244,7 +1253,14 @@ class MarkupsPanel(QWidget):
         self.filter = QLineEdit()
         self.filter.setPlaceholderText("Filter markups…")
         self.filter.setClearButtonEnabled(True)
-        self.filter.textChanged.connect(lambda _: self.rebuild(self.window.document))
+        # Built again a moment after the typing stops, not at every key: with
+        # a thousand markups one rebuild of the list is a tenth of a second,
+        # and every key waited for it (2026-10-17).
+        self._list_timer = QTimer(self)
+        self._list_timer.setSingleShot(True)
+        self._list_timer.setInterval(LIST_AFTER_MS)
+        self._list_timer.timeout.connect(lambda: self.rebuild(self.window.document))
+        self.filter.textChanged.connect(lambda _: self._list_timer.start())
         top.addWidget(self.filter, 1)
         layout.addLayout(top)
         top = QHBoxLayout()
@@ -1306,6 +1322,14 @@ class MarkupsPanel(QWidget):
         self._items: dict = {}
         #: what the list was last built from (rebuild)
         self._shown_before = None
+        #: Revu dims on the page the markups the filter leaves out: a moment
+        #: after the list changes, so typing in the search box never waits
+        #: for the page (filterdim.py)
+        self._dim_timer = QTimer(self)
+        self._dim_timer.setSingleShot(True)
+        self._dim_timer.setInterval(DIM_AFTER_MS)
+        self._dim_timer.timeout.connect(self.dim_filtered_now)
+        self._any_dimmed = False
 
         self.totals = QLabel("")
         self.totals.setWordWrap(True)
@@ -1381,6 +1405,21 @@ class MarkupsPanel(QWidget):
                        if (index, item.uid) in self._items}
         self.totals.setText(self._totals_text(document))
         self.follow_the_canvas()
+        self._dim_soon()
+
+    def _dim_soon(self) -> None:
+        if self._any_dimmed or self.filter.text().strip() or self.column_filters:
+            self._dim_timer.start()
+
+    def dim_filtered_now(self) -> int:
+        """Dim on the page what the filter leaves out, and nothing else."""
+        from . import filterdim
+        self._dim_timer.stop()
+        document = self.window.document
+        filtered = self.filtered_out(document)
+        changed = filterdim.apply(document, filtered)
+        self._any_dimmed = bool(filtered)
+        return changed
 
     def rebuild(self, document) -> None:
         needle = self.filter.text().strip().lower()
@@ -1440,6 +1479,7 @@ class MarkupsPanel(QWidget):
         self.totals.setText(self._totals_text(document))
         self._echoing = False
         self.follow_the_canvas()
+        self._dim_soon()
 
     # -- column filters ----------------------------------------------------
     def filter_menu(self, column: int, where=None):
@@ -1687,10 +1727,19 @@ class MarkupsPanel(QWidget):
         QMessageBox.information(self, "Export markups", f"Saved {path}")
 
 
+_SWATCHES: dict = {}
+
+
 def _swatch(colour: str) -> QIcon:
+    """A colour's square, made once for each colour."""
+    found = _SWATCHES.get(colour)
+    if found is not None:
+        return found
+
     def draw(painter: QPainter) -> None:
         painter.fillRect(QRectF(0, 0, 12, 12), QColor(colour))
-    return drawn_icon(draw, 12, 12)
+    found = _SWATCHES[colour] = drawn_icon(draw, 12, 12)
+    return found
 
 
 def _icon_for(item) -> str:

@@ -77,6 +77,11 @@ class Preferences:
     """Whether 1 to 9, with a markup tool in hand, draw the next markup in
     that tool's numbered style (markupstyles.py)."""
 
+    filtered_dim_percent: int = 60
+    """Revu's Filtered Annotation Dim Percent (Markups List preferences): how
+    far the markups the Markups List's filter leaves out are toned down on
+    the page, and on paper under Print's Dim Filtered Markups."""
+
     page_thumbnails: float = 1.0
     """How big the pictures in the page list are, as a multiple of their
     ordinary size. Ctrl and the wheel over the list changes it."""

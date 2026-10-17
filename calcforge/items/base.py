@@ -626,6 +626,9 @@ _CHANGES_THAT_SHOW = (QGraphicsItem.ItemPositionChange, QGraphicsItem.ItemTransf
 
 
 class MarkupItem(QGraphicsObject):
+    #: dimmed on the canvas because the Markups List's filter leaves it out
+    #: (ui/filterdim.py); the canvas's alone, never saved or printed
+    filter_dimmed = False
     """Base class: selection handles, style, metadata and serialisation."""
 
     TYPE = "markup"
@@ -1220,8 +1223,10 @@ class MarkupItem(QGraphicsObject):
         """Show the file's own drawing of this markup while it is unchanged,
         and nothing of it once it has been taken over."""
         # (a page that draws its file's markups with itself draws this one too)
+        # (but one the Markups List's filter dims is drawn alone, to be dimmed)
         wanted = bool(self.still_theirs and self.from_annotation
-                      and not getattr(self.parentItem(), "file_draws", False))
+                      and (not getattr(self.parentItem(), "file_draws", False)
+                           or self.filter_dimmed))
         if wanted and self._their_look is None:
             self._their_look = _TheirLook(self)
         if self._their_look is not None:

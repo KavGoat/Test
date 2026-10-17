@@ -847,7 +847,7 @@ def test_dim_filtered_markups(win, tmp_path):
     kept = a_rect(win, at=(100, 100))
     filtered = a_rect(win, at=(100, 500))
     kept.subject, filtered.subject = "Keep me", "Leave me out"
-    win.show_panel("dock_markups", True) if hasattr(win, "show_panel") else None
+    win.show_markups_list(True)
     panel = win.markups_panel
     panel.rebuild(win.document)
     panel.filter.setFocus()

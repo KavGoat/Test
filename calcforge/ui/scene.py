@@ -773,6 +773,8 @@ class PageFrame(QGraphicsObject):
             for item in self.markups():
                 if not item.isVisible():
                     continue
+                if getattr(item, "still_theirs", False) and item.filter_dimmed:
+                    continue                  # drawn alone, dimmed (filterdim.py)
                 if getattr(item, "still_theirs", False):
                     numbers.discard(item.from_annotation)
                 elif getattr(item, "split_theirs", False):
@@ -1317,7 +1319,7 @@ class PageFrame(QGraphicsObject):
     def render_page(self, painter: QPainter, target: QRectF, for_print: bool = True,
                     pdf_overlay: bool = False, without_markups: bool = False,
                     layer: str = "", stream: str = "", draft: str = "",
-                    links: bool = False) -> None:
+                    links: bool = False, dimmed=()) -> None:
         """Draw the whole page into *target*, hiding editing chrome.
 
         *layer* picks one of the two drawings a save puts into the page as
@@ -1352,10 +1354,23 @@ class PageFrame(QGraphicsObject):
         *links*: the links' rectangles are drawn on paper too, as they show
         on screen (Print's Print Visible Hyperlinks); else a link is only for
         clicking.
+
+        Every markup is drawn at full strength, whatever the Markups List's
+        filter dims on screen — but those in *dimmed* (Print's Dim Filtered
+        Markups), toned down (ui/filterdim.py).
         """
         scene = self.scene()
         if scene is None:
             return
+        from .filterdim import undimmed
+        with undimmed(self, dimmed):
+            self._render_page(painter, target, for_print, pdf_overlay, without_markups,
+                              layer, stream, draft, links)
+
+    def _render_page(self, painter: QPainter, target: QRectF, for_print: bool,
+                     pdf_overlay: bool, without_markups: bool, layer: str, stream: str,
+                     draft: str, links: bool) -> None:
+        scene = self.scene()
         if stream == "document":
             without_markups = True
         if self.is_sheet and self.sheet_rect is not None:

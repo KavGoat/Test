@@ -766,8 +766,14 @@ class MarkupLayer:
         transform, _ok = item.itemTransform(self.frame)
         painter.save()
         painter.setWorldTransform(transform * base)
-        if not own and item.opacity() < 1.0:
-            painter.setOpacity(item.opacity())
+        # its opacity and its markup's, as Qt would draw them (the Markups
+        # List's filter dims a markup through its opacity: filterdim.py)
+        strength, holder = 1.0, item
+        while holder is not None and holder is not self.frame:
+            strength *= holder.opacity()
+            holder = holder.parentItem()
+        if strength < 1.0:
+            painter.setOpacity(painter.opacity() * strength)
         option = QStyleOptionGraphicsItem()
         option.exposedRect = item.boundingRect()
         try:

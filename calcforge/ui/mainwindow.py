@@ -10597,6 +10597,10 @@ class MainWindow(QMainWindow):
         from . import preferences as prefs_module
 
         prefs_module.apply(prefs)
+        # Filtered Annotation Dim Percent: the page's dimming at the new level
+        panel = getattr(self, "markups_panel", None)
+        if panel is not None and hasattr(panel, "dim_filtered_now"):
+            panel.dim_filtered_now()
         if before is not None and prefs.result_format() != before:
             from ..calc.docsheet import sheet_for
             self.document.settings.calc_format = dict(

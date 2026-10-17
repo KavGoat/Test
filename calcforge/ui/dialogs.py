@@ -1948,6 +1948,15 @@ class PreferencesDialog(QDialog):
             "With a markup tool in hand, 1 to 9 draw the next markup in that\n"
             "tool's style 1 to 9 from the Markup Styles toolbar; 0 is the default")
         form.addRow("", self.style_keys)
+        self.filtered_dim = QSpinBox()
+        self.filtered_dim.setObjectName("filteredDimPercent")
+        self.filtered_dim.setRange(0, 95)
+        self.filtered_dim.setSuffix(" %")
+        self.filtered_dim.setValue(int(getattr(prefs, "filtered_dim_percent", 60)))
+        self.filtered_dim.setToolTip(
+            "How far the markups the Markups List's filter leaves out are dimmed\n"
+            "on the page (and in print, with Print's Dim Filtered Markups)")
+        form.addRow("Filtered Annotation Dim Percent", self.filtered_dim)
         layout.addWidget(markup)
 
         writing = QGroupBox("Writing")
@@ -2022,6 +2031,7 @@ class PreferencesDialog(QDialog):
             gpu_drawing=self.gpu_drawing.isChecked(),
             recover_flattened=getattr(self.prefs, "recover_flattened", True),
             markup_style_keys=self.style_keys.isChecked(),
+            filtered_dim_percent=self.filtered_dim.value(),
             page_thumbnails=getattr(self.prefs, "page_thumbnails", 1.0),
             result_decimals=self.result_decimals.value(),
             result_threshold=self.result_threshold.value(),

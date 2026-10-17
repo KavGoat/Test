@@ -532,9 +532,10 @@ def drawn_over(frame, region) -> "PdfSvgItem | None":
                 item.setVisible(False)
         source = frame.mapRectToScene(box)
         target = QRectF(0, 0, writer.width(), writer.height())
+        from ..ui.filterdim import undimmed
         from ..ui.scene import only_this_page
         frame.layer.suspend()                 # the other pages are not drawn
-        with only_this_page(scene, frame):
+        with only_this_page(scene, frame), undimmed(frame):
             scene.render(painter, target, source, Qt.IgnoreAspectRatio)
     finally:
         painter.end()

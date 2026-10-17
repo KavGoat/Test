@@ -48,10 +48,9 @@ AUTO, AUTO_270 = "auto90", "auto270"
 ROTATIONS = ((AUTO, "Auto-Rotate 90"), (AUTO_270, "Auto-Rotate 270"), ("0", "No Rotation"),
              ("90", "Rotate 90"), ("180", "Rotate 180"), ("270", "Rotate 270"))
 
-#: How far a markup the Markups List's filter leaves out is toned down when
-#: Dim Filtered Markups is ticked: drawn at this opacity (Revu's Filtered
-#: Annotation Dim, in its Markups List preferences).
-FILTERED_OPACITY = 0.3
+# How far a markup the Markups List's filter leaves out is toned down when
+# Dim Filtered Markups is ticked: Revu's Filtered Annotation Dim Percent, a
+# preference (ui/filterdim.opacity).
 
 # Advanced: Revu's printing engines (menus__file__advanced-printing.txt)
 ENGINE_MIXED, ENGINE_VECTOR, ENGINE_IMAGE, ENGINE_GRID = "mixed", "vector", "image", "grid"
@@ -298,27 +297,19 @@ def draw_page(painter: QPainter, page, stream: str = BOTH, dim: bool = False,
     painter.setRenderHint(QPainter.Antialiasing, True)
     painter.setRenderHint(QPainter.TextAntialiasing, True)
     painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-    toned = [item for item in frame.markups() if item in dimmed] if dimmed else []
-    before = [item.opacity() for item in toned]
-    for item in toned:
-        item.setOpacity(item.opacity() * FILTERED_OPACITY)
-    try:
-        if not dim or stream == MARKUPS:
-            frame.render_page(painter, whole, for_print=True,
-                              stream="" if stream == BOTH else stream, draft=draft,
-                              links=links)
-            return not frame.draft_waiting if draft else True
-        frame.render_page(painter, whole, for_print=True, stream=DOCUMENT, draft=draft,
-                          links=links)
-        complete = not frame.draft_waiting if draft else True
-        painter.fillRect(clip if clip is not None else whole, dim_veil())
-        if stream == BOTH:
-            frame.render_page(painter, whole, for_print=True, stream=MARKUPS, draft=draft,
-                              links=links)
-        return complete
-    finally:
-        for item, opacity in zip(toned, before):
-            item.setOpacity(opacity)
+    if not dim or stream == MARKUPS:
+        frame.render_page(painter, whole, for_print=True,
+                          stream="" if stream == BOTH else stream, draft=draft,
+                          links=links, dimmed=dimmed)
+        return not frame.draft_waiting if draft else True
+    frame.render_page(painter, whole, for_print=True, stream=DOCUMENT, draft=draft,
+                      links=links, dimmed=dimmed)
+    complete = not frame.draft_waiting if draft else True
+    painter.fillRect(clip if clip is not None else whole, dim_veil())
+    if stream == BOTH:
+        frame.render_page(painter, whole, for_print=True, stream=MARKUPS, draft=draft,
+                          links=links, dimmed=dimmed)
+    return complete
 
 
 def see_through(page, dimmed=()) -> list:
@@ -334,7 +325,7 @@ def see_through(page, dimmed=()) -> list:
         if not item.isVisible() or not item.printable:
             continue
         style = getattr(item, "style", None)
-        clear = item in dimmed or item.opacity() < 0.999
+        clear = item in dimmed
         if style is not None:
             clear = clear or style.opacity < 0.999 or style.blend == "multiply" \
                 or (bool(style.fill) and style.fill_opacity < 0.999)
