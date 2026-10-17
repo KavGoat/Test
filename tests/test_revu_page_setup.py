@@ -1003,3 +1003,59 @@ def test_going_to_a_page_after_a_zoom_still_picks_it_alone(six):
     assert w.selected_pages() == [5]
     wheel(w, 12)                                    # one page picked: it follows the view
     assert w.selected_pages() == [w.current_index]
+
+
+def test_scrolling_keeps_the_run_picked_in_thumbnails(six):
+    """Pages 2-4 picked, the reader scrolls on to page 6: 2-4 stay picked,
+    only the page in view moves, and Page Setup still offers 2-4 (the user,
+    2026-10-17)."""
+    from PySide6.QtWidgets import QStyle, QStyleOptionSlider
+    w = six
+    seen = set()
+    w.view.pageChanged.connect(seen.add)
+
+    def check(what):
+        assert w.selected_pages() == [1, 2, 3], what
+
+    assert w.current_index == 3                     # the run was picked by mouse
+    wheel(w, 40, Qt.ControlModifier)                # Ctrl+wheel scrolls (the wheel zooms)
+    assert w.current_index <= 1                     # the top of the document
+    check("ctrl+wheel up")
+    wheel(w, -12, Qt.ControlModifier)
+    check("ctrl+wheel down")
+    for _ in range(4):
+        press(w, Qt.Key_PageDown)
+    check("page down")
+    for key in (Qt.Key_Down, Qt.Key_Up, Qt.Key_Right, Qt.Key_Left):
+        press(w, key)
+    check("arrows")
+    # the scroll bar's handle dragged to the foot of the document
+    bar = w.view.verticalScrollBar()
+    option = QStyleOptionSlider()
+    bar.initStyleOption(option)
+    handle = bar.style().subControlRect(QStyle.CC_ScrollBar, option,
+                                        QStyle.SC_ScrollBarSlider, bar).center()
+    QTest.mousePress(bar, Qt.LeftButton, Qt.NoModifier, handle)
+    for step in range(1, 11):
+        QTest.mouseMove(bar, QPoint(handle.x(), handle.y() + step * bar.height() // 10))
+        settle(2)
+    QTest.mouseRelease(bar, Qt.LeftButton, Qt.NoModifier,
+                       QPoint(handle.x(), bar.height() - 2))
+    settle()
+    assert w.current_index == 5
+    check("scroll bar")
+    assert min(seen) <= 1 and {4, 5} <= seen, seen  # it did scroll past the other pages
+    found = {}
+    page_setup(w, lambda d: found.update(which=d.pages.which(), pages=d.page_indexes()),
+               ok=False)
+    assert found == {"which": "selected", "pages": [1, 2, 3]}
+    # a click on a thumbnail picks again; one page picked follows the scroll
+    listed = w.pages_panel.list
+    listed.scrollToItem(listed.item(5))
+    QTest.mouseClick(listed.viewport(), Qt.LeftButton, Qt.NoModifier,
+                     listed.visualItemRect(listed.item(5)).center())
+    settle()
+    assert w.selected_pages() == [5]
+    wheel(w, 30, Qt.ControlModifier)
+    assert w.current_index < 5
+    assert w.selected_pages() == [w.current_index]

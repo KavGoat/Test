@@ -752,9 +752,10 @@ class PagesPanel(QWidget):
 
     def show_current(self, row: int, keep_run: bool = False) -> None:
         """Make *row* the page in view in the strip, as going to a page does
-        (a key, a scroll, Go to Page): it alone is picked out — unless it is
-        one of a run picked out, which stays picked. A row clicked or keyed
-        to in the strip itself is left as the strip picked it.
+        (Home/End, Ctrl+arrows, the page box): it alone is picked out —
+        unless it is one of a run picked out, which stays picked. A row
+        clicked or keyed to in the strip itself is left as the strip picked
+        it.
 
         QListWidget.setCurrentRow only swaps the row it last picked by
         itself: rows picked any other way (a run re-picked after a rebuild,
@@ -762,10 +763,10 @@ class PagesPanel(QWidget):
         another page added it to them, and Page Setup or Set Scale opened on
         "Selected" for pages nobody had picked (2026-10-17).
 
-        *keep_run*: the page came into view because the view was zoomed or
-        fitted, which scrolls past other pages on the way. A run picked out
-        stays picked and only the current row moves; a zoom to look closer
-        is not a choice of pages (2026-10-17)."""
+        *keep_run*: the page came into view by scrolling, zooming or
+        fitting rather than being gone to. A run picked out stays picked and
+        only the current row moves — scrolling to look is not a choice of
+        pages (the user, 2026-10-17); one page picked follows the view."""
         listed = self.list
         entry = listed.item(row)
         if entry is None or self._following_the_strip:
