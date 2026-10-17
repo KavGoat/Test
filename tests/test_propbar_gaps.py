@@ -816,3 +816,139 @@ def test_the_new_commands_can_be_given_keys_and_pressed(w):
     finally:
         w.shortcuts.reset()
         w.apply_shortcuts()
+
+
+# ---------------------------------------------------------------------------
+# round 2 (the user, 2026-10-17)
+# ---------------------------------------------------------------------------
+def _hatched_tools(w):
+    """Every tool whose markup takes a hatch, and one of it drawn."""
+    from calcforge.ui.stylecaps import HATCH, capabilities
+    from calcforge.ui.tools import TOOLS
+    for tool in TOOLS:
+        if tool.factory is None or tool.key in ("snapshot", "calibrate", "image"):
+            continue
+        if tool.key.startswith("cutout"):
+            continue                  # these cut a hole; they leave nothing behind
+        made = tool.factory()
+        if getattr(made, "kind", "") == "marquee":
+            continue                  # a region being chosen (Crop, Whiteout, Viewport)
+        if HATCH in capabilities(made):
+            yield tool.key
+
+
+def test_every_hatched_markup_has_its_hatch_colour_on_the_bar_and_panel(w):
+    """A Sketch to Scale rectangle's hatch had no colour on the Properties
+    toolbar: every markup with a hatch shows it, on the bar and in the panel,
+    and both change it in one undo step."""
+    from calcforge.ui import colorpicker
+    from calcforge.ui.widgets import ColorButton
+    from tests.probe_audit import make
+    scaled(w, 50)
+    keys = list(_hatched_tools(w))
+    for wanted in ("rect", "ellipse", "polygon", "cloud", "measure_area", "measure_volume",
+                   "sketch_rect", "sketch_ellipse"):
+        assert wanted in keys, wanted
+    for index, key_ in enumerate(keys):
+        w.new_document()
+        w.interactive_prompts = False
+        scaled(w, 50)
+        w.view.set_zoom(1.0)
+        pump()
+        item = make(w, key_)
+        assert item is not None, key_
+        w.select_tool("select")
+        w.view.scene().clearSelection()
+        item.setSelected(True)
+        w.refresh_selection()
+        pump()
+        button = w.hatch_bar_colour_button
+        assert shown_on_bar(w, button), key_
+        assert shown_on_bar(w, w.hatch_combo), key_
+        bar = w.style_bar
+        visible = [bar.widgetForAction(a) for a in bar.actions() if a.isVisible()]
+        assert visible.index(button) == visible.index(w.hatch_combo) + 1, key_
+        colour = f"#00{index:02x}a0"
+        before = w.undo_stack.index()
+        colorpicker.ANSWERS.append(colour)
+        press(button)
+        assert w.undo_stack.index() == before + 1, key_
+        (found,) = [i for i in w.view.scene().ordered_markups() if i.uid == item.uid]
+        assert found.style.hatch_color == colour, key_
+        assert button.color() == colour
+        # the Properties panel's own, beside its Hatch list
+        w.view.scene().clearSelection()
+        found.setSelected(True)
+        w.refresh_selection()
+        pump()
+        panel_button = w.properties_panel.findChild(ColorButton, "hatchColour")
+        assert panel_button is not None and panel_button.isVisible(), key_
+        colorpicker.ANSWERS.append("#123456")
+        press(panel_button)
+        (found,) = [i for i in w.view.scene().ordered_markups() if i.uid == item.uid]
+        assert found.style.hatch_color == "#123456", key_
+        w.undo_stack.undo()
+        pump()
+        (found,) = [i for i in w.view.scene().ordered_markups() if i.uid == item.uid]
+        assert found.style.hatch_color == colour, key_
+        w.document.modified = False
+
+
+def test_the_bars_number_boxes_show_their_widest_value(w):
+    """'100%' was cut off in the fill-opacity box: every number box on the
+    bar is as wide as its widest value needs, at the default font."""
+    from PySide6.QtWidgets import QAbstractSpinBox
+    from calcforge.ui.propbar import CloudSizeCombo, ValueCombo
+    box = RectItem("rect", QRectF(0, 0, 120, 60))
+    w.document.pages[0].frame.add_markup(box, QPointF(200, 300))
+    select(w, box)
+    for spin in w.style_bar.findChildren(QAbstractSpinBox):
+        metrics = spin.fontMetrics()
+        widest = max(metrics.horizontalAdvance(spin.prefix() + spin.textFromValue(v)
+                                               + spin.suffix())
+                     for v in (spin.minimum(), spin.maximum()))
+        assert spin.lineEdit().width() >= widest + 4, spin.objectName()
+        assert spin.width() <= widest + 50, spin.objectName()
+    for combo in w.style_bar.findChildren(ValueCombo):
+        if isinstance(combo, CloudSizeCombo):
+            continue
+        widest = max(combo.fontMetrics().horizontalAdvance(combo.itemText(i))
+                     for i in range(combo.count()))
+        assert combo.width() >= widest + 28, combo.objectName()
+    # the fill opacity box draws all of "100%": its last column has ink
+    w.fill_opacity_spin.setValue(100)
+    pump()
+    edit = w.fill_opacity_spin.lineEdit()
+    assert edit.cursorRect().right() <= edit.width(), "the text ends inside the box"
+
+
+@pytest.mark.parametrize("tool", ["rect", "ellipse", "polygon", "line", "arrow", "polyline",
+                                  "cloud", "sketch_rect", "sketch_ellipse"])
+def test_only_sketch_to_scale_shapes_show_a_size_box_while_placed(w, tool):
+    """A plain Rectangle or Ellipse is not to scale: no size box rides its
+    corner while it is placed (the user, 2026-10-17); Sketch to Scale's do."""
+    from PySide6.QtWidgets import QGraphicsProxyWidget
+    scaled(w, 50)
+    w.select_tool(tool)
+    viewport = w.view.viewport()
+    QTest.mouseClick(viewport, Qt.LeftButton, Qt.NoModifier, at(w, page(w, 150, 300)))
+    pump()
+    for x, y in ((260, 380), (330, 420)):
+        QTest.mouseMove(viewport, at(w, page(w, x, y)))
+        pump()
+    proxies = [i for i in w.view.scene().items()
+               if isinstance(i, QGraphicsProxyWidget) and i.isVisible()]
+    if tool.startswith("sketch"):
+        assert w.view._size_editor is not None and proxies
+        # typed with the keyboard, as before: width, Tab, height, Enter
+        QTest.keyClicks(QApplication.focusWidget(), "3")
+        QTest.keyClick(QApplication.focusWidget(), Qt.Key_Tab)
+        QTest.keyClicks(QApplication.focusWidget(), "2")
+        QTest.keyClick(QApplication.focusWidget(), Qt.Key_Return)
+        pump()
+        (shape,) = markups(w, RectItem)
+        assert shape.to_scale and shape.size_text.startswith("3.00 m")
+    else:
+        assert w.view._size_editor is None and not proxies, tool
+        key(w, Qt.Key_Escape)
+        key(w, Qt.Key_Escape)

@@ -279,6 +279,16 @@ def _panel(owner, name: str) -> QFrame:
     return panel
 
 
+HATCH_TIP = "Hatch pattern, drawn over the fill in its own colour"
+
+
+def hatch_tip(combo) -> None:
+    """The hatch list's tooltip: the pattern's name, as the line list's is —
+    or, with none, what the list is for. Kept in step however the list was
+    set, so it never names a pattern the markup no longer has."""
+    combo.setToolTip(combo.currentText() if combo.currentData() else HATCH_TIP)
+
+
 def _framed(button):
     """A colour button framed as Revu's are, its colour a square inside."""
     button.setProperty("revuSwatch", True)
@@ -290,6 +300,55 @@ def _number(spin, width: int):
     spin.setFixedWidth(width)
     spin.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
     return _typed_on_enter(spin)
+
+
+def fit_numbers(bar) -> None:
+    """Size every number box on the bar to its widest value, and no more.
+
+    Fixed widths cut "100%" off in the fill-opacity box (the user,
+    2026-10-17): what the box needs is its frame and arrows, as the style
+    draws them, plus the widest text it can show — its minimum or maximum
+    with prefix and suffix — plus the line edit's own margins.
+    """
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QAbstractSpinBox, QStyleOptionSpinBox
+    for spin in bar.findChildren(QAbstractSpinBox):
+        spin.ensurePolished()
+        option = QStyleOptionSpinBox()
+        option.initFrom(spin)
+        option.rect = QRect(0, 0, 200, max(spin.sizeHint().height(), 20))
+        option.frame = spin.hasFrame()
+        option.buttonSymbols = spin.buttonSymbols()
+        option.subControls = (QStyle.SC_SpinBoxFrame | QStyle.SC_SpinBoxEditField
+                              | QStyle.SC_SpinBoxUp | QStyle.SC_SpinBoxDown)
+        field = spin.style().subControlRect(QStyle.CC_SpinBox, option,
+                                            QStyle.SC_SpinBoxEditField, spin)
+        chrome = option.rect.width() - field.width()
+        metrics = spin.fontMetrics()
+        texts = [spin.prefix() + spin.textFromValue(value) + spin.suffix()
+                 for value in (spin.minimum(), spin.maximum())] \
+            if hasattr(spin, "textFromValue") else [spin.text()]
+        widest = max(metrics.horizontalAdvance(text) for text in texts)
+        # the line edit's text margins (2 px a side) and its cursor
+        spin.setFixedWidth(chrome + widest + 8)
+    # and the number lists — the font size, the line-end sizes — the same way
+    for combo in bar.findChildren(ValueCombo):
+        if isinstance(combo, CloudSizeCombo):
+            continue                       # closed, it shows its picture only
+        combo.ensurePolished()
+        option = QStyleOptionComboBox()
+        option.initFrom(combo)
+        option.rect = QRect(0, 0, 200, max(combo.sizeHint().height(), 20))
+        option.editable = combo.isEditable()
+        field = combo.style().subControlRect(QStyle.CC_ComboBox, option,
+                                             QStyle.SC_ComboBoxEditField, combo)
+        chrome = option.rect.width() - field.width()
+        metrics = combo.fontMetrics()
+        texts = [combo.itemText(i) for i in range(combo.count())]
+        if combo.isEditable():
+            texts.append(combo._fmt(88.8))  # a typed size with a decimal: "35.1"
+        widest = max(metrics.horizontalAdvance(text) for text in texts)
+        combo.setFixedWidth(chrome + widest + 8)
 
 
 def _typed_on_enter(spin):
@@ -562,10 +621,20 @@ def build(window) -> QToolBar:
     w.hatch_combo.setObjectName("hatchPattern")
     big_pattern_dropdown(w.hatch_combo)
     fill_hatch_combo(w.hatch_combo, _bar_ink())
-    w.hatch_combo.setToolTip("Hatch pattern, drawn over the fill in its own colour")
+    w.hatch_combo.currentIndexChanged.connect(lambda _index: hatch_tip(w.hatch_combo))
+    hatch_tip(w.hatch_combo)
     w.hatch_combo.currentIndexChanged.connect(
         lambda _index: w._style_hatch(w.hatch_combo.currentData()))
     put(HATCH, w.hatch_combo)
+    # the hatch's own colour, beside it, as the Properties panel has it (the
+    # user, 2026-10-17: a Sketch to Scale rectangle's hatch had no colour on
+    # the bar). The type ▾ panel keeps its Hatch colour too.
+    w.hatch_bar_colour_button = ColorButton(style.hatch_color, label="Hatch colour")
+    w.hatch_bar_colour_button.setObjectName("hatchColourBar")
+    w.hatch_bar_colour_button.setToolTip("Hatch colour: the colour of the hatch's lines")
+    w.hatch_bar_colour_button.colorChanged.connect(w._style_hatch_colour)
+    _framed(w.hatch_bar_colour_button)
+    put(HATCH, w.hatch_bar_colour_button)
 
     # -- Highlight, and a cut-out in an area ---------------------------------
     w.highlight_button = QToolButton()
@@ -681,6 +750,7 @@ def build(window) -> QToolBar:
     put(TOTALS, w.totals_button)
 
     w.style_bar = bar
+    fit_numbers(bar)
     # a table's own controls, on the same bar while it is open
     from .tablebar import TableControls
     w.table_controls = TableControls(w)
@@ -764,8 +834,7 @@ def _build_more_panel(w) -> None:
     form.addRow("Dash spacing:", w.dash_scale_spin)
     w.hatch_colour_button = ColorButton(w.default_style.hatch_color, label="Hatch colour")
     w.hatch_colour_button.setObjectName("hatchColour")
-    w.hatch_colour_button.colorChanged.connect(lambda value: w._style_change(
-        HATCH, lambda s: setattr(s, "hatch_color", value), "Hatch colour"))
+    w.hatch_colour_button.colorChanged.connect(w._style_hatch_colour)
     form.addRow("Hatch colour:", w.hatch_colour_button)
     w.hatch_scale_spin = UnboundedSpin()
     w.hatch_scale_spin.setObjectName("hatchScale")
@@ -964,6 +1033,7 @@ def refresh_icons(window) -> None:
     window.highlight_button.setIcon(icon("highlighter", 20))
     window.cutout_button.setIcon(icon("cutout_polygon", 20))
     window.font_auto_button.setIcon(_auto_font_icon())
+    fit_numbers(window.style_bar)          # the theme's frames, and its font
     window.cloud_spin.refresh_icons()
     from .widgets import arrow_combo
     fresh = arrow_combo()

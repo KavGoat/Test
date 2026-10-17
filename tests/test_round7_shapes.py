@@ -322,67 +322,54 @@ def test_sketch_to_scale_typed_in_real_units_while_drawing_and_in_properties(w):
     (rect,) = markups(w, RectItem)
     assert rect.size_text == "4.00 m × 1.50 m"
     assert rect.local_rect().width() == pytest.approx(4000 / (50 * 25.4 / 72), rel=1e-3)
-    # the plain rectangle drawn beside it, typed on the paper
+    # the plain rectangle drawn beside it is not to scale: no size box while
+    # it is placed (the user, 2026-10-17), click and click again
     before = set(markups(w, RectItem))
     w.select_tool("rect")
     click(w, page(w, 150, 450))
-    caption = [l.text() for l in w.view._size_editor.findChildren(QLabel)]
-    assert "cm" in caption
-    QTest.keyClicks(QApplication.focusWidget(), "5")
-    QTest.keyClick(QApplication.focusWidget(), Qt.Key_Tab)
-    pump()
-    QTest.keyClicks(QApplication.focusWidget(), "2")
-    QTest.keyClick(QApplication.focusWidget(), Qt.Key_Return)
+    assert w.view._size_editor is None
+    click(w, page(w, 300, 520))
     pump()
     plain = newest(w, before)
-    assert not plain.to_scale and plain.size_text == "5.00 cm × 2.00 cm"
+    assert not plain.to_scale and w.view._size_editor is None
 
 
 def test_sketch_to_scale_on_the_measure_toolbar_with_its_own_icons(w):
+    """Revu's Sketch to Scale Rectangle and Ellipse are buttons of their own
+    (the user, 2026-10-17: the drop-down they shared drew its arrow over the
+    rectangle's icon)."""
     from PySide6.QtWidgets import QToolButton
     from calcforge.ui.icons import icon
     measure = next(bar for bar in w.toolbars if bar.objectName() == "toolbar_measure")
-    button = measure.findChild(QToolButton, "sketchToScaleButton")
-    assert button is not None and button.isVisible()
-    assert button.geometry().right() < measure.width()
+    assert measure.findChild(QToolButton, "sketchToScaleButton") is None
+    buttons = {}
     for key_, plain in (("sketch_rect", "rect"), ("sketch_ellipse", "ellipse")):
         action = w.tool_actions[key_]
-        assert action in button.menu().actions()
+        assert action in measure.actions()
         assert action.shortcut().isEmpty()
+        button = measure.widgetForAction(action)
+        assert isinstance(button, QToolButton) and button.isVisible()
+        assert button.menu() is None, "no drop-down on it"
+        assert button.geometry().right() < measure.width()
+        buttons[key_] = button
         mine = icon(key_).pixmap(22, 22).toImage()
         other = icon(plain).pixmap(22, 22).toImage()
         assert mine != other, f"{key_} has its own icon"
+    # side by side, neither drawn over the other
+    assert not buttons["sketch_rect"].geometry().intersects(buttons["sketch_ellipse"].geometry())
     # Main, Calculation and Measure still share a row at 1280 px
     main = next(bar for bar in w.toolbars if bar.objectName() == "toolbar_main")
     assert measure.y() == main.y()
-    # the button itself picks the rectangle
-    QTest.mouseClick(button, Qt.LeftButton, Qt.NoModifier, QPoint(10, button.height() // 2))
-    pump()
-    assert w.view.tool_key == "sketch_rect" and button.isChecked()
-    # its arrow opens the list; the ellipse picked from it with the mouse
-    got = {}
-
-    def pick(menu):
-        got["labels"] = [a.text() for a in menu.actions()]
-        target = next(a for a in menu.actions() if a.text() == "Sketch to Scale Ellipse")
-        QTest.mouseClick(menu, Qt.LeftButton, Qt.NoModifier,
-                         menu.actionGeometry(target).center())
-    keep = watching(pick)
-    QTest.mouseClick(button, Qt.LeftButton, Qt.NoModifier,
-                     QPoint(button.width() - 4, button.height() // 2))
-    pump(3)
-    keep.stop()
-    assert got.get("labels") == ["Sketch to Scale Rectangle", "Sketch to Scale Ellipse"]
-    assert w.view.tool_key == "sketch_ellipse"
-    assert button.defaultAction() is w.tool_actions["sketch_ellipse"] and button.isChecked()
-    # Customise Toolbars without the ellipse: the button keeps the rectangle
+    # each button picks its own tool, by the mouse
+    for key_, button in buttons.items():
+        QTest.mouseClick(button, Qt.LeftButton)
+        pump()
+        assert w.view.tool_key == key_ and button.isChecked()
+    # Customise Toolbars without the ellipse: the rectangle stays
     w.visible_tools = [k for k in w.visible_tool_keys() if k != "sketch_ellipse"]
     w.apply_visible_tools()
-    assert button.defaultAction() is w.tool_actions["sketch_rect"]
-    w.visible_tools = [k for k in w.visible_tool_keys() if k != "sketch_rect"]
-    w.apply_visible_tools()
     pump()
-    assert not button.isVisible()
+    assert buttons["sketch_rect"].isVisible() and not buttons["sketch_ellipse"].isVisible()
 
 
 def test_sketch_to_scale_in_customise_toolbars_and_the_key_list(w):

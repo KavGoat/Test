@@ -1564,7 +1564,6 @@ class MainWindow(QMainWindow):
         measure_bar = QToolBar("Measure")
         measure_bar.setObjectName("toolbar_measure")
         measure_bar.setIconSize(QSize(22, 22))
-        sketch_actions: list = []
         for category in CATEGORIES:
             # Sketch to Scale's shapes sit with the measurements they share
             # the page scale with, as on Revu's Measure toolbar
@@ -1586,13 +1585,12 @@ class MainWindow(QMainWindow):
                     action.triggered.connect(lambda _checked=False, key=tool.key:
                                              self.select_tool(key))
                 self.tool_group.addAction(action)
-                if category == SKETCH:
-                    sketch_actions.append(action)
-                else:
-                    bar.addAction(action)
+                # Sketch to Scale's Rectangle and Ellipse are buttons of their
+                # own, as on Revu's Measure toolbar (the user, 2026-10-17: the
+                # one drop-down they shared drew its arrow over the icon)
+                bar.addAction(action)
                 self.tool_actions[tool.key] = action
                 action.setProperty(bindable.COMMAND, f"tool.{tool.key}")
-        self._sketch_button(measure_bar, sketch_actions)
         tool_bar.addSeparator()
         tool_bar.addAction(self.act_sticky)
         # The Calculation bar's Table is the Tools bar's Table — one button
@@ -1616,46 +1614,6 @@ class MainWindow(QMainWindow):
         self._show_tool_extras("select")
         self._add_toolbar(style_bar)
         self._refresh_style_controls()
-
-    def _sketch_button(self, bar: QToolBar, actions: list) -> None:
-        """Sketch to Scale's tools on the Measure bar as one button with a
-        drop-down, showing the one last picked — as Revu groups a tool set
-        on a toolbar. Two more buttons would push the Measure bar off the
-        row it shares with Main and Calculation at 1280 px."""
-        if not actions:
-            return
-        button = QToolButton(bar)
-        button.setObjectName("sketchToScaleButton")
-        button.setIconSize(bar.iconSize())
-        button.setAutoRaise(True)
-        button.setToolButtonStyle(Qt.ToolButtonIconOnly)
-        menu = QMenu(button)
-        menu.setObjectName("sketchToScaleMenu")
-        menu.addActions(actions)
-        button.setMenu(menu)
-        button.setPopupMode(QToolButton.MenuButtonPopup)
-        button.setDefaultAction(actions[0])
-        for action in actions:
-            # the button shows (and lights up for) the sketch tool in hand
-            action.toggled.connect(lambda on, a=action: on and self._show_sketch_tool(a))
-        self.sketch_button = button
-        self.sketch_actions = list(actions)
-        self.sketch_bar_action = bar.addWidget(button)
-
-    def _show_sketch_tool(self, action) -> None:
-        button = getattr(self, "sketch_button", None)
-        if button is not None and button.defaultAction() is not action:
-            button.setDefaultAction(action)
-
-    def _refresh_sketch_button(self) -> None:
-        """Customise Toolbars ticked some Sketch to Scale tools off."""
-        actions = getattr(self, "sketch_actions", [])
-        shown = [a for a in actions if a.isVisible()]
-        holder = getattr(self, "sketch_bar_action", None)
-        if holder is not None:
-            holder.setVisible(bool(shown))
-        if shown and self.sketch_button.defaultAction() not in shown:
-            self.sketch_button.setDefaultAction(shown[0])
 
     def _build_markup_styles_bar(self) -> None:
         """The Markup Styles toolbar (markupstyles.py), on the Main bar's row:
@@ -4784,7 +4742,6 @@ class MainWindow(QMainWindow):
         wanted = self.visible_tool_keys()
         for key, action in self.tool_actions.items():
             action.setVisible(key in wanted)
-        self._refresh_sketch_button()
         self._wrap_toolbar_rows_soon()          # the bars changed width
 
     # -- remembering it ------------------------------------------------
@@ -6995,6 +6952,7 @@ class MainWindow(QMainWindow):
                      "setCurrentIndex"),
                     (self.hatch_scale_spin, active.style.hatch_scale * 100, "setValue"),
                     (self.hatch_colour_button, active.style.hatch_color, "set_color"),
+                    (self.hatch_bar_colour_button, active.style.hatch_color, "set_color"),
                     (self.hatch_opacity_spin,
                      int(round(getattr(active.style, "hatch_opacity", 1.0) * 100)), "setValue"),
                     (self.cloud_spin, float(getattr(active, "cloud_size", self.default_cloud_size))
@@ -7019,6 +6977,11 @@ class MainWindow(QMainWindow):
             button.blockSignals(True)
             button.setChecked(getattr(active.style, name))
             button.blockSignals(False)
+        # the lists were set quietly: their tooltips (the shown pattern's
+        # name) follow, or they would name what the last markup had
+        from .propbar import hatch_tip
+        hatch_tip(self.hatch_combo)
+        self.dash_combo.setToolTip(self.dash_combo.currentText())
 
     # -- undo --------------------------------------------------------------
     def _open_editor_document(self):
@@ -7891,6 +7854,15 @@ class MainWindow(QMainWindow):
             self.view.count_symbol = value
             return
         self._item_setting(SYMBOL, "symbol", value, "Count symbol")
+
+    def _style_hatch_colour(self, colour: str) -> None:
+        """Hatch colour, from the bar's swatch or the type ▾ panel's: the
+        selection's, as one undo step, or the next markup's."""
+        for button in (self.hatch_bar_colour_button, self.hatch_colour_button):
+            if button.color() != colour:
+                button.set_color(colour)
+        self._style_change(HATCH, lambda style: setattr(style, "hatch_color", colour),
+                           "Hatch colour")
 
     def _style_hatch_opacity(self, percent: int) -> None:
         value = percent / 100.0

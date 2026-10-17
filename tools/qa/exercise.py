@@ -1672,6 +1672,18 @@ def reset(win) -> list[str]:
             except Exception:  # noqa: BLE001
                 pass
             win._offset = None
+    # what the Properties toolbar set with nothing selected is the window's
+    # own (the next markup's look): one job's hatch or line style must not
+    # be the next job's fixture's (D0036 found a rectangle drawn hatched)
+    from calcforge.items.base import Style
+    if getattr(win, "default_style", None) is not None and \
+            win.default_style.to_dict() != Style().to_dict():
+        win.default_style = Style()
+        notes.append("default style")
+    if getattr(win, "default_cloud_size", 2.0) != 2.0:
+        win.default_cloud_size = 2.0
+        notes.append("cloud size")
+    win._measure_units_next = None
     win.interactive_prompts = False
     win.new_document(confirm=False)
     win.view.set_zoom(1.0)

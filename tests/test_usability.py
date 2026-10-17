@@ -315,7 +315,7 @@ def test_the_size_entry_stays_upright_whichever_way_the_page_is_turned(window):
     for turn in (0, 90, 180, 270):
         window.view.scene().set_reading_turn(turn)
         QApplication.processEvents()
-        window.select_tool("rect")
+        window.select_tool("sketch_rect")     # the size box is Sketch to Scale's
         click(window.view, 200, 200)
         hover(window.view, 340, 320)
         proxy = window.view._size_proxy
@@ -932,7 +932,7 @@ def test_the_size_entry_rides_the_corner_and_says_the_size(window):
     from calcforge.items.shapes import RectItem
 
     window.current_page().scale = PageScale.from_ratio(50)
-    window.select_tool("rect")
+    window.select_tool("sketch_rect")       # the size box is Sketch to Scale's
     click(window.view, 100, 100)            # first click, not a drag
     assert window.view._size_editor is not None, "the entry opens on the first click"
 
@@ -8955,9 +8955,12 @@ def test_size_bar_matches_bluebeam_width_tab_height_enter(window, qapp):
     from calcforge.core.document import MM_TO_PT
     from calcforge.items.shapes import RectItem
 
+    from calcforge.core.document import PageScale
     window.show()
-    window.view.rulers.set_unit("mm")     # a plain rectangle is typed in the rulers' unit
-    window.select_tool("rect")
+    # Sketch to Scale's rectangle, at 1:1 in millimetres: typed in real mm,
+    # which are paper mm (a plain rectangle has no size box, 2026-10-17)
+    window.current_page().scale = PageScale.from_ratio(1, display_unit="mm")
+    window.select_tool("sketch_rect")
     QApplication.sendEvent(window.view.viewport(),
                            _mouse(window.view, QEvent.MouseButtonPress, 100, 100))
     view = window.view

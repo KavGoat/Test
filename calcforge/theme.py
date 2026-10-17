@@ -118,7 +118,7 @@ QToolBar QLabel#styleKind {{
     color: {ink}; font-weight: 600; padding: 0 10px 0 6px;
     border-right: 1px solid {chrome_edge}; margin-right: 4px;
 }}
-QToolBar::separator {{ background: {chrome_edge}; width: 1px; margin: 5px 6px; }}
+QToolBar::separator {{ background: {chrome_edge}; width: 1px; margin: 5px 4px; }}
 /* The grip is left to the style to draw — a rule here would replace the dots
    with nothing, which is how the toolbars ended up with no way to pick them up.
    The padding above leaves it room. */

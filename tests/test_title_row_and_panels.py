@@ -216,10 +216,16 @@ def test_the_properties_bar_reads_line_fill_hatch_font_in_revus_order(window, qa
                      window.text_colour_button, window.font_style_button]
     assert shown[0] is window.style_kind_menu
     assert window.arrow_start_combo not in shown, "a callout's leader has an End only"
-    # compact, as Revu's
-    assert window.width_spin.width() <= 82
-    assert window.opacity_spin.width() <= 62 and window.fill_opacity_spin.width() <= 62
-    assert window.font_spin.width() <= 58
+    # compact, as Revu's — but never so narrow the widest value is cut off
+    # (the user, 2026-10-17: "100%" did not fit the fill opacity box)
+    assert window.width_spin.width() <= 90
+    assert window.opacity_spin.width() <= 72 and window.fill_opacity_spin.width() <= 72
+    assert window.font_spin.width() <= 68
+    for spin in (window.width_spin, window.opacity_spin, window.fill_opacity_spin):
+        widest = max(spin.fontMetrics().horizontalAdvance(
+            spin.prefix() + spin.textFromValue(v) + spin.suffix())
+            for v in (spin.minimum(), spin.maximum()))
+        assert spin.lineEdit().width() >= widest + 4, spin.objectName()
     assert window.hatch_combo.sizeHint().width() <= 70
     # Set as Default is not on the bar; B/I/U are behind Style ▾
     assert window.default_button not in shown

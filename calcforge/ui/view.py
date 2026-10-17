@@ -2551,7 +2551,7 @@ class PageView(QGraphicsView):
         self._mode = "draw_free" if tool.mode == FREE else "draw_drag"
         self._typed_size = False
         self._typed_w = self._typed_h = self._typed_rotation = None
-        if isinstance(self._draft, RectItem) and self._draft.kind in SIZED_SHAPES:
+        if self._sizes_while_placed(self._draft):
             # Bluebeam's size bar appears the moment the shape starts, and
             # rides the corner for a drag as well as a click-click.
             self.open_size_editor(self._draft)
@@ -3419,9 +3419,7 @@ class PageView(QGraphicsView):
                 # finish the markup then and there, which is where a measure
                 # tool got its 120 pt measurement from nowhere.
                 self._mode = "draw_click"
-                if (isinstance(self._draft, RectItem)
-                        and self._draft.kind in SIZED_SHAPES
-                        and self._size_editor is None):
+                if self._sizes_while_placed(self._draft) and self._size_editor is None:
                     self.open_size_editor(self._draft)
                 self.statusMessage.emit(
                     f"{self.current_tool().label}: click again to finish · "
@@ -4183,6 +4181,16 @@ class PageView(QGraphicsView):
             self._draft = None
         self._mode = "idle"
         self.forget_snap()
+
+    @staticmethod
+    def _sizes_while_placed(draft) -> bool:
+        """Whether the size box rides the corner while *draft* is placed:
+        only for Sketch to Scale's shapes, drawn to a real size. A plain
+        Rectangle or Ellipse is not to scale, and a size box on it only
+        confused (the user, 2026-10-17); Exact Size… on its right-click still
+        sizes one exactly."""
+        return (isinstance(draft, RectItem) and draft.kind in SIZED_SHAPES
+                and bool(getattr(draft, "to_scale", False)))
 
     def open_size_editor(self, draft: RectItem) -> None:
         """The Bluebeam size bar: Width, Height and Rotation beside the corner.

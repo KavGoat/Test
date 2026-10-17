@@ -157,7 +157,10 @@ def _formula_bar(w, part):
 
 def _size_field(w):
     from tests.test_usability import click as press
-    w.select_tool("rect")
+    from calcforge.core.document import PageScale
+    # the size box rides only Sketch to Scale's shapes (the user, 2026-10-17)
+    w.current_page().scale = PageScale.from_ratio(50)
+    w.select_tool("sketch_rect")
     press(w.view, 150, 300)
     pump()
     assert w.view._size_editor is not None
