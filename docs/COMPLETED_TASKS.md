@@ -3,6 +3,13 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-17 (later) — Print as the user's Revu photo; the Markups List filter dims the page (pushed at e2f4212)
+
+- Full test runs passed at 7ae6cd0 and e2f4212; 14/14 planted bugs caught.
+- Print dialog laid out as the user's Revu 21 photo; greyscale, visible hyperlinks and dim filtered markups print; Defaults ▾ and Advanced Printing.
+- Markups List: filtered-out markups dimmed on the canvas (and on paper with Dim Filtered Markups), imported and ink annotations included; Filter List toggle; typing in the search stays at 1–5 ms a key with 1000 markups.
+- The user checked on Windows: the menus in the native title bar work; opening Excel is fine.
+
 ## 2026-10-17 — Revu's Print and Page Setup, the Properties toolbar finished, names in reading order (pushed at 8f1c391)
 
 - Full test runs passed at 4f86c8b, 4672a2d, ac8f077 and 8f1c391 (`-n 3`, every-command tests included, no silent re-runs); 14/14 planted bugs caught each time.
