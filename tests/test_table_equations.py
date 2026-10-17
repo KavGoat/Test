@@ -1,7 +1,8 @@
 """Tables and equations reading each other (docs/SPREADSHEET_DESIGN.md):
 a table reads the variables defined before it; the equations read a table's
-cells, named cells, columns by heading and the table as a lookup; where
-reading order and dependencies disagree, dependencies win."""
+cells, named cells, columns by heading and the table as a lookup — after
+the table only, as in SMath (2026-10-17: reading order, not "dependencies
+win")."""
 from __future__ import annotations
 
 import pytest
@@ -114,15 +115,20 @@ def test_a_table_value_change_recalculates_the_equations(v):
     assert found["P="] == "14 kN"
 
 
-def test_dependencies_win_over_reading_order(v):
-    """An equation above a table can read it; the table reads a variable
-    defined between them."""
+def test_a_table_below_is_not_defined_above_it(v):
+    """As in SMath (the user's answer, 2026-10-17, replacing "dependencies
+    win"): an equation above a table can't read it — "T1.A1 - not
+    defined." — while the table still reads a variable defined above it,
+    and an equation below reads the table."""
     equation(v, 18, "z:T1.A1+1")
     equation(v, 54, "z=")
     equation(v, 120, "a:10")
     table = table_at(v, 200, [["=a*3"]], name="T1")
-    found = {item.region.editor.root.text(): display_text(item.region.display)
+    equation(v, 400, "y:T1.A1+1")
+    equation(v, 440, "y=")
+    found = {item.region.editor.root.text(): item.region
              for item in v.window.view.scene().items()
-             if isinstance(item, CalcItem) and item.region and item.region.display is not None}
+             if isinstance(item, CalcItem) and item.region}
     assert table.sheet.value(0, 0) == 30
-    assert found["z="] == "31"
+    assert found["z="].error is not None and found["z="].error.message == "T1.A1 - not defined."
+    assert display_text(found["y="].display) == "31"

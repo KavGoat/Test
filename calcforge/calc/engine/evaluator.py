@@ -459,9 +459,10 @@ class Evaluator:
         v = ctx.lookup(n.name)
         if v is None:
             if EXTERNAL is not None:
-                # a table's name: the definition in force here (defined
-                # after any equation's), or, with none before, a table's
-                # after it — though not over a built-in constant then
+                # a table's name defined before here (and after any
+                # equation's); one only below is not defined here, as in
+                # SMath. A table's name before here beats a built-in
+                # constant, as an equation's does.
                 key = ctx.reading_key()
                 if n.name not in BUILTIN_CONSTANTS or (
                         key is not None and EXTERNAL.defined_at(n.name, key) is not None):

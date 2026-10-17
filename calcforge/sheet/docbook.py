@@ -15,12 +15,12 @@ Between them and the equations (docs/SPREADSHEET_DESIGN.md):
 * a table's names are defined where the table is: an equation reads the
   latest definition before it in reading order, an equation's or a
   table's (the user's report, 2026-10-17: test:=5 kN, then a sheet's cell
-  named test, then test= gives the cell's 2);
-* where the two disagree with reading order, dependencies win: with no
-  definition before it an equation reads a table after it, and after every
-  calculation the tables take up changed variables and the equations
-  changed table values, until nothing changes (a true loop stops and is
-  reported as circular).
+  named test, then test= gives the cell's 2). A name defined only below an
+  equation is not defined there, as in SMath ("test - not defined."), even
+  when a table further down has it (the user's answer, 2026-10-17);
+* after every calculation the tables take up changed variables and the
+  equations changed table values, until nothing changes (a true loop stops
+  and is reported as circular).
 """
 from __future__ import annotations
 
@@ -298,15 +298,20 @@ class DocumentBook:
                 return RefValue(sheet, 1, col, bottom, col)
         return None
 
-    def equation_names(self) -> dict:
+    def equation_names(self, at_key=None) -> dict:
         """The names the equations can read from the tables, for their
-        autocomplete: defined names, and Table.Column for each heading."""
+        autocomplete: defined names, and Table.Column for each heading —
+        only those defined before *at_key* (an equation there), as SMath
+        lists only the names defined above."""
         out = {}
         for (lower, scope), dn in self.workbook.names.items():
-            if scope is None:
+            if scope is None and (at_key is None or self.defined_at(dn.name, at_key) is not None):
                 out[dn.name] = f"named cells: ={dn.refers_to}"
         for sheet in self.workbook.sheets:
             if sheet.kind != "table":
+                continue
+            if at_key is not None and (self._before(sheet, at_key) is None or
+                                       not self._lookup_readable(sheet, at_key)):
                 continue
             for (row, col), cell in sheet.cells.items():
                 if row == 0 and isinstance(cell.value, str) and _ident(cell.value):
@@ -331,13 +336,14 @@ class DocumentBook:
     # table as a lookup) are defined where it is in the document — its
     # top-left corner — and take their turn with the equations' definitions
     # there (calc/engine/evaluator.py IndexedContext.entry): an equation
-    # reads the latest definition before it, whichever kind it is. Only
-    # when nothing before it defines the name does a table after it answer
-    # (dependencies win over reading order, docs/SPREADSHEET_DESIGN.md).
+    # reads the latest definition before it, whichever kind it is. A table
+    # after it is not read at all: the name is not defined there yet, as
+    # in SMath (the user's answer, 2026-10-17).
     def _before(self, sheet: Sheet, at_key) -> Optional[tuple]:
-        """The sheet's reading key when it is before *at_key*, else None."""
+        """The sheet's reading key when it is before *at_key* (anywhere,
+        when *at_key* is None: asked from nowhere in particular), else None."""
         key = self._key(sheet)
-        return key if at_key is not None and key < tuple(at_key) else None
+        return key if at_key is None or key < tuple(at_key) else None
 
     def defined_at(self, name: str, at_key) -> Optional[tuple]:
         """Where the tables define *name*, when that is before *at_key* and
@@ -369,14 +375,18 @@ class DocumentBook:
         return at if at is not None and self._lookup_readable(sheet, at_key) else None
 
     def has(self, name: str, at_key=None) -> bool:
-        # known even from a later section: its value then says why it can't be read
-        return self._named(name) is not None
-
-    def value(self, name: str, at_key=None):
-        """The value of a table's *name* for the equation at *at_key*."""
+        """Whether a table before *at_key* defines *name* — known from an
+        earlier section too: its value then says why it can't be read."""
         at_key = self.reading_at if at_key is None else at_key
         got = self._named(name)
-        if got is None:
+        return got is not None and self._before(got[0], at_key) is not None
+
+    def value(self, name: str, at_key=None):
+        """The value of a table's *name* for the equation at *at_key*: None
+        when no table before it defines the name (it is "not defined" there)."""
+        at_key = self.reading_at if at_key is None else at_key
+        got = self._named(name)
+        if got is None or self._before(got[0], at_key) is None:
             return None
         if self._seen(got, at_key) is None:
             from calcforge.calc.engine.errors import SMathError
@@ -400,10 +410,12 @@ class DocumentBook:
             raise SMathError(f"{name} is {e.error.code} in its table.")
 
     def function(self, name: str, nargs: int, at_key=None):
-        """A table used as a lookup: name(x), name(x, "heading"), name(x, y)."""
+        """A table used as a lookup: name(x), name(x, "heading"), name(x, y)
+        — by an equation after the table only."""
         at_key = self.reading_at if at_key is None else at_key
         sheet = self._lookup_sheet(name, nargs)
-        if sheet is None or not self._lookup_readable(sheet, at_key):
+        if sheet is None or self._before(sheet, at_key) is None or \
+                not self._lookup_readable(sheet, at_key):
             return None
 
         def look(args):

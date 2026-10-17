@@ -213,14 +213,46 @@ def test_after_a_section_break_the_sections_own_definition_wins():
     assert answer(asked) == "5 kN"
 
 
-def test_with_nothing_before_a_table_after_still_answers():
-    """Dependencies win over reading order (docs/SPREADSHEET_DESIGN.md): with
-    no definition before it, an equation reads a table below it."""
+def test_a_name_defined_only_below_is_not_defined():
+    """As in SMath (the user's answer, 2026-10-17): with nothing above
+    defining it, a name a sheet below defines is "not defined" — and so are
+    a table's cells, columns and lookups below."""
     _doc, calc, book = a_document()
     asked = on_page(calc, 0, 20, "test=")
+    cell = on_page(calc, 0, 60, "T1.A2=")
+    column = on_page(calc, 0, 100, "sum(T1.Load)=")
+    looked = on_page(calc, 0, 140, "bolts(2)=")
+    a_sheet(book, 1, cells={(0, 0): "2"}, names={"test": "Sheet1!$A$1"})
+    a_sheet(book, 1, y=400, kind="table", name="T1", cells={(0, 0): "Load", (1, 0): "3"})
+    a_sheet(book, 1, y=600, kind="table", name="bolts",
+            cells={(0, 0): "d", (0, 1): "A", (1, 0): "1", (1, 1): "10", (2, 0): "3", (2, 1): "30"})
+    calc.recalculate()
+    assert answer(asked) == "test - not defined."
+    assert answer(cell) == "T1.A2 - not defined."
+    assert answer(column) == "T1.Load - not defined."
+    assert answer(looked) == "bolts(#) - function is not defined."
+    below = on_page(calc, 2, 20, "test=")
+    calc.recalculate()
+    assert answer(below) == "2", "after the sheet it is defined"
+
+
+def test_a_definition_using_a_name_defined_only_below_says_so():
+    _doc, calc, book = a_document()
+    defined = on_page(calc, 0, 20, "t:test")
     a_sheet(book, 1, cells={(0, 0): "2"}, names={"test": "Sheet1!$A$1"})
     calc.recalculate()
-    assert answer(asked) == "2"
+    assert answer(defined) == "test - not defined."
+
+
+def test_autocomplete_offers_only_the_tables_names_above():
+    _doc, calc, book = a_document()
+    above = on_page(calc, 0, 20, "x:1")
+    a_sheet(book, 1, cells={(0, 0): "2"}, names={"test": "Sheet1!$A$1"})
+    a_sheet(book, 1, y=400, kind="table", name="T1", cells={(0, 0): "Load", (1, 0): "3"})
+    below = on_page(calc, 2, 20, "x:2")
+    calc.recalculate()
+    assert book.equation_names(above.key) == {}
+    assert set(book.equation_names(below.key)) == {"test", "T1.Load"}
 
 
 def test_a_built_in_constant_gives_way_only_to_a_definition_before():

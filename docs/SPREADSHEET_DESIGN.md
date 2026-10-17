@@ -25,7 +25,7 @@ here is new.
 | Formulas | Excel's syntax in cells. A cell reference wins over a document variable of the same spelling; such a variable is written `var(M20)`. |
 | Units | Cells hold units (`5 kN`) and calculate with CalcForge's unit system. Units that don't match are an error (`#UNITS!`). |
 | Calculation order | Reading order between normal pages and sheets/tables: a table or sheet section uses variables defined before it; its values are usable after it. Inside a sheet section (one page, or consecutive sheet pages shown as one block) and inside a table, references are Excel's: A5 can be read above it. |
-| Order clashes | Follow dependencies: evaluate in the order things depend on each other, reading order otherwise. A true loop is a circular reference, as in Excel. |
+| Order clashes | ~~Follow dependencies: evaluate in the order things depend on each other, reading order otherwise.~~ Replaced 2026-10-17 (the user's answer by pop-up): **reading order, as in SMath.** An equation reads the latest definition before it, an equation's, a measurement's or a table's alike (a table's names are defined at its top-left corner); a name defined only below an equation is "not defined" there (SMath's red "test - not defined."), even when a table further down has it. A cell reads only the equation variables defined above its sheet. Tables and equations still take up each other's changed values until nothing changes; a true loop is a circular reference, as in Excel. |
 | Consecutive sheet pages | One sheet that grows. Its page count follows its content; typing past the last page adds one; no normal page can be put in the middle. |
 | A table's place in reading order | Its top-left corner. |
 | Cross references | A formula may read any other sheet or table: `='Sheet 2'!B4`. One name per table or sheet section, easy to set. |
@@ -215,5 +215,8 @@ here is new.
   both ways. The document's worksheet asks the book for names and functions
   it does not define itself (`evaluator.EXTERNAL`, set per worksheet); after
   each calculation, tables and equations take up each other's changes on the
-  next turn of the event loop, round after round until nothing changes, so
-  dependencies win over reading order.
+  next turn of the event loop, round after round until nothing changes.
+  Which definition an equation reads is reading order alone (2026-10-17):
+  the latest one before it, an equation's or a table's
+  (`IndexedContext.entry`, `DocumentBook.defined_at`); a table below it is
+  not read ("name - not defined.").

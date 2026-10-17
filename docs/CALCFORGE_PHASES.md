@@ -987,8 +987,10 @@ adds or removes rows and columns.
   follows. Define Name for a cell or block.
 * **Equations ↔ tables** (see the design doc): `Loads.D12`, `W_total`,
   `Loads.Load` (column vector), `bolts(d, "A")` (interpolating lookup); a
-  table reads variables defined before it; dependencies win over reading
-  order; a table that appears, goes or is renamed recalculates the equations.
+  table reads variables defined before it, and an equation a table's names
+  only after the table (reading order, as in SMath — 2026-10-17, replacing
+  "dependencies win"); a table that appears, goes, is renamed or moves past
+  an equation recalculates the equations.
 * **Saving:** a table is page drawing on the calc layer (real text, never an
   annotation), with its cells, formats, sizes, merges and names in the record;
   it prints without the on-screen headings and tab.

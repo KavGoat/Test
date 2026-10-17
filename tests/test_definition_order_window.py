@@ -40,7 +40,9 @@ def w(window):
 # -- doing it as a person does ------------------------------------------------------------------
 
 def calc_mode(w):
+    pump()
     w.view.setFocus()
+    pump()
     QTest.keyClick(w.view.viewport(), Qt.Key_F12)
     pump()
     assert w.view.calc.mode == "calc"
@@ -249,9 +251,9 @@ def test_an_equation_after_the_named_cell_wins(w):
     name_cell_from_its_menu(w, run, "A1", "test")
     defined = equation(w, 2, 60, "test:5'kN")
     asked = equation(w, 2, 120, "test=")
-    early = equation(w, 0, 60, "test=")
+    early = equation(w, 0, 60, "test*2=")    # test= alone would be test:= (SMath)
     assert shown(asked) == "5 kN"
-    assert shown(early) == "2", "nothing above it defines test: the sheet below answers"
+    assert shown(early) == "test - not defined.", "only the sheet below defines it"
     assert defined.region.error is None
 
 
@@ -345,3 +347,101 @@ def test_a_named_measurement_after_the_sheet_wins(w):
     above = equation(w, 2, 10, "test=")
     assert shown(above) == "2", "above the measurement: the sheet's"
     assert shown(asked) == "0.0706 m", "200 pt at 1:1, the measurement's length"
+
+
+def test_a_sheet_below_is_not_defined_until_it_moves_above(w):
+    """As in SMath (the user's answer, 2026-10-17): the sheet's test is
+    below the equation, so test is not defined there — the red error under
+    it; the sheet page moved above (Thumbnails ▸ right-click ▸ Move Up) and
+    the error goes."""
+    calc_mode(w)
+    asked = equation(w, 0, 60, "test*2=")
+    run = insert_sheet_page_after(w, 0)
+    type_into_cell(w, run, "A1", "2")
+    name_cell_from_its_menu(w, run, "A1", "test")
+    pump(6)
+    assert shown(asked) == "test - not defined.", "only the sheet below defines it"
+    # Thumbnails: right-click the sheet's page ▸ Move Up
+    strip = w.pages_panel.list
+    rect = strip.visualItemRect(strip.item(1))
+    seen = {}
+    click_through(["Move Up"], seen)
+    local = rect.center()
+    QApplication.sendEvent(strip.viewport(), QContextMenuEvent(
+        QContextMenuEvent.Mouse, local, strip.viewport().mapToGlobal(local)))
+    pump(8)
+    assert seen.get("clicked") == ["Move Up"], seen
+    assert run.parentItem().page is w.document.pages[0], "the sheet is page 1 now"
+    assert asked.region.error is None and shown(asked) == "4"
+    # and back down with undo: not defined again
+    w.undo_something()
+    pump(8)
+    again = next(i for i in sheet_for(w.document).items.values()
+                 if i.region.editor.root.text().startswith("test"))
+    assert shown(again) == "test - not defined."
+
+
+def test_a_table_dragged_above_the_equation_defines_its_names(w):
+    """A table on the same page, below the equation: its cell is not
+    defined there; dragged above it with the mouse (Markup mode), it is."""
+    from calcforge.calc.docsheet import PT_PER_PX
+    from calcforge.items.table import TableItem
+    from tests.test_usability import drag
+    calc_mode(w)
+    asked = equation(w, 0, 200, "T1.A1*2=")
+    frame = w.document.pages[0].frame
+    table = TableItem(2, 2)
+    w.view.begin_snapshot([frame])
+    frame.add_markup(table, QPointF(300 * PT_PER_PX, 400 * PT_PER_PX))
+    table.sheet.workbook.set_input(table.sheet, 0, 0, "5")
+    table.sheet.workbook.rename_sheet(table.sheet, "T1")
+    w.view.commit_snapshot("table")
+    pump(6)
+    assert shown(asked) == "T1.A1 - not defined."
+    QTest.keyClick(w.view.viewport(), Qt.Key_F12)          # Markup mode: a drag moves it
+    pump()
+    assert w.view.calc.mode == "markup"
+    start = table.sceneBoundingRect().center()
+    w.view.centerOn(start)
+    pump()
+    lift = frame.mapToScene(QPointF(300 * PT_PER_PX, 40 * PT_PER_PX)) - \
+        frame.mapToScene(QPointF(300 * PT_PER_PX, 400 * PT_PER_PX))
+    w.view.scene().clearSelection()
+    table.setSelected(True)
+    end = start + lift
+    drag(w.view, start.x(), start.y(), end.x(), end.y())
+    pump(8)
+    assert table.pos().y() < 100, table.pos()
+    assert asked.region.error is None and shown(asked) == "10"
+
+
+def test_autocomplete_lists_a_sheets_name_only_below_it(w):
+    """SMath lists only the names defined above: typing te above the sheet
+    offers no test; below it, it does."""
+    w.add_page(0)
+    pump()
+    calc_mode(w)
+    run = insert_sheet_page_after(w, 0)
+    type_into_cell(w, run, "A1", "2")
+    name_cell_from_its_menu(w, run, "A1", "test")
+
+    def offered(page):
+        w.go_to_page(page)
+        pump()
+        point = w.document.pages[page].frame.mapToScene(QPointF(72, 300))
+        w.view.centerOn(point)
+        pump()
+        click_at(w.view, point.x(), point.y())
+        pump()
+        QTest.keyClicks(w.view.viewport(), "te")
+        pump()
+        s = w.view.calc.suggestions
+        texts = [e.text for e in s.entries()] if s.isVisible() else []
+        QTest.keyClick(w.view.viewport(), Qt.Key_Escape)
+        QTest.keyClick(w.view.viewport(), Qt.Key_Escape)
+        w.view.calc.leave()
+        pump()
+        return texts
+
+    assert "test" not in offered(0), "above the sheet"
+    assert "test" in offered(2), "below it"
