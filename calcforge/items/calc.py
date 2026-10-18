@@ -916,7 +916,9 @@ class CalcBlockItem(MarkupItem):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setPen(self.style.pen() if self.style.stroke else QPen(Qt.NoPen))
         painter.setBrush(self.style.brush())
-        painter.drawRect(rect)
+        from .complexlines import draw_rect
+        if not draw_rect(painter, rect, self.style):
+            painter.drawRect(rect)
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         super().paint(painter, option, widget)

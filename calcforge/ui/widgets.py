@@ -251,29 +251,75 @@ def big_pattern_dropdown(combo, closed=QSize(64, 20)) -> None:
     view = QListView()
     view.setIconSize(QSize(150, 34))
     view.setSpacing(2)
-    view.setUniformItemSizes(True)
+    # not uniform: the line under Manage… is a thin row, as Revu's is
+    view.setUniformItemSizes(False)
     combo.setView(view)
     # The combo's own delegate draws icons at the closed box's small size;
-    # this one draws each pattern at full size, with its name.
-    view.setItemDelegate(_BigPatternDelegate(view))
+    # this one draws each pattern at full size, with its name, and ticks the
+    # one the markup has.
+    view.setItemDelegate(_BigPatternDelegate(view, combo))
     combo.setIconSize(closed)
     combo.setMaxVisibleItems(14)
     combo.setMinimumContentsLength(8)
     view.setMinimumWidth(300)
 
 
+def fit_pattern_list(combo) -> None:
+    """Widen a big pattern list's open list to its longest name, so no name
+    is cut short ("Long Dash Dot Do…" was)."""
+    view = combo.view()
+    delegate = view.itemDelegate()
+    if not isinstance(delegate, _BigPatternDelegate):
+        return
+    from PySide6.QtWidgets import QStyleOptionViewItem
+    option = QStyleOptionViewItem()
+    option.font = view.font()
+    option.fontMetrics = view.fontMetrics()
+    model = combo.model()
+    widest = max((delegate.sizeHint(option, model.index(row, 0)).width()
+                  for row in range(model.rowCount())), default=0)
+    room = view.verticalScrollBar().sizeHint().width() + 2 * view.frameWidth() \
+        + 2 * view.spacing() + 4
+    view.setMinimumWidth(max(300, widest + room))
+
+
 class _BigPatternDelegate(QStyledItemDelegateBase := __import__(
         "PySide6.QtWidgets", fromlist=["QStyledItemDelegate"]).QStyledItemDelegate):
-    """One row of a big pattern list: the pattern 150 × 34, then its name."""
+    """One row of a big pattern list, as Revu's: a tick on the one in use,
+    its name, and the pattern drawn 150 × 34 at the right. Manage… has no
+    pattern, and the line under it is a thin rule."""
 
     SWATCH = QSize(150, 34)
+    #: Room at the left for the tick.
+    TICK = 26
+
+    def __init__(self, parent=None, combo=None):
+        super().__init__(parent)
+        self._combo = combo
+
+    @staticmethod
+    def _rule(index) -> bool:
+        return index.data(Qt.AccessibleDescriptionRole) == "separator"
 
     def sizeHint(self, option, index):
-        return QSize(self.SWATCH.width() + 160, self.SWATCH.height() + 6)
+        if self._rule(index):
+            return QSize(self.SWATCH.width() + 160, 7)
+        metrics = option.fontMetrics
+        words = metrics.horizontalAdvance(str(index.data(Qt.DisplayRole) or ""))
+        return QSize(max(self.TICK + words + 24 + self.SWATCH.width() + 8,
+                         self.SWATCH.width() + 160), self.SWATCH.height() + 6)
 
     def paint(self, painter, option, index):
         from PySide6.QtWidgets import QStyle
         painter.save()
+        if self._rule(index):
+            colour = QColor(option.palette.text().color())
+            colour.setAlphaF(0.35)
+            painter.setPen(colour)
+            middle = option.rect.center().y()
+            painter.drawLine(option.rect.left() + 4, middle, option.rect.right() - 4, middle)
+            painter.restore()
+            return
         if option.state & QStyle.State_Selected:
             painter.fillRect(option.rect, option.palette.highlight())
             text_colour = option.palette.highlightedText().color()
@@ -290,7 +336,10 @@ class _BigPatternDelegate(QStyledItemDelegateBase := __import__(
             painter.fillRect(swatch, option.palette.base())
             icon.paint(painter, swatch)
         painter.setPen(text_colour)
-        words = option.rect.adjusted(12, 0, -(self.SWATCH.width() + 16), 0)
+        if self._combo is not None and index.row() == self._combo.currentIndex():
+            painter.drawText(option.rect.adjusted(8, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft,
+                             "✓")
+        words = option.rect.adjusted(self.TICK, 0, -(self.SWATCH.width() + 16), 0)
         painter.drawText(words, Qt.AlignVCenter | Qt.AlignLeft,
                          str(index.data(Qt.DisplayRole) or ""))
         painter.restore()
@@ -436,6 +485,14 @@ class PatternCombo(QComboBox):
 
     def minimumSizeHint(self):
         return self.sizeHint()
+
+    def showPopup(self) -> None:
+        super().showPopup()
+        # Revu's list opens at its top, Manage… showing, while the one in
+        # use is in the first screenful (it opened on the one in use, with
+        # Manage… scrolled off above it)
+        if 0 <= self.currentIndex() < self.maxVisibleItems() - 2:
+            self.view().scrollToTop()
 
     def paintEvent(self, event) -> None:
         from PySide6.QtWidgets import QStyle, QStyleOptionComboBox, QStylePainter
