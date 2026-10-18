@@ -1086,6 +1086,7 @@ class Watch:
     modal_timer = None
     popup_timer = None
     navigating = False
+    overflow_token = None
     seen: set = set()
     policy = "cancel"
     shots_dir = None
@@ -2970,7 +2971,20 @@ def show_from_overflow(widget, outcome) -> None:
             settle(50)
             if widget.isVisible():
                 break
-    QtCore.QTimer.singleShot(1500, lambda: setattr(Watch, "navigating", False))
+    if not outcome.get("overflow"):
+        return
+    # the » popup was ours: let the watcher close strays again a little later,
+    # but only if nothing has started navigating since. A bare timer here
+    # fired inside the next job's own menu walk on a loaded machine and let
+    # the watcher shut that menu as a stray ("no menu opened", T0180 and
+    # T0198 under -n 3).
+    Watch.overflow_token = token = object()
+
+    def done():
+        if Watch.overflow_token is token:
+            Watch.overflow_token = None
+            Watch.navigating = False
+    QtCore.QTimer.singleShot(1500, done)
 
 
 def menu_button(widget, outcome, path, each_index=None):
@@ -2978,11 +2992,27 @@ def menu_button(widget, outcome, path, each_index=None):
     A button's menu runs modally (QToolButton::showMenu is exec), so the walk
     is queued first and runs inside it."""
     QtCore, QtGui, QtWidgets, QTest = qt()
+    # a menu still closing from the job before (T0179 Merge, then T0180 its
+    # Merge & Centre, gate on 4694f8c): a click on its own button while it
+    # is up only closes it, as Qt does, so the next click opens nothing
+    close_popups()
+    wait_for(lambda: QtWidgets.QApplication.activePopupWidget() is None, 2.0)
     show_from_overflow(widget, outcome)
     if not widget.isVisible():
         outcome["hidden"] = True
         raise NotReached("its button is not on screen")
     rect = widget.rect()
+    # A plain click on the same button just before (T0179 Merge, T0184
+    # Borders, T0197 Rows & Columns) opened its menu on the press; the
+    # watcher shut that menu before the release came, so the button was left
+    # held down and the next press opened nothing. A hand always lets go:
+    # let go first.
+    if isinstance(widget, QtWidgets.QAbstractButton) and widget.isDown():
+        QTest.mouseRelease(widget, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier,
+                           rect.center())
+        pump()
+        if widget.isDown():
+            widget.setDown(False)
     if isinstance(widget, QtWidgets.QToolButton) and \
             widget.popupMode() == QtWidgets.QToolButton.MenuButtonPopup:
         point = QtCore.QPoint(rect.right() - 4, rect.center().y())
@@ -3015,6 +3045,7 @@ def open_then_walk(opener, path, outcome, each_index=None, kind=None):
         done["ok"] = walk_popup(path, outcome, each_index)
 
     Watch.navigating = True
+    Watch.overflow_token = None                # a menu walk of its own now
     QtCore.QTimer.singleShot(60, navigate)
     opener()
     wait_for(lambda: done["ran"], 4.0)
