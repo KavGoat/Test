@@ -298,6 +298,10 @@ DIALOG_OPENERS = {
     "dialogs.save_preset()": ("fresh", ["menu", ["Tools", "Measure", "Set Scale…"],
                                         {"inside": {"title": "Set Scale",
                                                     "click": "+ Add Preset"}}]),
+    # Advanced Printing: the Print dialog's Advanced button, as Revu opens it
+    "printdialog.open_advanced()": ("fresh", ["menu", ["File", "Print…"],
+                                              {"inside": {"title": "Print",
+                                                          "click": "Advanced"}}]),
     "(no opener found)": ("two_pages", ["context", "thumbnail", ["Insert Pages", "After…"]]),
 }
 
