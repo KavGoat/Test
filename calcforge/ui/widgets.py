@@ -383,17 +383,26 @@ def big_pattern_dropdown(combo, closed=QSize(64, 20)) -> None:
     view = QListView()
     view.setIconSize(QSize(150, 34))
     view.setSpacing(2)
-    # each row as wide as its own name (a uniform size took the first's,
-    # Manage…, and cut the long names short)
+    # not uniform: each row as wide as its own name (a uniform size took
+    # the first's, Manage…, and cut the long names short), and the line
+    # under Manage… a thin row, as Revu's is
     view.setUniformItemSizes(False)
     combo.setView(view)
     # The combo's own delegate draws icons at the closed box's small size;
-    # this one draws each pattern at full size, with its name.
+    # this one draws each pattern at full size, with its name, and ticks the
+    # one the markup has.
     view.setItemDelegate(_BigPatternDelegate(view, combo))
     combo.setIconSize(closed)
     combo.setMaxVisibleItems(14)
     combo.setMinimumContentsLength(8)
     view.setMinimumWidth(300)
+
+
+def fit_pattern_list(combo) -> None:
+    """Widen a big pattern list's open list to its longest name, so no name
+    is cut short ("Long Dash Dot Do…" was)."""
+    if isinstance(combo.view().itemDelegate(), _BigPatternDelegate):
+        fit_the_list(combo)
 
 
 class _BigPatternDelegate(QStyledItemDelegate):
@@ -587,6 +596,11 @@ class PatternCombo(QComboBox):
     def showPopup(self) -> None:
         fit_the_list(self)                 # every name whole
         super().showPopup()
+        # Revu's list opens at its top, Manage… showing, while the one in
+        # use is in the first screenful (it opened on the one in use, with
+        # Manage… scrolled off above it)
+        if 0 <= self.currentIndex() < self.maxVisibleItems() - 2:
+            self.view().scrollToTop()
 
     def paintEvent(self, event) -> None:
         from PySide6.QtWidgets import QStyle, QStyleOptionComboBox, QStylePainter

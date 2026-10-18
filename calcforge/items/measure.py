@@ -10,6 +10,7 @@ from PySide6.QtGui import (QColor, QFontMetricsF, QPainter, QPainterPath,
 
 from ..core.units import Q_, convert, format_quantity, parse_unit
 from .base import HANDLE_SIZE, MarkupItem, Style, draw_head, register_item
+from . import complexlines
 
 DIMENSION = "dimension"
 LENGTH = "length"
@@ -328,7 +329,7 @@ class MeasureItem(MarkupItem):
             half_height = self.style.font_size * 1.1 * len(lines)
             rect = rect.united(QRectF(centre.x() - half_width, centre.y() - half_height,
                                       half_width * 2, half_height * 2))
-        margin = self.style.width + HANDLE_SIZE + 12
+        margin = self.style.width + HANDLE_SIZE + 12 + complexlines.reach(self.style)
         if self.segment_values and self.offers_segments():
             from .segments import reach
             margin = max(margin, reach(self.style, self.segment_texts) + 4)
@@ -401,7 +402,7 @@ class MeasureItem(MarkupItem):
     def shape(self) -> QPainterPath:
         from PySide6.QtGui import QPainterPathStroker
         stroker = QPainterPathStroker()
-        stroker.setWidth(max(self.style.width, 6.0) + 6)
+        stroker.setWidth(max(self.style.width, 6.0) + 6 + 2 * complexlines.reach(self.style))
         path = stroker.createStroke(self.build_path())
         if self.closed:
             polygon = QPainterPath()
@@ -819,7 +820,8 @@ class MeasureItem(MarkupItem):
         else:
             painter.setPen(self.style.pen())
             painter.setBrush(Qt.NoBrush)
-            painter.drawPath(path)
+            if not complexlines.draw(painter, path, self.style):
+                painter.drawPath(path)
 
         if self.kind == ANGLE and len(self.points) >= 3:
             self._paint_angle_arc(painter)
@@ -1019,7 +1021,7 @@ class MeasureItem(MarkupItem):
         painter.setPen(self.style.pen())
         painter.setBrush(Qt.NoBrush)
         if not (self.show_label and self.value_text) or self.label_is_off_the_line():
-            painter.drawLine(start, end)
+            self._dimension_piece(painter, start, end)
             return
         along = self.dimension_direction()
         middle = (start + end) / 2
@@ -1029,12 +1031,22 @@ class MeasureItem(MarkupItem):
         gap = metrics.horizontalAdvance(self.value_text) / 2 + 3.0
         span = _distance(start, end)
         if gap * 2 >= span:
-            painter.drawLine(start, end)
+            self._dimension_piece(painter, start, end)
             return
         before = QPointF(middle.x() - along.x() * gap, middle.y() - along.y() * gap)
         after = QPointF(middle.x() + along.x() * gap, middle.y() + along.y() * gap)
-        painter.drawLine(start, before)
-        painter.drawLine(after, end)
+        self._dimension_piece(painter, start, before)
+        self._dimension_piece(painter, after, end)
+
+    def _dimension_piece(self, painter: QPainter, start: QPointF, end: QPointF) -> None:
+        """One run of the dimension line, in its line style — a complex one
+        (Double, Zig Zag…) drawn along it."""
+        if complexlines.is_complex(self.style.line_style):
+            run = QPainterPath(start)
+            run.lineTo(end)
+            complexlines.draw(painter, run, self.style)
+            return
+        painter.drawLine(start, end)
 
     # -- serialisation -----------------------------------------------------
     def serialize(self) -> dict:

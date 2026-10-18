@@ -1033,12 +1033,15 @@ class _TextBase(MarkupItem):
         rect = QRectF(self._rect)
         for point in self.leader_points():
             rect = rect.united(QRectF(point.x() - 1, point.y() - 1, 2, 2))
-        margin = self.style.width + HANDLE_SIZE + 12
+        from .complexlines import reach
+        margin = self.style.width + HANDLE_SIZE + 12 + reach(self.style)
         return rect.normalized().adjusted(-margin, -margin, margin, margin)
 
     def shape(self) -> QPainterPath:
+        from .complexlines import reach
         path = QPainterPath()
-        path.addRect(self._rect.normalized().adjusted(-3, -3, 3, 3))
+        grow = 3 + reach(self.style)
+        path.addRect(self._rect.normalized().adjusted(-grow, -grow, grow, grow))
         if self.leaders:
             stroker = QPainterPathStroker()
             stroker.setWidth(max(self.style.width, 6.0) + 4)
@@ -1348,7 +1351,20 @@ class TextItem(_TextBase):
         painter.setBrush(self.style.brush())
         painter.setPen(self.style.pen() if self.style.stroke and self.style.width > 0
                        else QPen(Qt.NoPen))
-        if self.style.text_shape == "circle":
+        from .complexlines import draw, is_complex
+        if is_complex(self.style.line_style):
+            # a complex line style (Double, Zig Zag…) drawn round the box
+            outline = QPainterPath()
+            if self.style.text_shape == "circle":
+                inset = max(self.style.width, 0.0) / 2.0
+                outline.addEllipse(rect.adjusted(inset, inset, -inset, -inset))
+            elif self.style.corner_radius > 0:
+                outline.addRoundedRect(rect, self.style.corner_radius,
+                                       self.style.corner_radius)
+            else:
+                outline.addRect(rect)
+            draw(painter, outline, self.style)
+        elif self.style.text_shape == "circle":
             # Bluebeam's circled text — a grid bubble, a detail number.
             inset = max(self.style.width, 0.0) / 2.0
             painter.drawEllipse(rect.adjusted(inset, inset, -inset, -inset))
@@ -1578,11 +1594,20 @@ class CalloutItem(_TextBase):
         painter.setBrush(self.style.brush())
         painter.setPen(self.style.pen() if self.style.stroke and self.style.width > 0
                        and self.box_border else QPen(Qt.NoPen))
+        from .complexlines import draw, is_complex
         if self.shape_kind == "cloud":
             from .base import cloud_path, round_the_joins
             round_the_joins(painter)
-            painter.drawPath(cloud_path(self.cloud_polygon_of(rect),
-                                        self.cloud_radius, inverted=self.cloud_invert))
+            outline = cloud_path(self.cloud_polygon_of(rect),
+                                 self.cloud_radius, inverted=self.cloud_invert)
+            if not draw(painter, outline, self.style):
+                painter.drawPath(outline)
+        elif is_complex(self.style.line_style):
+            # a complex line style (Double, Zig Zag…) drawn round the box
+            outline = QPainterPath()
+            outline.addRoundedRect(rect, self.style.corner_radius,
+                                   self.style.corner_radius)
+            draw(painter, outline, self.style)
         else:
             painter.drawRoundedRect(rect, self.style.corner_radius,
                                     self.style.corner_radius)
@@ -1830,7 +1855,9 @@ class StampItem(MarkupItem):
         rect = self._rect.normalized()
         painter.setBrush(self.style.brush())
         painter.setPen(self.style.pen())
-        painter.drawRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
+        from .complexlines import draw_rect
+        if not draw_rect(painter, rect, self.style, self.style.corner_radius):
+            painter.drawRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
         # Shrink the title until it fits the box.
         from PySide6.QtGui import QFontMetricsF
         from ..core.typography import set_size

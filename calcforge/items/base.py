@@ -32,8 +32,29 @@ LINE_STYLES = {
 # them. A line's thickness does not change them: a heavy dashed line has the
 # same dashes as a light one, the way Bluebeam draws it. Style.dash_scale
 # stretches or tightens them.
+#
+# Revu's own come first, in its order and by its names (the user's Revu 21
+# line-style list, 2026-10-18): Solid, Dashed 1 to 6 as its samples draw
+# them, then its complex styles — lines with symbols, labels, loops or a
+# second line, drawn by items/complexlines.py, which have no dashes of their
+# own. CalcForge's own dash styles follow, under the keys files already use.
 DASH_ARRAYS = {
     "solid": [],
+    "dashed 1": [3.0, 2.25],
+    "dashed 2": [4.0, 4.0],
+    "dashed 3": [5.5, 5.25],
+    "dashed 4": [5.5, 3.75, 3.0, 3.75],
+    "dashed 5": [5.5, 3.75, 21.75, 3.75],
+    "dashed 6": [10.5, 5.25, 6.0, 5.25],
+    "fenceline circle": [],
+    "fenceline square": [],
+    "gas": [],
+    "hot water": [],
+    "zig zag": [],
+    "insulation": [],
+    "double": [],
+    "tracks": [],
+    "road": [],
     "dash": [4.0, 2.0],
     "dot": [1.0, 2.0],
     "dashdot": [4.0, 2.0, 1.0, 2.0],
@@ -921,7 +942,9 @@ class MarkupItem(QGraphicsObject):
         return rect.adjusted(margin, margin, -margin, -margin) if margin else rect
 
     def _bounds_now(self) -> QRectF:
-        margin = self.style.width + HANDLE_SIZE + 4
+        from .complexlines import reach
+        # a Double, Tracks or Road line reaches past its pen
+        margin = self.style.width + HANDLE_SIZE + 4 + reach(self.style)
         box = self.local_rect().normalized().adjusted(-margin, -margin, margin, margin)
         if self.ROTATABLE:
             # The rotation handle stands off above the box. Left out of here it

@@ -209,7 +209,9 @@ class SnapshotItem(MarkupItem):
         if self.style.stroke and self.style.width > 0:
             painter.setPen(self.style.pen())
             painter.setBrush(Qt.NoBrush)
-            painter.drawRect(rect)
+            from .complexlines import draw_rect
+            if not draw_rect(painter, rect, self.style):
+                painter.drawRect(rect)
 
     def summary(self) -> str:
         if self.comment:

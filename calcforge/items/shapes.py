@@ -13,6 +13,7 @@ from ..core.units import Unit, format_quantity, parse_unit
 from .base import (CLOUD_SIZE, HANDLE_SIZE, SELECT_BLUE, MarkupItem, Style,
                    handle_zoom, paint_control_point, paint_rotate_handle,
                    cloud_path, draw_head, register_item, round_the_joins)
+from . import complexlines
 
 # Page refreshes construct two lengths per rectangle; the unit is built once.
 _MILLIMETRES = Unit((("mm", 1),))
@@ -225,7 +226,8 @@ class RectItem(MarkupItem):
     def shape(self) -> QPainterPath:
         path = QPainterPath()
         rect = self._rect.normalized()
-        grow = max(self.style.width, 4.0)
+        # a Double, Tracks or Road line is wider than its pen: picked on it
+        grow = max(self.style.width, 4.0) + complexlines.reach(self.style)
         if self.kind == "ellipse":
             path.addEllipse(rect.adjusted(-grow, -grow, grow, grow))
         else:
@@ -601,7 +603,22 @@ class RectItem(MarkupItem):
             painter.fillPath(solid.subtracted(self.clipped_holes_path()),
                              self.style.brush())
             painter.setBrush(Qt.NoBrush)
-        if self.kind == "ellipse":
+        if complexlines.is_complex(self.style.line_style) and self.style.stroke:
+            # Revu's complex lines (Double, Gas, Zig Zag…) along the outline
+            outline = QPainterPath()
+            if self.kind == "ellipse":
+                outline.addEllipse(rect)
+            elif self.kind == "cloud":
+                outline = cloud_path(QPolygonF([rect.topLeft(), rect.topRight(),
+                                                rect.bottomRight(), rect.bottomLeft()]),
+                                     self.cloud_radius, inverted=self.cloud_invert)
+            elif self.style.corner_radius > 0:
+                outline.addRoundedRect(rect, self.style.corner_radius,
+                                       self.style.corner_radius)
+            else:
+                outline.addRect(rect)
+            complexlines.draw(painter, outline, self.style)
+        elif self.kind == "ellipse":
             painter.drawEllipse(rect)
         elif self.kind == "cloud":
             polygon = QPolygonF([rect.topLeft(), rect.topRight(),
@@ -1099,12 +1116,13 @@ class PolyItem(MarkupItem):
 
     def shape(self) -> QPainterPath:
         from PySide6.QtGui import QPainterPathStroker
-        signature = (self._path_signature(), self.style.paints_inside())
+        signature = (self._path_signature(), self.style.paints_inside(),
+                     complexlines.reach(self.style))
         cached = self.__dict__.get("_shape_cache")
         if cached is not None and cached[0] == signature:
             return QPainterPath(cached[1])
         stroker = QPainterPathStroker()
-        stroker.setWidth(max(self.style.width, 6.0) + 4)
+        stroker.setWidth(max(self.style.width, 6.0) + 4 + 2 * complexlines.reach(self.style))
         stroker.setCapStyle(Qt.RoundCap)
         outline = self.build_path()
         path = stroker.createStroke(outline)
@@ -1114,7 +1132,7 @@ class PolyItem(MarkupItem):
         return path
 
     def boundingRect(self) -> QRectF:
-        margin = self.style.width + HANDLE_SIZE + 12
+        margin = self.style.width + HANDLE_SIZE + 12 + complexlines.reach(self.style)
         rect = self.local_rect().united(self.build_path().boundingRect())
         return self._with_scale_box(rect.adjusted(-margin, -margin, margin, margin))
 
@@ -1318,7 +1336,8 @@ class PolyItem(MarkupItem):
         if self.kind == "cloud":
             round_the_joins(painter)
         painter.setBrush(Qt.NoBrush)
-        painter.drawPath(path)
+        if not complexlines.draw(painter, path, self.style):
+            painter.drawPath(path)
         self.paint_cutouts(painter)
         self._paint_arrows(painter)
 
