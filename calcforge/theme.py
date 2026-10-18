@@ -97,6 +97,25 @@ QToolBar QToolButton:hover {{ background: {accent_soft}; }}
 QToolBar QToolButton:pressed {{ background: {accent_deep}; }}
 QToolBar QToolButton:checked {{ background: {picked}; color: {picked_ink}; }}
 QToolBar QToolButton::menu-indicator {{ width: 0; }}
+/* A button with a menu, as Revu's split buttons: the icon, then a narrow
+   arrow part of its own beside it. Unstyled, Qt laid the arrow over the
+   icon (Insert Pages, the user on Windows at 125%, 2026-10-18). */
+QToolBar QToolButton[menuButton="split"] {{ padding-right: 13px; }}
+QToolBar QToolButton::menu-button {{
+    subcontrol-origin: border; subcontrol-position: top right; width: 12px;
+    border: 0; border-left: 1px solid transparent;
+    border-top-right-radius: 3px; border-bottom-right-radius: 3px;
+}}
+QToolBar QToolButton::menu-button:hover {{ border-left-color: {chrome_edge}; }}
+QToolBar QToolButton::menu-arrow {{ image: url("{arrow_vee}"); width: 8px; height: 8px; }}
+/* a button that only opens its menu: its ▾ in room of its own at the right */
+QToolBar QToolButton[menuButton="only"] {{ padding-right: 13px; }}
+QToolBar QToolButton[menuButton="only"]::menu-indicator {{
+    image: url("{arrow_vee}"); width: 8px; height: 8px;
+    subcontrol-origin: padding; subcontrol-position: center right; right: 3px;
+}}
+QToolBar QToolButton#qt_toolbar_ext_button {{ padding: 0; }}
+QToolBar QToolButton#qt_toolbar_ext_button::menu-indicator {{ image: none; width: 0; }}
 /* the Properties toolbar's colours as Revu's: a framed button, the colour
    a square inside it (Line:, Fill:, the text's) */
 QToolBar QToolButton[revuSwatch="true"] {{
@@ -118,7 +137,7 @@ QToolBar QLabel#styleKind {{
     color: {ink}; font-weight: 600; padding: 0 10px 0 6px;
     border-right: 1px solid {chrome_edge}; margin-right: 4px;
 }}
-QToolBar::separator {{ background: {chrome_edge}; width: 1px; margin: 5px 4px; }}
+QToolBar::separator {{ background: {chrome_edge}; width: 1px; margin: 5px 2px; }}
 /* The grip is left to the style to draw — a rule here would replace the dots
    with nothing, which is how the toolbars ended up with no way to pick them up.
    The padding above leaves it room. */
@@ -276,6 +295,12 @@ QTabBar::close-button:hover {{ background: {accent_soft}; }}
 QStatusBar {{ background: {chrome}; border-top: 1px solid {chrome_edge}; }}
 QStatusBar::item {{ border: 0; }}
 QStatusBar QLabel {{ color: {ink_soft}; padding: 0 4px; }}
+/* the status bar's menus (page layout, snap): their ▾ beside the words */
+QStatusBar QToolButton[menuButton="only"] {{ padding-right: 13px; }}
+QStatusBar QToolButton[menuButton="only"]::menu-indicator {{
+    image: url("{arrow_vee}"); width: 8px; height: 8px;
+    subcontrol-origin: padding; subcontrol-position: center right; right: 3px;
+}}
 
 /* --- scrollbars ---------------------------------------------------------- */
 QScrollBar:vertical {{ background: transparent; width: 12px; margin: 0; }}
