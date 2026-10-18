@@ -1502,7 +1502,14 @@ class PageFrame(QGraphicsObject):
         self.print_mode = for_print
         self.file_drew_split = frozenset()
         self._pdf_overlay = bool(pdf_overlay)
-        self._items_only = layer == "calc"
+        # "sheet_multiply": what multiplies of the flattened markups, alone,
+        # for a layer of the saved page drawn with a Multiply blend; the
+        # sheet itself then leaves that part out (io/pdfbase.py)
+        self._items_only = layer in ("calc", "sheet_multiply", "sheet_over")
+        self._blend_pass = {"sheet": "base", "sheet_multiply": "multiply",
+                            "sheet_over": "over"}.get(layer, "")
+        if layer in ("sheet_multiply", "sheet_over"):
+            layer = "sheet"
         self._print_stream = stream if for_print else ""
         previous_draft = self._draft
         previous_links = self.print_links
@@ -1568,6 +1575,7 @@ class PageFrame(QGraphicsObject):
             self.print_mode = previous
             self._pdf_overlay = previous_overlay
             self._items_only = False
+            self._blend_pass = ""
             self._print_stream = previous_stream
             self._draft = previous_draft
             self.print_links = previous_links

@@ -939,3 +939,27 @@ def test_segment_values_and_centroid_set_as_default(w):
     again = RectItem("rect", QRectF(0, 0, 50, 50), to_scale=True)
     toolsets.apply_properties(again, toolsets.properties_of(newest))
     assert again.segment_values and again.show_centroid, "a tool chest tool keeps them"
+
+
+def test_a_flattened_highlight_keeps_its_border_unmultiplied(w, tmp_path):
+    from calcforge.items.shapes import RectItem
+    w.open_from_command_line(_page_with_black_words(tmp_path))
+    w.view.set_zoom(1.0)
+    pump()
+    frame = w.document.pages[0].frame
+    shape = RectItem("rect", QRectF(0, 0, 200, 200))
+    shape.style.fill, shape.style.fill_opacity = "#ffe066", 1.0
+    shape.style.stroke, shape.style.width = "#1060ff", 8.0
+    shape.style.blend = "multiply"
+    frame.add_markup(shape, QPointF(350, 200))
+    select(w, shape)
+    w.flatten_selection()
+    pump()
+    path = save_and_reopen(w, tmp_path, "flat.pdf")
+    with pymupdf.open(path) as document:
+        picture = document[0].get_pixmap(matrix=pymupdf.Matrix(1, 1), annots=True)
+        image = QImage(picture.samples, picture.width, picture.height, picture.stride,
+                       QImage.Format_RGB888).copy()
+    assert QColor(image.pixel(380, 380)).lightness() < 60, "black through the inside"
+    border = QColor(image.pixel(350, 380))
+    assert border.blue() > 200 and border.red() < 60, border.name()

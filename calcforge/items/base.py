@@ -1285,10 +1285,25 @@ class MarkupItem(QGraphicsObject):
                 style.fill, style.hatch, style.hatch_tile = kept
         return bare()
 
+    def multiplies(self) -> bool:
+        """Whether any of it multiplies onto the page (Highlight, the
+        highlighter pen)."""
+        style = getattr(self, "style", None)
+        return style is not None and style.blend == "multiply"
+
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
               widget: Optional[QWidget] = None) -> None:
-        painter.save()
         frame = self.parentItem()
+        blend_pass = getattr(frame, "_blend_pass", "")
+        if blend_pass:
+            # a flattened markup going into a saved page, where a PDF writer
+            # cannot multiply: the part drawn as it is, and the part that
+            # multiplies on a layer of its own (io/pdfbase.py)
+            painter.save()
+            self._paint_blend_pass(painter, blend_pass)
+            painter.restore()
+            return
+        painter.save()
         if not (self.split_theirs and (not getattr(frame, "print_mode", True)
                                        or self.split_from in getattr(frame, "file_drew_split", ()))):
             if self.multiplies_inside_only():
@@ -1304,6 +1319,24 @@ class MarkupItem(QGraphicsObject):
                 self.paint_visible(painter)      # nothing while it is still theirs
         painter.restore()
         self.paint_handles(painter)
+
+    def _paint_blend_pass(self, painter: QPainter, blend_pass: str) -> None:
+        """"base": every markup that does not multiply; "multiply": what
+        multiplies — a highlighted shape's inside, a highlighter's stroke;
+        "over": a highlighted shape's border and the rest, over its inside."""
+        if not self.multiplies():
+            if blend_pass == "base":
+                self.paint_visible(painter)
+            return
+        inside_only = self.multiplies_inside_only()
+        if blend_pass == "multiply":
+            if inside_only:
+                self.paint_inside(painter)
+            else:
+                self.paint_visible(painter)
+        elif blend_pass == "over" and inside_only:
+            with self.without_inside():
+                self.paint_visible(painter)
 
     def release_split(self) -> None:
         """A stroke of a split annotation changed: all of its strokes are

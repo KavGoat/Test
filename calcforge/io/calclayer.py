@@ -69,6 +69,39 @@ def place_layer(document, index: int, overlay, overlay_index: int,
     return layer_print(document, index, kind)
 
 
+def place_multiplied(document, index: int, overlay, overlay_index: int) -> None:
+    """A sheet layer whose drawing multiplies onto the page: placed as any
+    sheet layer is (tagged, so it comes off again on opening), its form then
+    drawn under an ExtGState with /BM /Multiply."""
+    page = document[index]
+    names_before = {entry[1] for entry in page.get_xobjects() if entry[2] == 0}
+    if place_layer(document, index, overlay, overlay_index, SHEET) is None:
+        return
+    for xref, name, invoker, _box in page.get_xobjects():
+        if invoker != 0 or name in names_before:
+            continue
+        try:
+            data = document.xref_stream(xref) or b""
+            state = engine.add_object(document, {"Type": engine_name("ExtGState"),
+                                                 "BM": engine_name("Multiply")})
+            kind, resources = document.xref_get_key(xref, "Resources")
+            if kind == "xref":
+                holder = int(resources.split()[0])
+                document.xref_set_key(holder, "ExtGState", f"<< /CFm {state} 0 R >>")
+            elif kind == "dict":
+                document.xref_set_key(xref, "Resources/ExtGState", f"<< /CFm {state} 0 R >>")
+            else:
+                document.xref_set_key(xref, "Resources", f"<< /ExtGState << /CFm {state} 0 R >> >>")
+            document.update_stream(xref, b"/CFm gs\n" + data)
+        except Exception:                              # noqa: BLE001
+            engine.drain_messages()
+
+
+def engine_name(text: str):
+    from ..pdf.objects import Name
+    return Name(text)
+
+
 def _put_it_where_it_is_shown(document, page, outer: int, entries, drawn) -> None:
     """Place the layer exactly over the page as it is shown.
 
