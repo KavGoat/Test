@@ -411,6 +411,7 @@ class _BigPatternDelegate(QStyledItemDelegate):
     SWATCH = QSize(150, 34)
     #: the words start after Revu's ✓ column
     WORDS = CHECK_COLUMN + 6
+    TICK = WORDS                       # (the tick's room, by its other name)
 
     def __init__(self, view, combo=None):
         super().__init__(view)
