@@ -97,16 +97,23 @@ QToolBar QToolButton:hover {{ background: {accent_soft}; }}
 QToolBar QToolButton:pressed {{ background: {accent_deep}; }}
 QToolBar QToolButton:checked {{ background: {picked}; color: {picked_ink}; }}
 QToolBar QToolButton::menu-indicator {{ width: 0; }}
+/* A button whose face is its arrow (the formula bar's ▾, the status bar's
+   ») draws no second one. A panel's split button (Thumbnails' Insert ▾, Add
+   to Tool Chest ▾) keeps the platform's own, which gives its arrow a part
+   of its own already. */
+QToolButton[menuButton="plain"]::menu-indicator {{ image: none; width: 0; }}
 /* A button with a menu, as Revu's split buttons: the icon, then a narrow
    arrow part of its own beside it. Unstyled, Qt laid the arrow over the
    icon (Insert Pages, the user on Windows at 125%, 2026-10-18). */
 QToolBar QToolButton[menuButton="split"] {{ padding-right: 13px; }}
-QToolBar QToolButton::menu-button {{
+QToolBar QToolButton[menuButton="split"]::menu-button {{
     subcontrol-origin: border; subcontrol-position: top right; width: 12px;
     border: 0; border-left: 1px solid transparent;
     border-top-right-radius: 3px; border-bottom-right-radius: 3px;
 }}
-QToolBar QToolButton::menu-button:hover {{ border-left-color: {chrome_edge}; }}
+QToolBar QToolButton[menuButton="split"]::menu-button:hover {{
+    border-left-color: {chrome_edge};
+}}
 QToolBar QToolButton::menu-arrow {{ image: url("{arrow_vee}"); width: 8px; height: 8px; }}
 /* a button that only opens its menu: its ▾ in room of its own at the right */
 QToolBar QToolButton[menuButton="only"] {{ padding-right: 13px; }}

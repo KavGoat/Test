@@ -4,8 +4,10 @@
 
 Each scale runs tests/menu_arrows_probe.py in a process of its own, since
 Qt reads QT_SCALE_FACTOR once, as the application starts. The probe walks
-every button with a menu on the toolbars, the Properties bar (a table's
-controls shown on it too) and the status bar, draws it three ways — whole,
+every button with a menu in the window — the toolbars, the Properties bar
+with a table open, the status bar (narrow, for its »), every panel brought
+forward in turn, the Properties panel with a markup picked — and fails any
+it never managed to show. It draws each three ways — whole,
 without its arrow, without its icon and words — and fails any whose arrow's
 ink meets its face's.
 """
@@ -28,15 +30,19 @@ def test_every_menu_buttons_arrow_is_clear_of_its_face(scale, theme):
     done = subprocess.run([sys.executable, PROBE, theme], env=env, capture_output=True,
                           text=True, timeout=240)
     lines = [line for line in done.stdout.splitlines()
-             if line.startswith(("ok ", "OVERLAP ", "done"))]
+             if line.startswith(("ok ", "OVERLAP ", "UNCHECKED ", "done"))]
     said = "\n".join(lines) + "\n" + done.stderr[-2000:]
     assert done.returncode == 0, said
     names = [line.split(":")[0][3:] for line in lines if line.startswith("ok ")]
     # Insert Pages (split: icon, then its arrow part), the page layout and
-    # Snap on the status bar, a table's Merge (only a menu, its ▾ beside it)
-    for wanted in ("Pages", "Continuous", "Snap", "Merge"):
+    # Snap on the status bar; a table's Merge, Borders and Rows & Columns
+    # (only a menu, its ▾ beside it); Thumbnails' Insert ▾ buttons; the
+    # Properties panel's Add to Tool Chest ▾; the formula bar's ▾ and the
+    # status bar's », whose face is their arrow
+    for wanted in ("Pages", "Continuous", "Snap", "Merge", "Borders", "Rows && Columns",
+                   "+", "▦", "addToToolChest", "▾", "statusMore"):
         assert wanted in names, said
-    assert not any(line.startswith("OVERLAP") for line in lines), said
+    assert not any(line.startswith(("OVERLAP", "UNCHECKED")) for line in lines), said
 
 
 def test_the_first_row_still_fits_1280_at_125_percent():
