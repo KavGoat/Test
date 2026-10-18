@@ -17,12 +17,23 @@ This is Microsoft's documented pattern, "Custom Window Frame Using DWM":
   so the desktop window manager keeps drawing its caption buttons there. Qt
   paints the title row; the place where the buttons are is left transparent
   (the window has an alpha channel) so they show through.
-* WM_NCHITTEST asks DwmDefWindowProc first, which answers over the caption
-  buttons (HTMAXBUTTON is what gives Snap Layouts); the top edge resizes;
-  empty parts of the title row answer HTCAPTION, so Windows itself moves,
-  snaps and maximises the window; menus, the Markup | Calc switch and the
-  search box stay ordinary widgets. The non-client mouse messages go to
-  DwmDefWindowProc too, which lights and presses the buttons.
+* WM_NCHITTEST asks DwmDefWindowProc first. Over the caption buttons the
+  window answers HTMINBUTTON, HTMAXBUTTON or HTCLOSE itself from
+  DWMWA_CAPTION_BUTTON_BOUNDS (in thirds) when DWM does not: the client area
+  covers them, so nothing else would, and HTMAXBUTTON is what gives Windows
+  11's Snap Layouts. The top edge resizes; empty parts of the title row
+  answer HTCAPTION, so Windows itself moves, snaps and maximises the window
+  (double-click too); menus, the Markup | Calc switch and the search box stay
+  ordinary widgets.
+* Every non-client mouse message goes to DwmDefWindowProc first, which lights
+  and presses the buttons. A press on a button is kept from DefWindowProc —
+  its old button-tracking loop looks for a caption the window no longer has,
+  and the click came to nothing (the user, 2026-10-18: minimise, maximise
+  and close did nothing) — and the release on the same button posts its
+  WM_SYSCOMMAND, as Windows Terminal and Chrome do.
+* A right-click on the caption opens the system menu here: Qt would take the
+  WM_CONTEXTMENU, since the title row is client area to it. Alt+Space is
+  Qt's own (it opens the same system menu).
 
 Everything that touches Win32 is inside win32-only branches, so the module
 imports anywhere; the hit-test decision is the pure function hit_test(), which
@@ -63,6 +74,20 @@ TOP_EDGE_CODES = frozenset({HTTOP, HTTOPLEFT, HTTOPRIGHT})
 FALLBACK_CAPTION_SIZE = (138, 30)
 
 
+def caption_button_at(point, caption_buttons_rect):
+    """Which of Windows' caption buttons is at *point*: HTMINBUTTON,
+    HTMAXBUTTON or HTCLOSE, left to right, each a third of the buttons' place
+    (they are all one width); None when the point is not on them."""
+    if caption_buttons_rect is None:
+        return None
+    rect = QRectF(caption_buttons_rect)
+    p = QPointF(point)
+    if rect.isEmpty() or not rect.contains(p):
+        return None
+    third = (p.x() - rect.left()) / rect.width() * 3
+    return (HTMINBUTTON, HTMAXBUTTON, HTCLOSE)[min(2, max(0, int(third)))]
+
+
 def hit_test(point, title_rect, widgets_rects, edge, caption_buttons_rect, maximised):
     """What a point in the window is, for WM_NCHITTEST.
 
@@ -73,16 +98,19 @@ def hit_test(point, title_rect, widgets_rects, edge, caption_buttons_rect, maxim
     *caption_buttons_rect* is where Windows draws its caption buttons (or
     None).
 
-    Returns a hit-test code, or None where the decision is Windows' own: off
-    the client area (its side and bottom borders) and over its caption
-    buttons, which DwmDefWindowProc answers.
+    Over the caption buttons it answers HTMINBUTTON, HTMAXBUTTON or HTCLOSE
+    itself: the client area covers them, so nothing else will — Windows
+    gives Snap Layouts to HTMAXBUTTON, and the window carries out the click
+    (NativeTitleBar). Returns None only off the client area (Windows' side
+    and bottom borders), which is Windows' own to decide.
     """
     p = QPointF(point)
     title = QRectF(title_rect)
     if p.x() < title.left() or p.x() > title.right() or p.y() < title.top():
         return None                           # Windows' own borders
     if p.y() >= title.bottom():
-        return HTCLIENT                       # below the title row
+        button = caption_button_at(p, caption_buttons_rect)
+        return button if button is not None else HTCLIENT   # below the title row
     if not maximised and p.y() < title.top() + edge:
         corner = 2 * edge
         if p.x() < title.left() + corner:
@@ -90,8 +118,9 @@ def hit_test(point, title_rect, widgets_rects, edge, caption_buttons_rect, maxim
         if p.x() >= title.right() - corner:
             return HTTOPRIGHT
         return HTTOP
-    if caption_buttons_rect is not None and QRectF(caption_buttons_rect).contains(p):
-        return None
+    button = caption_button_at(p, caption_buttons_rect)
+    if button is not None:
+        return button
     if any(QRectF(rect).contains(p) for rect in widgets_rects):
         return HTCLIENT
     return HTCAPTION
@@ -105,7 +134,28 @@ WM_ACTIVATE = 0x0006
 WM_NCCALCSIZE = 0x0083
 WM_NCHITTEST = 0x0084
 WM_NCMOUSEFIRST = 0x00A0          # WM_NCMOUSEMOVE
+WM_NCMOUSEMOVE = 0x00A0
+WM_NCLBUTTONDOWN = 0x00A1
+WM_NCLBUTTONUP = 0x00A2
+WM_NCLBUTTONDBLCLK = 0x00A3
+WM_NCRBUTTONDOWN = 0x00A4
+WM_NCRBUTTONUP = 0x00A5
 WM_NCMOUSELAST = 0x00AD           # WM_NCXBUTTONDBLCLK
+WM_SYSCOMMAND = 0x0112
+SC_MINIMIZE = 0xF020
+SC_MAXIMIZE = 0xF030
+SC_CLOSE = 0xF060
+SC_RESTORE = 0xF120
+SC_MOVE = 0xF010
+SC_SIZE = 0xF000
+MF_BYCOMMAND = 0x0000
+MF_ENABLED = 0x0000
+MF_GRAYED = 0x0001
+TPM_RIGHTBUTTON = 0x0002
+TPM_RETURNCMD = 0x0100
+TPM_NONOTIFY = 0x0080
+TME_LEAVE = 0x0002
+TME_NONCLIENT = 0x0010
 WM_NCPOINTERUPDATE = 0x0241
 WM_NCPOINTERUP = 0x0243
 WM_NCMOUSEHOVER = 0x02A0
@@ -202,6 +252,31 @@ class _Win32:
             self.GetSystemMetricsForDpi.argtypes = [ctypes.c_int, UINT]
             self.GetSystemMetricsForDpi.restype = ctypes.c_int
 
+        class TRACKMOUSEEVENT(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+                        ("hwndTrack", HWND), ("dwHoverTime", wintypes.DWORD)]
+
+        self.TRACKMOUSEEVENT = TRACKMOUSEEVENT
+        self.TrackMouseEvent = user32.TrackMouseEvent
+        self.TrackMouseEvent.argtypes = [ctypes.POINTER(TRACKMOUSEEVENT)]
+        self.TrackMouseEvent.restype = wintypes.BOOL
+        self.PostMessageW = user32.PostMessageW
+        self.PostMessageW.argtypes = [HWND, UINT, WPARAM, LPARAM]
+        self.PostMessageW.restype = wintypes.BOOL
+        self.GetSystemMenu = user32.GetSystemMenu
+        self.GetSystemMenu.argtypes = [HWND, wintypes.BOOL]
+        self.GetSystemMenu.restype = wintypes.HMENU
+        self.EnableMenuItem = user32.EnableMenuItem
+        self.EnableMenuItem.argtypes = [wintypes.HMENU, UINT, UINT]
+        self.EnableMenuItem.restype = wintypes.BOOL
+        self.SetMenuDefaultItem = user32.SetMenuDefaultItem
+        self.SetMenuDefaultItem.argtypes = [wintypes.HMENU, UINT, UINT]
+        self.SetMenuDefaultItem.restype = wintypes.BOOL
+        self.TrackPopupMenuEx = user32.TrackPopupMenuEx
+        self.TrackPopupMenuEx.argtypes = [wintypes.HMENU, UINT, ctypes.c_int, ctypes.c_int,
+                                          HWND, ctypes.c_void_p]
+        self.TrackPopupMenuEx.restype = wintypes.BOOL
+
         self.DwmDefWindowProc = dwmapi.DwmDefWindowProc
         self.DwmDefWindowProc.argtypes = [HWND, UINT, WPARAM, LPARAM, ctypes.POINTER(LRESULT)]
         self.DwmDefWindowProc.restype = wintypes.BOOL
@@ -276,6 +351,41 @@ class _Win32:
             self.DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, self.ctypes.byref(colour),
                                        self.ctypes.sizeof(colour))
 
+    def track_leaving(self, hwnd) -> None:
+        """Ask for WM_NCMOUSELEAVE when the pointer leaves the non-client
+        area (DefWindowProc would ask, but it does not see these moves)."""
+        track = self.TRACKMOUSEEVENT(self.ctypes.sizeof(self.TRACKMOUSEEVENT),
+                                     TME_LEAVE | TME_NONCLIENT, hwnd, 0)
+        self.TrackMouseEvent(self.ctypes.byref(track))
+
+    def system_command(self, hwnd, command: int) -> None:
+        """What Windows' own button does: SC_MINIMIZE, SC_MAXIMIZE,
+        SC_RESTORE or SC_CLOSE, posted so it runs after this message."""
+        self.PostMessageW(hwnd, WM_SYSCOMMAND, command, 0)
+
+    def system_menu(self, hwnd, x: int, y: int) -> None:
+        """The window's system menu at (x, y) on the screen, as a right-click
+        on a title bar opens it; the command picked is carried out."""
+        menu = self.GetSystemMenu(hwnd, False)
+        if not menu:
+            return
+        maximised = bool(self.IsZoomed(hwnd))
+
+        def able(command, on):
+            self.EnableMenuItem(menu, command, MF_BYCOMMAND | (MF_ENABLED if on else MF_GRAYED))
+
+        able(SC_RESTORE, maximised)
+        able(SC_MOVE, not maximised)
+        able(SC_SIZE, not maximised)
+        able(SC_MINIMIZE, True)
+        able(SC_MAXIMIZE, not maximised)
+        able(SC_CLOSE, True)
+        self.SetMenuDefaultItem(menu, SC_CLOSE, False)
+        command = self.TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
+                                        int(x), int(y), hwnd, None)
+        if command:
+            self.system_command(hwnd, int(command))
+
     def frame_changed(self, hwnd) -> None:
         """Have Windows send WM_NCCALCSIZE again, so the client area grows."""
         self.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS_FRAMECHANGED)
@@ -337,6 +447,8 @@ class NativeTitleBar(QObject):
         self.badge.setVisible(True)
         self.gap.setVisible(True)
         self._padding = None
+        #: the caption button a press went down on, for its release
+        self._pressed = None
         #: Windows' caption buttons, as Windows last gave them: (distance
         #: from the window's right edge, top, width, height), in
         #: device-independent pixels; None until it has
@@ -378,6 +490,10 @@ class NativeTitleBar(QObject):
                 top_left = widget.mapTo(self.window, widget.rect().topLeft())
                 rects.append(QRectF(top_left.x(), top_left.y(), widget.width(), widget.height()))
         return rects
+
+    def _ratio(self) -> float:
+        """Device pixels to the window's own (125 % scaling: 1.25)."""
+        return self.window.devicePixelRatioF() or 1.0
 
     def caption_rect(self) -> QRectF:
         """Where Windows' caption buttons are, or would be. They keep to the
@@ -444,7 +560,7 @@ class NativeTitleBar(QObject):
                 self._hwnd = hwnd
                 api.frame_changed(hwnd)       # the client area takes the caption's place
             bounds = api.caption_button_bounds(hwnd)
-            ratio = self.window.devicePixelRatioF() or 1.0
+            ratio = self._ratio()
             if bounds is not None:
                 left, top, right, bottom = (value / ratio for value in bounds)
                 self.caption = (max(0.0, self.window.width() - right), top,
@@ -453,7 +569,7 @@ class NativeTitleBar(QObject):
         caption = self.caption_rect()
         self._fit_title_row(caption if showing else None)
         if hwnd is not None:
-            ratio = self.window.devicePixelRatioF() or 1.0
+            ratio = self._ratio()
             top = max(caption.bottom(), self.title_rect().bottom()) if showing else 0
             api.extend_frame(hwnd, math.ceil(top * ratio))
             self.follow_theme(hwnd)
@@ -544,17 +660,77 @@ class NativeTitleBar(QObject):
         hwnd = msg.hWnd
         if not api.has_caption(hwnd):
             return None                       # full screen: no title bar
+        # DWM first, on every non-client mouse message: it draws the caption
+        # buttons, and lights and presses them from these
         handled, result = api.dwm_def_window_proc(hwnd, kind, msg.wParam, msg.lParam)
-        if kind != WM_NCHITTEST:
+        if kind == WM_NCHITTEST:
+            return self._answer_hit_test(api, hwnd, msg.lParam, handled, result)
+        if not (WM_NCMOUSEFIRST <= kind <= WM_NCMOUSELAST or kind == WM_NCMOUSELEAVE):
+            # pen and touch (WM_NCPOINTER*): DefWindowProc turns what is left
+            # of them into the mouse messages handled below
             return (True, result) if handled else None
-        code = self._hit(api, hwnd, msg.lParam)
+        where = int(msg.wParam)               # the hit-test code the message is for
+        if where in CAPTION_BUTTON_CODES and kind != WM_NCMOUSELEAVE:
+            return self._caption_button_message(api, hwnd, kind, where, handled, result)
+        if kind == WM_NCMOUSELEAVE:
+            self._pressed = None
+        if kind == WM_NCRBUTTONUP and where == HTCAPTION:
+            # Qt takes the WM_CONTEXTMENU that would follow for a context
+            # menu of its own (the title row is client area to it), so the
+            # system menu is opened here, as Windows' title bar opens it
+            x, y = _point_of(api, msg.lParam)
+            api.system_menu(hwnd, x, y)
+            return True, 0
+        # anything else — a press, drag or double-click on the caption — is
+        # Windows' own to carry out: moving, snapping, maximising
+        return None
+
+    def _answer_hit_test(self, api, hwnd, lparam, handled, result):
+        code = self._hit(api, hwnd, lparam)
         if code in TOP_EDGE_CODES:
             return True, code
+        if code in CAPTION_BUTTON_CODES:
+            # DWM knows its buttons best, when it says
+            return True, (result if handled and result in CAPTION_BUTTON_CODES else code)
         if handled and result in CAPTION_BUTTON_CODES:
             return True, result
         if code is None:
             return None
         return True, code
+
+    def _caption_button_message(self, api, hwnd, kind, button, handled, result):
+        """The mouse on Windows' minimise, maximise or close button.
+
+        Left to DefWindowProc, a press there starts the old button-tracking
+        loop, which looks for the buttons in a caption this window no longer
+        has, and the click comes to nothing. So, as apps that draw into the
+        caption do, the press is noted here and the release on the same
+        button carries out the button's command.
+        """
+        if kind in (WM_NCLBUTTONDOWN, WM_NCLBUTTONDBLCLK):
+            # what maximise does is settled at the press: restore if the
+            # window was maximised then (so a second command, should DWM
+            # also send one, changes nothing)
+            self._pressed = (button, bool(api.IsZoomed(hwnd)))
+            return True, 0
+        if kind == WM_NCLBUTTONUP:
+            pressed, self._pressed = self._pressed, None
+            if pressed is not None and pressed[0] == button:
+                if button == HTMINBUTTON:
+                    api.system_command(hwnd, SC_MINIMIZE)
+                elif button == HTMAXBUTTON:
+                    api.system_command(hwnd, SC_RESTORE if pressed[1] else SC_MAXIMIZE)
+                elif button == HTCLOSE:
+                    api.system_command(hwnd, SC_CLOSE)
+            return True, 0
+        if kind in (WM_NCRBUTTONDOWN, WM_NCRBUTTONUP):
+            return True, 0                    # a right-click on a button does nothing
+        if kind == WM_NCMOUSEMOVE:
+            api.track_leaving(hwnd)
+        # the hover is DWM's to show (and Windows 11's Snap Layouts come from
+        # the HTMAXBUTTON hit test); DefWindowProc is kept out of it, as it
+        # would draw the old style of button over the window
+        return True, (result if handled else 0)
 
     def _calc_size(self, api, msg):
         if not msg.wParam or not api.has_caption(msg.hWnd):
@@ -572,10 +748,9 @@ class NativeTitleBar(QObject):
         return True, 0
 
     def _hit(self, api, hwnd, lparam):
-        x = api.ctypes.c_short(lparam & 0xFFFF).value
-        y = api.ctypes.c_short((lparam >> 16) & 0xFFFF).value
+        x, y = _point_of(api, lparam)
         x, y = api.screen_to_client(hwnd, x, y)
-        ratio = self.window.devicePixelRatioF() or 1.0
+        ratio = self._ratio()
         point = QPointF(x / ratio, y / ratio)
         if not self.showing():
             return None
@@ -583,6 +758,13 @@ class NativeTitleBar(QObject):
         widgets = self.widget_rects() if title.top() <= point.y() < title.bottom() else []
         return hit_test(point, title, widgets, api.frame_thickness(hwnd) / ratio,
                         self.caption_rect(), bool(api.IsZoomed(hwnd)))
+
+
+def _point_of(api, lparam):
+    """The screen point packed in a mouse message's lParam (GET_X_LPARAM,
+    GET_Y_LPARAM: signed, for monitors left of or above the main one)."""
+    return (api.ctypes.c_short(lparam & 0xFFFF).value,
+            api.ctypes.c_short((lparam >> 16) & 0xFFFF).value)
 
 
 def install(window) -> None:

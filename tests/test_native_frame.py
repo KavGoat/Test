@@ -12,8 +12,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
 from calcforge.ui import nativeframe
-from calcforge.ui.nativeframe import (HTCAPTION, HTCLIENT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
-                                      hit_test)
+from calcforge.ui.nativeframe import (HTCAPTION, HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON,
+                                      HTTOP, HTTOPLEFT, HTTOPRIGHT, hit_test)
 
 TITLE = QRectF(0, 0, 1000, 32)
 MENUS = [QRectF(30, 0, 40, 32), QRectF(70, 0, 40, 32)]     # File, Edit
@@ -58,9 +58,14 @@ def test_maximised_there_is_no_top_edge():
     assert _hit(3, 2, maximised=True) == HTCAPTION
 
 
-def test_over_the_caption_buttons_windows_decides():
-    assert _hit(900, 16) is None
-    assert _hit(990, 20, maximised=True) is None
+def test_over_the_caption_buttons_they_are_the_buttons():
+    # the client area covers them, so the hit test has to say which they are
+    assert _hit(870, 16) == HTMINBUTTON         # 862–908
+    assert _hit(930, 16) == HTMAXBUTTON         # 908–954 (Snap Layouts)
+    assert _hit(990, 20) == HTCLOSE             # 954–1000
+    assert _hit(999, 29, maximised=True) == HTCLOSE
+    assert _hit(931, 2, maximised=True) == HTMAXBUTTON   # maximised: to the very top
+    assert _hit(931, 2) == HTTOP                # otherwise the top edge resizes
 
 
 def test_below_the_title_row_is_the_client_and_outside_it_is_windows_border():
@@ -213,6 +218,9 @@ class _FakeWin32:
         self.dwm_answer = (False, 0)
         self.calls = []
         self.origin = (0, 0)
+        self.bounds = None
+        self.commands = []
+        self.menus = []
 
     def DefWindowProcW(self, hwnd, message, wparam, lparam):
         params = self.NCCALCSIZE_PARAMS.from_address(lparam)
@@ -243,7 +251,16 @@ class _FakeWin32:
         self.calls.append("frame_changed")
 
     def caption_button_bounds(self, hwnd):
-        return None
+        return self.bounds                        # client device pixels, or None
+
+    def system_command(self, hwnd, command):
+        self.commands.append(command)
+
+    def system_menu(self, hwnd, x, y):
+        self.menus.append((x, y))
+
+    def track_leaving(self, hwnd):
+        self.calls.append("track")
 
     def extend_frame(self, hwnd, top):
         self.calls.append(("extend", top))
@@ -323,12 +340,12 @@ def test_hit_testing_through_the_window_procedure(window, title_row, fake_win32)
     assert ask(caption.x(), 2) == (True, HTTOP)
     fake_win32.zoomed = True
     assert ask(caption.x(), 2) == (True, nativeframe.HTMAXBUTTON)
-    # the mouse over the buttons is DWM's to light them
+    # the pointer leaving is DWM's to see (it unlights the buttons) and then
+    # Windows'
     fake_win32.dwm_answer = (True, 0)
     _msg, address = _message(nativeframe.WM_NCMOUSELEAVE)
-    assert title_row.native_event(address) == (True, 0)
-    fake_win32.dwm_answer = (False, 0)
     assert title_row.native_event(address) is None
+    assert fake_win32.calls[-1] == nativeframe.WM_NCMOUSELEAVE
     # in full screen there is no title bar to answer for
     fake_win32.caption_style = False
     assert ask(window.width() / 2, 15) is None
@@ -341,3 +358,152 @@ def test_the_frame_is_extended_behind_the_title_row(window, title_row, fake_win3
     (top,) = [call[1] for call in fake_win32.calls if call[0] == "extend"]
     assert top >= window.menuBar().height()
     assert ("dark", window.palette().window().color().lightness() < 128) in fake_win32.calls
+
+
+# -- the caption buttons, through the window procedure, at several scales ----
+
+N = nativeframe
+
+
+def _send(frame, kind, wparam=0, lparam=0):
+    _msg, address = _message(kind, wparam, lparam)
+    return frame.native_event(address)
+
+
+@pytest.fixture(params=[1.0, 1.25, 1.5, 2.0], ids=["100%", "125%", "150%", "200%"])
+def scaled(request, window, title_row, fake_win32, monkeypatch):
+    """The title row at a display scale, the window at (200, 100) on the
+    screen, and Windows' buttons where DWMWA_CAPTION_BUTTON_BOUNDS puts them:
+    46 x 30 each at 100 %, at the window's top right."""
+    ratio = request.param
+    monkeypatch.setattr(title_row, "_ratio", lambda: ratio)
+    fake_win32.origin = (200, 100)
+    width = window.width() * ratio
+    fake_win32.bounds = (round(width - 138 * ratio), 0, round(width), round(30 * ratio))
+    title_row.refresh()
+    _settle()
+    title_row.refresh()
+
+    def at(x, y):
+        """lParam of a logical point in the window."""
+        return _lparam(round(200 + x * ratio), round(100 + y * ratio))
+
+    return title_row, fake_win32, at, ratio
+
+
+def test_the_buttons_answer_the_hit_test_at_every_scale(window, scaled):
+    frame, fake, at, ratio = scaled
+    right = window.width()
+    for x, code in ((right - 115, HTMINBUTTON), (right - 69, HTMAXBUTTON),
+                    (right - 23, HTCLOSE), (right - 2, HTCLOSE)):
+        assert _send(frame, N.WM_NCHITTEST, 0, at(x, 18)) == (True, code), (ratio, x)
+    # DWM is asked first, every time
+    assert fake.calls.count(N.WM_NCHITTEST) == 4
+    # and its own answer, when it gives one, is the one used
+    fake.dwm_answer = (True, HTCLOSE)
+    assert _send(frame, N.WM_NCHITTEST, 0, at(right - 69, 18)) == (True, HTCLOSE)
+    fake.dwm_answer = (False, 0)
+    # the menus stop before the buttons
+    caption = frame.caption_rect()
+    assert caption.left() == pytest.approx(right - 138, abs=1)
+    assert not any(rect.intersects(caption) for rect in frame.widget_rects())
+    bar = window.menuBar()
+    menu = bar.actionGeometry(bar.actions()[1]).center()
+    assert _send(frame, N.WM_NCHITTEST, 0, at(menu.x(), menu.y())) == (True, HTCLIENT)
+    icon = frame.badge.mapTo(window, frame.badge.rect().center())
+    assert _send(frame, N.WM_NCHITTEST, 0, at(icon.x(), icon.y())) == (True, HTCAPTION)
+    # the top edge, a frame's thickness (8 device pixels) deep
+    assert _send(frame, N.WM_NCHITTEST, 0, at(icon.x(), 7 / ratio))[1] in N.TOP_EDGE_CODES
+    assert _send(frame, N.WM_NCHITTEST, 0, at(icon.x(), 9 / ratio)) == (True, HTCAPTION)
+
+
+def test_a_click_on_each_button_does_what_the_button_does(window, scaled):
+    frame, fake, at, _ratio = scaled
+    right = window.width()
+    for x, command in ((right - 115, N.SC_MINIMIZE), (right - 69, N.SC_MAXIMIZE),
+                       (right - 23, N.SC_CLOSE)):
+        code = _send(frame, N.WM_NCHITTEST, 0, at(x, 18))[1]
+        fake.commands.clear()
+        # the press is kept from DefWindowProc (its button tracking looks for
+        # a caption the window no longer has) and the release acts
+        assert _send(frame, N.WM_NCLBUTTONDOWN, code, at(x, 18)) == (True, 0)
+        assert fake.commands == []
+        assert _send(frame, N.WM_NCLBUTTONUP, code, at(x, 18)) == (True, 0)
+        assert fake.commands == [command]
+        # DWM saw both, to show the press
+        assert fake.calls[-2:] == [N.WM_NCLBUTTONDOWN, N.WM_NCLBUTTONUP]
+    # maximised, the middle button restores
+    fake.zoomed = True
+    fake.commands.clear()
+    _send(frame, N.WM_NCLBUTTONDOWN, HTMAXBUTTON, at(right - 69, 18))
+    _send(frame, N.WM_NCLBUTTONUP, HTMAXBUTTON, at(right - 69, 18))
+    assert fake.commands == [N.SC_RESTORE]
+
+
+def test_a_press_let_go_elsewhere_does_nothing(window, scaled):
+    frame, fake, at, _ratio = scaled
+    right = window.width()
+    _send(frame, N.WM_NCLBUTTONDOWN, HTCLOSE, at(right - 23, 18))
+    _send(frame, N.WM_NCLBUTTONUP, HTMAXBUTTON, at(right - 69, 18))
+    assert fake.commands == []
+    _send(frame, N.WM_NCLBUTTONDOWN, HTCLOSE, at(right - 23, 18))
+    _send(frame, N.WM_NCMOUSELEAVE)
+    _send(frame, N.WM_NCLBUTTONUP, HTCLOSE, at(right - 23, 18))
+    assert fake.commands == []
+    # a release with no press before it (pressed in the client, say)
+    _send(frame, N.WM_NCLBUTTONUP, HTMINBUTTON, at(right - 115, 18))
+    assert fake.commands == []
+
+
+def test_hovering_the_buttons_is_dwms_and_never_defwindowprocs(window, scaled):
+    frame, fake, at, _ratio = scaled
+    right = window.width()
+    assert _send(frame, N.WM_NCMOUSEMOVE, HTMAXBUTTON, at(right - 69, 18)) == (True, 0)
+    assert fake.calls[-2:] == [N.WM_NCMOUSEMOVE, "track"]    # and asks for the leave
+    fake.dwm_answer = (True, 0)
+    assert _send(frame, N.WM_NCMOUSEMOVE, HTCLOSE, at(right - 23, 18)) == (True, 0)
+
+
+def test_the_caption_still_drags_snaps_and_double_click_maximises(window, scaled):
+    frame, fake, at, _ratio = scaled
+    icon = frame.badge.mapTo(window, frame.badge.rect().center())
+    point = at(icon.x(), icon.y())
+    # Windows' own: the drag, Aero Snap, and the double-click — even should
+    # DWM claim the message
+    for kind in (N.WM_NCLBUTTONDOWN, N.WM_NCLBUTTONDBLCLK, N.WM_NCLBUTTONUP):
+        assert _send(frame, kind, HTCAPTION, point) is None
+        fake.dwm_answer = (True, 0)
+        assert _send(frame, kind, HTCAPTION, point) is None
+        fake.dwm_answer = (False, 0)
+    assert fake.commands == []
+
+
+def test_a_right_click_on_the_caption_opens_the_system_menu(window, scaled):
+    frame, fake, at, ratio = scaled
+    icon = frame.badge.mapTo(window, frame.badge.rect().center())
+    point = at(icon.x(), icon.y())
+    assert _send(frame, N.WM_NCRBUTTONDOWN, HTCAPTION, point) is None
+    assert _send(frame, N.WM_NCRBUTTONUP, HTCAPTION, point) == (True, 0)
+    assert fake.menus == [(round(200 + icon.x() * ratio), round(100 + icon.y() * ratio))]
+    # not on the buttons
+    right = window.width()
+    assert _send(frame, N.WM_NCRBUTTONUP, HTCLOSE, at(right - 23, 18)) == (True, 0)
+    assert len(fake.menus) == 1
+
+
+def test_a_screen_left_of_the_main_one_gives_negative_points(window, title_row, fake_win32):
+    fake_win32.origin = (-1500, -40)
+    fake_win32.bounds = None
+    title_row.refresh()
+    caption = title_row.caption_rect()
+    x, y = int(-1500 + caption.right() - 10), int(-40 + 15)
+    assert _send(title_row, N.WM_NCHITTEST, 0, _lparam(x, y)) == (True, HTCLOSE)
+
+
+def test_full_screen_leaves_every_message_to_windows(window, scaled):
+    frame, fake, at, _ratio = scaled
+    fake.caption_style = False
+    right = window.width()
+    assert _send(frame, N.WM_NCHITTEST, 0, at(right - 23, 18)) is None
+    assert _send(frame, N.WM_NCLBUTTONUP, HTCLOSE, at(right - 23, 18)) is None
+    assert fake.commands == []
