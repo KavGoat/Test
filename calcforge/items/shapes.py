@@ -517,7 +517,10 @@ class RectItem(MarkupItem):
             more = reach(self.style, self.segment_texts)
             rect = rect.adjusted(-more, -more, more, more)
         if self.show_size and self.size_text:
-            rect = rect.adjusted(0, 0, 0, self.style.font_size + 6)
+            under = self.style.font_size + 6
+            if self.segment_values and self.offers_segments():
+                under += self.style.font_size * 1.4 + 2      # below the bottom's length
+            rect = rect.adjusted(0, 0, 0, under)
             words = self._shown_size()
             if words != self.size_text:
                 # a longer caption (its area, its perimeter) reaches wider
@@ -662,6 +665,10 @@ class RectItem(MarkupItem):
         painter.setFont(font)
         metrics = QFontMetricsF(font)
         gap = max(self.style.width, 0.5) + 2.5
+        if self.segment_values and self.offers_segments():
+            # below the bottom side's own length, not over it
+            from .segments import text_font
+            gap += QFontMetricsF(text_font(self.style)).height() + 1.0
         words = self._shown_size()
         box = QRectF(rect.center().x() - metrics.horizontalAdvance(words) / 2,
                      rect.bottom() + gap,

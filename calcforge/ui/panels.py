@@ -3882,6 +3882,10 @@ class PropertiesPanel(QScrollArea):
                 leader.addRow("Leaders:", count)
             return
         start = arrow_combo()
+        from .propbar import _mirrored
+        for index in range(start.count()):
+            # a start's end points back along the line, as on the bar (◀—)
+            start.setItemIcon(index, _mirrored(start.itemIcon(index)))
         start.setObjectName("arrowStart")
         set_arrow(start, first.style.arrow_start)
         start.currentIndexChanged.connect(lambda _i: self._apply(
