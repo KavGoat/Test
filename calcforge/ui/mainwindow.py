@@ -47,7 +47,7 @@ from .icons import icon
 from .panels import (_hatch_icon, fill_hatch_combo, hatch_index,
                      fill_line_style_combo, line_style_index,
                      BookmarksPanel, MarkupsPanel, PagesPanel, PropertiesPanel, ToolSetsPanel)
-from .docks import PanelDock, load_panel_state, save_panel_state
+from .docks import CLICK_SLOP, PanelDock, load_panel_state, save_panel_state
 from .rail import (AREAS, LEFT, RIGHT, PanelRail, RailBar, load_order,
                    load_sides, save_order, save_sides)
 from .scene import DocumentScene, detach
@@ -364,18 +364,84 @@ class _SizeFollower(QObject):
         self._callback()
 
 
-class _DoubleClickToggle(QObject):
-    """Calls *callback* when the watched widget is double-clicked."""
+class _SecondClick(QObject):
+    """The second click of a double-click on a panel edge, wherever it lands.
 
-    def __init__(self, callback, parent=None):
+    A click on an edge hides or brings back its panel, and the edge moves
+    with it — so the second click of a double-click would land on the canvas
+    or a panel. For a moment after a click toggles, the next press near the
+    same spot is taken as a click on that edge too: a double-click ends where
+    it started, as two clicks do (the user, 2026-10-18)."""
+
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self._callback = callback
+        self._callback = None
+        self._at = None
+        self._swallow_release = False
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.disarm)
+
+    def arm(self, global_pos, callback) -> None:
+        self._at, self._callback = QPointF(global_pos), callback
+        application = QApplication.instance()
+        application.removeEventFilter(self)
+        application.installEventFilter(self)
+        self._timer.start(QApplication.doubleClickInterval())
+
+    def disarm(self) -> None:
+        self._callback = None
+        if not self._swallow_release:
+            QApplication.instance().removeEventFilter(self)
 
     def eventFilter(self, watched, event) -> bool:
-        if (event.type() == QEvent.MouseButtonDblClick
-                and event.button() == Qt.LeftButton):
-            self._callback()
+        kind = event.type()
+        if kind == QEvent.MouseButtonRelease and self._swallow_release:
+            self._swallow_release = False
+            if self._callback is None:
+                QApplication.instance().removeEventFilter(self)
             return True
+        if kind not in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick):
+            return False
+        if self._callback is None or event.button() != Qt.LeftButton:
+            return False
+        near = (event.globalPosition() - self._at).manhattanLength() <= 2 * CLICK_SLOP
+        callback, self._callback = self._callback, None
+        self._timer.stop()
+        if not near:
+            QApplication.instance().removeEventFilter(self)
+            return False
+        self._swallow_release = True
+        callback()
+        return True
+
+
+class _ClickToggle(QObject):
+    """A splitter handle that a click toggles and a drag still sizes: the
+    Markups List's bar, as Revu's (the user, 2026-10-18). A press and release
+    within CLICK_SLOP pixels is a click."""
+
+    def __init__(self, callback, second_click, parent=None):
+        super().__init__(parent)
+        self._callback = callback
+        self._second = second_click
+        self._pressed = None
+        self._dragged = False
+
+    def eventFilter(self, watched, event) -> bool:
+        kind = event.type()
+        if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            self._pressed, self._dragged = QPointF(event.globalPosition()), False
+        elif kind == QEvent.MouseMove and self._pressed is not None:
+            if (event.globalPosition() - self._pressed).manhattanLength() > CLICK_SLOP:
+                self._dragged = True
+        elif kind == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            pressed, self._pressed = self._pressed, None
+            if pressed is not None and not self._dragged:
+                self._callback()
+                self._second.arm(event.globalPosition(), self._callback)
+        elif kind == QEvent.MouseButtonDblClick:
+            return True             # (taken as the second click, above)
         return False
 
 
@@ -828,6 +894,7 @@ class MainWindow(QMainWindow):
             toolbar.visibilityChanged.connect(lambda *_: self._wrap_toolbar_rows_soon())
             toolbar.movableChanged.connect(lambda *_: self.note_layout_change())
         self._enforce_panel_limit()
+        self._build_panel_separators()      # the columns' edges (docks.ColumnSeparator)
         self._initial_fit = QTimer(self)
         self._initial_fit.setSingleShot(True)
         self._initial_fit.timeout.connect(self.view.fit_page)
@@ -852,8 +919,9 @@ class MainWindow(QMainWindow):
         row.addWidget(self.panel_edges[RIGHT])
         for side, edge in self.panel_edges.items():
             edge.hide()
-            edge.doubleClicked.connect(lambda s=side: self.toggle_panel_column(s))
-            edge.draggedOut.connect(lambda width, s=side: self.open_panel_column(s, width))
+            edge.clicked.connect(lambda at, s=side: self._edge_clicked(s, at))
+            edge.dragFinished.connect(
+                lambda width, s=side: self.open_panel_column(s, width) if width > 0 else None)
         layout = QVBoxLayout(inner)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -1688,11 +1756,17 @@ class MainWindow(QMainWindow):
         self.bottom_split.setCollapsible(1, True)
         self._markups_height = 220
         self.bottom_split.setSizes([1, 0])
-        # Double-clicking the list's handle bar hides it, or brings it back
-        # at the height it had (as Revu's Markups List does).
-        self._markups_handle_toggle = _DoubleClickToggle(
-            lambda: self.show_markups_list(not self.markups_list_open()), self)
-        self.bottom_split.handle(1).installEventFilter(self._markups_handle_toggle)
+        # A click on the list's bar hides it, or brings it back at the height
+        # it had; a drag still sizes it; it is blue under the pointer (Revu's
+        # Markups List, the user, 2026-10-18; theme.py has the blue)
+        self._second_click = _SecondClick(self)
+        self._markups_handle_toggle = _ClickToggle(
+            lambda: self.show_markups_list(not self.markups_list_open()),
+            self._second_click, self)
+        handle = self.bottom_split.handle(1)
+        handle.setAttribute(Qt.WA_Hover, True)
+        handle.setToolTip("Click to show or hide the Markups List · drag to size it")
+        handle.installEventFilter(self._markups_handle_toggle)
         self.toolsets_panel = ToolSetsPanel(self)
         self.dock_toolsets = self._dock("Tool Chest", self.toolsets_panel,
                                         Qt.LeftDockWidgetArea, "dock_toolsets")
@@ -1903,11 +1977,12 @@ class MainWindow(QMainWindow):
         self.tabify_panels()
         self.note_layout_change()
 
-    # -- a panel column's edge (the user, 2026-10-17) -----------------------
-    # Double-clicking the edge between a panel column and the canvas hides
-    # the column, as double-clicking the Markups List's bar does; the column
-    # leaves a thin edge (docks.PanelEdge) that a double-click or a drag
-    # brings it back from, at the width it had.
+    # -- a panel column's edge (the user, 2026-10-17, as Revu's 2026-10-18) --
+    # The edge between a panel column and the canvas is blue under the
+    # pointer; a click hides the column and a drag sizes it (docks.
+    # ColumnSeparator, over QMainWindow's own separator). The column leaves
+    # a thin edge (docks.PanelEdge) that a click or a drag brings it back
+    # from, at the width it had.
     def open_panel_on(self, side: str):
         """The panel open on *side*, docked there, or None."""
         for name, dock in self.docks_by_name.items():
@@ -1942,7 +2017,7 @@ class MainWindow(QMainWindow):
         self._edge_hidden = memory
         self.show_panel(dock.objectName(), False)
         self.status_hint.setText(
-            f"{'Left' if side == LEFT else 'Right'} panels hidden — double-click the edge "
+            f"{'Left' if side == LEFT else 'Right'} panels hidden — click the edge "
             "to bring them back")
 
     def open_panel_column(self, side: str, width: Optional[int] = None) -> None:
@@ -1968,6 +2043,57 @@ class MainWindow(QMainWindow):
             # once it is laid out too: Qt sizes a dock just shown on the next pass
             QTimer.singleShot(0, self, lambda: self.resizeDocks([dock], [width], Qt.Horizontal))
 
+    def _edge_clicked(self, side: str, at) -> None:
+        """A click on a panel column's edge (*at*, on the screen): hide it or
+        bring it back, and a quick second click there puts it back as it was
+        (_SecondClick)."""
+        self.toggle_panel_column(side)
+        self._second_click.arm(at, lambda: self.toggle_panel_column(side))
+
+    def _build_panel_separators(self) -> None:
+        """Our own edge over each open column's separator: the hover, the
+        click and the drag are ours, on every platform."""
+        from .docks import ColumnSeparator
+        self.panel_separators = {}
+        for side in (LEFT, RIGHT):
+            edge = ColumnSeparator(side, self)
+            edge.hide()
+            edge.clicked.connect(lambda at, s=side: self._edge_clicked(s, at))
+            edge.dragStarted.connect(lambda s=side: self._column_drag_started(s))
+            edge.dragMoved.connect(lambda outward, s=side: self._column_dragged(s, outward))
+            self.panel_separators[side] = edge
+        self._separator_follower = _SizeFollower(self._place_panel_separators, self)
+        for watched in [self, self.centralWidget(), *self.panels]:
+            watched.installEventFilter(self._separator_follower)
+        self._place_panel_separators()
+
+    def _place_panel_separators(self) -> None:
+        separators = getattr(self, "panel_separators", None)
+        if not separators or self._closed_for_good:
+            return
+        import shiboken6
+        if not shiboken6.isValid(self):
+            return
+        for side, edge in separators.items():
+            zone = self.panel_column_edge(side)
+            if zone is None:
+                edge.hide()
+                continue
+            width = max(zone.width(), edge.WIDTH)
+            edge.setGeometry(zone.center().x() - width // 2, zone.top(), width, zone.height())
+            edge.show()
+            edge.raise_()
+
+    def _column_drag_started(self, side: str) -> None:
+        dock = self.open_panel_on(side)
+        self._column_drag = (dock, dock.width() if dock is not None else 0)
+
+    def _column_dragged(self, side: str, outward: int) -> None:
+        dock, start = getattr(self, "_column_drag", (None, 0))
+        if dock is None or dock.isHidden():
+            return
+        self.resizeDocks([dock], [max(start + outward, 60)], Qt.Horizontal)
+
     def _show_panel_edges(self) -> None:
         edges = getattr(self, "panel_edges", None)
         if not edges or not hasattr(self, "docks_by_name") or self._closed_for_good:
@@ -1979,17 +2105,7 @@ class MainWindow(QMainWindow):
             empty = self.open_panel_on(side) is None
             if edge.isHidden() == empty:
                 edge.setVisible(empty)
-
-    def mouseDoubleClickEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton:
-            at = event.position().toPoint()
-            for side in (LEFT, RIGHT):
-                zone = self.panel_column_edge(side)
-                if zone is not None and zone.contains(at):
-                    self.toggle_panel_column(side)
-                    event.accept()
-                    return
-        super().mouseDoubleClickEvent(event)
+        QTimer.singleShot(0, self, self._place_panel_separators)
 
     def _panel_landed_soon(self, name: str) -> None:
         if getattr(self, "_tabifying", False):

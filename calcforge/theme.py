@@ -296,6 +296,9 @@ QScrollBar#sheetRowScroll::handle:horizontal {{ margin: 6px 2px; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 
 QSplitter::handle {{ background: {chrome_edge}; }}
+/* the Markups List's bar: Revu's blue under the pointer, a click opens or
+   closes the list (mainwindow._ClickToggle) */
+QSplitter#markupsSplit::handle:hover {{ background: {accent}; }}
 QCheckBox, QRadioButton {{ spacing: 7px; }}
 /* a box you can see in either theme, filled with the accent when ticked */
 /* (and the same box in lists and trees: Manage Tool Sets, Layers) */

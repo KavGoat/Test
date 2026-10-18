@@ -281,31 +281,137 @@ def load_panel_state(docks: list[PanelDock]) -> None:
         dock.set_collapsed(dock.objectName() in collapsed)
 
 
-class PanelEdge(QWidget):
-    """The thin edge a hidden panel column leaves at the side of the canvas.
+def accent_colour() -> QColor:
+    """Revu's blue, in the theme in force."""
+    from ..app import current_theme
+    from ..theme import _DARK_TOKENS, _LIGHT_TOKENS, DARK
+    tokens = _DARK_TOKENS if current_theme() == DARK else _LIGHT_TOKENS
+    return QColor(tokens["accent"])
 
-    Double-clicking a panel column's edge hides the column (the user,
-    2026-10-17), as double-clicking the Markups List's bar does; the edge
-    stays, so a double-click on it, or a drag out from it, brings the column
-    back. Shown only while that side has no panel open.
-    """
 
-    doubleClicked = Signal()
-    draggedOut = Signal(int)          # how far, in pixels, away from the edge
+#: How far a press may wander and still be a click, not a drag (pixels).
+CLICK_SLOP = 4
 
-    WIDTH = 6
+
+class _EdgeBase(QWidget):
+    """A panel edge as Revu has it: blue under the pointer, a click hides or
+    brings back the panel, a drag resizes it (the user, 2026-10-18). A click
+    is a press and release within CLICK_SLOP pixels; anything further is a
+    drag. Its own widget, so it works the same on every platform, rather
+    than hanging on QMainWindow's private separator (a double-click there
+    did nothing on Windows)."""
+
+    clicked = Signal(object)           # where, on the screen (a QPointF)
+    dragStarted = Signal()
+    dragMoved = Signal(int)            # pixels outward from the press, so far
+    dragFinished = Signal(int)
 
     def __init__(self, side: str, parent=None):
         super().__init__(parent)
         self.side = side
-        self.setObjectName(f"panelEdge_{side}")
-        self.setFixedWidth(self.WIDTH)
-        self.setCursor(Qt.SplitHCursor)
-        self.setToolTip("Double-click, or drag, to bring the panels back")
+        self.setAttribute(Qt.WA_Hover, True)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.SplitHCursor)       # it still drags, as Revu's does
+        self._hover = False
         self._pressed_at = None
+        self._dragging = False
+
+    # -- the look ------------------------------------------------------------
+    def hovered(self) -> bool:
+        return self._hover
+
+    def enterEvent(self, event) -> None:
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paint_resting(self, painter: QPainter) -> None:
+        """How the edge looks with the pointer away."""
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
+        if self._hover or self._dragging:
+            painter.fillRect(self.rect(), accent_colour())
+        else:
+            self.paint_resting(painter)
+        painter.end()
+
+    # -- click or drag ---------------------------------------------------------
+    def _outward(self, event) -> int:
+        moved = event.globalPosition().x() - self._pressed_at
+        return int(moved if self.side == "left" else -moved)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.LeftButton:
+            super().mousePressEvent(event)
+            return
+        self._pressed_at = event.globalPosition().x()
+        self._dragging = False
+        event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._pressed_at is None:
+            super().mouseMoveEvent(event)
+            return
+        outward = self._outward(event)
+        if not self._dragging and abs(outward) > CLICK_SLOP:
+            self._dragging = True
+            self.dragStarted.emit()
+        if self._dragging:
+            self.dragMoved.emit(outward)
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._pressed_at is None or event.button() != Qt.LeftButton:
+            super().mouseReleaseEvent(event)
+            return
+        outward = self._outward(event)
+        dragging, self._dragging, self._pressed_at = self._dragging, False, None
+        self.update()
+        event.accept()
+        if dragging:
+            self.dragFinished.emit(outward)
+        else:
+            self.clicked.emit(QPointF(event.globalPosition()))
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        # the second click of a double-click is a click like the first (it
+        # puts the panel back where it was); it arrives as this, not a press
+        self.mousePressEvent(event)
+
+
+class ColumnSeparator(_EdgeBase):
+    """Over the edge between an open panel column and the canvas, where
+    QMainWindow's own separator is: it takes the hover, the click and the
+    drag (MainWindow._place_panel_separators keeps it there)."""
+
+    WIDTH = 6
+
+    def __init__(self, side: str, parent=None):
+        super().__init__(side, parent)
+        self.setObjectName(f"panelSeparator_{side}")
+        self.setToolTip("Click to hide the panels · drag to resize them")
+
+
+class PanelEdge(_EdgeBase):
+    """The thin edge a hidden panel column leaves at the side of the canvas:
+    a click on it, or a drag out from it, brings the column back. Shown only
+    while that side has no panel open."""
+
+    WIDTH = 6
+
+    def __init__(self, side: str, parent=None):
+        super().__init__(side, parent)
+        self.setObjectName(f"panelEdge_{side}")
+        self.setFixedWidth(self.WIDTH)
+        self.setToolTip("Click, or drag, to bring the panels back")
+
+    def paint_resting(self, painter: QPainter) -> None:
         painter.fillRect(self.rect(), self.palette().window())
         pen = QPen(self.palette().mid().color())
         pen.setWidth(1)
@@ -315,30 +421,3 @@ class PanelEdge(QWidget):
         middle = self.height() // 2
         for dy in (-8, -4, 0, 4, 8):                 # the grip, as a splitter's
             painter.drawPoint(self.width() // 2, middle + dy)
-        painter.end()
-
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton:
-            self._pressed_at = event.globalPosition().x()
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def mouseReleaseEvent(self, event) -> None:
-        start, self._pressed_at = self._pressed_at, None
-        if start is not None and event.button() == Qt.LeftButton:
-            moved = event.globalPosition().x() - start
-            outward = moved if self.side == "left" else -moved
-            if outward > 8:
-                self.draggedOut.emit(int(outward))
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
-
-    def mouseDoubleClickEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton:
-            self._pressed_at = None
-            self.doubleClicked.emit()
-            event.accept()
-            return
-        super().mouseDoubleClickEvent(event)
