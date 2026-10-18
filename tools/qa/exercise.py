@@ -2497,11 +2497,26 @@ def find_action(actions, label):
     return None
 
 
+_LAST_CLICK = {"widget": None, "at": 0.0}
+
+
 def click_at(widget, point, button=None, modifiers=None):
     QtCore, QtGui, QtWidgets, QTest = qt()
     QTest.mouseMove(widget, point)
+    # A second click on the same button inside the double-click time is a
+    # double-click to Qt, and a button's menu then does not open (T0184
+    # Borders, then T0185 its All Borders, under -n 3). A hand clicking two
+    # different things on one button is never that quick: wait it out.
+    delay = -1
+    if _LAST_CLICK["widget"] is widget:
+        gap = (time.perf_counter() - _LAST_CLICK["at"]) * 1000
+        wait = QtWidgets.QApplication.doubleClickInterval() + 20 - gap
+        if wait > 0:
+            delay = int(wait)
     QTest.mouseClick(widget, button or QtCore.Qt.LeftButton,
-                     modifiers or QtCore.Qt.NoModifier, point)
+                     modifiers or QtCore.Qt.NoModifier, point, delay)
+    _LAST_CLICK["widget"] = widget
+    _LAST_CLICK["at"] = time.perf_counter()
 
 
 def walk_popup(path, outcome, each_index=None):
@@ -3018,7 +3033,29 @@ def menu_button(widget, outcome, path, each_index=None):
         point = QtCore.QPoint(rect.right() - 4, rect.center().y())
     else:
         point = rect.center()
-    return open_then_walk(lambda: click_at(widget, point), path, outcome, each_index)
+    ok = open_then_walk(lambda: click_at(widget, point), path, outcome, each_index)
+    if not ok and outcome.get("error") == "no menu opened" and under_its_own_pointer(widget):
+        # The button is settled, enabled, not held and under the pointer, and
+        # still the click opened nothing: under -n 3 Qt sometimes drops a
+        # synthetic press on a button whose menu the job before closed by
+        # code (T0185 after T0184, gate runs on 4694f8c). A hand clicks again.
+        # Written down, never silent: a second miss fails the job.
+        note = ("swallowed click on '%s' (%s), clicked again\n"
+                % (clean(widget.text()) if hasattr(widget, "text") else widget,
+                   " > ".join(path)))
+        try:
+            import tempfile
+            with open(os.path.join(tempfile.gettempdir(),
+                                   "test_every_command-failures.txt"), "a") as log:
+                log.write("SWALLOWED\t" + note)
+        except OSError:
+            pass
+        for key in ("error", "missing", "disabled"):
+            outcome.pop(key, None)
+        outcome["clicked_again"] = True
+        settle(QtWidgets.QApplication.doubleClickInterval() + 50)
+        ok = open_then_walk(lambda: click_at(widget, point), path, outcome, each_index)
+    return ok
 
 
 def open_then_walk(opener, path, outcome, each_index=None, kind=None):
@@ -3057,7 +3094,60 @@ def open_then_walk(opener, path, outcome, each_index=None, kind=None):
     return done["ok"] and not any(k in outcome for k in ("missing", "disabled", "error"))
 
 
+def under_its_own_pointer(widget) -> bool:
+    """The button found is the one on screen where it says it is: a bar
+    still being rebuilt (the Properties bar after the table fixture opens)
+    hands back a button that is about to go, and a click at its place lands
+    on nothing (T0180, T0185, T0198 under -n 3)."""
+    QtWidgets = qt()[2]
+    try:
+        if not widget.isVisible():
+            return False
+        hit = QtWidgets.QApplication.widgetAt(widget.mapToGlobal(widget.rect().center()))
+    except RuntimeError:
+        return False
+    return hit is not None and (hit is widget or widget.isAncestorOf(hit))
+
+
 def via_toolbar_menu(win, entry, outcome, each_index=None):
+    QtWidgets = qt()[2]
+    # wait for the bar to settle: the button found must be the one on screen
+    for _ in range(20):
+        pump()
+        found = find_toolbar_menu_button(win, entry)
+        if found is None or under_its_own_pointer(found) or \
+                not found.isVisible():          # behind the », shown from there
+            break
+        settle(100)
+    return _via_toolbar_menu(win, entry, outcome, each_index)
+
+
+def find_toolbar_menu_button(win, entry):
+    QtWidgets = qt()[2]
+    try:
+        bar = toolbar_named(win, entry["bar"])
+    except NotReached:
+        return None
+    inv = inventory()
+    for action in bar.actions():
+        widget = bar.widgetForAction(action)
+        candidates = [widget] if widget is not None else []
+        holder = (action.defaultWidget() if isinstance(action, QtWidgets.QWidgetAction)
+                  else None) or widget
+        if holder is not None and not isinstance(holder, QtWidgets.QToolButton):
+            candidates = inv.controls(holder, only_visible=False)
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            text = inv.describe_widget(candidate)[1]
+            if isinstance(candidate, QtWidgets.QToolButton) and candidate.defaultAction():
+                text = clean(candidate.defaultAction().text()) or text
+            if norm(text) == norm(entry["button"]):
+                return candidate
+    return None
+
+
+def _via_toolbar_menu(win, entry, outcome, each_index=None):
     QtWidgets = qt()[2]
     bar = toolbar_named(win, entry["bar"])
     inv = inventory()
