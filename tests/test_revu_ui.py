@@ -66,7 +66,7 @@ def test_properties_panel_has_revus_sections_and_names(window):
     titles = [g.title() for g in panel.findChildren(QGroupBox) if not g.isHidden()]
     assert titles[:2] == ["General", "Appearance"] and "Layout" in titles and titles[-1] == "Options"
     labels = {label.text() for label in panel.findChildren(QLabel)}
-    for name in ("Cloud Properties", "Subject:", "Color:", "Fill Color:", "Hatch:", "Scale:",
+    for name in ("Cloud Properties", "Subject:", "Colour:", "Fill Colour:", "Hatch:", "Scale:",
                  "Opacity:", "Fill Opacity:", "Line Width:", "Style:", "Size:", "X:", "Rotation:"):
         assert name in labels, name
     # a section folds by its title, and stays folded for the next markup

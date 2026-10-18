@@ -223,6 +223,15 @@ def _style(annotation: dict) -> dict:
         style["arrow_end"] = ARROWS.get(str(ends[1]), "none")
     elif isinstance(ends, str):
         style["arrow_end"] = ARROWS.get(ends, "none")
+    # a line's /IC is what its filled ends are filled with (Revu's Fill Color)
+    from ..items.base import FILLED_HEADS
+    if str(annotation.get("Subtype", "")) in ("Line", "PolyLine") and \
+            {style.get("arrow_start"), style.get("arrow_end")} & FILLED_HEADS:
+        inside = style.get("fill") or ""
+        if not inside:
+            style["end_fill"] = "none"
+        elif inside.lower() != (style.get("stroke") or "").lower():
+            style["end_fill"] = inside
     size = _font_size(annotation)
     if size:
         style["font_size"] = size

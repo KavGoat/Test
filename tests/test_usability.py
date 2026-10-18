@@ -3936,7 +3936,7 @@ def test_a_raster_image_offers_its_frame_but_no_fill_style_controls(window, tmp_
                       window.properties_panel.findChildren(QGroupBox)
                       if group.title() == "Appearance")
     labels = [label.text() for label in appearance.findChildren(QLabel)]
-    assert "Color:" in labels and "Fill Color:" not in labels
+    assert "Colour:" in labels and "Fill Colour:" not in labels
 
     before = image.style.stroke
     window._style_stroke("#c92a2a")
@@ -6688,7 +6688,7 @@ def test_properties_only_offers_controls_the_selected_kind_can_use(window):
 
 
 def test_arrowhead_size_is_independent_in_properties_and_toolbar(window):
-    from PySide6.QtWidgets import QDoubleSpinBox
+    from PySide6.QtWidgets import QComboBox
 
     window.show()           # the toolbar's width is the window's only once shown
     window.select_tool("arrow")
@@ -6698,7 +6698,8 @@ def test_arrowhead_size_is_independent_in_properties_and_toolbar(window):
     arrow.setSelected(True)
     window.refresh_selection()
 
-    properties = window.properties_panel.findChild(QDoubleSpinBox, "arrowSize")
+    # the panel's End Size speaks the bar's values (Auto, 25% … 400%)
+    properties = window.properties_panel.findChild(QComboBox, "arrowSize")
     assert properties is not None
     line_width = arrow.style.width
     properties.setValue(2.0)

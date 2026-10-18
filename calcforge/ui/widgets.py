@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import shiboken6
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (QAbstractScrollArea, QLayout, QAbstractSpinBox, QComboBox,
-                               QHBoxLayout, QSlider,
+                               QHBoxLayout, QSlider, QStyledItemDelegate,
                                QToolButton, QWidget, QDoubleSpinBox)
 
 from .icons import colour_icon, drawn_icon
@@ -30,7 +30,139 @@ def arrow_combo() -> QComboBox:
             painter.setBrush(colour if kind in FILLED_HEADS else Qt.NoBrush)
             painter.drawPath(arrow_path(QPointF(31, 10), 0, 11, kind))
         combo.addItem(drawn_icon(draw, 42, 20), ARROW_NAMES.get(kind, kind), kind)
+        combo.setItemData(combo.count() - 1, ARROW_NAMES.get(kind, kind), Qt.ToolTipRole)
+    checked_list(combo, pictures=True, picture=QSize(42, 20))
     return combo
+
+
+# ---------------------------------------------------------------------------
+# lists as Revu's: a tick on what is picked, nothing cut short
+# ---------------------------------------------------------------------------
+#: The width of the tick's column at the left of every list (Revu's ✓).
+CHECK_COLUMN = 22
+
+
+def _paint_row_background(painter, option) -> QColor:
+    """A list row's ground — the picked or hovered row lit — and the colour
+    its words are written in."""
+    from PySide6.QtWidgets import QStyle
+    if option.state & QStyle.State_Selected:
+        painter.fillRect(option.rect, option.palette.highlight())
+        return option.palette.highlightedText().color()
+    if option.state & QStyle.State_MouseOver:
+        painter.fillRect(option.rect, option.palette.alternateBase())
+    return option.palette.text().color()
+
+
+def _paint_tick(painter, option, colour: QColor) -> None:
+    """Revu's ✓ in the left column, on the entry that is the current one."""
+    pen = QPen(colour, 1.5)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    painter.setPen(pen)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    middle = option.rect.center().y()
+    left = option.rect.left() + 7
+    painter.drawPolyline(QPolygonF([QPointF(left, middle), QPointF(left + 3, middle + 3),
+                                    QPointF(left + 9, middle - 4)]))
+
+
+def is_current(combo, index) -> bool:
+    """Whether the list row is the combo's own current entry (the one ticked)."""
+    return combo is not None and index.row() == combo.currentIndex()
+
+
+class CheckedListDelegate(QStyledItemDelegate):
+    """One row of a short Revu list: the ✓ on the current entry, then its
+    picture alone (*pictures*, the line ends — the name is the tooltip) or
+    its words (the sizes, Auto…400%), each row as wide as it needs."""
+
+    def __init__(self, combo, pictures: bool = False, picture: QSize = QSize(42, 20)):
+        super().__init__(combo)
+        self.combo = combo
+        self.pictures = pictures
+        self.picture = QSize(picture)
+
+    def _words(self, index) -> str:
+        return str(index.data(Qt.DisplayRole) or "")
+
+    def row_width(self, option, index) -> int:
+        icon = index.data(Qt.DecorationRole)
+        has_icon = isinstance(icon, QIcon) and not icon.isNull()
+        if self.pictures:
+            return CHECK_COLUMN + self.picture.width() + 14
+        width = CHECK_COLUMN + option.fontMetrics.horizontalAdvance(self._words(index)) + 18
+        if has_icon:
+            width += self.combo.iconSize().width() + 6
+        return width
+
+    def sizeHint(self, option, index):
+        if index.data(Qt.AccessibleDescriptionRole) == "separator":
+            return QSize(10, 7)
+        high = max(option.fontMetrics.height() + 8, 22)
+        if self.pictures:
+            high = max(high, self.picture.height() + 6)
+        else:
+            icon = index.data(Qt.DecorationRole)
+            if isinstance(icon, QIcon) and not icon.isNull():
+                high = max(high, self.combo.iconSize().height() + 6)
+        return QSize(self.row_width(option, index), high)
+
+    def paint(self, painter, option, index):
+        if index.data(Qt.AccessibleDescriptionRole) == "separator":
+            painter.save()
+            painter.setPen(option.palette.mid().color())
+            y = option.rect.center().y()
+            painter.drawLine(option.rect.left() + 4, y, option.rect.right() - 4, y)
+            painter.restore()
+            return
+        painter.save()
+        ink = _paint_row_background(painter, option)
+        if is_current(self.combo, index):
+            _paint_tick(painter, option, ink)
+        icon = index.data(Qt.DecorationRole)
+        x = option.rect.left() + CHECK_COLUMN
+        if isinstance(icon, QIcon) and not icon.isNull():
+            size = self.picture if self.pictures else self.combo.iconSize()
+            top = option.rect.top() + (option.rect.height() - size.height()) // 2
+            icon.paint(painter, QRect(x, top, size.width(), size.height()))
+            x += size.width() + 6
+        if not self.pictures:
+            painter.setPen(ink)
+            painter.drawText(QRect(x, option.rect.top(), option.rect.right() - x,
+                                   option.rect.height()),
+                             Qt.AlignVCenter | Qt.AlignLeft, self._words(index))
+        painter.restore()
+
+
+def checked_list(combo, pictures: bool = False, picture: QSize = QSize(42, 20)) -> None:
+    """Give *combo*'s open list Revu's look: a ✓ on the current entry, and
+    pictures only when *pictures* (the names then their tooltips)."""
+    combo.setItemDelegate(CheckedListDelegate(combo, pictures, picture))
+    for index in range(combo.count()):
+        if combo.itemData(index, Qt.ToolTipRole) is None and combo.itemText(index):
+            combo.setItemData(index, combo.itemText(index), Qt.ToolTipRole)
+
+
+def fit_the_list(combo) -> None:
+    """The open list as wide as its widest row — nothing cut short (the
+    user's Revu: "Long Dash Dot Dot" whole) — and never narrower than the box."""
+    from PySide6.QtWidgets import QStyleOptionViewItem
+    view = combo.view()
+    delegate = view.itemDelegate()
+    option = QStyleOptionViewItem()
+    option.initFrom(view)
+    option.font = view.font()
+    option.fontMetrics = view.fontMetrics()
+    model = combo.model()
+    widest = 0
+    for row in range(combo.count()):
+        index = model.index(row, combo.modelColumn())
+        widest = max(widest, delegate.sizeHint(option, index).width())
+    bar = view.verticalScrollBar().sizeHint().width() \
+        if combo.count() > combo.maxVisibleItems() else 0
+    frame = 2 * view.frameWidth() + 2 * view.spacing() + 4
+    view.setMinimumWidth(max(widest + bar + frame, combo.width()))
 
 
 def set_arrow(combo: QComboBox, kind: str) -> None:
@@ -251,36 +383,51 @@ def big_pattern_dropdown(combo, closed=QSize(64, 20)) -> None:
     view = QListView()
     view.setIconSize(QSize(150, 34))
     view.setSpacing(2)
-    view.setUniformItemSizes(True)
+    # each row as wide as its own name (a uniform size took the first's,
+    # Manage…, and cut the long names short)
+    view.setUniformItemSizes(False)
     combo.setView(view)
     # The combo's own delegate draws icons at the closed box's small size;
     # this one draws each pattern at full size, with its name.
-    view.setItemDelegate(_BigPatternDelegate(view))
+    view.setItemDelegate(_BigPatternDelegate(view, combo))
     combo.setIconSize(closed)
     combo.setMaxVisibleItems(14)
     combo.setMinimumContentsLength(8)
     view.setMinimumWidth(300)
 
 
-class _BigPatternDelegate(QStyledItemDelegateBase := __import__(
-        "PySide6.QtWidgets", fromlist=["QStyledItemDelegate"]).QStyledItemDelegate):
+class _BigPatternDelegate(QStyledItemDelegate):
     """One row of a big pattern list: the pattern 150 × 34, then its name."""
 
     SWATCH = QSize(150, 34)
+    #: the words start after Revu's ✓ column
+    WORDS = CHECK_COLUMN + 6
+
+    def __init__(self, view, combo=None):
+        super().__init__(view)
+        self.combo = combo
 
     def sizeHint(self, option, index):
-        return QSize(self.SWATCH.width() + 160, self.SWATCH.height() + 6)
+        if index.data(Qt.AccessibleDescriptionRole) == "separator":
+            return QSize(10, 7)
+        # as wide as its own name needs (the user's Revu shows "Long Dash
+        # Dot Dot" whole), and at least as wide as it always was
+        words = option.fontMetrics.horizontalAdvance(str(index.data(Qt.DisplayRole) or ""))
+        wide = max(self.SWATCH.width() + 160, self.WORDS + words + 20 + self.SWATCH.width() + 8)
+        return QSize(wide, self.SWATCH.height() + 6)
 
     def paint(self, painter, option, index):
-        from PySide6.QtWidgets import QStyle
+        if index.data(Qt.AccessibleDescriptionRole) == "separator":
+            painter.save()
+            painter.setPen(option.palette.mid().color())
+            y = option.rect.center().y()
+            painter.drawLine(option.rect.left() + 4, y, option.rect.right() - 4, y)
+            painter.restore()
+            return
         painter.save()
-        if option.state & QStyle.State_Selected:
-            painter.fillRect(option.rect, option.palette.highlight())
-            text_colour = option.palette.highlightedText().color()
-        else:
-            if option.state & QStyle.State_MouseOver:
-                painter.fillRect(option.rect, option.palette.alternateBase())
-            text_colour = option.palette.text().color()
+        text_colour = _paint_row_background(painter, option)
+        if is_current(self.combo, index):
+            _paint_tick(painter, option, text_colour)     # Revu's ✓
         # Revu's list: the name at the left, the pattern drawn at the right
         swatch = option.rect.adjusted(0, 3, -8, -3)
         swatch.setLeft(swatch.right() - self.SWATCH.width())
@@ -290,7 +437,7 @@ class _BigPatternDelegate(QStyledItemDelegateBase := __import__(
             painter.fillRect(swatch, option.palette.base())
             icon.paint(painter, swatch)
         painter.setPen(text_colour)
-        words = option.rect.adjusted(12, 0, -(self.SWATCH.width() + 16), 0)
+        words = option.rect.adjusted(self.WORDS, 0, -(self.SWATCH.width() + 16), 0)
         painter.drawText(words, Qt.AlignVCenter | Qt.AlignLeft,
                          str(index.data(Qt.DisplayRole) or ""))
         painter.restore()
@@ -436,6 +583,10 @@ class PatternCombo(QComboBox):
 
     def minimumSizeHint(self):
         return self.sizeHint()
+
+    def showPopup(self) -> None:
+        fit_the_list(self)                 # every name whole
+        super().showPopup()
 
     def paintEvent(self, event) -> None:
         from PySide6.QtWidgets import QStyle, QStyleOptionComboBox, QStylePainter

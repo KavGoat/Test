@@ -770,6 +770,8 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'sheettab.go_to': ('Sheet tab: Go To', 'Spreadsheet', 'table'),
     # -- properties ------------------------------------------------------------
     'properties.document_default': ('Properties: Document default', 'Markup', 'always'),
+    # Revu's Edit beside Show Caption: the caption's values and label
+    'properties.edit': ('Properties: Edit caption…', 'Markup', 'always'),
     # -- variables -------------------------------------------------------------
     'variables.go_to': ('Variables: Go to', 'Panels', 'always'),
     'variables.make_global': ('Variables: Make Global / Local', 'Panels', 'always'),

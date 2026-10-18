@@ -30,8 +30,8 @@ from ..items.text import (STAMP_PRESETS, CalloutItem, NoteItem, StampItem, TextI
 from ..settings import app_settings
 from .icons import drawn_icon, icon, visible_ink
 from .stylecaps import CLOUD, CORNER
-from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
-                        WIDTH, common_capabilities)
+from .stylecaps import (ARROW_SIZE, DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
+                        WIDTH, common_capabilities, takes_end_fill)
 from .widgets import (ColorButton, PatternCombo, UnitCombo, arrow_combo,
                       big_pattern_dropdown, set_arrow)
 
@@ -3091,12 +3091,15 @@ class PropertiesPanel(QScrollArea):
             self._add_chart(first)
         appearance = common_capabilities(self._items)
         texts = all(getattr(i, "HAS_TEXT", False) or isinstance(i, (StampItem, CountItem, MeasureItem))
-                    for i in self._items)
-        ends = all(isinstance(i, (PolyItem, MeasureItem, CalloutItem)) for i in self._items)
+                    or getattr(i, "to_scale", False) for i in self._items)
+        # line ends only where every markup has a line with two ends (Revu's):
+        # not a closed shape, the pen or the highlighter
+        ends = ARROW_SIZE in appearance
         if appearance - {"font"} or texts or ends:
             self._add_appearance(first, appearance)
             if ends:
                 self._add_arrows(first)
+            self._add_captions(self._group("Appearance"))
             if texts:
                 self._add_text(first, compact=not getattr(first, "HAS_TEXT", False))
         if len(self._items) == 1:
@@ -3147,12 +3150,13 @@ class PropertiesPanel(QScrollArea):
         """Appearance, line ends and text: what a markup style is made of."""
         appearance = common_capabilities([first])
         texts = getattr(first, "HAS_TEXT", False) or isinstance(
-            first, (StampItem, CountItem, MeasureItem))
-        ends = isinstance(first, (PolyItem, MeasureItem, CalloutItem))
+            first, (StampItem, CountItem, MeasureItem)) or getattr(first, "to_scale", False)
+        ends = ARROW_SIZE in appearance
         if appearance - {"font"} or texts or ends:
             self._add_appearance(first, appearance)
             if ends:
                 self._add_arrows(first)
+            self._add_captions(self._group("Appearance"))
             if texts:
                 self._add_text(first, compact=not getattr(first, "HAS_TEXT", False))
         self._fit_width()
@@ -3357,7 +3361,7 @@ class PropertiesPanel(QScrollArea):
         colour = ColorButton(region.color, label="Colour")
         colour.colorChanged.connect(lambda value: change(
             "Colour", lambda r: setattr(r, "color", value or "#000000")))
-        form.addRow("Color:", colour)
+        form.addRow("Colour:", colour)
         background = ColorButton(region.bg_color, label="Background")
         background.colorChanged.connect(lambda value: change(
             "Background", lambda r: setattr(r, "bg_color", value or "#ffffff")))
@@ -3451,13 +3455,25 @@ class PropertiesPanel(QScrollArea):
             return
 
         if STROKE in controls:
-            stroke = ColorButton(style.stroke, allow_none=True, label="Color")
+            stroke = ColorButton(style.stroke, allow_none=True, label="Colour")
             stroke.colorChanged.connect(lambda colour: self._apply(
                 lambda i: setattr(i.style, "stroke", colour), "Line colour"))
-            form.addRow("Color:", _row(stroke))
+            form.addRow("Colour:", _row(stroke))
+
+        if ARROW_SIZE in controls and FILL not in controls and all(
+                takes_end_fill(i) for i in self._items):
+            # Revu's Fill Color on a line: what its filled ends are filled with
+            end_fill = ColorButton(style.end_fill_colour(), allow_none=True,
+                                   label="Fill Colour")
+            end_fill.setObjectName("lineEndFill")
+            end_fill.setToolTip("Fill Colour: what the line's filled ends — Closed, Round, "
+                                "Square, Diamond — are filled with")
+            end_fill.colorChanged.connect(lambda colour: self._apply(
+                lambda i: setattr(i.style, "end_fill", colour or "none"), "Line-end colour"))
+            form.addRow("Fill Colour:", _row(end_fill))
 
         if FILL in controls:
-            fill = ColorButton(style.fill, allow_none=True, label="Fill Color")
+            fill = ColorButton(style.fill, allow_none=True, label="Fill Colour")
             fill.colorChanged.connect(lambda colour: self._apply(
                 lambda i: setattr(i.style, "fill", colour), "Fill colour"))
             highlight = QCheckBox("Highlight")
@@ -3468,7 +3484,7 @@ class PropertiesPanel(QScrollArea):
             highlight.toggled.connect(lambda on: self._apply(
                 lambda i: setattr(i.style, "blend", "multiply" if on else "normal"),
                 "Highlight"))
-            form.addRow("Fill Color:", _row(fill, highlight))
+            form.addRow("Fill Colour:", _row(fill, highlight))
 
         # A hatch over the fill: how a section reads as concrete or as steel.
         if HATCH in controls:
@@ -3480,9 +3496,9 @@ class PropertiesPanel(QScrollArea):
             hatch_colour = style.hatch_color or style.stroke
             fill_hatch_combo(hatch, hatch_colour, style.hatch or "")
             hatch.currentIndexChanged.connect(lambda _index: self._hatch_chosen(hatch, style))
-            hatch_ink = ColorButton(style.hatch_color, label="Hatch color")
+            hatch_ink = ColorButton(style.hatch_color, label="Hatch colour")
             hatch_ink.setObjectName("hatchColour")
-            hatch_ink.setToolTip("The hatch pattern's line color")
+            hatch_ink.setToolTip("The hatch pattern's line colour")
             hatch_ink.colorChanged.connect(lambda colour: self._apply(
                 lambda i: setattr(i.style, "hatch_color", colour), "Hatch colour"))
             form.addRow("Hatch:", _row(hatch, hatch_ink, stretch_first=True))
@@ -3572,6 +3588,133 @@ class PropertiesPanel(QScrollArea):
                 lambda i: setattr(i.style, "corner_radius", value), "Corner radius"))
             form.addRow("Corner Radius:", radius)
 
+    def _add_captions(self, form) -> None:
+        """Revu's rows after Style for a measurement or a Sketch to Scale
+        shape (the user's photo of a Sketch to Scale rectangle): Show Segment
+        Values with Align to Segment / Align Horizontally under it, Show
+        Caption with its Edit, Show Centroid. The words they write are in the
+        markup's font, set in the rows below."""
+        from PySide6.QtWidgets import QButtonGroup, QRadioButton
+        from .propbar import sketched
+        items = self._items
+        first = items[0]
+
+        def every(test) -> bool:
+            return all(test(i) for i in items)
+
+        def refreshed(item) -> None:
+            item.prepareGeometryChange()
+            item.refresh(page=self.window.current_page())
+
+        if every(lambda i: getattr(i, "offers_segments", lambda: False)()):
+            show = QCheckBox("Show Segment Values")
+            show.setObjectName("showSegmentValues")
+            show.setToolTip("Write each side's length on that side")
+            show.setChecked(bool(first.segment_values))
+            form.addRow("", show)
+            along = QRadioButton("Align to Segment")
+            along.setObjectName("segmentAlignAlong")
+            level = QRadioButton("Align Horizontally")
+            level.setObjectName("segmentAlignLevel")
+            group = QButtonGroup(form.parentWidget())
+            group.addButton(along)
+            group.addButton(level)
+            (level if first.segment_align == "horizontal" else along).setChecked(True)
+            for radio in (along, level):
+                radio.setEnabled(bool(first.segment_values))
+                holder = QWidget()
+                row = QHBoxLayout(holder)
+                row.setContentsMargins(22, 0, 0, 0)       # indented under the tick, as Revu's
+                row.addWidget(radio)
+                row.addStretch(1)
+                form.addRow("", holder)
+            show.toggled.connect(lambda on: (
+                along.setEnabled(on), level.setEnabled(on),
+                self._apply(lambda i: (setattr(i, "segment_values", bool(on)), refreshed(i)),
+                            "Show segment values")))
+            level.toggled.connect(lambda on: self._apply(
+                lambda i: (setattr(i, "segment_align", "horizontal" if on else "segment"),
+                           refreshed(i)), "Segment value alignment"))
+
+        captioned = every(lambda i: (isinstance(i, MeasureItem) and i.kind != "calibrate")
+                          or sketched(i))
+        if captioned:
+            caption = QCheckBox("Show Caption")
+            caption.setObjectName("showCaption")
+            caption.setToolTip("Write the measurement's caption on the drawing "
+                               "(Caption ▾ on the Properties toolbar says which values)")
+            caption.setChecked(bool(first.show_size if sketched(first) else first.show_label))
+            caption.toggled.connect(lambda on: self._apply(
+                lambda i: (setattr(i, "show_size" if sketched(i) else "show_label", bool(on)),
+                           refreshed(i)), "Caption"))
+            change = QPushButton("Edit")
+            change.setObjectName("editCaption")
+            change.setToolTip("Edit caption: which values it writes, and its label")
+            change.clicked.connect(self.edit_caption)
+            form.addRow("", _row(caption, change))
+
+        if every(lambda i: getattr(i, "offers_centroid", lambda: False)()):
+            centroid = QCheckBox("Show Centroid")
+            centroid.setObjectName("showCentroid")
+            centroid.setToolTip("Mark the middle of what it encloses")
+            centroid.setChecked(bool(first.show_centroid))
+            centroid.toggled.connect(lambda on: self._apply(
+                lambda i: (setattr(i, "show_centroid", bool(on)), refreshed(i)),
+                "Show centroid"))
+            form.addRow("", centroid)
+
+    def edit_caption(self) -> None:
+        """Revu's Edit beside Show Caption: which values the caption writes
+        (the same as Caption ▾ on the bar) and the label it can carry."""
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox
+        from ..items.measure import CAPTION_PARTS
+        from .propbar import sketched
+        if not self._items:
+            return
+        first = self._items[0]
+        words = dict(CAPTION_PARTS)
+        dialog = QDialog(self)
+        dialog.setObjectName("captionDialog")
+        dialog.setWindowTitle("Caption")
+        form = QFormLayout(dialog)
+        ticks = {}
+        shown = first.caption_shown()
+        for part in first.caption_choices():
+            tick = QCheckBox(words.get(part, part.title()))
+            tick.setObjectName(f"captionPart_{part}")
+            tick.setChecked(part in shown)
+            tick.setEnabled(first.caption_available(part))
+            form.addRow("", tick)
+            ticks[part] = tick
+        label = QLineEdit(first.label)
+        label.setObjectName("captionLabel")
+        label.setPlaceholderText("written when Label is ticked")
+        form.addRow("Label:", label)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        def accepted() -> None:
+            text = label.text().strip()
+            picked = {part for part, tick in ticks.items() if tick.isChecked()}
+
+            def change(item) -> None:
+                item.label = text
+                for part in item.caption_choices():
+                    item.set_caption_part(part, part in picked)
+                if sketched(item):
+                    item.show_size = True
+                else:
+                    item.show_label = True
+                item.prepareGeometryChange()
+                item.refresh(page=self.window.current_page())
+            self._apply(change, "Caption")
+            QTimer.singleShot(0, lambda: self.show_items(self.window.selected_items()))
+        dialog.accepted.connect(accepted)
+        self.caption_dialog = dialog
+        dialog.open()
+
 
     def _line_style_chosen(self, combo, style) -> None:
         """A line style from the list — or Manage…, which opens Line Styles
@@ -3609,7 +3752,7 @@ class PropertiesPanel(QScrollArea):
 
     def _add_text(self, first: MarkupItem, compact: bool = False) -> None:
         """The words' settings, in Appearance as Bluebeam keeps them: the font
-        and its size, Text Color, Alignment, Font Style, Margin."""
+        and its size, Font Colour, Alignment, Font Style, Margin."""
         form = self._group("Appearance")
         style = first.style
         family = QFontComboBox()
@@ -3642,10 +3785,10 @@ class PropertiesPanel(QScrollArea):
         else:
             form.addRow("Font Size:", size)
 
-        colour = ColorButton(style.text_color, label="Text Color")
+        colour = ColorButton(style.text_color, label="Font Colour")
         colour.colorChanged.connect(lambda value: self._apply(
             lambda i: setattr(i.style, "text_color", value), "Text colour"))
-        form.addRow("Text Color:", _row(colour))
+        form.addRow("Font Colour:", _row(colour))
 
         # Revu's Font Style: Bold, Italic, Underline, Strikethrough — and for
         # words in a box, Superscript and Subscript (one or the other)
@@ -3762,15 +3905,26 @@ class PropertiesPanel(QScrollArea):
             buttons[other].blockSignals(False)
         self._apply(lambda i: i.style.set_font_style(attribute, on), "Font style")
 
+    @staticmethod
+    def _end_size_list(name: str, value: float, tip: str):
+        """A line end's size as the bar says it: Auto, 25% … 400%."""
+        from .propbar import END_SIZES, ValueCombo
+        size = ValueCombo(END_SIZES, lambda v: f"{v * 100:g}%", 0.25, 4.0, editable=False,
+                          first=("Auto", 1.0), width=72)
+        size.setMinimumWidth(72)
+        size.setMaximumWidth(16777215)
+        size.setObjectName(name)
+        size.blockSignals(True)
+        size.setValue(value)
+        size.blockSignals(False)
+        size.setToolTip(tip)
+        return size
+
     def _add_start_size(self, form, first: MarkupItem) -> None:
         """Revu sizes each end on its own: the start's."""
-        size = QDoubleSpinBox()
-        size.setObjectName("arrowStartSize")
-        size.setRange(0.25, 4.0)
-        size.setSingleStep(0.25)
-        size.setValue(first.style.start_size())
-        size.setSuffix(" ×")
-        size.setToolTip("The start's line-end size, independent of line thickness")
+        size = self._end_size_list(
+            "arrowStartSize", first.style.start_size(),
+            "The start's line-end size: Auto sizes it from the line width")
         size.valueChanged.connect(
             lambda value: self._slide(
                 lambda item: setattr(item.style, "arrow_start_size", value),
@@ -3778,13 +3932,9 @@ class PropertiesPanel(QScrollArea):
         form.addRow("Start Size:", size)
 
     def _add_arrow_size(self, form, first: MarkupItem) -> None:
-        size = QDoubleSpinBox()
-        size.setObjectName("arrowSize")
-        size.setRange(0.25, 4.0)
-        size.setSingleStep(0.25)
-        size.setValue(first.style.arrow_size)
-        size.setSuffix(" ×")
-        size.setToolTip("Arrowhead size, independent of line thickness")
+        size = self._end_size_list(
+            "arrowSize", first.style.arrow_size,
+            "The end's line-end size: Auto sizes it from the line width")
         def end(item, value) -> None:
             # the start keeps its size: each end is sized on its own
             if float(item.style.arrow_start_size or 0.0) <= 0:
@@ -3856,6 +4006,8 @@ class PropertiesPanel(QScrollArea):
             exact.clicked.connect(lambda: self.window.set_rectangle_size(item))
             form.addRow("", exact)
 
+        if getattr(item, "to_scale", False):
+            return                 # its Show Caption is in Appearance, as Revu's
         show = QCheckBox("Show size")
         show.setToolTip("Write the size across the shape itself")
         show.setChecked(item.show_size)
@@ -3895,7 +4047,7 @@ class PropertiesPanel(QScrollArea):
         text_colour = ColorButton(item.style.text_color, label="Text colour")
         text_colour.colorChanged.connect(lambda value: self._apply(
             lambda i: setattr(i.style, "text_color", value), "Text colour"))
-        form.addRow("Text Color:", text_colour)
+        form.addRow("Text Colour:", text_colour)
 
         height = QDoubleSpinBox()
         height.setRange(8.0, 60.0)
@@ -3923,6 +4075,21 @@ class PropertiesPanel(QScrollArea):
             lambda: self._apply(lambda i: setattr(i, "comment", body.toPlainText()),
                                 "Note text", coalesce=typing()))
         form.addRow(body)
+        # Revu's Icon: how the note is drawn
+        from .propbar import note_icon_picture
+        from .widgets import checked_list
+        from ..items.text import NOTE_ICONS
+        icon_list = QComboBox()
+        icon_list.setObjectName("noteIconPanel")
+        icon_list.setIconSize(QSize(20, 20))
+        for key, words in NOTE_ICONS:
+            icon_list.addItem(note_icon_picture(key), words, key)
+        checked_list(icon_list)
+        icon_list.setCurrentIndex(max(icon_list.findData(item.icon), 0))
+        icon_list.currentIndexChanged.connect(lambda _i: self._apply(
+            lambda i: setattr(i, "icon", icon_list.currentData() or "Note"), "Note icon"))
+        appearance = self._group("Appearance")
+        appearance.insertRow(0, "Icon:", icon_list)
 
     def _add_image(self, item) -> None:
         form = self._group("Image")
@@ -4045,12 +4212,7 @@ class PropertiesPanel(QScrollArea):
                 "Text angle"))
         form.addRow("", inline)
 
-        label = QCheckBox("Show value")
-        label.setToolTip("Write the measurement on the page beside its line")
-        label.setChecked(item.show_label)
-        label.toggled.connect(
-            lambda on: self._apply(lambda i: setattr(i, "show_label", on), "Label"))
-        form.addRow("", label)
+        # (whether it is written on the page: Show Caption, in Appearance)
 
         calibrate = QPushButton("Calibrate…")
         calibrate.setToolTip("Pick a known distance on this page and enter its length")

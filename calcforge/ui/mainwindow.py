@@ -54,6 +54,7 @@ from .scene import DocumentScene, detach
 from .shortcuts import MARKUP, COMMAND, INSERT, TOOL, ShortcutManager
 from .shortcuts import SYMBOL as TYPED_SYMBOL
 from .stylecaps import (CLOUD, CORNER, SYMBOL)
+from . import stylecaps
 from .propbar import TOTALS as TOTALS_GROUP
 from .stylecaps import (ARROW_SIZE, DASH, FILL, FILL_OPACITY, FONT, HATCH,
                         OPACITY, STROKE, WIDTH, capabilities,
@@ -7110,6 +7111,16 @@ class MainWindow(QMainWindow):
             # Revu's area bar has no Font (its caption's font is in the
             # Properties panel): Line, Fill, Hatch, Units, Caption, Totals
             shown.discard(FONT)
+        if propbar.sketched(active):
+            shown.discard(FONT)          # nor has Sketch to Scale's (the user's shot)
+        if ARROW_SIZE in supported and all(
+                stylecaps.end_fill_shown(i) for i in (items or [active]) if i is not None):
+            # Revu's line-end colour, once an end is a filled one
+            shown.add(propbar.END_FILL)
+        if isinstance(active, NoteItem) and supported and all(
+                isinstance(i, NoteItem) for i in items):
+            # Revu's note: Color, opacity and Icon ▾ — no line, no fill
+            shown = {propbar.NOTE}
         if items:
             names = {self._type_name(i) for i in items}
             kind = names.pop() if len(names) == 1 else f"{len(items)} markups"
@@ -7172,6 +7183,13 @@ class MainWindow(QMainWindow):
             return
         controls = ((self.stroke_button, active.style.stroke, "set_color"),
                     (self.fill_button, active.style.fill, "set_color"),
+                    (self.end_fill_button, active.style.end_fill_colour(), "set_color"),
+                    (self.note_colour_button, active.style.fill, "set_color"),
+                    (self.note_opacity_spin, int(round(active.style.opacity * 100)),
+                     "setValue"),
+                    (self.note_icon_combo,
+                     max(self.note_icon_combo.findData(getattr(active, "icon", "Note")), 0),
+                     "setCurrentIndex"),
                     (self.width_spin, active.style.width, "setValue"),
                     (self.arrow_size_spin, active.style.arrow_size, "setValue"),
                     (self.arrow_start_size_spin, active.style.start_size(), "setValue"),
@@ -7709,6 +7727,61 @@ class MainWindow(QMainWindow):
             ARROW_SIZE, lambda style: setattr(style, "arrow_start_size", value),
             "Start size")
 
+    def _style_end_fill(self, colour: str) -> None:
+        """The line-end colour swatch (Revu's): what the filled ends are
+        filled with; No Color leaves them hollow. One undo step."""
+        value = colour or "none"
+        self._style_change(ARROW_SIZE, lambda style: setattr(style, "end_fill", value),
+                           "Line-end colour")
+
+    def _style_note_colour(self, colour: str) -> None:
+        """A note's Color (Revu's): the colour the note is drawn in."""
+        if colour:
+            self._style_note(FILL, lambda style: setattr(style, "fill", colour), "Note colour")
+
+    def _style_note_opacity(self, percent: int) -> None:
+        value = percent / 100.0
+        self._style_note(OPACITY, lambda style: setattr(style, "opacity", value), "Opacity")
+
+    def _style_note(self, field: str, mutate, description: str) -> None:
+        """A note's control on the bar: the selected notes, as one undo step —
+        or, with the Note tool in hand, the next note's look (a note is not
+        drawn with the bar's pen, so its look is remembered for notes alone)."""
+        if self.selected_items():
+            self._style_change(field, mutate, description)
+            return
+        if self._edit_markup_style(lambda item: mutate(item.style)):
+            return
+        item = self._style_default_item()
+        if isinstance(item, NoteItem):
+            self.apply_default_style(item)
+            mutate(item.style)
+            toolsets.remember_default(item)
+
+    def _style_note_icon(self, key: str) -> None:
+        """A note's Icon ▾: Comment, Help, Insert, Key, New Paragraph, Note,
+        Paragraph — the selection's as one undo step, or the next note's."""
+        key = key or "Note"
+        if self._edit_markup_style(lambda item: setattr(item, "icon", key)):
+            return
+        items = [i for i in self.selected_items() if isinstance(i, NoteItem)]
+        if not items:
+            item = self._style_default_item()
+            if isinstance(item, NoteItem):
+                self.apply_default_style(item)
+                item.icon = key
+                toolsets.remember_default(item)
+            return
+        if all(i.icon == key for i in items):
+            return
+        self.view.begin_snapshot(self.view.involved_frames(*items))
+        for item in items:
+            item.icon = key
+            item.touch()
+            item.update()
+        self.view.commit_snapshot("Note icon")
+        self.properties_panel.show_items(self.selected_items())
+
     def _style_line_ending(self, attribute: str, value: str) -> None:
         if self._edit_markup_style(lambda item: setattr(item.style, attribute, value)):
             return
@@ -7906,27 +7979,38 @@ class MainWindow(QMainWindow):
         """Caption ▾: something of the selected measurements, as one undo step."""
         if getattr(self, "_filling_caption", False):
             return
-        items = [i for i in self.selected_items() if isinstance(i, MeasureItem)]
+        from .propbar import sketched
+        items = [i for i in self.selected_items() if isinstance(i, MeasureItem)
+                 or (sketched(i) and attr == "show_label")]
         if not items:
             return
         self.view.begin_snapshot(self.view.involved_frames(*items))
         for item in items:
             item.prepareGeometryChange()
-            setattr(item, attr, value)
+            # a Sketch to Scale shape's caption is its size written under it
+            setattr(item, "show_size" if sketched(item) else attr, value)
+            if sketched(item):
+                item.refresh(page=self.current_page())
             item.touch()
             item.update()
         self.view.commit_snapshot(description)
         self.properties_panel.show_items(self.selected_items())
 
     def _fill_caption_menu(self) -> None:
-        items = [i for i in self.selected_items() if isinstance(i, MeasureItem)]
+        from .propbar import sketched
+        items = [i for i in self.selected_items() if isinstance(i, MeasureItem) or sketched(i)]
         first = items[0] if items else None
+        shape = sketched(first)
         self._filling_caption = True
         try:
             for action in (self.caption_show_action, self.caption_inline_action):
                 action.setEnabled(bool(items))
-            self.caption_show_action.setChecked(bool(items) and first.show_label)
-            self.caption_inline_action.setChecked(bool(items) and first.label_angle is None)
+            # a Sketch to Scale shape's caption is never along a line
+            self.caption_inline_action.setVisible(not shape)
+            self.caption_show_action.setChecked(
+                bool(items) and (first.show_size if shape else first.show_label))
+            self.caption_inline_action.setChecked(
+                bool(items) and not shape and first.label_angle is None)
             # Revu's values: those this kind of measurement can show, ticked
             # when shown; the ones that need a depth greyed until it has one
             offered = first.caption_choices() if first is not None else ()
@@ -7942,15 +8026,20 @@ class MainWindow(QMainWindow):
         """Caption ▾: one of Revu's values shown or not, as one undo step."""
         if getattr(self, "_filling_caption", False):
             return
+        from .propbar import sketched
         items = [i for i in self.selected_items()
-                 if isinstance(i, MeasureItem) and part in i.caption_choices()]
+                 if (isinstance(i, MeasureItem) or sketched(i)) and part in i.caption_choices()]
         if not items:
             return
         self.view.begin_snapshot(self.view.involved_frames(*items))
         for item in items:
             item.prepareGeometryChange()
             item.set_caption_part(part, on)
-            item.refresh()
+            if sketched(item):
+                item.show_size = True             # a value picked is a value shown
+                item.refresh(page=self.current_page())
+            else:
+                item.refresh()
             item.touch()
             item.update()
         self.view.commit_snapshot("Caption")
@@ -7966,8 +8055,10 @@ class MainWindow(QMainWindow):
         return self.current_index
 
     def _measures_for_units(self) -> list:
+        from .propbar import sketched
         return [i for i in self.selected_items()
-                if isinstance(i, MeasureItem) and i.kind not in ("dimension", "calibrate")]
+                if (isinstance(i, MeasureItem) and i.kind not in ("dimension", "calibrate"))
+                or sketched(i)]
 
     def _fill_units_panel(self) -> None:
         """Units ▾ for the selected measurement — or, with a measuring tool in
@@ -7975,9 +8066,10 @@ class MainWindow(QMainWindow):
         from ..items.measure import AREA, PERIMETER, VOLUME
         from .propbar import _unit_words
         page = self.document.pages[self._measure_page_index()]
+        from .propbar import sketched
         items = self._measures_for_units()
         first = items[0] if items else self._style_default_item()
-        if not isinstance(first, MeasureItem):
+        if not isinstance(first, MeasureItem) and not sketched(first):
             first = None
         own = dict(first.units) if first is not None else {}
         if not items and first is not None:
@@ -7986,10 +8078,12 @@ class MainWindow(QMainWindow):
                       "volume": page.scale.area_unit.replace("^2", "^3")
                       if page.scale.area_unit.endswith("^2") else ""}
         kind = first.kind if first is not None else ""
+        shape = sketched(first)
         wanted = {"length": True,
-                  "area": kind in (AREA, VOLUME, PERIMETER),
-                  "volume": kind == VOLUME or bool(first is not None and first.depth_text
-                                                   and kind in (AREA, PERIMETER))}
+                  # a Sketch to Scale shape: its size, and its area
+                  "area": shape or kind in (AREA, VOLUME, PERIMETER),
+                  "volume": not shape and (kind == VOLUME or bool(
+                      first is not None and first.depth_text and kind in (AREA, PERIMETER)))}
         for key, combo in self.units_combos.items():
             combo.blockSignals(True)
             shown = page_units[key]
@@ -8021,9 +8115,11 @@ class MainWindow(QMainWindow):
         unit (6250 mm or 6.25 m)."""
         combo = self.units_combos[key]
         unit = combo.currentData() or ""
+        from .propbar import sketched
         items = self._measures_for_units()
         if not items:
-            if isinstance(self._style_default_item(), MeasureItem):
+            if isinstance(self._style_default_item(), MeasureItem) \
+                    or sketched(self._style_default_item()):
                 units = dict(self._next_measure_units())
                 units[key] = unit
                 self._measure_units_next = (self.view.tool_key,
@@ -8035,7 +8131,10 @@ class MainWindow(QMainWindow):
         for item in items:
             item.prepareGeometryChange()
             item.set_unit(key, unit)
-            item.refresh()
+            if sketched(item):
+                item.refresh(page=self.current_page())
+            else:
+                item.refresh()
             item.touch()
             item.update()
         self.view.commit_snapshot("Measurement units")
@@ -8256,6 +8355,7 @@ class MainWindow(QMainWindow):
             item.style.dash_array = tuple(style.dash_array or ())
             item.style.arrow_size = style.arrow_size
             item.style.arrow_start_size = style.arrow_start_size
+            item.style.end_fill = style.end_fill
             for key, unit in self._next_measure_units().items():
                 item.set_unit(key, unit)
             return
@@ -8273,6 +8373,7 @@ class MainWindow(QMainWindow):
         item.style.dash_array = tuple(style.dash_array or ())
         item.style.arrow_size = style.arrow_size
         item.style.arrow_start_size = style.arrow_start_size
+        item.style.end_fill = style.end_fill
         item.style.text_color = style.text_color
         item.style.font_family = style.font_family
         for name in Style.FONT_STYLES:
@@ -10299,7 +10400,8 @@ class MainWindow(QMainWindow):
         "font": ("font_family", "font_size", "bold", "italic", "underline",
                  "strikethrough", "superscript", "subscript", "font_auto",
                  "text_color", "align", "valign"),
-        "arrow_size": ("arrow_size", "arrow_start_size", "arrow_start", "arrow_end"),
+        "arrow_size": ("arrow_size", "arrow_start_size", "arrow_start", "arrow_end",
+                       "end_fill"),
     }
 
     def format_painter(self) -> None:

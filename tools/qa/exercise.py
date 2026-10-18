@@ -555,7 +555,7 @@ def build_commands(path: str) -> list[dict]:
                 state = "rect" if "Calc mode" not in note else "rect"
                 if label == "Bookmark":
                     state = "textbox"
-                if rest == "Appearance" and label in ("Font", "Font Size", "Text Color", "B",
+                if rest == "Appearance" and label in ("Font", "Font Size", "Font Colour", "B",
                                                       "I", "U", "S", "x²", "x₂", "Auto",
                                                       "Alignment", "Margin"):
                     state = "textbox"

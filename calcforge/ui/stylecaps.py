@@ -81,8 +81,14 @@ def capabilities(item, for_default: bool = False) -> set[str]:
     if isinstance(item, PolyItem) and item.kind == "highlighter":
         return {STROKE, WIDTH, OPACITY}       # a highlighter pen: colour, width, opacity
     if isinstance(item, PolyItem):
-        result = {STROKE, WIDTH, DASH, OPACITY, ARROW_SIZE}
-        if getattr(item, "closed", False) or item.kind in ("polygon", "cloud"):
+        result = {STROKE, WIDTH, DASH, OPACITY}
+        closed = getattr(item, "closed", False) or item.kind in ("polygon", "cloud")
+        # Line ends belong to a line with two ends (Revu's): a closed shape
+        # has none, nor has the pen — unless a pen line was given one before
+        # (or came with one from a file), which keeps it to change or take off.
+        if not closed and (item.kind != "ink" or has_line_ends(item)):
+            result.add(ARROW_SIZE)
+        if closed:
             result |= {FILL, HATCH, FILL_OPACITY}
         if item.kind == "cloud":
             result |= {CLOUD}
@@ -95,8 +101,37 @@ def capabilities(item, for_default: bool = False) -> set[str]:
             result |= {CLOUD}
         elif item.kind == "rect":
             result |= {CORNER}
+        if getattr(item, "to_scale", False):
+            # its caption and segment values are written in its own font
+            # (Revu's Sketch to Scale panel has Font, Size, Colour, Style)
+            result.add(FONT)
         return result
     return {STROKE, FILL, WIDTH, DASH, OPACITY, FILL_OPACITY}
+
+
+def has_line_ends(item) -> bool:
+    """Whether either end of the markup's line has something drawn on it."""
+    style = getattr(item, "style", None)
+    return style is not None and any(
+        getattr(style, end, "none") not in ("", "none") for end in ("arrow_start", "arrow_end"))
+
+
+def end_fill_shown(item) -> bool:
+    """Revu's line-end colour swatch: on a line whose ends can carry a head
+    (not a callout's leader), shown once one of its ends is a filled one —
+    Closed, Round, Square, Diamond — as Revu's bar shows it."""
+    from ..items.base import FILLED_HEADS
+    if item is None or isinstance(item, CalloutItem) or ARROW_SIZE not in capabilities(item):
+        return False
+    style = item.style
+    return bool({style.arrow_start, style.arrow_end} & FILLED_HEADS)
+
+
+def takes_end_fill(item) -> bool:
+    """Whether the markup's line ends have a colour of their own to set (the
+    Properties panel's Fill Color on a line)."""
+    return item is not None and not isinstance(item, CalloutItem) \
+        and ARROW_SIZE in capabilities(item)
 
 
 def common_capabilities(items) -> set[str]:

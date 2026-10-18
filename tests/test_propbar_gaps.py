@@ -709,11 +709,12 @@ def test_each_line_end_has_its_own_size(w, tmp_path):
     arrow = the_arrow()
     assert arrow.style.arrow_size == pytest.approx(0.5)
     assert arrow.style.start_size() == pytest.approx(2.0), "the start keeps its size"
-    # the Properties panel has both
+    # the Properties panel has both, in the bar's words (Auto, 25% … 400%)
     select(w, arrow)
-    start = w.properties_panel.findChild(QDoubleSpinBox, "arrowStartSize")
-    end = w.properties_panel.findChild(QDoubleSpinBox, "arrowSize")
+    start = w.properties_panel.findChild(QComboBox, "arrowStartSize")
+    end = w.properties_panel.findChild(QComboBox, "arrowSize")
     assert start.value() == pytest.approx(2.0) and end.value() == pytest.approx(0.5)
+    assert start.currentText() == "200%" and end.currentText() == "50%"
     # drawn so: the start's head is the bigger
     big, small = _head_ink(arrow, 0), _head_ink(arrow, -1)
     assert big > small * 1.8
