@@ -829,8 +829,17 @@ class PageView(QGraphicsView):
         changed = []
         for frame, before in self._snapshot:
             after = frame.serialize_items()
-            if after != before:
-                changed.append((frame, before, after))
+            if after == before:
+                continue
+            if _unstamped(after) == _unstamped(before):
+                # Changed only by the clock: a box opened and left without a
+                # word typed is stamped again as it closes, and when a second
+                # ticked over meanwhile that was an "Edit text" step of
+                # nothing, which the next Ctrl+Z used up doing nothing. Its
+                # Modified time is put back instead.
+                _put_back_stamps(frame, before)
+                continue
+            changed.append((frame, before, after))
         if not changed:
             return
         stack = self.window.undo_stack
@@ -5853,6 +5862,25 @@ def _as_written(data: dict) -> dict:
     """A markup's record, leaving out who draws it and when it was touched."""
     return {k: v for k, v in data.items()
             if k not in ("still_theirs", "modified", "their_box")}
+
+
+def _unstamped(data):
+    """A page's markups as recorded, without when each was last touched."""
+    if isinstance(data, dict):
+        return {k: _unstamped(v) for k, v in data.items() if k != "modified"}
+    if isinstance(data, list):
+        return [_unstamped(v) for v in data]
+    return data
+
+
+def _put_back_stamps(frame, before: list) -> None:
+    """Each markup on *frame* given back the Modified time it had in *before*."""
+    stamps = {entry.get("uid"): entry.get("modified") for entry in before
+              if isinstance(entry, dict)}
+    for item in frame.markups():
+        stamp = stamps.get(getattr(item, "uid", None))
+        if stamp is not None:
+            item.modified = stamp
 
 
 def _far_enough(a: QPointF, b: QPointF) -> bool:

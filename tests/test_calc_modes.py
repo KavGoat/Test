@@ -332,3 +332,30 @@ def test_the_mode_switch_is_on_the_menu_bar_not_in_a_toolbar(win):
     assert win.view.calc.mode == "calc" and win.mode_switch.isChecked()
     QTest.keyClick(win.view, Qt.Key_F12)
     assert win.view.calc.mode == "markup"
+
+
+def test_a_second_ticking_over_while_the_words_are_open_makes_no_undo_step(win, monkeypatch):
+    """Leaving words untouched used to stamp them again; when the clock had
+    moved on a second meanwhile that was an "Edit text" step of nothing, and
+    the next Ctrl+Z used itself up on it (seen under load in the full run)."""
+    from datetime import datetime as real, timedelta
+
+    import calcforge.items.base as base
+
+    into_calc_mode(win)
+    typed(win, "Check ")
+    (made,) = calc_texts(win)
+    stamp, steps = made.modified, win.undo_stack.count()
+
+    class Later(real):
+        @classmethod
+        def now(cls, tz=None):
+            return real.now(tz) + timedelta(seconds=5)
+    monkeypatch.setattr(base, "datetime", Later)
+    press_key(win.view, Qt.Key_Escape)
+    assert win.undo_stack.count() == steps
+    assert made.modified == stamp
+    win.undo_something()
+    assert calc_texts(win) == []
+    (back,) = equations(win)
+    assert back.text() == "Check"
