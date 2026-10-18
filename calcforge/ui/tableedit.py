@@ -150,6 +150,7 @@ class FormulaBar(QWidget):
         from PySide6.QtWidgets import QToolButton
         self.names = QToolButton()
         self.names.setText("▾")
+        self.names.setProperty("menuButton", "plain")       # ▾ is its arrow
         self.names.setToolTip("Go to a named cell or block")
         self.names.setPopupMode(QToolButton.InstantPopup)
         names_list = QMenu(self.names)

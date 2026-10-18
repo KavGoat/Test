@@ -90,8 +90,24 @@ def _check(button: QToolButton) -> tuple[bool, str]:
     pump(2)
     arrow = ink_box(whole, no_arrow)
     face = ink_box(whole, no_face)
+    if arrow.isEmpty() and button.popupMode() == QToolButton.MenuButtonPopup:
+        # the platform's own split button: its arrow is drawn in the menu part
+        from PySide6.QtWidgets import QStyle, QStyleOptionToolButton
+        option = QStyleOptionToolButton()
+        button.initStyleOption(option)
+        part = button.style().subControlRect(QStyle.CC_ToolButton, option,
+                                             QStyle.SC_ToolButtonMenu, button)
+        ratio = whole.devicePixelRatio() or 1.0
+        arrow = QRect(int(part.x() * ratio), int(part.y() * ratio),
+                      int(part.width() * ratio), int(part.height() * ratio))
+        arrow = arrow.adjusted(1, 1, -1, -1)
     name = button.objectName() or (action.text() if action is not None else text) or "?"
     ratio = whole.devicePixelRatio() or 1.0
+    if button.property("menuButton") == "plain":
+        # its face is its arrow (▾, »): no second one may be drawn beside it
+        if not arrow.isEmpty():
+            return False, f"{name}: a second arrow {arrow.getRect()} beside its own"
+        return True, f"{name}: its face is its arrow, and no second one"
     if arrow.isEmpty():
         return False, f"{name}: no arrow drawn"
     if face.isEmpty():
@@ -117,24 +133,74 @@ def main() -> int:
     if theme == "dark":
         window.toggle_theme(True)
         pump()
-    window.table_controls.show(True)          # a table's controls, on the same bar
-    window.style_bar.layout().invalidate()
-    pump()
-    buttons = []
-    for root in list(window.findChildren(QToolBar)) + [window.statusBar()]:
-        for button in root.findChildren(QToolButton):
-            if button.objectName() == "qt_toolbar_ext_button" or not has_menu(button):
-                continue
-            if not button.isVisible():
-                continue
-            buttons.append(button)
     failures = 0
     pictures = []
-    for button in buttons:
-        good, said = check(button)
-        failures += not good
-        print(("ok " if good else "OVERLAP ") + said)
-        pictures.append(button.grab())
+    checked: set = set()
+    names: list = []
+
+    def walk() -> None:
+        nonlocal failures
+        pump()
+        for button in window.findChildren(QToolButton):
+            if button.objectName() in ("qt_toolbar_ext_button", "qt_menubar_ext_button") \
+                    or not has_menu(button):
+                continue
+            if not button.isVisible() or id(button) in checked:
+                continue
+            checked.add(id(button))
+            good, said = check(button)
+            failures += not good
+            print(("ok " if good else "OVERLAP ") + said)
+            names.append(said.split(":")[0])
+            pictures.append(button.grab())
+
+    # wide enough that no bar puts a button behind its »
+    window.resize(2400, 1000)
+    pump()
+    # every panel shown, the Markups List too
+    # every panel brought forward in turn (tabbed panels show one at a time),
+    # the Markups List too
+    for dock in window.panels:
+        window.show_panel(dock.objectName(), True)
+        dock.raise_()
+        walk()
+    if not window.markups_panel.isVisible():
+        window.act_markups_list.setChecked(True)
+    walk()
+    # a markup picked: the Properties panel's Add to Tool Chest ▾
+    from PySide6.QtCore import QPointF, QRectF as _Rect
+    from calcforge.items.shapes import RectItem
+    box = RectItem("rect", _Rect(0, 0, 120, 60))
+    window.document.pages[0].frame.add_markup(box, QPointF(300, 400))
+    window.select_tool("select")
+    box.setSelected(True)
+    window.refresh_selection()
+    window.show_panel("dock_properties", True)
+    walk()
+    window.view.scene().clearSelection()
+    window.refresh_selection()
+    # a table open for its cells: its controls on the Properties bar, and the
+    # formula bar's name box
+    from tests.test_tables import make_table
+    window.view.set_zoom(1.0)
+    make_table(window)
+    tables = window.view.tables
+    if not tables.is_open() and tables.item is not None:
+        tables.open(tables.item) if hasattr(tables, "open") else None
+    walk()
+    # a narrow window: what goes behind the status bar's own menu
+    window.resize(800, 600)
+    walk()
+    # nothing with a menu may go unchecked: any never shown in these states
+    # is named, and fails
+    for button in window.findChildren(QToolButton):
+        if button.objectName() in ("qt_toolbar_ext_button", "qt_menubar_ext_button") \
+                or not has_menu(button) or id(button) in checked:
+            continue
+        failures += 1
+        action = button.defaultAction()
+        print("UNCHECKED " + (button.objectName() or button.text()
+                              or (action.text() if action is not None else "?")))
     if len(sys.argv) > 2 and pictures:
         scale = 4
         width = int(max(p.width() / p.devicePixelRatio() for p in pictures) * scale) + 8
@@ -150,9 +216,9 @@ def main() -> int:
             y += h + 8
         painter.end()
         sheet.save(sys.argv[2])
-    print(f"done {len(buttons)} buttons, {failures} overlapping")
+    print(f"done {len(checked)} buttons, {failures} overlapping")
     window.document.modified = False
-    return 1 if failures or not buttons else 0
+    return 1 if failures or not checked else 0
 
 
 if __name__ == "__main__":

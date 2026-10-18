@@ -2913,6 +2913,7 @@ class MainWindow(QMainWindow):
         self.status_more.setObjectName("statusMore")
         self.status_more.setAutoRaise(True)
         self.status_more.setText("»")
+        self.status_more.setProperty("menuButton", "plain")      # » is its arrow
         self.status_more.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self._status_icon_buttons[self.status_more] = "overflow"
         self.status_more.setToolTip("The status bar controls there is no room for")
@@ -11222,31 +11223,33 @@ class MainWindow(QMainWindow):
         self._refresh_all_scenes()
 
     def mark_menu_buttons(self) -> None:
-        """Every bar button with a menu — on the toolbars, the Properties bar
-        (a table's controls too) and the status bar — gets room for its
+        """Every button with a menu — on the toolbars, the Properties bar
+        (a table's controls too), the status bar and the panels — gets room for its
         arrow, as Revu's split buttons have: the icon, then the arrow part
         beside it. Qt decides a button's popup mode after it is polished, so
         the theme is told by a property of its own and the button polished
         again (an arrow drawn over the icon: the user, 2026-10-18)."""
-        roots = list(self.findChildren(QToolBar)) + [self.statusBar()]
-        for root in roots:
-            for button in root.findChildren(QToolButton):
-                if button.objectName() == "qt_toolbar_ext_button":
-                    continue
-                has_menu = button.menu() is not None or (
-                    button.defaultAction() is not None
-                    and button.defaultAction().menu() is not None)
-                kind = ""
-                if has_menu and button.popupMode() == QToolButton.MenuButtonPopup:
-                    kind = "split"
-                elif has_menu and button.popupMode() == QToolButton.InstantPopup:
-                    kind = "only"
-                if (button.property("menuButton") or "") == kind:
-                    continue
-                button.setProperty("menuButton", kind)
-                button.style().unpolish(button)
-                button.style().polish(button)
-                button.updateGeometry()
+        # and the panels' (Thumbnails' Insert ▾, the Properties panel's Add
+        # to Tool Chest ▾, the formula bar's names): every button in the window
+        for button in self.findChildren(QToolButton):
+            if button.objectName() in ("qt_toolbar_ext_button", "qt_menubar_ext_button"):
+                continue
+            if button.property("menuButton") == "plain":
+                continue          # its face is its arrow: ▾, »
+            has_menu = button.menu() is not None or (
+                button.defaultAction() is not None
+                and button.defaultAction().menu() is not None)
+            kind = ""
+            if has_menu and button.popupMode() == QToolButton.MenuButtonPopup:
+                kind = "split"
+            elif has_menu and button.popupMode() == QToolButton.InstantPopup:
+                kind = "only"
+            if (button.property("menuButton") or "") == kind:
+                continue
+            button.setProperty("menuButton", kind)
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.updateGeometry()
 
     def _refresh_status_icons(self) -> None:
         for button, name in getattr(self, "_status_icon_buttons", {}).items():
