@@ -14,6 +14,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenuBar, QTabBar, QToolBar, QWidget
 
 from calcforge.ui.mainwindow import MainWindow
+from tests.test_canvas import wheel
 from tests.test_usability import click, drag
 
 
@@ -64,6 +65,12 @@ def _drag_tab(bar, index, target, at):
         _settle(1)
     QTest.mouseRelease(bar, Qt.LeftButton, Qt.NoModifier, end)
     _settle()
+
+
+def _zoom_in_by_wheel(view):
+    """A notch of the wheel over the view: it zooms (no keys zoom by default,
+    the user, 2026-10-18)."""
+    wheel(view, 120)
 
 
 def _split(window):
@@ -117,7 +124,7 @@ def test_the_controls_act_on_the_view_last_clicked(window, two_files):
     assert right.view.tool_key == "rect" and left.view.tool_key == "select"
     QTest.keyClick(right.view.viewport(), Qt.Key_Escape)
     before = left.view.zoom(), right.view.zoom()
-    QTest.keyClick(right.view.viewport(), Qt.Key_Plus, Qt.ControlModifier)
+    _zoom_in_by_wheel(right.view)
     _settle()
     assert right.view.zoom() > before[1] and left.view.zoom() == before[0]
     # a markup drawn in one view of the same document shows in the other
@@ -271,11 +278,11 @@ def test_file_open_keeps_worked_on_untitled(window, tmp_path, monkeypatch):
 def test_window_sync_moves_the_other_view_of_the_same_document(window, two_files):
     left, right = _split(window)                     # b.pdf in both views
     window.window_sync.setCurrentIndex(1)            # Page sync
-    QTest.keyClick(right.view.viewport(), Qt.Key_Plus, Qt.ControlModifier)
+    _zoom_in_by_wheel(right.view)
     _settle()
     assert left.view.zoom() == pytest.approx(right.view.zoom())
     window.window_sync.setCurrentIndex(0)
-    QTest.keyClick(right.view.viewport(), Qt.Key_Plus, Qt.ControlModifier)
+    _zoom_in_by_wheel(right.view)
     _settle()
     assert left.view.zoom() < right.view.zoom()
 

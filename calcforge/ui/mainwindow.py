@@ -1376,9 +1376,11 @@ class MainWindow(QMainWindow):
         self._act("font_decrease", "Decrease Font Size",
                   lambda: self.format_content(font_delta=-1.0), "Ctrl+Alt+Down")
 
-        # lambdas: the view in hand when pressed (Split View has two)
-        self._act("zoom_in", "Zoom In", lambda: self.view.zoom_in(), "Ctrl++", "zoom_in")
-        self._act("zoom_out", "Zoom Out", lambda: self.view.zoom_out(), "Ctrl+-", "zoom_out")
+        # lambdas: the view in hand when pressed (Split View has two). No
+        # key by default: the wheel zooms, with Ctrl or without as the
+        # preference says (the user, 2026-10-18); a key can still be given.
+        self._act("zoom_in", "Zoom In", lambda: self.view.zoom_in(), "", "zoom_in")
+        self._act("zoom_out", "Zoom Out", lambda: self.view.zoom_out(), "", "zoom_out")
         # Revu's zoom keys (audit L2): Fit Page Ctrl+9, Fit Width Ctrl+0,
         # Actual Size Ctrl+8
         self._act("fit_page", "Fit Page", lambda: self.view.fit_page(), "Ctrl+9", "fit")

@@ -15,7 +15,8 @@ painted before:
 
 Each scale runs in a process of its own (the screen's scale is fixed when the
 application starts), zooms the way a person does — notches of the real wheel
-over the window and Ctrl++ / Ctrl+- on the keyboard — waits for the page to
+over the window and the Zoom In and Zoom Out commands (no key zooms by
+default, the user, 2026-10-18) — waits for the page to
 settle, and holds what the window shows against the same view repainted from
 scratch. Then it has parts of the window repainted the way squares coming in
 do, and holds that against a full repaint too.
@@ -38,7 +39,7 @@ TOLERANCE = 8
 
 
 @pytest.mark.parametrize("scale", ["1.0", "1.25", "1.5"])
-def test_zooming_by_wheel_and_keys_leaves_no_artefacts_at_page_edges(scale, tmp_path):
+def test_zooming_by_wheel_and_commands_leaves_no_artefacts_at_page_edges(scale, tmp_path):
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_SCALE_FACTOR=scale)
     run = subprocess.run([sys.executable, os.path.abspath(__file__), scale, str(tmp_path)],
                          env=env, cwd=REPO, capture_output=True, text=True, timeout=600)
@@ -46,7 +47,7 @@ def test_zooming_by_wheel_and_keys_leaves_no_artefacts_at_page_edges(scale, tmp_
     assert run.returncode == 0 and lines, run.stdout[-3000:] + run.stderr[-3000:]
     report = json.loads(lines[-1])
     assert report["ratio"] == pytest.approx(float(scale))
-    assert report["zooms"] == 12, "every notch and key zoomed"
+    assert report["zooms"] == 12, "every notch and command zoomed"
     bad = {name: found for name, found in report["steps"].items() if found}
     assert not bad, (f"at {scale}: the window differs from a full repaint "
                      f"(pixels, largest difference): {bad}; diffs in {tmp_path}")
@@ -101,7 +102,6 @@ def _drive(scale: str, out: str) -> dict:
     import numpy
     from PySide6.QtCore import QPoint, QPointF, QRect, Qt
     from PySide6.QtGui import QImage, QWheelEvent
-    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication
 
     from calcforge.app import build_application
@@ -185,17 +185,16 @@ def _drive(scale: str, out: str) -> dict:
     size = viewport.size()
     spots = [QPointF(size.width() * x, size.height() * y)
              for x, y in ((0.5, 0.5), (0.2, 0.3), (0.85, 0.75), (0.35, 0.9), (0.7, 0.1))]
-    steps = [("wheel", 3, 0), ("wheel", -2, 1), ("ctrl+", 0, 0), ("wheel", 5, 2),
-             ("ctrl-", 0, 0), ("wheel", -4, 3), ("ctrl+", 0, 0), ("wheel", -3, 4),
-             ("ctrl-", 0, 0), ("wheel", 2, 2), ("ctrl+", 0, 0), ("ctrl-", 0, 0)]
+    steps = [("wheel", 3, 0), ("wheel", -2, 1), ("zoom+", 0, 0), ("wheel", 5, 2),
+             ("zoom-", 0, 0), ("wheel", -4, 3), ("zoom+", 0, 0), ("wheel", -3, 4),
+             ("zoom-", 0, 0), ("wheel", 2, 2), ("zoom+", 0, 0), ("zoom-", 0, 0)]
     found, zooms = {}, 0
     for number, (kind, notches, spot) in enumerate(steps):
         before = view.zoom()
         if kind == "wheel":
             wheel(notches, spots[spot])
         else:
-            key = Qt.Key_Plus if kind == "ctrl+" else Qt.Key_Minus
-            QTest.keyClick(viewport, key, Qt.ControlModifier)
+            (window.act_zoom_in if kind == "zoom+" else window.act_zoom_out).trigger()
         settle()
         zooms += abs(view.zoom() - before) > 1e-6
         name = f"{scale}-{number:02d}-{kind}"

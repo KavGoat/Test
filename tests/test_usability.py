@@ -8859,7 +8859,8 @@ def test_split_panes_edit_independently_and_route_shortcuts(window):
     QTest.keyClick(pane.view.viewport(), Qt.Key_Escape)
     assert pane.view.tool_key == "select"
     before = pane.view.zoom()
-    QTest.keyClick(pane.view.viewport(), Qt.Key_Plus, Qt.ControlModifier)
+    from tests.test_canvas import wheel
+    wheel(pane.view, 120)                          # the wheel zooms
     QApplication.processEvents()
     assert pane.view.zoom() > before
     click(left.view, 300, 300)                     # the other view, clicked
