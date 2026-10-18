@@ -29,6 +29,28 @@ def _family(angle, x0=0.0, y0=0.0, dx=0.0, dy=8.0, dashes=()):
             tuple(float(d) for d in dashes))
 
 
+def _turned(families, degrees: float):
+    """*families* turned *degrees* anticlockwise about the origin: each
+    family's angle, and its origin with it (its shift and spacing are its
+    own, along and across it, so they stay)."""
+    radians = math.radians(degrees)
+    c, s = math.cos(radians), math.sin(radians)
+    return [(angle + degrees, x0 * c - y0 * s, x0 * s + y0 * c, dx, dy, dashes)
+            for angle, x0, y0, dx, dy, dashes in families]
+
+
+# A basket weave on a 12 pt square: the squares' edges, then two lines across
+# every other square one way and two along the others the other way.
+_W = 12.0
+_WEAVE = [
+    _family(0, dy=_W),
+    _family(90, dy=_W),
+    _family(0, y0=_W / 3, dx=_W, dy=_W, dashes=(_W, -_W)),
+    _family(0, y0=2 * _W / 3, dx=_W, dy=_W, dashes=(_W, -_W)),
+    _family(90, x0=_W / 3, y0=_W, dx=_W, dy=_W, dashes=(_W, -_W)),
+    _family(90, x0=2 * _W / 3, y0=_W, dx=_W, dy=_W, dashes=(_W, -_W)),
+]
+
 # name -> (families, special)
 LIBRARY: dict[str, tuple[tuple, str]] = {
     "": ((), ""),
@@ -43,6 +65,15 @@ LIBRARY: dict[str, tuple[tuple, str]] = {
                         _family(135, dy=8 / math.sqrt(2))), ""),
     "dots": ((), "dots"),
     "dense": ((), "dense dots"),
+    # -- the rest of Revu's own (the user's Revu 21 hatch list, 2026-10-18) --
+    # Diagonal Brick: Brick turned to 45°.
+    "diagonal brick": ((_family(45, dy=8), _family(135, dx=8, dy=8, dashes=(8, -8))), ""),
+    # Weave: a basket weave turned to 45° — squares of three strips, each
+    # square's strips across its neighbours'.
+    "weave": (tuple(_turned(_WEAVE, 45)), ""),
+    "10% dots": ((), "10% dots"),
+    "20% dots": ((), "20% dots"),
+    "30% dots": ((), "30% dots"),
     # -- materials ---------------------------------------------------------
     "steel": ((_family(45, dy=6), _family(45, x0=0, y0=1.6, dy=6)), ""),
     "masonry": ((_family(45, dy=4),), ""),
@@ -83,11 +114,26 @@ LIBRARY: dict[str, tuple[tuple, str]] = {
     "timber end": ((), "end grain"),
 }
 
-#: Names offered in the lists, in order: plain patterns first, then materials.
-NAMES = [name for name in LIBRARY if name not in ("", "solid")]
+#: Revu's own hatches, in its order (the user's Revu 21 list, 2026-10-18),
+#: under the keys files keep: Grid is "cross", Diagonal Up "up" (/) and
+#: Diagonal Down "down" (\).
+REVU = ["brick", "diagonal brick", "horizontal", "vertical", "down", "up", "cross",
+        "weave", "10% dots", "20% dots", "30% dots"]
+#: What Revu calls the ones whose key is not its name.
+REVU_NAMES = {"down": "Diagonal Down", "up": "Diagonal Up", "cross": "Grid"}
+#: Names offered in the lists, in order: Revu's first, then CalcForge's own
+#: plain patterns and materials.
+NAMES = REVU + [name for name in LIBRARY if name not in ("", "solid") and name not in REVU]
 _PLAIN = {"horizontal", "vertical", "cross", "up", "down", "diagonal cross", "dots",
-          "dense"}
+          "dense", "weave", "10% dots", "20% dots", "30% dots"}
 MATERIALS = [name for name in NAMES if name not in _PLAIN]
+#: Revu's names, and their spellings in a Bluebeam tool set, as the key each
+#: means: "Diagonal Up", "DiagonalUp", "Grid", "10% Dots", "10Dots"…
+_ALIASES = {"diagonalup": "up", "diagonaldown": "down", "grid": "cross",
+            "diagonalbrick": "diagonal brick", "weave": "weave", "brick": "brick",
+            "10dots": "10% dots", "20dots": "20% dots", "30dots": "30% dots",
+            "densedots": "dense", "diagonalcross": "diagonal cross",
+            "horizontal": "horizontal", "vertical": "vertical"}
 
 # Qt's own brush patterns, which older files and Bluebeam tool sets name
 # through hatch_named, as the library pattern that looks like each.
@@ -112,7 +158,9 @@ def display_name(key: str) -> str:
     """What a list shows for a pattern: its own spelling, or the library's."""
     if not key:
         return "None"
-    return CUSTOM.get(key, key.title())
+    if key in CUSTOM:
+        return CUSTOM[key]
+    return REVU_NAMES.get(key, key.title())
 
 
 def parse_pat(text: str, unit: float = PAT_UNIT) -> dict[str, tuple[str, tuple]]:
@@ -200,16 +248,30 @@ def load_custom() -> None:
             continue
 
 
+def named_key(name: str) -> str:
+    """The library pattern *name* is, by its key or by Revu's name for it
+    however a tool set spells that ("Diagonal Up", "Hatch-DiagonalUp",
+    "Grid", "10% Dots"); "" for any other name."""
+    lowered = (name or "").strip().lower()
+    if lowered in LIBRARY:
+        return lowered
+    squeezed = "".join(character for character in lowered if character.isalnum())
+    if squeezed.startswith("hatch"):
+        squeezed = squeezed[len("hatch"):]
+    return _ALIASES.get(squeezed, "")
+
+
 def key_for(name: str) -> str:
     """The library pattern *name* means: its own entry, or Bluebeam's word."""
     if not name:
         return ""
-    lowered = name.strip().lower()
-    if lowered in LIBRARY:
-        return lowered
+    named = named_key(name)
+    if named:
+        return named
     words = set(_words(name))
-    # A material named in so many words — "Hatch-Concrete", "Steel section".
-    for key in MATERIALS:
+    # A material named in so many words — "Hatch-Concrete", "Steel section";
+    # the one that names the most of them ("Diagonal Brick", not "Brick").
+    for key in sorted(MATERIALS, key=lambda key: -len(key.split())):
         if set(key.split()) <= words:
             return key
     from .base import hatch_named
@@ -422,6 +484,44 @@ def _dots(painter, box, scale, ink, step, radius, stagger=False) -> bool:
     return True
 
 
+#: Revu's 10%, 20% and 30% dots: square dots this big, in points at a hatch
+#: scale of one, set this many dots apart along a row and between rows —
+#: whole dots along, so the rows never beat against the screen's pixels in
+#: stripes — covering that share of the shape.
+DOT_SIZE = 1.0
+DOT_LATTICE = {"10% dots": (3.0, 10.0 / 3.0), "20% dots": (2.0, 2.5),
+               "30% dots": (2.0, 5.0 / 3.0)}
+
+
+def _tone(painter, box, scale, ink, key) -> bool:
+    """Square dots in staggered rows. Each row is one dashed line, a dash a
+    dot long: few strokes on screen, and one dashed line each in a PDF
+    however many dots it has."""
+    along, apart = DOT_LATTICE[key]
+    dot = DOT_SIZE * scale
+    pitch, row_pitch = along * dot, apart * dot
+    rows = math.ceil(box.height() / row_pitch) + 2
+    if rows > MOST_PIECES or box.width() / pitch > 4 * MOST_PIECES:
+        tint = QColor(ink)
+        tint.setAlphaF(ink.alphaF() / (along * apart))
+        painter.fillRect(box, tint)
+        return True
+    pen = QPen(ink, dot)
+    pen.setCapStyle(Qt.FlatCap)
+    pen.setStyle(Qt.CustomDashLine)
+    pen.setDashPattern([1.0, along - 1.0])
+    painter.setPen(pen)
+    first = math.floor(box.top() / row_pitch)
+    left = (math.floor(box.left() / (2 * pitch)) - 1) * 2 * pitch
+    lines = []
+    for row in range(rows):
+        y = (first + row) * row_pitch + row_pitch / 2
+        shift = math.floor(along / 2) * dot if (first + row) % 2 else 0.0
+        lines.append(QLineF(left + shift, y, box.right() + pitch, y))
+    painter.drawLines(lines)
+    return True
+
+
 def _scatter(painter, box, scale, ink, step, shapes) -> bool:
     cells = _cells(box, step * scale)
     if cells is None:
@@ -513,6 +613,9 @@ def _end_grain(painter, box, scale, ink) -> bool:
 _SPECIALS = {
     "dots": lambda p, b, s, i: _dots(p, b, s, i, 8, 0.9),
     "dense dots": lambda p, b, s, i: _dots(p, b, s, i, 4, 0.7, stagger=True),
+    "10% dots": lambda p, b, s, i: _tone(p, b, s, i, "10% dots"),
+    "20% dots": lambda p, b, s, i: _tone(p, b, s, i, "20% dots"),
+    "30% dots": lambda p, b, s, i: _tone(p, b, s, i, "30% dots"),
     "sand": lambda p, b, s, i: _scatter(p, b, s, i, 4, [("dot", 0.35), ("dot", 0.3)]),
     "gravel": lambda p, b, s, i: _scatter(p, b, s, i, 10, [("ring", 1.6), ("ring", 1.1),
                                                             ("dot", 0.4)]),
@@ -535,5 +638,6 @@ def sample_icon(name: str, colour: str, width: int = 76, height: int = 22):
         painter.drawRect(3, 3, width - 7, height - 7)
         region = QPainterPath()
         region.addRect(3, 3, width - 7, height - 7)
-        paint(painter, region, name, 0.8, ink)
+        # Revu's dots a pixel each, so the swatch is an even tone
+        paint(painter, region, name, 1.0 if key_for(name) in DOT_LATTICE else 0.8, ink)
     return drawn_icon(draw, width, height)

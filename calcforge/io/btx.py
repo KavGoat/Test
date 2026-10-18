@@ -215,6 +215,15 @@ def _style(annotation: dict) -> dict:
             # Scaled with the line: Bluebeam's lengths are in widths then.
             style["dash_array"] = tuple(v * width if scaled else v for v in pattern)
             style["line_style"] = "dash"
+    # Revu's own line styles by name — Dashed 1 to 6, and its complex ones
+    # (Fenceline Circle, Gas, Double, Road…), which are drawn here from the
+    # name: a complex one keeps no dashes, or it would be drawn dashed
+    from ..items import complexlines, linestyles
+    known = linestyles.named(annotation.get("LineStyleName"))
+    if known:
+        style["line_style"] = known
+        if complexlines.is_complex(known) or known == "solid":
+            style.pop("dash_array", None)
     if annotation.get("BM") == "Multiply":
         style["blend"] = "multiply"
     ends = annotation.get("LE")
@@ -532,7 +541,10 @@ def _hatch_of(annotation: dict, resources: dict, payload: dict) -> None:
     if not isinstance(pattern, str) or not pattern:
         return
     style = dict(payload.get("style") or {})
-    style["hatch"] = pattern
+    # Revu's own patterns by the key the lists know them by ("Diagonal Up"
+    # is "up"), so the hatch list ticks the right one; any other by its name
+    from ..items.hatches import named_key
+    style["hatch"] = named_key(pattern) or pattern
     style["hatch_color"] = colour(annotation.get("PatternColor")) or \
         style.get("stroke") or "#000000"
     try:

@@ -445,6 +445,25 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'markuprow.width.3_pt': ('Markups List: Width ▸ 3 pt', 'Panels', 'always'),
     'markuprow.width.5_pt': ('Markups List: Width ▸ 5 pt', 'Panels', 'always'),
     'markuprow.line_style.solid': ('Markups List: Line style ▸ solid', 'Panels', 'always'),
+    # Revu's own line styles (the user's Revu 21 list, 2026-10-18)
+    'markuprow.line_style.dashed_1': ('Markups List: Line style ▸ dashed 1', 'Panels', 'always'),
+    'markuprow.line_style.dashed_2': ('Markups List: Line style ▸ dashed 2', 'Panels', 'always'),
+    'markuprow.line_style.dashed_3': ('Markups List: Line style ▸ dashed 3', 'Panels', 'always'),
+    'markuprow.line_style.dashed_4': ('Markups List: Line style ▸ dashed 4', 'Panels', 'always'),
+    'markuprow.line_style.dashed_5': ('Markups List: Line style ▸ dashed 5', 'Panels', 'always'),
+    'markuprow.line_style.dashed_6': ('Markups List: Line style ▸ dashed 6', 'Panels', 'always'),
+    'markuprow.line_style.fenceline_circle':
+        ('Markups List: Line style ▸ fenceline circle', 'Panels', 'always'),
+    'markuprow.line_style.fenceline_square':
+        ('Markups List: Line style ▸ fenceline square', 'Panels', 'always'),
+    'markuprow.line_style.gas': ('Markups List: Line style ▸ gas', 'Panels', 'always'),
+    'markuprow.line_style.hot_water': ('Markups List: Line style ▸ hot water', 'Panels', 'always'),
+    'markuprow.line_style.zig_zag': ('Markups List: Line style ▸ zig zag', 'Panels', 'always'),
+    'markuprow.line_style.insulation':
+        ('Markups List: Line style ▸ insulation', 'Panels', 'always'),
+    'markuprow.line_style.double': ('Markups List: Line style ▸ double', 'Panels', 'always'),
+    'markuprow.line_style.tracks': ('Markups List: Line style ▸ tracks', 'Panels', 'always'),
+    'markuprow.line_style.road': ('Markups List: Line style ▸ road', 'Panels', 'always'),
     'markuprow.line_style.dash': ('Markups List: Line style ▸ dash', 'Panels', 'always'),
     'markuprow.line_style.dot': ('Markups List: Line style ▸ dot', 'Panels', 'always'),
     'markuprow.line_style.dashdot': ('Markups List: Line style ▸ dashdot', 'Panels', 'always'),

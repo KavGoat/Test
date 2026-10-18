@@ -7,7 +7,7 @@ import functools
 from PySide6.QtCore import (QByteArray, QEvent, QMimeData, QPoint, QPointF, QRect, QRectF, QSize,
                             QTimer, Qt, Signal)
 from PySide6.QtGui import (QColor, QDrag, QFont, QFontInfo, QFontMetrics, QIcon, QKeySequence,
-                           QPainter, QPen, QPixmap, QPolygonF)
+                           QPainter, QPainterPath, QPen, QPixmap, QPolygonF)
 from PySide6.QtWidgets import (QAbstractItemView, QAbstractSpinBox, QApplication,
                                QCheckBox, QComboBox, QDoubleSpinBox, QInputDialog, QMessageBox,
                                QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
@@ -33,17 +33,22 @@ from .stylecaps import CLOUD, CORNER
 from .stylecaps import (DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
                         WIDTH, common_capabilities)
 from .widgets import (ColorButton, PatternCombo, UnitCombo, arrow_combo,
-                      big_pattern_dropdown, set_arrow)
+                      big_pattern_dropdown, fit_pattern_list, set_arrow)
 
 
 def _line_style_icon(name: str, colour: str, width: float, cloud: bool = False) -> QIcon:
     """A line style's sample across the box — for a cloud, its scallops
     drawn in that style, as Revu's list shows a cloud's."""
+    from ..items import complexlines
     colour = visible_ink(colour)
+    complex_line = complexlines.is_complex(name)
+
     def draw(painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
         pen = QPen(QColor(colour or "#111318"))
-        pen.setWidthF(max(2.0, min(float(width) * 1.5, 6.0)))
+        # a complex line (Double, Gas…) at one size, as Revu's samples are,
+        # so a heavy line's still fits the row
+        pen.setWidthF(1.5 if complex_line else max(2.0, min(float(width) * 1.5, 6.0)))
         dashes = DASH_ARRAYS.get(name, [])
         if dashes:
             pen.setStyle(Qt.CustomDashLine)
@@ -52,10 +57,26 @@ def _line_style_icon(name: str, colour: str, width: float, cloud: bool = False) 
         painter.setPen(pen)
         if cloud:
             from .propbar import _scallop_path
-            painter.drawPath(_scallop_path(3.0, 147.0, 27.0, 12.0))
+            path = _scallop_path(3.0, 147.0, 27.0, 12.0)
+        else:
+            path = QPainterPath(QPointF(4, 17))
+            path.lineTo(146, 17)
+        if complex_line:
+            complexlines.draw(painter, path, _Sample(name, pen.widthF()))
+        elif cloud:
+            painter.drawPath(path)
         else:
             painter.drawLine(4, 17, 146, 17)
     return drawn_icon(draw, 150, 34)
+
+
+class _Sample:
+    """What a complex line's sample is drawn from: its name and width."""
+
+    def __init__(self, name: str, width: float):
+        self.line_style = name
+        self.width = width
+        self.dash_scale = 1.0
 
 
 def line_style_name(name: str) -> str:
@@ -78,6 +99,7 @@ def fill_line_style_combo(combo, colour: str, width: float, current: str = "",
     combo.setProperty("cloudStyles", bool(cloud))
     combo.setCurrentIndex(line_style_index(combo, current))
     combo.setToolTip(combo.currentText())
+    fit_pattern_list(combo)
     combo.blockSignals(False)
 
 
@@ -125,12 +147,17 @@ def fill_hatch_combo(combo, colour: str, current: str = "") -> None:
         label = hatches.display_name(name) if name else "(None)"
         combo.addItem(_hatch_icon(name, colour), label, name)
     combo.setCurrentIndex(hatch_index(combo, current))
+    fit_pattern_list(combo)
     combo.blockSignals(False)
 
 
 def hatch_index(combo, key: str) -> int:
-    """Where *key* is in a hatch list — (None) when it is not there."""
+    """Where *key* is in a hatch list — found by Revu's name for it too
+    ("Diagonal Up" is "up"); (None) when it is not there."""
     found = combo.findData(key or "")
+    if found < 0 and key:
+        from ..items.hatches import named_key
+        found = combo.findData(named_key(key)) if named_key(key) else -1
     return found if found >= 0 else max(combo.findData(""), 0)
 
 

@@ -31,6 +31,19 @@ def built_in(name: str) -> bool:
     return name in DASH_ARRAYS and name not in CUSTOM
 
 
+def named(name) -> str:
+    """The built-in style a Bluebeam file's /LineStyleName means — Revu's
+    "Dashed 1", "Fenceline Circle", "Hot Water", "Zig Zag" however it is
+    spaced or cased — or "" for any other name."""
+    if not isinstance(name, str):
+        return ""
+    squeezed = "".join(character for character in name.lower() if character.isalnum())
+    for key in DASH_ARRAYS:
+        if built_in(key) and "".join(c for c in key if c.isalnum()) == squeezed:
+            return key
+    return ""
+
+
 def parse_dashes(text: str) -> list[float]:
     """Dashes and gaps typed as numbers — "6, 2, 1, 2" — in points. Empty
     when the text is not a pattern: a run needs a dash and a gap, none
