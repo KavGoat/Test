@@ -137,34 +137,81 @@ def _painted_scale(painter) -> float:
     return max(across, down, 0.01) * max(float(real or 1.0), 1.0)
 
 
+def _square_on(transform: QTransform) -> bool:
+    """Whether *transform* keeps rectangles rectangles on the device: no
+    turn, or a quarter turn — anything that maps whole pixels to whole
+    pixels once the corners are."""
+    return ((abs(transform.m12()) < 1e-9 and abs(transform.m21()) < 1e-9)
+            or (abs(transform.m11()) < 1e-9 and abs(transform.m22()) < 1e-9))
+
+
+def _on_device_pixels(painter, rect: QRectF, inset: float = 0.0) -> QRectF:
+    """*rect* moved to the nearest whole pixels of the device being drawn on
+    (and *inset* device pixels inside them), in the painter's coordinates.
+
+    The device is the real one: ``deviceTransform`` has the screen's pixel
+    ratio and where the view sits in its window in it, which the painter's
+    own transform does not. At 125 % a view whose corner is at x = 266 starts
+    at device pixel 332.5, and a page snapped by its own transform alone came
+    out half a pixel off every whole one. A page whose edge falls part way
+    through a pixel has that pixel drawn by whatever happened to be painted
+    last — the paper, its edge, the shadow, a square of the page at another
+    zoom — so after a zoom a repaint of part of the page left a sliver along
+    the edge that a full one did not (the user, 2026-10-18).
+    """
+    device = painter.deviceTransform()
+    if not _square_on(device):
+        return QRectF(rect)
+    placed = device.mapRect(QRectF(rect))
+    snapped = QRectF(QPointF(round(placed.left()) + inset, round(placed.top()) + inset),
+                     QPointF(round(placed.right()) - inset, round(placed.bottom()) - inset))
+    if snapped.width() <= 0 or snapped.height() <= 0:
+        return QRectF(rect)
+    inverse, invertible = device.inverted()
+    return inverse.mapRect(snapped) if invertible else QRectF(rect)
+
+
+def _out_to_device_pixels(painter, rect: QRectF) -> QRectF:
+    """*rect* grown out to the whole device pixels it touches, in the
+    painter's coordinates (see :func:`_on_device_pixels`)."""
+    device = painter.deviceTransform()
+    if not _square_on(device):
+        return QRectF(rect)
+    placed = device.mapRect(QRectF(rect))
+    grown = QRectF(QPointF(math.floor(placed.left()), math.floor(placed.top())),
+                   QPointF(math.ceil(placed.right()), math.ceil(placed.bottom())))
+    inverse, invertible = device.inverted()
+    return inverse.mapRect(grown) if invertible else QRectF(rect)
+
+
 def _draw_on_the_pixel_grid(painter, where: QRectF, tile) -> None:
     """Draw a tile so its pixels sit exactly on the device's pixels.
 
     A tile placed at a fractional position, or a pixel or so off its own
     size, is resampled by Qt and every line in it goes soft. With the page
-    upright the tile's corners are snapped to whole device pixels and, when
-    that is the tile's own size, it is copied without any smoothing at all.
-    Turned pages keep the ordinary smoothed draw.
+    upright the tile's corners are snapped to whole device pixels — the
+    device's own, through ``deviceTransform``, so a view at a fractional
+    place in its window at 125 % or 150 % is snapped too — and, when that is
+    the tile's own size, it is copied without any smoothing at all. Turned
+    pages keep the ordinary smoothed draw.
     """
-    shape = painter.transform()
-    if abs(shape.m12()) > 1e-9 or abs(shape.m21()) > 1e-9:
+    device = painter.deviceTransform()
+    if abs(device.m12()) > 1e-9 or abs(device.m21()) > 1e-9:
         painter.drawPixmap(where, tile, QRectF(tile.rect()))
         return
-    device = painter.device()
-    ratio = max(float(device.devicePixelRatio() if device is not None else 1.0), 1.0)
-    placed = shape.mapRect(where)
-    left = round(placed.left() * ratio)
-    top = round(placed.top() * ratio)
-    right = round(placed.right() * ratio)
-    bottom = round(placed.bottom() * ratio)
+    placed = device.mapRect(QRectF(where))
+    left, top = round(placed.left()), round(placed.top())
+    right, bottom = round(placed.right()), round(placed.bottom())
     if right <= left or bottom <= top:
+        return
+    inverse, invertible = device.inverted()
+    if not invertible:
         return
     exact = (right - left == tile.width() and bottom - top == tile.height())
     painter.save()
-    painter.resetTransform()
     painter.setRenderHint(QPainter.SmoothPixmapTransform, not exact)
-    painter.drawPixmap(QRectF(left / ratio, top / ratio, (right - left) / ratio,
-                              (bottom - top) / ratio), tile, QRectF(tile.rect()))
+    painter.drawPixmap(inverse.mapRect(QRectF(left, top, right - left, bottom - top)),
+                       tile, QRectF(tile.rect()))
     painter.restore()
 
 
@@ -843,16 +890,26 @@ class PageFrame(QGraphicsObject):
                                  _painted_scale(painter))
             return
         rect = self.page_rect()
+        # On screen the sheet's edges lie on whole pixels of the screen, and
+        # nothing of the page is drawn past them: a square of the page reaches
+        # up to a pixel past its edge (MuPDF draws whole pixels), and one of
+        # another zoom standing in reaches further. Painted over the shadow,
+        # that was a sliver along the page's right and bottom edges, and one
+        # a repaint of the page did not always reach, so it stayed after a
+        # zoom (the user, 2026-10-18). In print the page is as written.
+        paper = rect if self.print_mode else _on_device_pixels(painter, rect)
         if not self.print_mode:
-            self._paint_shadow(painter, rect)
+            self._paint_shadow(painter, paper)
         if not self._pdf_overlay:
             # Paper is viewing chrome, not opaque PDF artwork. A painted white
             # rectangle is copied as a background by other viewers' snapshots.
             if not self.print_mode:
-                painter.fillRect(rect, PAPER)
+                painter.fillRect(paper, PAPER)
             if self._background is None and self.page.background_key:
                 self.load_background()
             painter.save()
+            if not self.print_mode:
+                painter.setClipRect(paper, Qt.IntersectClip)
             painter.setOpacity(self.page.background_opacity)
             painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
             if self._background is not None:
@@ -865,7 +922,7 @@ class PageFrame(QGraphicsObject):
                 # the content toned down, the markups (drawn after) not
                 veil = QColor(PAPER)
                 veil.setAlphaF(max(0.0, min(1.0, 1.0 - DIMMER["level"])))
-                painter.fillRect(rect, veil)
+                painter.fillRect(paper, veil)
         exposed = _exposed_part(option, rect, self) if not self.print_mode else rect
         if not self.print_mode:
             self._paint_grid(painter, rect)
@@ -879,7 +936,10 @@ class PageFrame(QGraphicsObject):
             pen.setWidthF(0)              # one device pixel, at any zoom
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
-            _outline_where_exposed(painter, rect, exposed)
+            # down the middle of the sheet's outermost pixels: a crisp line
+            # on them, not two half-toned ones either side of the edge
+            _outline_where_exposed(painter, _on_device_pixels(painter, rect, 0.5),
+                                   exposed)
             painter.restore()
             if not self._pdf_overlay:
                 # the markups nobody is touching, from their squares
@@ -2086,6 +2146,13 @@ class DocumentScene(QGraphicsScene):
         # completely and left the markups floating on grey.
         if any(frame.print_mode for frame in self.frames):
             return
+        # Out to whole pixels of the screen. At 125 % or 150 % the part of
+        # the window being repainted ends part way through a pixel, which Qt
+        # repaints whole; filled only as far as the rect it was given, that
+        # pixel was half desk and half whatever the window had under it — a
+        # faint dark line along the edge of every repaint, beside the page
+        # where a zoom's squares had just come in (the user, 2026-10-18).
+        rect = _out_to_device_pixels(painter, rect)
         painter.fillRect(rect, self.backgroundBrush())
         # calculation section breaks, in the gap above their pages
         from .calcsections import paint_bands
