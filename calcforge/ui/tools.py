@@ -87,8 +87,8 @@ TOOLS: list[Tool] = [
     Tool("polyline", "Polyline", "polyline", POLY, "Draw", "N",
          "Click each vertex, double-click to finish", factory=_poly("polyline")),
     Tool("rect", "Rectangle", "rect", DRAG, "Draw", "R",
-         "Rectangle — drag it or click twice; Shift squares it off, and an "
-         "exact width and height on the paper can be typed while drawing",
+         "Rectangle — drag it or click twice; Shift squares it off. Its width "
+         "and height are on the paper; right-click ▸ Exact Size… sets them",
          factory=_rect("rect")),
     Tool("ellipse", "Ellipse", "ellipse", DRAG, "Draw", "E",
          "Ellipse — hold Shift for a circle; its width and height are on the paper",
