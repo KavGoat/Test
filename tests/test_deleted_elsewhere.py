@@ -73,8 +73,7 @@ def test_a_deleted_page_with_a_table_is_named_and_can_be_restored(win, tmp_path)
     assert tables(win) == []
     (said,) = [w for w in win.document.open_warnings if "deleted in another program" in w]
     assert "page 1" in said and "the table Loads" in said, said
-    assert "Restore Deleted Pages" in said
-    assert win._restore_button_text() == "Restore Page 1"
+    assert "Restore Deleted Pages" in said and "not their markups" in said
     assert win.restore_deleted_pages(ask=False)
     assert [t.sheet.name for t in tables(win)] == ["Loads"]
     assert len(win.document.pages) == 2
@@ -113,6 +112,56 @@ def test_a_spreadsheets_middle_page_deleted_elsewhere_keeps_every_cell_and_says_
     assert len(the_sheet(win).sheet.cells) == 120
     (said,) = [w for w in win.document.open_warnings if "deleted in another program" in w]
     assert "a page of the spreadsheet" in said and "keeps all its cells" in said, said
+
+
+def a_page_of_equations_and_a_cloud(win):
+    from calcforge.items.shapes import RectItem
+
+    win.document.add_page()
+    win.rebuild_scenes()
+    write_lines(win, ["b:2", "b="], page=0)
+    frame = win.document.pages[0].frame
+    win.view.begin_snapshot([frame])
+    frame.add_markup(RectItem(), QPointF(300, 300))
+    win.view.commit_snapshot("rect")
+
+
+def kinds(win, page):
+    return sorted(i.TYPE for i in win.document.pages[page].frame.markups())
+
+
+def test_restore_brings_back_calcforges_own_not_the_markups(win, tmp_path):
+    a_page_of_equations_and_a_cloud(win)
+    assert "rect" in kinds(win, 0)
+    path = str(tmp_path / "e.pdf")
+    save_to(win, path)
+    delete_pages_elsewhere(path, 0)
+    reopen(win, path)
+    assert win.restore_deleted_pages(ask=False)
+    assert kinds(win, 0) == ["calc", "calc"], "the equations, not the rectangle"
+    assert win.document.pages[0].pdf_key is None, "paper, never the page's drawing"
+    win.undo_stack.undo()
+    assert win.restore_deleted_pages(ask=False, markups=True)
+    assert kinds(win, 0) == ["calc", "calc", "rect"], "ticked: the markups too"
+
+
+def test_a_page_with_only_markups_is_restored_only_when_asked(win, tmp_path):
+    from calcforge.items.shapes import RectItem
+
+    win.document.add_page()
+    win.rebuild_scenes()
+    frame = win.document.pages[0].frame
+    win.view.begin_snapshot([frame])
+    frame.add_markup(RectItem(), QPointF(300, 300))
+    win.view.commit_snapshot("rect")
+    path = str(tmp_path / "r.pdf")
+    save_to(win, path)
+    delete_pages_elsewhere(path, 0)
+    reopen(win, path)
+    assert not win.restore_deleted_pages(ask=False)
+    assert len(win.document.pages) == 1
+    assert win.restore_deleted_pages(ask=False, markups=True)
+    assert len(win.document.pages) == 2 and kinds(win, 0) == ["rect"]
 
 
 def test_after_saving_there_is_nothing_left_to_restore(win, tmp_path):

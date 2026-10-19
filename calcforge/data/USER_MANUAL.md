@@ -811,12 +811,14 @@ cells' own Find and Replace — see Part 3.)
   lists each page deleted elsewhere by its number as saved here and its label, and
   what was on it — equations (and the variables that are now undefined), tables,
   markups, a page of a spreadsheet. A spreadsheet keeps all its cells, however many
-  of its pages went, and is laid out again over the pages left. **Restore Pages …**
-  in that message, or **Document ▸ Restore Deleted Pages…** at any time until the
-  document is saved, puts exactly those pages back where they were with everything
-  CalcForge had on them, as one undo step (the list of pages is shown first). A page
-  whose drawing was the file's own page comes back as blank paper with what
-  CalcForge put on it — the drawing itself went with the file's page.
+  of its pages went, and is laid out again over the pages left. **Restore…** in that
+  message, or **Document ▸ Restore Deleted Pages…** at any time until the document
+  is saved, lists the pages again and puts back **what CalcForge itself had on them**
+  — equations, calculation blocks and text, tables, spreadsheet cells and charts — on
+  pages where they were, as one undo step. Their **markups** come back only when you
+  tick **Also restore the markups that were on them** (a page that had only markups
+  is restored only then). The page's own drawing — a PDF page or a picture — is never
+  restored: it went with the file's page, so a restored page is paper.
 - **Flatten…** (`Ctrl+Shift+M`; Document and Batch menus, and a page's menu) is
   Revu's **Flatten Markups**: tick the markup types; **All Markups**, **Exclude
   Filtered Markups** or **Currently Selected Markups**; the **Pages**; and **Allow

@@ -684,6 +684,18 @@ def _take_the_file_back(document, data: bytes, record: dict, assets: dict) -> No
     document.open_warnings = warnings
 
 
+#: What CalcForge itself puts on a page, which Restore Deleted Pages brings
+#: back: the equations, calculation blocks and text, tables, spreadsheet
+#: cells and charts — not markups, unless asked to (the user, 2026-10-19).
+CALCFORGE_ITEMS = frozenset({"calc", "calc_block", "calc_text", "calc_drawing",
+                             "table", "sheet_run", "chart"})
+
+
+def calcforge_items(page: dict) -> list:
+    return [p for p in page.get("items", []) if isinstance(p, dict)
+            and p.get("type") in CALCFORGE_ITEMS]
+
+
 def _keep_the_sheets_of(gone: list, pages: list) -> list:
     """A spreadsheet laid out over several pages keeps all its cells when
     some of its pages were deleted elsewhere (the user, 2026-10-19: "keep
@@ -754,16 +766,10 @@ def _what_went(deleted: list, pages: list, sheets_kept: list) -> str:
     for name in sheets_kept:
         lines.append(f"The spreadsheet {name} keeps all its cells; it is laid out again "
                      f"over its pages that are left.")
-    lines.append("Restore Deleted Pages (Document menu) brings "
-                 + ("it" if len(deleted) == 1 else "them")
-                 + " back where " + ("it was" if len(deleted) == 1 else "they were")
-                 + ", with everything on " + ("it" if len(deleted) == 1 else "them")
-                 + ", until the document is saved.")
-    if any(entry["drawing_lost"] for entry in deleted):
-        lost = ", ".join(str(e["number"]) for e in deleted if e["drawing_lost"])
-        lines.append(f"(The drawing of page {lost} itself was in the file and cannot be "
-                     f"brought back: restored, it is a blank page with what CalcForge put "
-                     f"on it.)")
+    lines.append("Restore Deleted Pages (Document menu), until the document is saved, "
+                 "brings back their equations, tables, spreadsheets and charts on "
+                 "pages where they were — not their markups, unless you tick that too, "
+                 "and never the page's drawing itself, which went with the file's page.")
     return "\n".join(lines)
 
 

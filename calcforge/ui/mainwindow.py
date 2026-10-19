@@ -4391,26 +4391,30 @@ class MainWindow(QMainWindow):
             return
         from .release import done_with
         box = QMessageBox(QMessageBox.Warning, "Open document", text, QMessageBox.NoButton, self)
-        restore = box.addButton(self._restore_button_text(), QMessageBox.AcceptRole)
+        restore = box.addButton("Restore…", QMessageBox.AcceptRole)
         box.addButton("Keep Them Deleted", QMessageBox.RejectRole)
         try:
             box.exec()
-            if box.clickedButton() is restore:
-                self.restore_deleted_pages(ask=False)
+            chosen = box.clickedButton() is restore
         finally:
             done_with(box)
+        if chosen:
+            self.restore_deleted_pages()
 
-    def _restore_button_text(self) -> str:
-        numbers = [str(e["number"]) for e in self.document.deleted_elsewhere]
-        return ("Restore Page " if len(numbers) == 1 else "Restore Pages ") + ", ".join(numbers)
-
-    def restore_deleted_pages(self, _checked: bool = False, ask: bool = True) -> bool:
-        """Document ▸ Restore Deleted Pages…: the pages deleted in another
-        program since the document was last saved here, put back where they
-        were with everything CalcForge had on them (the user, 2026-10-19:
+    def restore_deleted_pages(self, _checked: bool = False, ask: bool = True,
+                              markups: bool = False) -> bool:
+        """Document ▸ Restore Deleted Pages…: what CalcForge itself had on the
+        pages deleted in another program since the document was last saved
+        here — equations, calculation blocks and text, tables, spreadsheet
+        cells, charts — put back on pages where they were; their markups too
+        only when asked (*markups*, the dialog's tick); never the page's
+        drawing, which went with the file's page (the user, 2026-10-19:
         "offer to restore but be very clear on what pages were deleted and
-        those pages being restored"). One undo step; once the document is
-        saved there is nothing left to restore."""
+        those pages being restored"; "restore only applies to spreadsheet,
+        table cells and equations and charts etc ... unless that becomes a
+        toggle"). One undo step; once saved, nothing is left to restore."""
+        from ..io.pdfbase import calcforge_items
+
         here = {page.uid for page in self.document.pages}
         found = [entry for entry in getattr(self.document, "deleted_elsewhere", None) or []
                  if entry["page"].get("uid") not in here]      # (not already back)
@@ -4418,16 +4422,50 @@ class MainWindow(QMainWindow):
             self.status_hint.setText("No pages were deleted in another program since "
                                      "this document was last saved here")
             return False
+
+        def name(e):
+            label = e["page"].get("label")
+            return f"page {e['number']}" + (f" “{label}”" if label else "")
+
+        def has_calc(e):
+            return bool(calcforge_items(e["page"]) or e["page"].get("sheet"))
+
+        def has_markups(e):
+            return any(isinstance(p, dict) and p not in calcforge_items(e["page"])
+                       for p in e["page"].get("items", []))
+
         if ask and self.interactive_prompts:
-            listing = "\n".join(f"• page {e['number']}"
-                                 + (f" “{e['page'].get('label')}”" if e["page"].get("label") else "")
-                                 for e in found)
-            if QMessageBox.question(
-                    self, "Restore Deleted Pages",
-                    f"These pages were deleted in another program and will be put back "
-                    f"where they were, with everything CalcForge had on them:\n\n{listing}",
-                    QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
-                return False
+            from PySide6.QtWidgets import QCheckBox
+
+            from .release import done_with
+            ours = [name(e) for e in found if has_calc(e)]
+            only_markups = [name(e) for e in found if not has_calc(e)]
+            text = "Pages deleted in another program:\n\n" + "\n".join(
+                "• " + name(e) for e in found) + "\n\n"
+            text += ("Restore puts back, on pages where they were, the equations, tables, "
+                     "spreadsheets and charts of " + ", ".join(ours) + "." if ours else
+                     "None of them had equations, tables, spreadsheets or charts.")
+            if only_markups:
+                text += "\n" + ", ".join(only_markups) + (" has" if len(only_markups) == 1 else
+                                                          " have") + " only markups."
+            text += "\n\nThe pages' own drawings went with the file's pages and are not restored."
+            box = QMessageBox(QMessageBox.Question, "Restore Deleted Pages", text,
+                              QMessageBox.Ok | QMessageBox.Cancel, self)
+            box.button(QMessageBox.Ok).setText("Restore")
+            tick = QCheckBox("Also restore the markups that were on them", box)
+            tick.setEnabled(any(has_markups(e) for e in found))
+            box.setCheckBox(tick)
+            try:
+                if box.exec() != QMessageBox.Ok:
+                    return False
+                markups = tick.isChecked()
+            finally:
+                done_with(box)
+        found = [e for e in found if has_calc(e) or (markups and has_markups(e))]
+        if not found:
+            self.status_hint.setText("Nothing to restore: the pages deleted elsewhere had "
+                                     "no equations, tables, spreadsheets or charts")
+            return False
         import copy
 
         from ..core.document import Page
@@ -4437,13 +4475,16 @@ class MainWindow(QMainWindow):
             restored, runs = [], set()
             for entry in sorted(found, key=lambda e: e["number"]):
                 data = copy.deepcopy(entry["page"])
-                if entry["drawing_lost"] or (data.get("pdf_key")
-                                             and data["pdf_key"] not in self.document.assets):
-                    # its drawing was the file's own page, deleted with it:
-                    # back as paper, with what CalcForge put on it
-                    data["pdf_key"] = None
-                    data["pdf_page_index"] = None
-                    data["written_here"] = True
+                if not markups:
+                    data["items"] = calcforge_items(data)
+                # never the page's drawing (a PDF page or a picture): back as
+                # paper, with what CalcForge put on it
+                data["pdf_key"] = None
+                data["pdf_page_index"] = None
+                data["background_key"] = None
+                data["written_here"] = True
+                data["pdf_annotations"] = True
+                data["markup_annotations"] = []
                 runs |= {p.get("uid") for p in data.get("items", [])
                          if isinstance(p, dict) and p.get("type") == "sheet_run"}
                 at = next((i + 1 for i, e in enumerate(entries) if e.get("uid") == entry["after"]), 0)
@@ -4461,8 +4502,10 @@ class MainWindow(QMainWindow):
             self.current_index = max(0, min(first, len(self.document.pages) - 1))
         self._structural_change("Restore deleted pages", mutate)
         numbers = ", ".join(str(e["number"]) for e in found)
-        self.status_hint.setText(f"Restored page{'s' if len(found) != 1 else ''} {numbers}, "
-                                 f"deleted in another program")
+        self.status_hint.setText(
+            f"Restored what CalcForge had on page{'s' if len(found) != 1 else ''} {numbers}, "
+            f"deleted in another program" + (", with their markups" if markups else
+                                             " (not their markups)"))
         return True
 
     def save_document(self) -> bool:
