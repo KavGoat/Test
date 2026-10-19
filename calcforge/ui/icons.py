@@ -598,6 +598,48 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         _pen(painter, FAINT, 1.0)
         for offset in range(4):
             painter.drawLine(QPointF(8, 7 + offset * 3.2), QPointF(16, 7 + offset * 3.2))
+    # -- the Thumbnails panel's buttons, as Revu's: a page's tray, then what
+    #    goes into it (the user, 2026-10-19: "■" was not a page) ----------
+    elif name in ("insert_pages", "insert_blank_page", "insert_sheet_page"):
+        _pen(painter, INK, 1.4)
+        painter.drawPolyline(QPolygonF([QPointF(4.5, 3), QPointF(4.5, 12.5),
+                                        QPointF(19.5, 12.5), QPointF(19.5, 3)]))
+        if name == "insert_pages":
+            # pages coming in from a file: a run of sheets along its foot
+            _pen(painter, INK, 1.2, Qt.DotLine)
+            painter.drawLine(QPointF(5.5, 16.5), QPointF(18.5, 16.5))
+        else:
+            if name == "insert_sheet_page":
+                # its cells inside the tray
+                _pen(painter, FAINT, 1.0)
+                for x in (9.5, 14.5):
+                    painter.drawLine(QPointF(x, 4), QPointF(x, 11.5))
+                painter.drawLine(QPointF(5.5, 7.5), QPointF(18.5, 7.5))
+            # Revu's new-page sparkle, in the amber accent
+            _pen(painter, WARM, 1.3)
+            centre = QPointF(12, 18)
+            for angle in range(0, 180, 45):
+                dx = math.cos(math.radians(angle)) * 3.2
+                dy = math.sin(math.radians(angle)) * 3.2
+                painter.drawLine(QPointF(centre.x() - dx, centre.y() - dy),
+                                 QPointF(centre.x() + dx, centre.y() + dy))
+    elif name == "duplicate_page":
+        _pen(painter, INK, 1.3)
+        painter.drawPolyline(QPolygonF([QPointF(8.5, 5.5), QPointF(8.5, 2.5),
+                                        QPointF(19.5, 2.5), QPointF(19.5, 16.5),
+                                        QPointF(16.5, 16.5)]))
+        painter.drawRect(QRectF(4.5, 6.5, 11, 15))
+        _pen(painter, WARM, 1.3)
+        painter.drawLine(QPointF(10, 11), QPointF(10, 17))
+        painter.drawLine(QPointF(7, 14), QPointF(13, 14))
+    elif name == "delete_pages":
+        _pen(painter, INK, 1.3)
+        painter.drawPolyline(QPolygonF([QPointF(13.5, 21.5), QPointF(5.5, 21.5),
+                                        QPointF(5.5, 2.5), QPointF(18.5, 2.5),
+                                        QPointF(18.5, 11.5)]))
+        _pen(painter, DANGER, 1.5)
+        painter.drawLine(QPointF(14.5, 14.5), QPointF(20.5, 20.5))
+        painter.drawLine(QPointF(20.5, 14.5), QPointF(14.5, 20.5))
     elif name == "pdf":
         # as Revu's line icons: the sheet in the icons' ink, its word in the warm accent
         _pen(painter, INK, 1.4)

@@ -672,3 +672,28 @@ window emptied by a drag closes):
 Undo steps now find their pages through the canvas and their window as the
 one holding the document when they are applied (ui/commands.py
 `on_the_canvas`, MainWindow._on_its_window). `tests/test_tab_drag_windows.py`.
+
+## 2026-10-19 — the Thumbnails panel as Revu's
+
+The user's photo showed page 3 on a second row with room for it on the
+first. The grid gave each cell width / columns, so the cells came to the
+whole width, and Qt starts a new row as soon as the next cell reaches the
+right edge; it also kept a scroll bar's width spare whenever the strip might
+scroll. The strip now works out its columns from its own width (less the
+scroll bar only while one is shown), leaves Qt its spare pixel, and lays
+itself out again on resize, zoom, pages put in or taken out, and at 125 %
+and 150 %. Pages fewer than the row has room for share it, centred.
+
+The header is Revu's: "Thumbnails ▾" (the title) is the panel's menu —
+every insert Before / After, Duplicate, Extract, Split, Delete, Crop and
+Rotate Pages, Page Setup, Set Scale, Larger / Smaller Thumbnails (also on
+the Window menu) — and the
+buttons follow it as small flat icons, evenly spaced: Insert Pages ▾ (new
+here, as Revu's), Insert Blank Page ▾, Insert Spreadsheet Page ▾ (a page
+icon, not "▦"), Duplicate Page and Delete Pages. On a narrow panel they go
+on a line of their own under the title. Pin, float, roll up and close are
+small and flat on every panel. The thumbnails have a thin neutral edge, the
+picked page Revu's blue frame (#0972b8 in dark), the page in view an
+outline just outside it, the number centred under the page and its scale
+under that, on the panel's own ground. `tests/test_thumbnails_look.py`.
+

@@ -235,6 +235,8 @@ BUILDERS: dict[str, Callable] = {
 #: Where panel and bar buttons are found, and the context their ids are in.
 BUTTON_ROOTS = (
     ("thumbnails", lambda w: w.pages_panel),
+    # its buttons sit on its title bar, after "Thumbnails ▾"
+    ("thumbnails", lambda w: w.pages_panel.header_tools),
     ("bookmarks", lambda w: w.bookmarks_panel),
     ("markupslist", lambda w: w.markups_panel),
     ("toolchest", lambda w: w.toolsets_panel),
