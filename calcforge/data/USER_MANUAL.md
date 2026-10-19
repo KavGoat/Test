@@ -728,6 +728,14 @@ cells' own Find and Replace — see Part 3.)
   (`Ctrl+9`), **Fit Width** (`Ctrl+0`), **Actual Size** (`Ctrl+8`), **Zoom to
   Selection** (`Ctrl+2`), **Zoom In** and **Zoom Out** (no key by default), and the
   zoom box in the status bar.
+- **Big drawing sets.** As in Revu, a page you have not looked at yet appears at
+  once at low resolution and sharpens a moment later: when a document opens, a
+  small picture of every page is drawn in the background, so however fast you
+  scroll, flick, drag the scroll bar or zoom out, each page shows itself (soft)
+  rather than a blank sheet until its sharp drawing arrives. While a zoom is
+  moving, the drawing already made stands in, scaled; once you stop, the page
+  is drawn sharp at exactly the zoom on screen, the same as before. Scrolling
+  draws ahead in the direction you are going. Nothing needs setting.
 - **Moving about**: `Page Up` / `Page Down` move a screenful; `Home` and `End` go
   to the first and last page; `Ctrl+Left` / `Ctrl+Right` (and `Ctrl+Page Up` /
   `Ctrl+Page Down`) turn pages; `Ctrl+Home` / `Ctrl+End` reach the very ends. The
