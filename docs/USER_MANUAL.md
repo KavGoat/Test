@@ -615,11 +615,19 @@ tool set keep their own drawing.
 
 ### Pages
 
-**Thumbnails panel** (`Alt+T`). A picture of every page; click to go there; drag
-pages to reorder them (a run of picked pages moves together); drop a PDF file
-onto it to insert its pages there. `Ctrl`+wheel over the panel changes the
-picture size. Its buttons insert a blank page (**+**), insert a spreadsheet page
-(**▦**), duplicate (**⧉**) and delete (**−**).
+**Thumbnails panel** (`Alt+T`). A picture of every page, as many to a row as
+the panel has room for, with the page number (and label) centred under it and
+its scale under that when it has one; the page picked out is framed in blue.
+Click to go there; drag pages to reorder them (a run of picked pages moves
+together); drop a PDF file onto it to insert its pages there. `Ctrl`+wheel over
+the panel changes the picture size, as do **Larger Thumbnails** and **Smaller
+Thumbnails** (on the Window menu too). The panel's title, **Thumbnails ▾**, is
+its menu: every insert (Before or After), Duplicate Page, Extract Pages…, Split
+Document…, Delete Pages…, Crop Pages…, Rotate Pages, Page Setup…, Set Scale… and
+the two sizes. The buttons after it are **Insert Pages**, **Insert Blank Page**
+and **Insert Spreadsheet Page** (each with Before or After on its arrow; a click
+puts it after this page), **Duplicate Page** and **Delete Pages**; on a narrow
+panel they go on a line of their own under the title.
 
 **A page's right-click menu** (also **Document ▸ Current Page**): Page Setup…,
 Set Scale…, Cut, Copy and Paste Pages (Before or After), Move Up, Move Down,
@@ -1217,8 +1225,8 @@ The engine has **119** built-in functions.
   (Table1…) on a tab above it, always prints, and is part of the page in the saved
   PDF. Dragging its edge or corner adds or removes rows and columns.
 - A **spreadsheet page** is a whole page of cells: **Document ▸ Insert ▸
-  Spreadsheet Page ▸ Before / After**, the Thumbnails panel's ▦ button, or a
-  page's right-click menu. Consecutive spreadsheet pages are **one sheet** that
+  Spreadsheet Page ▸ Before / After**, the Thumbnails panel's Insert Spreadsheet
+  Page button, or a page's right-click menu. Consecutive spreadsheet pages are **one sheet** that
   grows a page at a time; the columns that fit inside the page margins print, and
   everything to the right of the blue line is a **scratch area** for side
   calculations that never prints. Only markups can go on a spreadsheet page.

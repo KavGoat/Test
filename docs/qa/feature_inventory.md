@@ -13,14 +13,14 @@ How it was walked: the menu bar with every lazy submenu asked to fill (`aboutToS
 
 | Area | Lines | UNTESTED | ≈ named only | cmd: key not pressed |
 |---|---:|---:|---:|---:|
-| Menu bar | 237 | 16 | 82 |  |
+| Menu bar | 238 | 16 | 83 |  |
 | Toolbars | 222 | 50 | 99 |  |
-| Right-click menus | 404 | 116 | 176 |  |
-| Panels | 117 | 56 | 50 |  |
+| Right-click menus | 434 | 116 | 191 |  |
+| Panels | 120 | 54 | 55 |  |
 | Dialogs | 84 | 31 | 3 |  |
-| Keys | 851 | 593 | 0 | 123 |
+| Keys | 852 | 593 | 0 | 124 |
 | Mouse | 44 | 7 | 0 |  |
-| **Total** | **1959** | **869** | **410** | **123** |
+| **Total** | **1994** | **867** | **431** | **124** |
 
 ### Top 20 placement smells
 
@@ -47,7 +47,7 @@ How it was walked: the menu bar with every lazy submenu asked to fill (`aboutToS
 
 All 31 are in the last section.
 
-## Menu bar (237)
+## Menu bar (238)
 
 | Where (path) | Name | Shortcut | Covered by |
 |---|---|---|---|
@@ -68,14 +68,14 @@ All 31 are in the last section.
 | File | Save All |  | test_view_workspace.py::test_open_recent_save_all_and_close_all |
 | File | Import ▸ |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
 | File ▸ Import | Pages ▸ | Ctrl+Shift+I | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus |
-| File ▸ Import ▸ Pages | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| File ▸ Import ▸ Pages | After… | Ctrl+Shift+I | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| File ▸ Import ▸ Pages | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| File ▸ Import ▸ Pages | After… | Ctrl+Shift+I | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
 | File ▸ Import | Image Page ▸ |  | test_usability.py::test_inserting_an_image_page_can_be_undone (+1) |
-| File ▸ Import ▸ Image Page | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| File ▸ Import ▸ Image Page | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| File ▸ Import ▸ Image Page | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| File ▸ Import ▸ Image Page | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
 | File ▸ Import | Excel Workbook ▸ |  | test_sheet_gone.py::test_its_pages_deleted_from_the_thumbnail_menu (+5) |
-| File ▸ Import ▸ Excel Workbook | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| File ▸ Import ▸ Excel Workbook | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| File ▸ Import ▸ Excel Workbook | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| File ▸ Import ▸ Excel Workbook | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
 | File ▸ Import | Tool Set… |  | test_usability.py::test_importing_a_bluebeam_tool_set_fills_the_tool_chest (+6) |
 | File | Export ▸ |  | ≈ test_command_families.py::test_import_and_export_entries_do_not_repeat_the_menus_word (+1) |
 | File ▸ Export | PDF… | Ctrl+E | test_app.py::test_a_page_excluded_from_print_is_grey_and_is_not_exported (+32) |
@@ -96,7 +96,6 @@ All 31 are in the last section.
 | Edit | Offset | O | test_offset.py::test_offset_on_the_page_is_one_undo_and_can_replace (+1) |
 | Edit | Multiply… | Ctrl+M | test_usability.py::test_duplicate_along_an_offset (+1) |
 | Edit | Delete |  | test_app.py::test_delete_copy_paste_and_duplicate (+4) |
-| Edit | Edit Selected | F2 | ≈ test_consistency.py::test_f2_is_on_the_edit_menu_and_bindable |
 | Edit | Order ▸ |  | ≈ test_command_families.py::test_edit_and_the_markup_menu_group_the_same_families_alike (+2) |
 | Edit ▸ Order | Bring to Front | Ctrl+Shift+] | test_app.py::test_z_order_and_alignment (+2) |
 | Edit ▸ Order | Bring Forward | Ctrl+] | test_app.py::test_z_order_and_alignment (+2) |
@@ -104,10 +103,10 @@ All 31 are in the last section.
 | Edit ▸ Order | Send to Back | Ctrl+Shift+[ | test_app.py::test_z_order_and_alignment (+2) |
 | Edit | Alignment ▸ |  | ≈ test_command_families.py::test_edit_and_the_markup_menu_group_the_same_families_alike (+3) |
 | Edit ▸ Alignment | 6 choices: Align Left, Align Centre, Align Right, Align Top, Align Middle, Align Bottom *(value list)* |  | ≈ test_command_families.py::test_edit_and_the_markup_menu_group_the_same_families_alike (+1) |
-| Edit | Flatten |  | test_consistency.py::test_calculation_text_is_never_flattened_or_hidden (+2) |
+| Edit | Flatten |  | test_revu_flatten_scale.py::test_right_click_flatten_is_at_once_and_recoverable (+1) |
 | Edit | Unflatten | Ctrl+Shift+U | test_revu_flatten_scale.py::test_allow_markup_recovery_on_can_be_unflattened (+2) |
 | Edit | Lock | Ctrl+Shift+L / Ctrl+L | test_app.py::test_lock_prevents_moving (+1) |
-| Edit | Hide |  | test_consistency.py::test_calculation_text_is_never_flattened_or_hidden (+1) |
+| Edit | Hide |  | test_document_lifecycle.py::test_undo_reselects |
 | Edit | Show Hidden |  | test_usability.py::test_hidden_markups_go_away_and_come_back |
 | Edit | Group | Ctrl+G | test_calc_editing.py::test_grouping_and_aligning_keep_the_calculation (+17) |
 | Edit | Ungroup | Ctrl+Shift+G | test_usability.py::test_ungrouping_puts_them_back_on_their_own (+1) |
@@ -124,7 +123,7 @@ All 31 are in the last section.
 | Edit ▸ Text | Increase Font Size | Ctrl+Alt+Up | ≈ test_usability.py::test_every_label_the_user_reads_is_one_or_two_words |
 | Edit ▸ Text | Decrease Font Size | Ctrl+Alt+Down | ≈ test_usability.py::test_every_label_the_user_reads_is_one_or_two_words |
 | Edit | Pan |  | test_markup_styles.py::test_the_toolbar_follows_the_tool_in_hand |
-| Edit | Select |  | test_app.py::test_select_move_and_undo (+172) |
+| Edit | Select |  | test_app.py::test_select_move_and_undo (+173) |
 | Edit | Select All | Ctrl+A | test_app.py::test_delete_copy_paste_and_duplicate (+2) |
 | Edit | Snapshot |  | test_calc_editing.py::test_a_snapshot_copies_an_equation_as_line_work (+5) |
 | Edit | Format Painter | Ctrl+Shift+C | test_review_regressions.py::test_format_painter_stays_armed_until_escape (+9) |
@@ -170,25 +169,25 @@ All 31 are in the last section.
 | View | Next Page | Ctrl+Right / Ctrl+PgDown | test_canvas.py::test_ctrl_page_down_goes_to_the_next_page |
 | Document | Document Properties… | Ctrl+D | ≈ test_revu_keys.py::test_revus_keys_for_flatten_dark_mode_and_lock (+1) |
 | Document | Page Setup… |  | test_document_lifecycle.py::test_page_setup_ok_with_no_change_is_no_step |
-| Document | Rotate Pages ▸ |  | ≈ test_command_families.py::test_rotate_pages_is_on_the_document_menu_as_on_the_page_menu (+4) |
+| Document | Rotate Pages ▸ |  | ≈ test_command_families.py::test_rotate_pages_is_on_the_document_menu_as_on_the_page_menu (+5) |
 | Document ▸ Rotate Pages | Clockwise |  | test_command_families.py::test_rotate_pages_is_on_the_document_menu_as_on_the_page_menu (+1) |
 | Document ▸ Rotate Pages | Anticlockwise |  | test_calc_editing.py::test_rotating_a_page_turns_its_equations_but_never_changes_a_result (+13) |
 | Document | Insert ▸ |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+13) |
 | Document ▸ Insert | Blank Page ▸ | Ctrl+Shift+N | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus |
-| Document ▸ Insert ▸ Blank Page | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| Document ▸ Insert ▸ Blank Page | After… | Ctrl+Shift+N | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
-| Document ▸ Insert | Spreadsheet Page ▸ |  | test_charts.py::test_a_chart_on_a_sheet_page_sits_over_the_cells_and_moves_with_them (+24) |
+| Document ▸ Insert ▸ Blank Page | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Document ▸ Insert ▸ Blank Page | After… | Ctrl+Shift+N | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
+| Document ▸ Insert | Spreadsheet Page ▸ |  | test_charts.py::test_a_chart_on_a_sheet_page_sits_over_the_cells_and_moves_with_them (+25) |
 | Document ▸ Insert ▸ Spreadsheet Page | Before |  | test_sheet_qa_round1.py::test_the_slot_line_of_pasted_pages_goes_with_their_undo (+4) |
 | Document ▸ Insert ▸ Spreadsheet Page | After |  | test_sheet_qa_round1.py::test_the_slot_line_of_pasted_pages_goes_with_their_undo (+4) |
 | Document ▸ Insert | Pages ▸ | Ctrl+Shift+I | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus |
-| Document ▸ Insert ▸ Pages | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| Document ▸ Insert ▸ Pages | After… | Ctrl+Shift+I | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Document ▸ Insert ▸ Pages | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Document ▸ Insert ▸ Pages | After… | Ctrl+Shift+I | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
 | Document ▸ Insert | Image Page ▸ |  | test_usability.py::test_inserting_an_image_page_can_be_undone (+1) |
-| Document ▸ Insert ▸ Image Page | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| Document ▸ Insert ▸ Image Page | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Document ▸ Insert ▸ Image Page | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Document ▸ Insert ▸ Image Page | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
 | Document ▸ Insert | Excel Workbook ▸ |  | test_sheet_gone.py::test_its_pages_deleted_from_the_thumbnail_menu (+5) |
-| Document ▸ Insert ▸ Excel Workbook | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| Document ▸ Insert ▸ Excel Workbook | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Document ▸ Insert ▸ Excel Workbook | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Document ▸ Insert ▸ Excel Workbook | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
 | Document | Extract Pages… | Ctrl+Shift+X | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus |
 | Document | Split Document… |  | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus |
 | Document | Delete Pages… | Ctrl+Shift+D | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus |
@@ -205,7 +204,7 @@ All 31 are in the last section.
 | Batch | Flatten… | Ctrl+Shift+M | test_usability.py::test_document_flattening_uses_the_types_chosen |
 | Batch | Unflatten | Ctrl+Shift+U | test_revu_flatten_scale.py::test_allow_markup_recovery_on_can_be_unflattened (+2) |
 | Tools | Markup ▸ |  | ≈ test_calc_modes.py::test_the_status_bar_shows_the_mode_and_f12_switches_it (+5) |
-| Tools ▸ Markup | 22 choices: Text Box, Callout, Cloud+, Note, Stamp, Flag, Image, Crop Image … *(value list)* |  | test_app.py::test_applying_redactions_destroys_what_is_underneath (+39) |
+| Tools ▸ Markup | 22 choices: Text Box, Callout, Cloud+, Note, Stamp, Flag, Image, Crop Image … *(value list)* |  | test_app.py::test_applying_redactions_destroys_what_is_underneath (+40) |
 | Tools | Measure ▸ |  | ≈ test_command_families.py::test_set_scale_has_one_name (+7) |
 | Tools ▸ Measure | Length |  | test_app.py::test_measurement_follows_the_page_scale (+17) |
 | Tools ▸ Measure | Dimension |  | test_usability.py::test_a_dimension_carries_its_own_text (+15) |
@@ -267,7 +266,7 @@ All 31 are in the last section.
 | Calculation ▸ Program | While |  | ≈ test_calc_panels.py::test_the_calculation_toolbar_has_smaths_commands |
 | Calculation ▸ Program | Line |  | ≈ test_calc_panels.py::test_the_calculation_toolbar_has_smaths_commands (+5) |
 | Calculation | Conditional Formatting… |  | test_exercise_round1_undo.py::test_conditional_formatting_cancel_changes_nothing_and_ok_is_one_undo |
-| Calculation | Page Layout ▸ |  | ≈ test_command_families.py::test_sheet_layout_has_one_name_and_page_breaks_one_shape (+3) |
+| Calculation | Page Layout ▸ |  | ≈ test_command_families.py::test_sheet_layout_has_one_name_and_page_breaks_one_shape (+4) |
 | Calculation ▸ Page Layout | Breaks ▸ |  | ≈ test_command_families.py::test_sheet_layout_has_one_name_and_page_breaks_one_shape (+2) |
 | Calculation ▸ Page Layout ▸ Breaks | Insert Page Break *(disabled (fresh window))* |  | test_command_families.py::test_sheet_layout_has_one_name_and_page_breaks_one_shape |
 | Calculation ▸ Page Layout ▸ Breaks | Remove Page Break *(disabled (fresh window))* |  | ≈ test_command_families.py::test_sheet_layout_has_one_name_and_page_breaks_one_shape (+3) |
@@ -280,6 +279,8 @@ All 31 are in the last section.
 | Window | Panels ▸ |  | ≈ test_command_families.py::test_the_page_panel_is_not_called_page_setup (+2) |
 | Window ▸ Panels | 9 choices: Bookmarks, Markups List, Maths, Page, Properties, Search, Thumbnails, Tool Chest … *(value list, toggles)* |  | test_every_command_is_bindable.py::test_a_key_given_in_the_dialog_runs_a_command_of_each_group (+1) |
 | Window | Hide/Show Panels | Shift+F4 | ≈ test_command_families.py::test_window_panels_are_alphabetical_with_revus_keys |
+| Window | Larger Thumbnails |  | ≈ test_thumbnails_look.py::test_thumbnails_menu_opens_from_its_title_with_the_options (+1) |
+| Window | Smaller Thumbnails |  | ≈ test_thumbnails_look.py::test_thumbnails_menu_opens_from_its_title_with_the_options (+1) |
 | Window | Full Screen *(toggle)* | F11 | test_native_frame.py::test_full_screen_comes_and_goes_with_the_ordinary_frame (+2) |
 | Window | Presentation *(toggle)* | Ctrl+Return | test_view_workspace.py::test_presentation_shows_the_page_alone_and_esc_puts_everything_back |
 | Window | Pin Panels *(toggle)* |  | test_layout.py::test_pin_every_panel_at_once (+1) |
@@ -305,8 +306,8 @@ All 31 are in the last section.
 | Toolbar Main | Open… | Ctrl+O | test_app.py::test_pdf_review_snapshot_survives_edit_save_reopen_and_export (+1) |
 | Toolbar Main | Save | Ctrl+S | test_app.py::test_a_page_excluded_from_print_is_grey_and_is_not_exported (+41) |
 | Toolbar Main | Pages | Ctrl+Shift+I | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus |
-| Toolbar Main ▸ Pages | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| Toolbar Main ▸ Pages | After… | Ctrl+Shift+I | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Toolbar Main ▸ Pages | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Toolbar Main ▸ Pages | After… | Ctrl+Shift+I | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
 | Toolbar Main | PDF… | Ctrl+E | test_app.py::test_a_page_excluded_from_print_is_grey_and_is_not_exported (+32) |
 | Toolbar Main | Print… | Ctrl+P | test_output.py::test_the_print_path_survives_a_second_run (+1) |
 | Toolbar Main | Undo | Ctrl+Z | test_markup_styles.py::test_r_then_1_draws_style_1_and_the_next_one_is_the_default |
@@ -338,7 +339,7 @@ All 31 are in the last section.
 | Toolbar Measure | Calibrate *(toggle)* |  | test_usability.py::test_two_clicks_and_a_length_set_the_scale (+2) |
 | Toolbar Measure | Sketch to Scale Rectangle *(toggle)* |  | test_propbar_gaps.py::test_line_colour_is_a_framed_swatch_that_sets_the_line (+10) |
 | Toolbar Measure | Sketch to Scale Ellipse *(toggle)* |  | test_usability.py::test_one_ellipse_diameter_makes_a_circle_and_escape_cancels |
-| Toolbar Tools | Select *(toggle)* | Esc | test_app.py::test_select_move_and_undo (+172) |
+| Toolbar Tools | Select *(toggle)* | Esc | test_app.py::test_select_move_and_undo (+173) |
 | Toolbar Tools | Snapshot *(toggle)* |  | test_calc_editing.py::test_a_snapshot_copies_an_equation_as_line_work (+5) |
 | Toolbar Tools | Pan *(toggle)* | Shift+V | test_markup_styles.py::test_the_toolbar_follows_the_tool_in_hand |
 | Toolbar Tools | Hyperlink *(toggle)* |  | test_exercise_round1_undo.py::test_a_link_cancelled_leaves_nothing_and_one_ok_is_one_undo (+1) |
@@ -346,7 +347,7 @@ All 31 are in the last section.
 | Toolbar Tools | Pen *(toggle)* | Alt+P | test_usability.py::test_shift_draws_a_straight_stroke_with_the_pen (+2) |
 | Toolbar Tools | Highlight *(toggle)* |  | test_usability.py::test_the_highlighter_goes_straight_on_shift_too |
 | Toolbar Tools | Eraser *(toggle)* | Shift+E | test_usability.py::test_the_eraser_rubs_out_ink_and_leaves_shapes_alone |
-| Toolbar Tools | Line *(toggle)* |  | test_editing_performance.py::test_pointer_snapping_tracks_movement_rotation_visibility_and_undo (+22) |
+| Toolbar Tools | Line *(toggle)* |  | test_editing_performance.py::test_pointer_snapping_tracks_movement_rotation_visibility_and_undo (+23) |
 | Toolbar Tools | Arrow *(toggle)* |  | test_propbar_gaps.py::test_each_line_end_has_its_own_size (+5) |
 | Toolbar Tools | Arc *(toggle)* | Shift+C | test_usability.py::test_an_arc_bends (+1) |
 | Toolbar Tools | Polyline *(toggle)* |  | test_output.py::test_every_markup_goes_out_as_a_markup (+3) |
@@ -357,14 +358,14 @@ All 31 are in the last section.
 | Toolbar Tools | Highlight Area *(toggle)* |  | UNTESTED |
 | Toolbar Tools | Mark for Redaction *(toggle)* |  | test_app.py::test_applying_redactions_destroys_what_is_underneath (+1) |
 | Toolbar Tools | Whiteout *(toggle)* |  | test_review_regressions.py::test_whiteout_preserves_outside_vectors_and_undo |
-| Toolbar Tools | Text Box *(toggle)* |  | test_app.py::test_applying_redactions_destroys_what_is_underneath (+39) |
+| Toolbar Tools | Text Box *(toggle)* |  | test_app.py::test_applying_redactions_destroys_what_is_underneath (+40) |
 | Toolbar Tools | Callout *(toggle)* |  | test_escape_recovery.py::test_escape_from_inline_panel_editor_cancels_callout (+19) |
 | Toolbar Tools | Cloud+ *(toggle)* | Shift+Q | test_markup_interaction_round6.py::test_markups_get_the_tools_name_as_subject (+6) |
 | Toolbar Tools | Note *(toggle)* |  | test_propbar_per_kind.py::test_a_notes_icon_from_the_bar_and_the_panel_saved_as_the_pdfs_name (+6) |
 | Toolbar Tools | Stamp *(toggle)* |  | test_usability.py::test_the_stamp_wording_is_only_shown_for_the_stamp |
 | Toolbar Tools | Flag *(toggle)* | Shift+F | test_usability.py::test_a_flag_is_pinned_where_it_is_clicked (+1) |
 | Toolbar Tools | Image *(toggle)* |  | test_usability.py::test_a_click_placed_image_hangs_from_the_pointers_bottom_left (+4) |
-| Toolbar Tools | Crop Image *(toggle)* |  | test_app.py::test_drag_tools_create_a_markup (+387) |
+| Toolbar Tools | Crop Image *(toggle)* |  | test_app.py::test_drag_tools_create_a_markup (+388) |
 | Toolbar Tools | Table *(toggle)* |  | ≈ test_calc_panels.py::test_the_calculation_toolbar_has_smaths_commands (+2) |
 | Toolbar Tools | Contents *(toggle)* |  | test_output.py::test_a_contents_line_is_a_working_link_in_the_exported_pdf (+1) |
 | Toolbar Tools | Reuse *(toggle)* |  | test_app.py::test_sticky_tool_keeps_drawing (+1) |
@@ -399,10 +400,10 @@ All 31 are in the last section.
 | Toolbar Properties | Redaction — Subject, and more *(_IconOnlyPopupCombo; shown with a markup selected)* |  | ≈ test_title_row_and_panels.py::test_the_properties_bar_reads_line_fill_hatch_font_in_revus_order (+1) |
 | Toolbar Properties | Link — Subject, and more *(_IconOnlyPopupCombo; shown with a markup selected)* |  | ≈ test_title_row_and_panels.py::test_the_properties_bar_reads_line_fill_hatch_font_in_revus_order (+1) |
 | Toolbar Properties | Text box — Subject, and more *(_IconOnlyPopupCombo; shown with a markup selected)* |  | ≈ test_title_row_and_panels.py::test_the_properties_bar_reads_line_fill_hatch_font_in_revus_order (+1) |
-| Toolbar Properties | fontFamily *(FontComboBox; shown with a markup selected)* |  | ≈ test_consistency.py::test_the_toolbar_sets_the_picked_equations_size_colour_and_bold (+3) |
-| Toolbar Properties | Font size, in points *(ValueCombo; shown with a markup selected)* |  | ≈ test_consistency.py::test_the_toolbar_sets_the_picked_equations_size_colour_and_bold (+6) |
+| Toolbar Properties | fontFamily *(FontComboBox; shown with a markup selected)* |  | ≈ test_september17_review.py::test_count_properties_expose_number_and_text_style (+2) |
+| Toolbar Properties | Font size, in points *(ValueCombo; shown with a markup selected)* |  | ≈ test_exercise_round1_undo.py::test_a_markup_styles_text_look_is_drawn (+4) |
 | Toolbar Properties | Auto: the font size set to the largest that fits the box, and kept so as the words or the box change *(ToolButton; shown with a markup selected)* |  | ≈ test_propbar_gaps.py::test_a_callouts_auto_font_size_fills_its_box |
-| Toolbar Properties | Text colour *(ColorButton; shown with a markup selected)* |  | ≈ test_consistency.py::test_the_toolbar_sets_the_picked_equations_size_colour_and_bold (+2) |
+| Toolbar Properties | Text colour *(ColorButton; shown with a markup selected)* |  | ≈ test_exercise_round1_undo.py::test_a_markup_styles_text_look_is_drawn (+1) |
 | Toolbar Properties | Font style: bold, italic, underline, strikethrough; alignment *(PopupCombo; shown with a markup selected)* |  | ≈ test_propbar_gaps.py::test_strikethrough_superscript_and_subscript (+1) |
 | Toolbar Properties | Callout — Subject, and more *(_IconOnlyPopupCombo; shown with a markup selected)* |  | ≈ test_title_row_and_panels.py::test_the_properties_bar_reads_line_fill_hatch_font_in_revus_order (+1) |
 | Toolbar Properties | Shape: Rectangle *(IconCombo; shown with a markup selected)* |  | ≈ test_title_row_and_panels.py::test_the_properties_bar_reads_line_fill_hatch_font_in_revus_order (+1) |
@@ -516,12 +517,12 @@ All 31 are in the last section.
 | Sheet tabs bar | + *(button, spreadsheet page)* |  | UNTESTED |
 | Toolbar Properties | Sheet1 *(_IconOnlyPopupCombo; shown on a spreadsheet page)* |  | ≈ test_title_row_and_panels.py::test_the_properties_bar_reads_line_fill_hatch_font_in_revus_order (+1) |
 
-## Right-click menus (404)
+## Right-click menus (434)
 
 | Where (path) | Name | Shortcut | Covered by |
 |---|---|---|---|
 | Canvas, two shapes selected (entries beyond one rectangle's) | Group | Ctrl+G | test_calc_editing.py::test_grouping_and_aligning_keep_the_calculation (+17) |
-| Canvas, two shapes selected (entries beyond one rectangle's) | Change Colours… |  | ≈ test_color_processing.py::test_page_colour_change_is_the_drawings_and_a_group_is_how_markups_change (+1) |
+| Canvas, two shapes selected (entries beyond one rectangle's) | Change Colours… |  | test_color_processing.py::test_a_photo_has_colorize_and_mask_only (+1) |
 | Canvas, empty page (Markup mode) ▸ Insert Here | Text Box |  | ≈ test_command_families.py::test_every_tool_name_is_title_case (+2) |
 | Canvas, empty page (Markup mode) ▸ Insert Here | Callout |  | ≈ test_context_menus.py::test_calc_modes_page_menu_has_smaths_inserts (+3) |
 | Canvas, empty page (Markup mode) ▸ Insert Here | Note |  | ≈ test_calc_panels.py::test_calculation_text_lands_on_the_grid_when_moved (+7) |
@@ -590,7 +591,7 @@ All 31 are in the last section.
 | Markups List row | Font size ▸ |  | UNTESTED |
 | Markups List row | Opacity ▸ |  | ≈ test_ui_fixes.py::test_hatch_opacity_is_its_own_and_leaves_the_fill_alone (+4) |
 | Markups List row | Lock / unlock |  | UNTESTED |
-| Markups List row | Hide |  | ≈ test_calc_blocks.py::test_a_blocks_menu_and_properties_offer_what_applies_to_it (+4) |
+| Markups List row | Hide |  | ≈ test_calc_blocks.py::test_a_blocks_menu_and_properties_offer_what_applies_to_it (+3) |
 | Markups List row | Delete |  | test_usability.py::test_markups_list_filters_sorts_and_changes_several_at_once |
 | Markups List column heading | Filter Page: (All) + a tick per value |  | test_data_tools_session.py::test_filter_dropdown_sort_and_clear_filter (+3) |
 | Markups List column heading | Filter Type: (All) + a tick per value |  | test_data_tools_session.py::test_filter_dropdown_sort_and_clear_filter (+3) |
@@ -609,40 +610,40 @@ All 31 are in the last section.
 | Markups List column heading | Filter Comment: (All) + a tick per value |  | test_data_tools_session.py::test_filter_dropdown_sort_and_clear_filter (+3) |
 | Thumbnail (one page) — also Document ▸ Current Page ▸ Paste Pages | Before |  | test_sheet_qa_round1.py::test_the_slot_line_of_pasted_pages_goes_with_their_undo (+4) |
 | Thumbnail (one page) — also Document ▸ Current Page ▸ Paste Pages | After |  | test_sheet_qa_round1.py::test_the_slot_line_of_pasted_pages_goes_with_their_undo (+4) |
-| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Blank Page | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Blank Page | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Blank Page | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Blank Page | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
 | Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Spreadsheet Page | Before |  | test_sheet_qa_round1.py::test_the_slot_line_of_pasted_pages_goes_with_their_undo (+4) |
 | Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Spreadsheet Page | After |  | test_sheet_qa_round1.py::test_the_slot_line_of_pasted_pages_goes_with_their_undo (+4) |
-| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Pages | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Pages | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
-| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Image Page | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Image Page | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
-| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Excel Workbook | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Excel Workbook | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
-| Thumbnail (one page) — also Document ▸ Current Page ▸ Rotate Pages | Clockwise |  | ≈ test_command_families.py::test_rotate_pages_is_on_the_document_menu_as_on_the_page_menu (+2) |
-| Thumbnail (one page) — also Document ▸ Current Page ▸ Rotate Pages | Anticlockwise |  | ≈ test_command_families.py::test_rotate_pages_is_on_the_document_menu_as_on_the_page_menu (+1) |
+| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Pages | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Pages | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
+| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Image Page | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Image Page | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
+| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Excel Workbook | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Thumbnail (one page) — also Document ▸ Current Page ▸ Insert Excel Workbook | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
+| Thumbnail (one page) — also Document ▸ Current Page ▸ Rotate Pages | Clockwise |  | ≈ test_command_families.py::test_rotate_pages_is_on_the_document_menu_as_on_the_page_menu (+3) |
+| Thumbnail (one page) — also Document ▸ Current Page ▸ Rotate Pages | Anticlockwise |  | ≈ test_command_families.py::test_rotate_pages_is_on_the_document_menu_as_on_the_page_menu (+2) |
 | Thumbnail (one page) — also Document ▸ Current Page ▸ Header/Footer | Show Header *(toggle)* |  | ≈ test_usability.py::test_the_header_and_footer_are_on_the_page_menu |
 | Thumbnail (one page) — also Document ▸ Current Page ▸ Header/Footer | Show Footer *(toggle)* |  | ≈ test_usability.py::test_the_header_and_footer_are_on_the_page_menu |
 | Thumbnail (one page) — also Document ▸ Current Page ▸ Header/Footer | Headers & Footers… |  | UNTESTED |
 | Thumbnail (one page) — also Document ▸ Current Page ▸ Paper Size | 16 choices: A0, A1, A2, A3, A4, A5, Letter, Legal … *(value list, toggles)* |  | UNTESTED |
-| Thumbnail (one page) — also Document ▸ Current Page | Page Setup… |  | ≈ test_command_families.py::test_the_page_menu_has_the_document_menus_page_commands (+4) |
+| Thumbnail (one page) — also Document ▸ Current Page | Page Setup… |  | ≈ test_command_families.py::test_the_page_menu_has_the_document_menus_page_commands (+5) |
 | Thumbnail (one page) — also Document ▸ Current Page | Set Scale… |  | ≈ test_command_families.py::test_set_scale_has_one_name (+4) |
 | Thumbnail (one page) — also Document ▸ Current Page | Cut Pages |  | ≈ test_command_families.py::test_move_is_with_the_clipboard_and_print_with_its_tick (+1) |
 | Thumbnail (one page) — also Document ▸ Current Page | Copy Pages |  | test_usability.py::test_a_page_can_be_copied_and_pasted (+3) |
 | Thumbnail (one page) — also Document ▸ Current Page | Paste Pages ▸ *(disabled here)* |  | ≈ test_command_families.py::test_move_is_with_the_clipboard_and_print_with_its_tick (+1) |
 | Thumbnail (one page) — also Document ▸ Current Page | Move Up *(disabled here)* |  | test_revu_ui.py::test_a_tool_has_revus_modes_scale_order_and_copy |
 | Thumbnail (one page) — also Document ▸ Current Page | Move Down |  | test_revu_ui.py::test_a_tool_has_revus_modes_scale_order_and_copy |
-| Thumbnail (one page) — also Document ▸ Current Page | Insert Blank Page ▸ |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
-| Thumbnail (one page) — also Document ▸ Current Page | Insert Spreadsheet Page ▸ |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
-| Thumbnail (one page) — also Document ▸ Current Page | Insert Pages ▸ |  | ≈ test_command_families.py::test_import_and_export_entries_do_not_repeat_the_menus_word (+3) |
+| Thumbnail (one page) — also Document ▸ Current Page | Insert Blank Page ▸ |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+4) |
+| Thumbnail (one page) — also Document ▸ Current Page | Insert Spreadsheet Page ▸ |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+4) |
+| Thumbnail (one page) — also Document ▸ Current Page | Insert Pages ▸ |  | ≈ test_command_families.py::test_import_and_export_entries_do_not_repeat_the_menus_word (+4) |
 | Thumbnail (one page) — also Document ▸ Current Page | Insert Image Page ▸ |  | ≈ test_context_menus.py::test_the_page_tab_and_sheet_tab_menus |
 | Thumbnail (one page) — also Document ▸ Current Page | Insert Excel Workbook ▸ |  | ≈ test_context_menus.py::test_the_page_tab_and_sheet_tab_menus |
-| Thumbnail (one page) — also Document ▸ Current Page | Duplicate Page |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere |
+| Thumbnail (one page) — also Document ▸ Current Page | Duplicate Page |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
 | Thumbnail (one page) — also Document ▸ Current Page | Extract Pages… |  | ≈ test_command_families.py::test_the_page_menu_has_the_document_menus_page_commands (+2) |
 | Thumbnail (one page) — also Document ▸ Current Page | Split Document… |  | ≈ test_command_families.py::test_the_page_menu_has_the_document_menus_page_commands (+1) |
-| Thumbnail (one page) — also Document ▸ Current Page | Delete Pages… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+6) |
+| Thumbnail (one page) — also Document ▸ Current Page | Delete Pages… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+7) |
 | Thumbnail (one page) — also Document ▸ Current Page | Crop Pages… |  | ≈ test_command_families.py::test_the_page_menu_has_the_document_menus_page_commands (+1) |
-| Thumbnail (one page) — also Document ▸ Current Page | Rotate Pages ▸ |  | ≈ test_command_families.py::test_rotate_pages_is_on_the_document_menu_as_on_the_page_menu (+4) |
+| Thumbnail (one page) — also Document ▸ Current Page | Rotate Pages ▸ |  | ≈ test_command_families.py::test_rotate_pages_is_on_the_document_menu_as_on_the_page_menu (+5) |
 | Thumbnail (one page) — also Document ▸ Current Page | Rename Page Label |  | ≈ test_context_menus.py::test_the_page_tab_and_sheet_tab_menus (+3) |
 | Thumbnail (one page) — also Document ▸ Current Page | Reset Page Label *(disabled here)* |  | test_usability.py::test_resetting_a_blank_pages_label_restores_its_number |
 | Thumbnail (one page) — also Document ▸ Current Page | Reset All Page Labels *(disabled here)* |  | ≈ test_context_menus.py::test_the_page_tab_and_sheet_tab_menus |
@@ -679,6 +680,33 @@ All 31 are in the last section.
 | Tool Chest ▸ a set's gear button | Import Tool Set… |  | ≈ test_command_families.py::test_import_and_export_entries_do_not_repeat_the_menus_word (+2) |
 | Tool Chest ▸ a tool (right-click) | New Tool Set… |  | test_usability.py::test_tool_sets_can_be_made_renamed_and_deleted |
 | Tool Chest ▸ a tool (right-click) | Import Tool Set… |  | ≈ test_command_families.py::test_import_and_export_entries_do_not_repeat_the_menus_word (+2) |
+| Thumbnails ▸ Thumbnails ▾ (its title) ▸ Insert Blank Page | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Thumbnails ▸ Thumbnails ▾ (its title) ▸ Insert Blank Page | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
+| Thumbnails ▸ Thumbnails ▾ (its title) ▸ Insert Spreadsheet Page | Before |  | test_sheet_qa_round1.py::test_the_slot_line_of_pasted_pages_goes_with_their_undo (+4) |
+| Thumbnails ▸ Thumbnails ▾ (its title) ▸ Insert Spreadsheet Page | After |  | test_sheet_qa_round1.py::test_the_slot_line_of_pasted_pages_goes_with_their_undo (+4) |
+| Thumbnails ▸ Thumbnails ▾ (its title) ▸ Insert Pages | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Thumbnails ▸ Thumbnails ▾ (its title) ▸ Insert Pages | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
+| Thumbnails ▸ Thumbnails ▾ (its title) ▸ Insert Image Page | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Thumbnails ▸ Thumbnails ▾ (its title) ▸ Insert Image Page | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
+| Thumbnails ▸ Thumbnails ▾ (its title) ▸ Insert Excel Workbook | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Thumbnails ▸ Thumbnails ▾ (its title) ▸ Insert Excel Workbook | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
+| Thumbnails ▸ Thumbnails ▾ (its title) ▸ Rotate Pages | Clockwise |  | test_command_families.py::test_rotate_pages_is_on_the_document_menu_as_on_the_page_menu (+1) |
+| Thumbnails ▸ Thumbnails ▾ (its title) ▸ Rotate Pages | Anticlockwise |  | test_calc_editing.py::test_rotating_a_page_turns_its_equations_but_never_changes_a_result (+13) |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Insert Blank Page ▸ |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+4) |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Insert Spreadsheet Page ▸ |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+4) |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Insert Pages ▸ |  | ≈ test_command_families.py::test_import_and_export_entries_do_not_repeat_the_menus_word (+4) |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Insert Image Page ▸ |  | ≈ test_context_menus.py::test_the_page_tab_and_sheet_tab_menus |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Insert Excel Workbook ▸ |  | ≈ test_context_menus.py::test_the_page_tab_and_sheet_tab_menus |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Duplicate Page |  | test_app.py::test_page_operations (+4) |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Extract Pages… | Ctrl+Shift+X | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Split Document… |  | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Delete Pages… | Ctrl+Shift+D | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Crop Pages… | Alt+Shift+O | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus (+1) |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Rotate Pages ▸ |  | ≈ test_command_families.py::test_rotate_pages_is_on_the_document_menu_as_on_the_page_menu (+5) |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Page Setup… |  | test_document_lifecycle.py::test_page_setup_ok_with_no_change_is_no_step |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Set Scale… | Ctrl+Shift+K | test_revu_flatten_scale.py::test_every_way_in_opens_set_scale (+1) |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Larger Thumbnails |  | ≈ test_thumbnails_look.py::test_thumbnails_menu_opens_from_its_title_with_the_options (+1) |
+| Thumbnails ▸ Thumbnails ▾ (its title) | Smaller Thumbnails |  | ≈ test_thumbnails_look.py::test_thumbnails_menu_opens_from_its_title_with_the_options (+1) |
 | Table cell (open table) ▸ Decimal Places | 17 choices: General, 0, 1, 2, 3, 4, 5, 6 … *(value list, toggles)* |  | ≈ test_consistency.py::test_an_equation_clicked_shows_its_properties (+9) |
 | Table cell (open table) ▸ Paste Special | Values *(disabled here)* | Ctrl+Shift+V | ≈ test_sheet_qa_round1.py::test_paste_with_nothing_on_the_clipboard_is_greyed_and_never_raises |
 | Table cell (open table) ▸ Paste Special | Formulas *(disabled here)* |  | UNTESTED |
@@ -797,13 +825,13 @@ All 31 are in the last section.
 | Spreadsheet cell (entries beyond the table cell menu) ▸ Page Layout | Breaks ▸ |  | ≈ test_command_families.py::test_sheet_layout_has_one_name_and_page_breaks_one_shape (+2) |
 | Spreadsheet cell (entries beyond the table cell menu) ▸ Page Layout | Print Area ▸ |  | ≈ test_command_families.py::test_sheet_layout_has_one_name_and_page_breaks_one_shape (+1) |
 | Spreadsheet cell (entries beyond the table cell menu) ▸ Page Layout | Sheet Layout… |  | ≈ test_command_families.py::test_sheet_layout_has_one_name_and_page_breaks_one_shape |
-| Spreadsheet cell (entries beyond the table cell menu) | Page Layout ▸ |  | ≈ test_command_families.py::test_sheet_layout_has_one_name_and_page_breaks_one_shape (+3) |
+| Spreadsheet cell (entries beyond the table cell menu) | Page Layout ▸ |  | ≈ test_command_families.py::test_sheet_layout_has_one_name_and_page_breaks_one_shape (+4) |
 | Spreadsheet cell (entries beyond the table cell menu) | Rename Sheet… |  | ≈ test_table_menu.py::test_every_spreadsheet_page_command |
 | Sheet tab | Insert Sheet |  | ≈ test_context_menus.py::test_the_page_tab_and_sheet_tab_menus |
 | Sheet tab | Delete |  | test_usability.py::test_markups_list_filters_sorts_and_changes_several_at_once |
 | Sheet tab | Rename… |  | ≈ test_context_menus.py::test_the_page_tab_and_sheet_tab_menus (+3) |
 | Sheet tab | Go To |  | ≈ test_context_menus.py::test_the_page_tab_and_sheet_tab_menus |
-| Canvas, empty page (Calc mode; entries beyond Markup mode's) ▸ Insert Here | Equation |  | ≈ test_calc_blocks.py::test_an_equation_has_no_markup_pen_in_properties (+13) |
+| Canvas, empty page (Calc mode; entries beyond Markup mode's) ▸ Insert Here | Equation |  | ≈ test_calc_blocks.py::test_an_equation_has_no_markup_pen_in_properties (+12) |
 | Canvas, empty page (Calc mode; entries beyond Markup mode's) ▸ Insert Here | Calc Text |  | ≈ test_calc_panels.py::test_the_calculation_toolbar_has_smaths_commands (+5) |
 | Canvas, empty page (Calc mode; entries beyond Markup mode's) ▸ Insert Here | Calculation Block |  | ≈ test_calc_blocks.py::test_block_on_the_toolbar_wraps_the_selected_equations (+3) |
 | Canvas, empty page (Calc mode; entries beyond Markup mode's) ▸ Insert Here | Plot |  | ≈ test_calc_panels.py::test_the_calculation_toolbar_has_smaths_commands (+8) |
@@ -831,9 +859,9 @@ All 31 are in the last section.
 | Canvas, any item (markup, equation, block, table) | Add to Tool Chest ▸ |  | ≈ test_context_menus.py::test_the_markup_menu_is_in_revus_order (+6) |
 | Canvas, any item (markup, equation, block, table) | Properties |  | test_workbook_self_contained.py::test_the_properties_panel_ticks_it_by_mouse |
 | Canvas, any markup (not equations or blocks) | Format Painter | Ctrl+Shift+C | test_review_regressions.py::test_format_painter_stays_armed_until_escape (+9) |
-| Canvas, any markup (not equations or blocks) | Flatten |  | test_consistency.py::test_calculation_text_is_never_flattened_or_hidden (+2) |
+| Canvas, any markup (not equations or blocks) | Flatten |  | test_revu_flatten_scale.py::test_right_click_flatten_is_at_once_and_recoverable (+1) |
 | Canvas, any markup (not equations or blocks) | Unflatten | Ctrl+Shift+U | test_revu_flatten_scale.py::test_allow_markup_recovery_on_can_be_unflattened (+2) |
-| Canvas, any markup (not equations or blocks) | Hide |  | test_consistency.py::test_calculation_text_is_never_flattened_or_hidden (+1) |
+| Canvas, any markup (not equations or blocks) | Hide |  | test_document_lifecycle.py::test_undo_reselects |
 | Canvas, any markup (not equations or blocks) | Show Hidden |  | test_usability.py::test_hidden_markups_go_away_and_come_back |
 | Canvas, any markup (not equations or blocks) | Set as Default |  | test_september17_review.py::test_snapshot_saved_outline_default_is_used (+6) |
 | Canvas, any markup (not equations or blocks) | Apply to Pages… |  | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus (+2) |
@@ -898,7 +926,6 @@ All 31 are in the last section.
 | Canvas, equation ▸ Equation ▸ Rounding | Half to Even *(toggle)* |  | ≈ calc/test_calcforge_window.py::test_context_menu_items_match_site |
 | Canvas, equation ▸ Equation ▸ Rounding | Away from Zero *(toggle)* |  | ≈ calc/test_calcforge_window.py::test_context_menu_items_match_site (+1) |
 | Canvas, equation ▸ Equation ▸ Font | 13 choices: 8 pt, 9 pt, 10 pt, 11 pt, 12 pt, 14 pt, 16 pt, 18 pt … *(value list, toggles)* |  | ≈ test_calc_panels.py::test_font_colour_and_they_survive_saving |
-| Canvas, equation ▸ Equation | Edit Equation |  | test_calc_panels.py::test_auto_calc_off_waits_for_calculate (+5) |
 | Canvas, equation ▸ Equation | Display Input Data *(toggle)* |  | ≈ calc/test_calcforge_window.py::test_context_menu_items_match_site (+1) |
 | Canvas, equation ▸ Equation | Go to Definition |  | ≈ test_calc_panels.py::test_go_to_definition (+2) |
 | Canvas, equation ▸ Equation | Show Description *(disabled here)* |  | ≈ calc/test_calcforge_window.py::test_context_menu_items_match_site |
@@ -916,16 +943,20 @@ All 31 are in the last section.
 | Canvas, equation | Decimal Places ▸ |  | ≈ test_calc_panels.py::test_decimal_places_from_the_right_click_menu_and_undo (+11) |
 | Canvas, equation | Significant Figures *(toggle)* |  | ≈ test_consistency.py::test_significant_figures_from_the_cells_menu (+8) |
 | Canvas, equation | Global (Read by Later Calc Sections) *(toggle)* |  | test_calc_sections.py::test_tables_are_reset_too_unless_their_cells_are_global (+2) |
-| Canvas, equation | Equation ▸ |  | ≈ test_calc_blocks.py::test_an_equation_has_no_markup_pen_in_properties (+13) |
+| Canvas, equation | Equation ▸ |  | ≈ test_calc_blocks.py::test_an_equation_has_no_markup_pen_in_properties (+12) |
 | Canvas, calculation block | Self-Contained *(toggle)* |  | ≈ test_calc_blocks.py::test_self_contained_keeps_the_blocks_names_inside_it (+4) |
 | Canvas, calculation block | Select Its Equations |  | ≈ test_calc_blocks.py::test_a_blocks_menu_and_properties_offer_what_applies_to_it (+1) |
 | Canvas, calculation block | Remove Block, Keep Equations |  | ≈ test_calc_blocks.py::test_a_blocks_menu_and_properties_offer_what_applies_to_it (+1) |
 | Canvas, calculation text ▸ Insert Field ▸ Variable | a |  | UNTESTED |
 | Canvas, calculation text | Format Painter | Ctrl+Shift+C | test_review_regressions.py::test_format_painter_stays_armed_until_escape (+9) |
+| Canvas, calculation text | Flatten |  | test_revu_flatten_scale.py::test_right_click_flatten_is_at_once_and_recoverable (+1) |
+| Canvas, calculation text | Unflatten | Ctrl+Shift+U | test_revu_flatten_scale.py::test_allow_markup_recovery_on_can_be_unflattened (+2) |
+| Canvas, calculation text | Hide |  | test_document_lifecycle.py::test_undo_reselects |
+| Canvas, calculation text | Show Hidden |  | test_usability.py::test_hidden_markups_go_away_and_come_back |
 | Canvas, calculation text | Set as Default |  | test_september17_review.py::test_snapshot_saved_outline_default_is_used (+6) |
 | Canvas, calculation text | Apply to Pages… |  | test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus (+2) |
 
-## Panels (117)
+## Panels (120)
 
 | Where (path) | Name | Shortcut | Covered by |
 |---|---|---|---|
@@ -938,15 +969,18 @@ All 31 are in the last section.
 | Thumbnails (title bar) | Pin this panel where it is *(header button)* |  | UNTESTED |
 | Thumbnails (title bar) | Float this panel *(header button)* |  | test_panel_sides.py::test_the_float_button_still_floats_a_panel |
 | Thumbnails (title bar) | Hide this panel *(header button)* |  | UNTESTED |
-| Thumbnails | (panel shown/hidden) |  | ≈ test_canvas.py::test_rail_click_keeps_one_panel_open_per_side (+19) |
-| Thumbnails | + *(button)* |  | UNTESTED |
-| Thumbnails ▸ + | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+1) |
-| Thumbnails ▸ + | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
-| Thumbnails | ▦ *(button)* |  | UNTESTED |
-| Thumbnails ▸ ▦ | Before |  | test_sheet_qa_round1.py::test_the_slot_line_of_pasted_pages_goes_with_their_undo (+4) |
-| Thumbnails ▸ ▦ | After |  | test_sheet_qa_round1.py::test_the_slot_line_of_pasted_pages_goes_with_their_undo (+4) |
-| Thumbnails | ⧉ *(button)* |  | UNTESTED |
-| Thumbnails | − *(button)* |  | UNTESTED |
+| Thumbnails | (panel shown/hidden) |  | ≈ test_canvas.py::test_rail_click_keeps_one_panel_open_per_side (+22) |
+| Thumbnails | Insert Pages — pages from a PDF, after this page; the arrow offers Before or After  (Ctrl+Shift+I) *(button)* |  | ≈ test_menu_button_arrows.py::test_every_menu_buttons_arrow_is_clear_of_its_face |
+| Thumbnails ▸ Insert Pages — pages from a PDF, after this page; the arrow offers Before or After  (Ctrl+Shift+I) | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Thumbnails ▸ Insert Pages — pages from a PDF, after this page; the arrow offers Before or After  (Ctrl+Shift+I) | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
+| Thumbnails | Insert Blank Page — after this page; the arrow offers Before or After  (Ctrl+Shift+N) *(button)* |  | ≈ test_menu_button_arrows.py::test_every_menu_buttons_arrow_is_clear_of_its_face |
+| Thumbnails ▸ Insert Blank Page — after this page; the arrow offers Before or After  (Ctrl+Shift+N) | Before… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+3) |
+| Thumbnails ▸ Insert Blank Page — after this page; the arrow offers Before or After  (Ctrl+Shift+N) | After… |  | ≈ test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere (+5) |
+| Thumbnails | Insert Spreadsheet Page — after this page (pages next to each other are one sheet); the arrow offers Before or After *(button)* |  | ≈ test_menu_button_arrows.py::test_every_menu_buttons_arrow_is_clear_of_its_face |
+| Thumbnails ▸ Insert Spreadsheet Page — after this page (pages next to each other are one sheet); the arrow offers Before or After | Before |  | test_sheet_qa_round1.py::test_the_slot_line_of_pasted_pages_goes_with_their_undo (+4) |
+| Thumbnails ▸ Insert Spreadsheet Page — after this page (pages next to each other are one sheet); the arrow offers Before or After | After |  | test_sheet_qa_round1.py::test_the_slot_line_of_pasted_pages_goes_with_their_undo (+4) |
+| Thumbnails | Duplicate Page — the page, or the pages picked out *(button)* |  | UNTESTED |
+| Thumbnails | Delete Pages… — the page, or the pages picked out  (Ctrl+Shift+D) *(button)* |  | UNTESTED |
 | Properties (title bar) | Roll this panel up *(header button)* |  | UNTESTED |
 | Properties (title bar) | Pin this panel where it is *(header button)* |  | UNTESTED |
 | Properties (title bar) | Float this panel *(header button)* |  | test_panel_sides.py::test_the_float_button_still_floats_a_panel |
@@ -1051,7 +1085,7 @@ All 31 are in the last section.
 
 | Where (opened by) | Name | Shortcut | Covered by |
 |---|---|---|---|
-| Table cell (open table) ▸ Format Cells | Format Cells — celldialog.py:FormatCellsDialog, 22 fields |  | test_consistency.py::test_significant_figures_in_format_cells |
+| Table cell (open table) ▸ Format Cells | Format Cells — celldialog.py:FormatCellsDialog, 21 fields |  | test_tables.py::test_format_cells_dialog |
 | via cfmanager.edit(), cfmanager.new(), cfmanager.new_rule() | Edit Formatting Rule / New Formatting Rule — cfmanager.py:RuleDialog, 18 fields |  | UNTESTED |
 | via cfmanager.rules_manager() | Conditional Formatting Rules Manager — cfmanager.py:RulesManager, 4 fields |  | UNTESTED |
 | via changecolors.change_multiple_colors() | Change Multiple Colours — changecolors.py:ChangeColorsDialog |  | test_change_multiple_colors.py::test_one_colour_becomes_another_wherever_it_is_used_in_one_undo (+2) |
@@ -1094,12 +1128,12 @@ All 31 are in the last section.
 | via names.open_editor() | Edit Name / New Name — names.py:NameDialog, 4 fields |  | test_table_names.py::test_name_manager_new_edit_delete_with_scope_and_comment |
 | Table cell (open table) ▸ Names ▸ Name Manager | Name Manager — names.py:NameManagerDialog, 1 fields |  | test_table_names.py::test_name_manager_new_edit_delete_with_scope_and_comment |
 | via pagedialogs.apply_to_pages_dialog() | Apply to Pages — pagedialogs.py:ApplyToPagesDialog, 2 fields |  | test_revu_page_dialogs.py::test_dialogs_have_revus_fields (+3) |
-| Document ▸ Crop Pages | Crop Pages — pagedialogs.py:CropPagesDialog, 1 fields |  | test_revu_page_dialogs.py::test_dialogs_have_revus_fields (+2) |
-| Document ▸ Delete Pages | Delete Pages — pagedialogs.py:DeletePagesDialog |  | test_revu_page_dialogs.py::test_selected_shows_only_with_a_thumbnail_selection (+3) |
-| Document ▸ Extract Pages | Extract Pages — pagedialogs.py:ExtractPagesDialog, 4 fields |  | test_revu_page_dialogs.py::test_selected_shows_only_with_a_thumbnail_selection (+4) |
+| Document ▸ Crop Pages; Thumbnails ▸ Thumbnails ▾ (its title) ▸ Crop Pages | Crop Pages — pagedialogs.py:CropPagesDialog, 1 fields |  | test_revu_page_dialogs.py::test_dialogs_have_revus_fields (+2) |
+| Document ▸ Delete Pages; Thumbnails ▸ Thumbnails ▾ (its title) ▸ Delete Pages | Delete Pages — pagedialogs.py:DeletePagesDialog |  | test_revu_page_dialogs.py::test_selected_shows_only_with_a_thumbnail_selection (+3) |
+| Document ▸ Extract Pages; Thumbnails ▸ Thumbnails ▾ (its title) ▸ Extract Pages | Extract Pages — pagedialogs.py:ExtractPagesDialog, 4 fields |  | test_revu_page_dialogs.py::test_selected_shows_only_with_a_thumbnail_selection (+4) |
 | Document ▸ Insert ▸ Blank Page | Insert Blank Page — pagedialogs.py:InsertBlankPageDialog, 4 fields |  | test_revu_page_dialogs.py::test_dialogs_have_revus_fields (+2) |
 | (no opener found) | Insert Pages — pagedialogs.py:InsertPagesDialog, 3 fields |  | ≈ test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus |
-| Document ▸ Split Document | Split Document — pagedialogs.py:SplitDocumentDialog, 4 fields |  | test_revu_page_dialogs.py::test_split_makes_the_right_number_of_files |
+| Document ▸ Split Document; Thumbnails ▸ Thumbnails ▾ (its title) ▸ Split Document | Split Document — pagedialogs.py:SplitDocumentDialog, 4 fields |  | test_revu_page_dialogs.py::test_split_makes_the_right_number_of_files |
 | Document ▸ Page Setup; Canvas, empty page (Markup mode) ▸ Page Setup | Page Setup — pagesetup.py:PageSetupDialog, 4 fields |  | test_revu_page_dialogs.py::test_dialog_titles_are_revus_in_title_case |
 | via printdialog.open_advanced() | Advanced Printing — printdialog.py:AdvancedPrintDialog, 3 fields |  | UNTESTED |
 | Thumbnail (one page) — also Document ▸ Current Page ▸ Print Pages | Print — printdialog.py:PrintDialog, 15 fields |  | test_sheet_rows.py::test_insert_and_delete_row_by_the_heading_menu_change_the_rows_and_pages |
@@ -1136,7 +1170,7 @@ All 31 are in the last section.
 | via view.edit_note() | Note — view.py:edit_note(), 1 fields |  | UNTESTED |
 | via xlsximport.__init__() | Import Excel workbook — xlsximport.py:__init__(), 1 fields |  | UNTESTED |
 
-## Keys (851)
+## Keys (852)
 
 | Where (path) | Name | Shortcut | Covered by |
 |---|---|---|---|
@@ -1159,7 +1193,7 @@ All 31 are in the last section.
 | SMath · In an equation | Constants *(smath)* | Ctrl+K | UNTESTED |
 | SMath · In an equation | Double-check results *(smath)* | Ctrl+Shift+D | key: test_app.py::test_pressing_keys_records_them (+2) |
 | SMath · In an equation | Select all equations *(smath)* | Ctrl+A | key: test_calc_modes.py::test_ctrl_a_in_an_equation_selects_every_equation (+17) |
-| Navigate · Always | Select *(tool)* | Esc | key: test_escape_recovery.py::test_escape_from_inline_panel_editor_cancels_callout (+24) |
+| Navigate · Always | Select *(tool)* | Esc | key: test_escape_recovery.py::test_escape_from_inline_panel_editor_cancels_callout (+25) |
 | Navigate · Markup mode | Snapshot *(tool)* | G | key: test_app.py::test_pdf_review_snapshot_survives_edit_save_reopen_and_export |
 | Navigate · Markup mode | Pan *(tool)* | Shift+V | cmd: test_markup_styles.py::test_the_toolbar_follows_the_tool_in_hand |
 | Draw · Markup mode | Pen *(tool)* | Alt+P | cmd: test_usability.py::test_shift_draws_a_straight_stroke_with_the_pen (+2) |
@@ -1208,10 +1242,10 @@ All 31 are in the last section.
 | View · Always | Fit Page *(command)* | Ctrl+9 | key: test_command_families.py::test_the_zoom_keys_by_keyboard (+2) |
 | View · Always | Fit Width *(command)* | Ctrl+0 | key: test_calc_editing.py::test_ctrl_0_is_smaths_at_least_inside_an_equation (+4) |
 | Markup · Always | Renumber counts *(command)* |  | cmd: test_app.py::test_renumber_counts_closes_gaps |
-| Spreadsheet · In a table / sheet | Edit the cell *(sheet)* | F2 | key: test_consistency.py::test_f2_opens_the_picked_text_equation_calculation_text_and_table (+10) |
+| Spreadsheet · In a table / sheet | Edit the cell *(sheet)* | F2 | key: test_markups_list_editing.py::test_f2_edits_the_label_with_the_keyboard (+9) |
 | Spreadsheet · In a table / sheet | Select all cells *(sheet)* | Ctrl+A | key: test_calc_modes.py::test_ctrl_a_in_an_equation_selects_every_equation (+17) |
 | Spreadsheet · In a table / sheet | Select whole column *(sheet)* | Ctrl+Space | UNTESTED |
-| Spreadsheet · In a table / sheet | Select whole row *(sheet)* | Shift+Space | key: test_review_findings.py::test_shift_and_a_letter_is_a_shortcut_of_its_own (+2) |
+| Spreadsheet · In a table / sheet | Select whole row *(sheet)* | Shift+Space | key: test_review_findings.py::test_shift_and_a_letter_is_a_shortcut_of_its_own (+3) |
 | Spreadsheet · In a table / sheet | Copy cells *(sheet)* | Ctrl+C | key: test_document_lifecycle.py::test_nothing_under_way_survives_new_pdf (+1) |
 | Spreadsheet · In a table / sheet | Cut cells *(sheet)* | Ctrl+X | key: test_document_lifecycle.py::test_undo_reselects |
 | Spreadsheet · In a table / sheet | Paste cells *(sheet)* | Ctrl+V | key: test_document_lifecycle.py::test_paste_lands_under_the_pointer_or_clear_of_the_original |
@@ -1834,7 +1868,7 @@ All 31 are in the last section.
 | File · Always | Save All *(command)* |  | cmd: test_view_workspace.py::test_open_recent_save_all_and_close_all |
 | File · Always | Save *(command)* | Ctrl+S | key: test_every_command_is_bindable.py::test_a_key_already_in_use_can_be_reassigned_or_left (+3) |
 | File · Always | Save As *(command)* | Ctrl+Shift+S | UNTESTED |
-| File · Always | Insert Pages *(command)* | Ctrl+Shift+I | cmd: test_revu_page_dialogs.py::test_every_page_dialog_opens_from_its_menus |
+| File · Always | Insert Pages *(command)* | Ctrl+Shift+I | key: test_thumbnails_look.py::test_every_header_button_works_by_mouse_and_by_key |
 | File · Always | Insert Excel Workbook *(command)* |  | cmd: test_sheet_gone.py::test_its_pages_deleted_from_the_thumbnail_menu (+5) |
 | File · Always | Import Tool Set *(command)* |  | cmd: test_usability.py::test_importing_a_bluebeam_tool_set_fills_the_tool_chest (+6) |
 | File · Always | Manage Tool Sets *(command)* |  | cmd: test_revu_ui.py::test_manage_tool_sets_shows_hides_orders_and_renames |
@@ -1855,7 +1889,6 @@ All 31 are in the last section.
 | Edit · Always | Duplicate *(command)* | Ctrl+J | key: test_document_lifecycle.py::test_duplicate_of_an_equation_is_readable (+2) |
 | Edit · Always | Delete *(command)* |  | cmd: test_app.py::test_delete_copy_paste_and_duplicate (+4) |
 | Edit · Always | Select All *(command)* | Ctrl+A | key: test_calc_modes.py::test_ctrl_a_in_an_equation_selects_every_equation (+17) |
-| Edit · Always | Edit Selected *(command)* | F2 | key: test_consistency.py::test_f2_opens_the_picked_text_equation_calculation_text_and_table (+10) |
 | SMath · Always | Calculate *(command)* | F9 | key: test_bughunt_round1.py::test_function_keys_belong_to_the_box_being_typed_in (+1) |
 | SMath · Always | Auto-Calc *(command)* |  | cmd: test_every_command_is_bindable.py::test_a_key_given_in_the_dialog_runs_a_command_of_each_group |
 | SMath · Calc mode | Matrix *(command)* | Ctrl+M | key: test_calc_modes.py::test_f9_calculates_and_ctrl_m_inserts_a_matrix (+3) |
@@ -1916,9 +1949,11 @@ All 31 are in the last section.
 | Window · Always | Lock Toolbars *(command)* |  | cmd: test_layout.py::test_the_toolbars_can_be_locked (+3) |
 | Window · Always | Customise Toolbars *(command)* |  | cmd: test_layout.py::test_choosing_which_tools_are_on_the_toolbar |
 | Pages · Always | Insert Blank Page *(command)* | Ctrl+Shift+N | key: test_command_families.py::test_the_insert_keys_put_it_after_the_page_in_view |
-| Pages · Always | Insert Spreadsheet Page *(command)* |  | cmd: test_charts.py::test_a_chart_on_a_sheet_page_sits_over_the_cells_and_moves_with_them (+24) |
+| Pages · Always | Insert Spreadsheet Page *(command)* |  | cmd: test_charts.py::test_a_chart_on_a_sheet_page_sits_over_the_cells_and_moves_with_them (+25) |
 | Spreadsheet · Always | Sheet Layout *(command)* |  | cmd: test_sheet_pages.py::test_page_layout_dialog_sets_the_options |
 | Pages · Always | Duplicate Page *(command)* |  | cmd: test_app.py::test_page_operations (+4) |
+| Window · Always | Larger Thumbnails *(command)* |  | cmd: test_thumbnails_look.py::test_larger_and_smaller_thumbnails_from_the_menu |
+| Window · Always | Smaller Thumbnails *(command)* |  | cmd: test_thumbnails_look.py::test_larger_and_smaller_thumbnails_from_the_menu |
 | Pages · Always | Delete Pages *(command)* | Ctrl+Shift+D | key: test_app.py::test_pressing_keys_records_them (+2) |
 | Pages · Always | Rotate Pages Clockwise *(command)* |  | cmd: test_command_families.py::test_rotate_pages_is_on_the_document_menu_as_on_the_page_menu (+1) |
 | Pages · Always | Rotate Pages Anticlockwise *(command)* |  | cmd: test_calc_editing.py::test_rotating_a_page_turns_its_equations_but_never_changes_a_result (+13) |
@@ -1947,9 +1982,9 @@ All 31 are in the last section.
 | Markup · Always | Ungroup *(command)* | Ctrl+Shift+G | key: test_round7_exercise.py::test_a_groups_right_click_menu_does_not_reach_inside_it |
 | Markup · Always | Auto-Size *(command)* | Alt+Z | cmd: test_usability.py::test_alt_z_brings_the_box_back_in_around_the_words |
 | Markup · Always | Format Painter *(command)* | Ctrl+Shift+C | cmd: test_review_regressions.py::test_format_painter_stays_armed_until_escape (+9) |
-| Markup · Always | Hide *(command)* |  | cmd: test_consistency.py::test_calculation_text_is_never_flattened_or_hidden (+1) |
+| Markup · Always | Hide *(command)* |  | cmd: test_document_lifecycle.py::test_undo_reselects |
 | Markup · Always | Show Hidden *(command)* |  | cmd: test_usability.py::test_hidden_markups_go_away_and_come_back |
-| Markup · Always | Flatten *(command)* |  | cmd: test_consistency.py::test_calculation_text_is_never_flattened_or_hidden (+2) |
+| Markup · Always | Flatten *(command)* |  | cmd: test_revu_flatten_scale.py::test_right_click_flatten_is_at_once_and_recoverable (+1) |
 | Document · Always | Flatten *(command)* | Ctrl+Shift+M | key: test_revu_keys.py::test_revus_keys_for_flatten_dark_mode_and_lock |
 | Edit · Always | Unflatten *(command)* | Ctrl+Shift+U | key: test_revu_keys.py::test_revus_keys_for_flatten_dark_mode_and_lock |
 | Edit · Always | Preferences *(command)* | Ctrl+, | key: test_app.py::test_slash_on_bare_canvas_starts_nothing (+15) |
@@ -1977,8 +2012,8 @@ All 31 are in the last section.
 | Window · Always | Page Panel *(command)* | Alt+U | key: test_command_families.py::test_window_panels_are_alphabetical_with_revus_keys |
 | Window · Always | Maths Panel *(command)* |  | UNTESTED |
 | Window · Always | Variables Panel *(command)* |  | UNTESTED |
-| Canvas, fixed in view.py · both | Pan while held *(not rebindable)* | Space (hold) | test_print_dialog.py::test_print_visible_hyperlinks (+10) |
-| Canvas, fixed in view.py · both | Finish typing / drop the tool / clear the selection *(not rebindable)* | Esc | test_app.py::test_backspace_clears_and_escape_puts_it_back (+122) |
+| Canvas, fixed in view.py · both | Pan while held *(not rebindable)* | Space (hold) | test_print_dialog.py::test_print_visible_hyperlinks (+11) |
+| Canvas, fixed in view.py · both | Finish typing / drop the tool / clear the selection *(not rebindable)* | Esc | test_app.py::test_backspace_clears_and_escape_puts_it_back (+121) |
 | Canvas, fixed in view.py · Markup | Close the polygon/polyline being clicked out; close a Shift lasso *(not rebindable)* | Enter | UNTESTED |
 | Canvas, fixed in view.py · both | Delete the selection *(not rebindable)* | Delete / Backspace | test_document_lifecycle.py::test_undo_reselects (+12) |
 | Canvas, fixed in view.py · both | Nudge the selection (equations: one grid step); move the insertion cross *(not rebindable)* | Arrows | test_app.py::test_nudge_with_arrow_keys (+1) |
@@ -2035,7 +2070,7 @@ All 31 are in the last section.
 | toolbar grip | Drag: Move a toolbar (top or bottom) |  | test_layout.py::test_a_toolbar_has_a_grip_to_pick_it_up_by |
 | window edge (frameless) | Drag: Resize the window |  | UNTESTED |
 | empty menu-bar space | Drag: Move the window |  | UNTESTED |
-| cells | Click / drag: Select cells |  | test_bughunt_round1.py::test_a_sheet_pages_row_numbers_pick_rows_before_any_cell_is_clicked (+46) |
+| cells | Click / drag: Select cells |  | test_bughunt_round1.py::test_a_sheet_pages_row_numbers_pick_rows_before_any_cell_is_clicked (+51) |
 | row/column heading border | Drag: Resize; double-click fits |  | test_tables.py::test_dragging_a_heading_border_resizes_and_double_click_fits |
 | selection border | Drag: Move the cells |  | test_tables.py::test_dragging_the_selection_border_moves_cells |
 | fill handle | Drag: AutoFill a series or formulas |  | test_tables.py::test_fill_handle_continues_a_series |
