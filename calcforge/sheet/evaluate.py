@@ -207,11 +207,21 @@ class Ctx:
 MISSING = F.Missing()
 
 
-def evaluate_cell(wb, sheet, row: int, col: int, tree):
-    """(value, document variables read) of the formula in a cell."""
+_compiled = None
+
+
+def evaluate_cell(wb, sheet, row: int, col: int, tree, parsed=None):
+    """(value, document variables read) of the formula in a cell; with its
+    *parsed* form, through the closures compiled from it (compiled.py)."""
     ctx = Ctx(wb, sheet, row, col)
     try:
-        value = result(ev(tree, ctx))
+        if parsed is not None:
+            global _compiled
+            if _compiled is None:
+                from .compiled import compiled as _compiled
+            value = result(_compiled(parsed)(ctx))
+        else:
+            value = result(ev(tree, ctx))
     except SheetError as e:
         value = e.error
     except RecursionError:
@@ -488,15 +498,25 @@ def _name(n: F.Name, ctx: Ctx):
     if dn is not None:
         if ctx.depth > 40:
             raise failed(NUM, f"the name '{n.name}' refers to itself, round and round")
-        try:
-            parsed = F.parse(dn.refers_to, 0, 0)
-        except F.FormulaError:
-            return NAME.because(f"the defined name '{n.name}' is a formula that can't be read")
+        # what it refers to, read once while it stays the same (parsing it
+        # again for every formula that uses it was most of a name's cost)
+        held = dn.__dict__.get("_parsed")
+        if held is not None and held[0] == dn.refers_to:
+            parsed = held[1]
+        else:
+            try:
+                parsed = F.parse(dn.refers_to, 0, 0)
+            except F.FormulaError:
+                return NAME.because(f"the defined name '{n.name}' is a formula that can't be read")
+            dn.__dict__["_parsed"] = (dn.refers_to, parsed)
         home = ctx.wb.sheet_by_id(dn.sheet) if dn.sheet else ctx.sheet
         inner = Ctx(ctx.wb, home, 0, 0)
         inner.reads = ctx.reads
         inner.depth = ctx.depth + 1
-        return ev(parsed.tree, inner)
+        global _compiled
+        if _compiled is None:
+            from .compiled import compiled as _compiled
+        return _compiled(parsed)(inner)
     if n.sheet is None:
         try:
             return _outside(n.name, ctx)

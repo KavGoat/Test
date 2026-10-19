@@ -37,6 +37,34 @@ PAGE_LABEL = QColor(150, 150, 150, 70)
 DEFAULT_ROWS = 52
 
 
+def _frozen(v):
+    if isinstance(v, dict):
+        return tuple(sorted((k, _frozen(x)) for k, x in v.items()))
+    if isinstance(v, (list, tuple)):
+        return tuple(_frozen(x) for x in v)
+    return v
+
+
+def _looks_in(sheet, a: int, b: int, last_col: int) -> tuple:
+    """What conditional formatting makes of the cells of rows a to b (only
+    those a rule covers), as something to compare."""
+    from ..sheet.condfmt import looks_for
+    looks = looks_for(sheet)
+    seen = set()
+    out = []
+    for rule in sheet.cond_rules:
+        for t, l, bottom, r in rule.get("ranges", []):
+            for row in range(max(t, a), min(bottom, b) + 1):
+                for col in range(l, min(r, last_col) + 1):
+                    if (row, col) in seen:
+                        continue
+                    seen.add((row, col))
+                    got = looks.look(row, col)
+                    if got:
+                        out.append((row, col, _frozen(got)))
+    return tuple(sorted(out))
+
+
 def run_frames_from(frame) -> list:
     """The frames of the run *frame* is in, first to last."""
     scene = frame.scene() if frame is not None else None
@@ -401,7 +429,10 @@ class SheetRunItem(TableItem):
             content.append((r, c, cell.style, type(cell.value), cell.value))
         paging = self.paging
         opts = options(sheet)
-        rules = (sheet.cond_rules, sheet.workbook.version) if sheet.cond_rules else None
+        # what conditional formatting makes of the band's cells — not every
+        # rule against every value change, which drew all the bands again
+        # for any edit (the user's seismic workbook, 2026-10-19)
+        rules = _looks_in(sheet, a, b, self.size[1] - 1) if sheet.cond_rules else None
         from .nametags import named_blocks, shown
         tags = (shown(self), tuple(named_blocks(sheet)))
         return (tuple(xs), tuple(ys[a:b + 2]), content, [tuple(m) for m in sheet.merges], tags,

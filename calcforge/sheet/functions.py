@@ -91,6 +91,11 @@ def _call(n: F.Call, ctx: Ctx):
         except SheetError as e:
             return e.error
     args = [MISSING if type(a) is F.Missing else ev(a, ctx) for a in n.args]
+    return run(spec, args, ctx)
+
+
+def run(spec: Spec, args: list, ctx: Ctx):
+    """A function (not a lazy one) given its arguments' values."""
     if spec.lift:
         lifted = [i for i in spec.lift if i < len(args) and _is_block(args[i])]
         if lifted:
