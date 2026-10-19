@@ -216,6 +216,102 @@ def test_a_key_typed_into_a_table_markup_redraws_only_the_cell(w, monkeypatch):
     assert statistics.median(per_key) < 20, per_key
 
 
+# -- typing, key by key (the user, 2026-10-19: "a bit laggy in typing") ------------------------
+TYPED = {"plain": "hello world here", "unit": "12.5 kN/m^2", "formula": "=A1*B2+SUM(C1:C9)"}
+
+
+def keys_into_cell(w, text) -> list:
+    """Milliseconds from each key pressed (real key dispatch, as a person
+    types) to its drawing done, the first key (which opens the box) left
+    out."""
+    from PySide6.QtTest import QTest
+    te = w.view.tables
+    times = []
+    for ch in text:
+        start = time.perf_counter()
+        QTest.keyClick(te.editor or w.view, ch)
+        idle()
+        times.append((time.perf_counter() - start) * 1000)
+    assert te.editor is not None and te.editor.text() == text
+    return times[1:]
+
+
+@pytest.mark.parametrize("kind", ["sheet", "table"])
+def test_a_key_typed_is_well_under_a_frame_and_does_only_its_own_work(w, monkeypatch, kind):
+    """Plain words, a quantity with its unit and a formula, typed into a
+    cell of a spreadsheet of 300 rows of formulas, and into a table markup.
+
+    Per key, measured here: plain 2.5 -> 1.1 ms, a unit 5.6 -> 1.6 ms, a
+    formula 6.8 -> 2.7 ms (11 -> 3 ms in a table markup). What went: the
+    page under the cell's box drawn again for each key (the box was not
+    opaque); the lists and tips under the box worked out and placed three
+    times a key (the text changed, then the caret moved in the cell and in
+    the formula bar), with a function signature read for each of fifty
+    entries each time; and the whole sheet drawn again for each reference
+    typed into a formula."""
+    from calcforge.ui.formulahelp import FormulaHelp
+    if kind == "sheet":
+        item = sheet_with_formulas(w)
+        open_cell(w, item, 30, 9)
+        cell = (30, 9)
+    else:
+        item = a_table(w)
+        cell = (20, 1)
+    te = w.view.tables
+    worked = Calls(monkeypatch, FormulaHelp, "_update")
+    medians = {}
+    for what, text in TYPED.items():
+        te.select(cell)
+        idle()
+        before = worked.count
+        paints = Paints(w.view.viewport())
+        full = []
+        original = type(item).update
+
+        def update(self, *args):
+            if self is item and not args:
+                full.append(1)
+            return original(self, *args)
+        monkeypatch.setattr(type(item), "update", update)
+        times = keys_into_cell(w, text)
+        monkeypatch.setattr(type(item), "update", original)
+        w.view.viewport().removeEventFilter(paints)
+        medians[what] = statistics.median(times)
+        # the lists and tips worked out once a key, not three times
+        assert worked.count - before <= len(text) + 1, (what, worked.count - before)
+        # the sheet is never drawn whole while it is typed in
+        assert not full, what
+        if what == "plain":
+            # nothing on the canvas changes while words are typed
+            assert paints.count <= 1, paints.count
+        te.cancel()
+        idle()
+    # well under a frame (16 ms) for the typical key, loaded machine and all
+    assert max(medians.values()) < 16, medians
+
+
+def test_typing_a_formula_redraws_only_the_cells_it_outlines(w):
+    """Each reference typed is outlined on its cells, as in Excel; what is
+    drawn again is where the outlines were and are, not the sheet."""
+    from PySide6.QtCore import QRectF
+    run = sheet_with_formulas(w, 60)
+    open_cell(w, run, 30, 9)
+    te = w.view.tables
+    keys_into_cell(w, "=A1+B3")
+    area = te._drawn_refs_area
+    expect = run.block_rect(0, 0, 0, 0).united(run.block_rect(2, 1, 2, 1))
+    assert area.contains(expect)
+    assert area.height() < run.block_rect(0, 0, 8, 0).height()
+    from PySide6.QtTest import QTest
+    QTest.keyClick(te.editor, Qt.Key_Backspace)
+    idle()
+    assert te._drawn_refs_area.contains(run.block_rect(0, 0, 0, 0))
+    assert not te._drawn_refs_area.intersects(run.block_rect(2, 1, 2, 1).adjusted(2, 2, -2, -2))
+    te.cancel()
+    idle()
+    assert isinstance(te._refs_area(run, "plain"), QRectF) and te._refs_area(run, "plain").isEmpty()
+
+
 def test_enter_and_300_dependent_formulas_recalculate_within_budget(w):
     run = sheet_with_formulas(w)
     open_cell(w, run, 0, 5)

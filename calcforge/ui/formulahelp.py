@@ -10,6 +10,7 @@ function's own parameters, the optional ones in [brackets].
 """
 from __future__ import annotations
 
+import functools
 import html
 import inspect
 import re
@@ -27,6 +28,18 @@ FUNCTION, NAME, TABLE = "function", "name", "table"
 def arguments(name: str) -> list[str]:
     """The arguments of an Excel function as Excel lists them:
     PMT -> rate, nper, pv, [fv], [kind]; SUM -> number1, [number2], …"""
+    return list(_arguments(name))
+
+
+@functools.lru_cache(maxsize=None)
+def _arguments(name: str) -> tuple:
+    # Worked out once a function: the list under "=S" asks for some fifty of
+    # them at each key, and reading each one's signature was most of a key's
+    # time (2026-10-19)
+    return tuple(_read_arguments(name))
+
+
+def _read_arguments(name: str) -> list[str]:
     from .excelargs import ARGS, WORDS
     if name in ARGS:
         return [a.strip() for a in ARGS[name].split(",")] if ARGS[name] else []
@@ -106,6 +119,11 @@ class FormulaHelp:
                                "padding:1px 4px;}")
         self.widget = None
         self.word_start = 0
+        # what the last update was asked and left showing: a key in the cell
+        # asks three times (the text changed, then the caret moved in the
+        # cell and in the formula bar), and only the first has work to do
+        self._settled = None
+        self._found = None
         # a unit being typed: SMath's own list instead (ui/cellunits.py)
         from .cellunits import UnitList
         self.units = UnitList(tables)
@@ -123,8 +141,22 @@ class FormulaHelp:
                     if getattr(s, "kind", "") == "table" and s.name.upper().startswith(up)]
         return out
 
+    def _state(self, widget) -> tuple:
+        """Everything an update reads, and what is showing."""
+        item = self.tables.item
+        return (id(widget), widget.text(), widget.cursorPosition(), widget.isVisible(),
+                id(item), widget.mapToGlobal(QPoint(0, 0)).toTuple(),
+                self.list.isVisible(), self.tip.isVisible(), self.units.visible())
+
     def update(self, widget) -> None:
         """After a key or a caret move in ``widget`` (a QLineEdit)."""
+        state = self._state(widget)
+        if state == self._settled and widget is self.widget:
+            return                     # asked again with nothing changed
+        self._update(widget)
+        self._settled = self._state(widget)
+
+    def _update(self, widget) -> None:
         self.widget = widget
         text, caret = widget.text(), widget.cursorPosition()
         if self.units.update(widget):
@@ -146,26 +178,34 @@ class FormulaHelp:
             self.list.hide()
             return
         self.word_start = caret - len(word)
-        self.list.clear()
-        for name, kind in found:
-            entry = QListWidgetItem(name)
-            entry.setData(Qt.UserRole, kind)
-            if kind == FUNCTION:
-                entry.setToolTip(f"{name}({', '.join(arguments(name))})")
-            else:
-                entry.setToolTip("a defined name" if kind == NAME else "a table")
-            self.list.addItem(entry)
+        if found != self._found or self.list.count() != len(found):
+            # filled again only when what it lists changes
+            self._found = found
+            self.list.clear()
+            for name, kind in found:
+                entry = QListWidgetItem(name)
+                entry.setData(Qt.UserRole, kind)
+                if kind == FUNCTION:
+                    entry.setToolTip(f"{name}({', '.join(arguments(name))})")
+                else:
+                    entry.setToolTip("a defined name" if kind == NAME else "a table")
+                self.list.addItem(entry)
+            rows = min(10, len(found))
+            height = self.list.sizeHintForRow(0) * rows + 4
+            width = max(160, self.list.sizeHintForColumn(0) + 30)
+            if self.list.size().toTuple() != (width, height):
+                self.list.resize(width, height)
         self.list.setCurrentRow(0)
-        rows = min(10, len(found))
-        height = self.list.sizeHintForRow(0) * rows + 4
-        width = max(160, self.list.sizeHintForColumn(0) + 30)
-        self.list.resize(width, height)
         below = widget.mapToGlobal(QPoint(widget.cursorRect().left(), widget.height()))
         if self.tip.isVisible():
             below += QPoint(0, self.tip.height() + 2)
-        self.list.move(below)
-        self.list.show()
-        self.list.raise_()
+        # A window of its own: moved, shown and raised only when it must be
+        # (each is a call to the window system, slow on Windows)
+        if self.list.pos() != below:
+            self.list.move(below)
+        if not self.list.isVisible():
+            self.list.show()
+            self.list.raise_()
 
     def _update_tip(self, widget, text: str, caret: int) -> None:
         got = call_at(text[1:], caret - 1)
@@ -175,10 +215,7 @@ class FormulaHelp:
         name, index = got
         args = arguments(name)
         if not args:
-            self.tip.setText(f"{name}()")
-            self.tip.adjustSize()
-            self.tip.move(widget.mapToGlobal(QPoint(0, widget.height() + 1)))
-            self.tip.show()
+            self._show_tip(widget, f"{name}()", raise_it=False)
             return
         if args[-1] == "…" and len(args) >= 3:
             # number1, [number2], …: past the second, still the repeating one
@@ -186,11 +223,22 @@ class FormulaHelp:
         else:
             index = min(index, len(args) - 1)
         parts = [f"<b>{html.escape(a)}</b>" if i == index else html.escape(a) for i, a in enumerate(args)]
-        self.tip.setText(f"{name}({', '.join(parts)})")
-        self.tip.adjustSize()
-        self.tip.move(widget.mapToGlobal(QPoint(0, widget.height() + 1)))
-        self.tip.show()
-        self.tip.raise_()
+        self._show_tip(widget, f"{name}({', '.join(parts)})")
+
+    def _show_tip(self, widget, text: str, raise_it: bool = True) -> None:
+        """The tip with *text*, under *widget*: its words, size and place set
+        only when they change, as each is a call to the window system."""
+        tip = self.tip
+        if tip.text() != text:
+            tip.setText(text)
+            tip.adjustSize()
+        at = widget.mapToGlobal(QPoint(0, widget.height() + 1))
+        if tip.pos() != at:
+            tip.move(at)
+        if not tip.isVisible():
+            tip.show()
+            if raise_it:
+                tip.raise_()
 
     # -- keys ----------------------------------------------------------------------------------
     def key(self, event) -> bool:
@@ -209,6 +257,7 @@ class FormulaHelp:
             return True
         if key == Qt.Key_Escape:
             self.list.hide()
+            self._settled = None
             return True
         return False
 
@@ -228,6 +277,7 @@ class FormulaHelp:
         self.list.hide()
         self.tip.hide()
         self.units.hide()
+        self._settled = None
 
     def visible(self) -> bool:
         return self.list.isVisible() or self.units.visible()

@@ -271,21 +271,34 @@ class UnitList:
             return False
         self.start, word = got
         s = self.list
+        refill = word != s.word or found != s.entries()
         s.word = word
-        s.fill(found, selected_index(found, word))
-        rows = min(s.count(), 8)
-        scrolls = s.count() > rows
-        s.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn if scrolls else Qt.ScrollBarAlwaysOff)
-        row = max(s.sizeHintForRow(0), s.fontMetrics().height() + 2)
-        bar = s.verticalScrollBar().sizeHint().width() if scrolls else 0
-        wide = s.sizeHintForColumn(0) + s.iconSize().width() + bar + 2 * s.frameWidth() + 10
-        s.setMaximumHeight(16777215)
-        s.setFixedSize(max(90, wide), row * rows + 2 * s.frameWidth() + 2)
+        if refill:
+            # filled and sized again only when what it lists changes
+            s.fill(found, selected_index(found, word))
+            rows = min(s.count(), 8)
+            scrolls = s.count() > rows
+            s.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn if scrolls else Qt.ScrollBarAlwaysOff)
+            row = max(s.sizeHintForRow(0), s.fontMetrics().height() + 2)
+            bar = s.verticalScrollBar().sizeHint().width() if scrolls else 0
+            wide = s.sizeHintForColumn(0) + s.iconSize().width() + bar + 2 * s.frameWidth() + 10
+            s.setMaximumHeight(16777215)
+            size = (max(90, wide), row * rows + 2 * s.frameWidth() + 2)
+            if s.size().toTuple() != size:
+                s.setFixedSize(*size)
         x = widget.x_of(self.start) if isinstance(widget, UnitText) else widget.cursorRect().left()
-        s.move(widget.mapToGlobal(QPoint(int(x) - 2, widget.height() + 1)))
-        s.show()
-        s.raise_()
-        s.show_tooltip()
+        at = widget.mapToGlobal(QPoint(int(x) - 2, widget.height() + 1))
+        # a window of its own: moved, shown and raised only when it must be
+        # (each is a call to the window system, slow on Windows)
+        moved = s.pos() != at
+        if moved:
+            s.move(at)
+        shown = not s.isVisible()
+        if shown:
+            s.show()
+            s.raise_()
+        if refill or moved or shown:
+            s.show_tooltip()
         return True
 
     def key(self, event) -> bool:
