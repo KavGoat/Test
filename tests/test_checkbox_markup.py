@@ -25,7 +25,7 @@ def checkboxes(window):
 
 def place(window, x=100, y=100, words=None):
     """A Checkbox put down with a click of its tool; *words* typed over its
-    three default options."""
+    one default option."""
     window.select_tool("checkbox")
     click(window.view, *on_page(window, 0, x, y))
     (item,) = checkboxes(window)
@@ -84,12 +84,14 @@ def dark_in(image: QImage, rect: QRectF, item, scale=4.0) -> int:
 
 # -- placing and typing ----------------------------------------------------
 
-def test_a_click_places_three_options_ready_to_type_over(window):
+def test_a_click_places_one_option_ready_to_type_over(window):
+    """The user, 2026-10-19: "place a checkbox with one entry only and no
+    drag to place"."""
     window.select_tool("checkbox")
     click(window.view, *on_page(window, 0, 100, 100))
     (item,) = checkboxes(window)
-    assert item.options() == ["Option 1", "Option 2", "Option 3"]
-    assert item.ticks() == [False, False, False]
+    assert item.options() == ["Option 1"]
+    assert item.ticks() == [False]
     assert item.subject == "Checkbox"
     assert window.view.editing_item() is item
     width, height = item.natural_size()
@@ -105,12 +107,13 @@ def test_a_click_places_three_options_ready_to_type_over(window):
     assert not checkboxes(window), "one undo takes back the Checkbox and its words"
 
 
-def test_a_drag_makes_one_the_size_dragged(window):
+def test_a_drag_places_it_where_it_began_at_its_own_size(window):
     window.select_tool("checkbox")
     drag(window.view, *on_page(window, 0, 100, 100), *on_page(window, 0, 300, 160))
     (item,) = checkboxes(window)
-    assert item.local_rect().width() == pytest.approx(200, abs=1)
-    assert item.options() == ["Option 1", "Option 2", "Option 3"]
+    width, height = item.natural_size()
+    assert item.local_rect().width() == pytest.approx(width, abs=0.5), "not the size dragged"
+    assert item.options() == ["Option 1"]
 
 
 def test_enter_adds_an_option_backspace_joins_and_ticks_stay_with_their_option(window):
@@ -271,8 +274,11 @@ def test_the_tick_runs_out_past_its_box(qapp):
     image = picture_of(item)
     (box,) = item.box_rects()
     side = box.width()
-    beyond = QRectF(box.right() + side * 0.05, box.top() - side * 0.3, side * 0.25, side * 0.3)
-    assert dark_in(image, beyond, item) > 0, "over the top right-hand corner"
+    # just past the top right-hand corner, as on the stamp — not far out
+    beyond = QRectF(box.right() + side * 0.02, box.top() - side * 0.05, side * 0.12, side * 0.2)
+    assert dark_in(image, beyond, item) > 0, "past the top right-hand corner"
+    far = QRectF(box.right() + side * 0.3, box.top() - side * 0.4, side * 0.3, side * 0.3)
+    assert dark_in(image, far, item) == 0, "not running far out (too steep before)"
 
 
 def test_narrower_wraps_without_changing_the_boxes_and_a_bigger_font_grows_them(window):
@@ -524,7 +530,7 @@ def test_a_markup_style_keeps_shape_mark_and_multiple(window):
     fresh = CheckboxItem()
     toolsets.apply_properties(fresh, properties)
     assert (fresh.box_shape, fresh.mark, fresh.multiple) == ("circle", "dot", False)
-    assert fresh.ticks() == [False, False, False]
+    assert fresh.ticks() == [False]
     from calcforge.ui import markupstyles
     assert markupstyles.styled("checkbox")
 

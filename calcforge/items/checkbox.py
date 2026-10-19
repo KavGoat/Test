@@ -40,7 +40,7 @@ SHAPE_NAMES = dict(SHAPES)
 MARK_NAMES = dict(MARKS)
 
 #: What a new Checkbox says until it is typed into.
-DEFAULT_OPTIONS = "Option 1\nOption 2\nOption 3"
+DEFAULT_OPTIONS = "Option 1"
 
 #: A box is about the height of a capital letter: this share of the font size.
 BOX_SHARE = 0.75
@@ -123,13 +123,15 @@ def draw_mark(painter: QPainter, mark: str, shape: str, box: QRectF, ink: QColor
         painter.drawLine(inner.topLeft(), inner.bottomRight())
         painter.drawLine(inner.topRight(), inner.bottomLeft())
         return
-    # the stamp's tick: heavy, starting inside the box and running out past
-    # its top right-hand corner
+    # the stamp's tick: heavy, a short stroke down from the box's left edge
+    # at half its height to near its foot, then a long one up just past its
+    # top right-hand corner — nearly a right angle between them (the user's
+    # WSP stamp; the tick before ran far out and looked too steep)
     pen.setWidthF(max(side * TICK_SHARE, 0.1))
     painter.setPen(pen)
-    tick = QPainterPath(QPointF(box.left() + side * 0.18, box.top() + side * 0.50))
-    tick.lineTo(QPointF(box.left() + side * 0.42, box.top() + side * 0.80))
-    tick.lineTo(QPointF(box.right() + side * 0.28, box.top() - side * 0.30))
+    tick = QPainterPath(QPointF(box.left() + side * 0.06, box.top() + side * 0.50))
+    tick.lineTo(QPointF(box.left() + side * 0.40, box.top() + side * 0.88))
+    tick.lineTo(QPointF(box.right() + side * 0.10, box.top() + side * 0.06))
     painter.drawPath(tick)
 
 

@@ -237,8 +237,8 @@ its default (see *Markup styles and defaults*).
 - **Cloud+** (`Shift+Q`) — a cloud and its note as one markup: drag a rectangular
   cloud or click a free-form one, then click where the words go.
 - **Checkbox** — options with a box to tick beside each, as on a review stamp, all
-  in one markup typed like a text box. Click to put one down with three options
-  (Option 1, Option 2, Option 3) picked ready to type over, or drag a box. Each line
+  in one markup typed like a text box. Click to put one down with one option
+  (Option 1) picked ready to type over; it is not dragged to a size. Each line
   you type is one option: `Enter` adds the next, `Backspace` at the start of a line
   joins it to the one above, and a tick stays with its option as lines are added,
   joined or taken away. With Select, a click **on a box** ticks or unticks it (one
@@ -324,7 +324,7 @@ measurement extras too: cut-outs, Units, Caption and Totals.
 | **Text Box** | Annotate | `T` | A box of words on the page — drag the box, then type in it |
 | **Callout** | Annotate | `Q` | Click what it points at, then click where the words go |
 | **Cloud+** | Annotate | `Shift+Q` | Drag a rectangular Cloud or click the corners of a custom Cloud+, then click where the words go — the cloud and note are one thing |
-| **Checkbox** | Annotate | — | Options with boxes to tick — click to place three, or drag a box; type one option a line, and click a box to tick it |
+| **Checkbox** | Annotate | — | Options with boxes to tick — click to place one; type one option a line, and click a box to tick it |
 | **Note** | Annotate | — | Sticky note with a comment |
 | **Stamp** | Annotate | `S` | Approval or status stamp |
 | **Flag** | Annotate | `Shift+F` | Pin a flag somewhere to come back to |

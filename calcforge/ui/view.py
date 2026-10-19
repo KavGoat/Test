@@ -3018,6 +3018,8 @@ class PageView(QGraphicsView):
     def _update_draft(self, scene_pos: QPointF, modifiers,
                       final: bool = False) -> None:
         draft = self._draft
+        if isinstance(draft, CheckboxItem):
+            return            # put down by a click, never dragged to a size
         freehand = self._mode == "draw_free"
         # Freehand is sampled from the hand, not marched point-by-point across
         # the grid. Only the first press and final release are intentional
@@ -3550,14 +3552,13 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
-        if self._mode == "draw_drag" and self._is_a_click(scene_pos) \
-                and isinstance(self._draft, CheckboxItem):
-            # A Checkbox is put down by a click as well as dragged: three
-            # options at the size that holds them, ready to type over —
-            # and widening to hold what is typed.
+        if self._mode == "draw_drag" and isinstance(self._draft, CheckboxItem):
+            # A Checkbox is put down by a click, never dragged to a size (the
+            # user, 2026-10-19): one option at the size that holds it, ready
+            # to type over — and widening to hold what is typed.
             self._draft.auto_width = True
             self._mode = "idle"
-            self.finish_draft(scene_pos)
+            self.finish_draft(self._draw_origin or self._press_scene)
             event.accept()
             return
 

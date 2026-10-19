@@ -133,7 +133,7 @@ TOOLS: list[Tool] = [
          "then click where the words go — the cloud and note are one thing",
          factory=lambda: CalloutItem("")),
     Tool("checkbox", "Checkbox", "checkbox", DRAG, "Annotate", "",
-         "Options with boxes to tick — click to place three, or drag a box; "
+         "Options with boxes to tick — click to place one; "
          "type one option a line, and click a box to tick it",
          factory=lambda: _checkbox()),
     Tool("note", "Note", "note", CLICK, "Annotate", "",
