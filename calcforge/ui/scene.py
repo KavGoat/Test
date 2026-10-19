@@ -2056,6 +2056,16 @@ class DocumentScene(QGraphicsScene):
         self._pages_rect = QRectF(0, 0, right, height)
         self._apply_desk_margin()
 
+    def pages_rect(self) -> QRectF:
+        """Where the pages (or the spread in view) lie on the canvas; each
+        view keeps its own desk round this (PageView._update_desk_margin)."""
+        return QRectF(self._pages_rect)
+
+    @staticmethod
+    def desk_minimum() -> float:
+        """The least desk round the pages, whatever the zoom."""
+        return float(PAGE_GAP)
+
     def set_desk_margin(self, across: float, down: float) -> None:
         """Leave enough canvas around the pages to centre any page edge."""
         self._desk_margin = QPointF(max(float(across), PAGE_GAP),

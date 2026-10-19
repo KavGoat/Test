@@ -7,6 +7,7 @@ import base64
 import json
 import os
 import re
+from contextlib import contextmanager
 from typing import Optional
 
 from PySide6.QtCore import (QBuffer, QByteArray, QEvent, QIODevice, QMimeData, QModelIndex, QObject,
@@ -773,7 +774,10 @@ class MainWindow(QMainWindow):
         self.destroyed.connect(
             lambda *_: type(self)._windows.remove(self)
             if self in type(self)._windows else None)
-        self._syncing_view = False
+        # Window Sync: Split View's views, and other windows of a document,
+        # kept in step (viewsync.py)
+        from .viewsync import ViewSync
+        self.view_sync = ViewSync(self)
         from ..items import hatches
         hatches.load_custom()          # the hatch patterns of one's own, from before
         from ..items import linestyles
@@ -2880,7 +2884,8 @@ class MainWindow(QMainWindow):
         self.window_sync.addItems(["Sync off", "Page sync", "Document sync"])
         self.window_sync.currentIndexChanged.connect(self._set_window_sync)
         self.window_sync.setToolTip(
-            "Link this view with other windows showing the same document")
+            "Keep the two views of Split View (and other windows of this document) "
+            "in step — Page sync: the same page; Document sync: scroll, zoom and page")
 
         # as wide as what it says now, not as its longest choice: the status
         # bar's room is what lets the page number sit under the page's middle
@@ -2986,15 +2991,19 @@ class MainWindow(QMainWindow):
         view.statusMessage.connect(active(self.status_hint.setText))
         view.cursorMoved.connect(active(self._show_position))
         view.zoomChanged.connect(active(self._show_zoom))
-        view.zoomChanged.connect(active(lambda _zoom: self._sync_other_windows(True)))
         view.selectionChanged.connect(active(self._selection_changed_on_the_canvas))
         view.toolFinished.connect(active(self.select_tool))
         view.documentEdited.connect(active(self.mark_modified))
         view.pageChanged.connect(active(self.follow_scrolled_page))
-        view.horizontalScrollBar().valueChanged.connect(
-            active(lambda _value: self._sync_other_windows(False)))
-        view.verticalScrollBar().valueChanged.connect(
-            active(lambda _value: self._sync_other_windows(False)))
+        # Window Sync hears every view, the one in hand or not: the wheel
+        # zooms and scrolls the other view of a split without a click
+        sync = self.view_sync
+        view.zoomChanged.connect(lambda _zoom, v=view: sync.moved(v))
+        view.horizontalScrollBar().valueChanged.connect(lambda _value, v=view: sync.moved(v))
+        view.verticalScrollBar().valueChanged.connect(lambda _value, v=view: sync.moved(v))
+        # (the view in hand is heard through follow_scrolled_page)
+        view.pageChanged.connect(
+            lambda index, v=view: sync.paged(v, index) if self.view is not v else None)
 
     def _connect(self) -> None:
         self._wire_view(self.view)
@@ -3091,6 +3100,15 @@ class MainWindow(QMainWindow):
                 "vscroll": self.view.verticalScrollBar().value()}
 
     def _adopt_document_state(self, state: dict) -> None:
+        """Show the document of *state* where it was left. Coming into view
+        is not a move for Window Sync to repeat: the views are linked anew
+        as they then stand (viewsync.py)."""
+        from .viewsync import ViewSync
+        with ViewSync.quiet():
+            self._take_document_state(state)
+        self.view_sync.relink()
+
+    def _take_document_state(self, state: dict) -> None:
         initial_fit = getattr(self, "_initial_fit", None)
         if initial_fit is not None:
             initial_fit.stop()
@@ -3113,8 +3131,11 @@ class MainWindow(QMainWindow):
         self._refresh_undo_actions()
         self._show_page_layout()
 
+        # another window of this document brings its sync; otherwise the
+        # window's own stays (a tab switched in Split View keeps the sync)
         mode = next((other.window_sync.currentIndex() for other in type(self)._windows
-                     if other is not self and other.document is self.document), 0)
+                     if other is not self and other.document is self.document),
+                    self.window_sync.currentIndex())
         self.window_sync.blockSignals(True)
         self.window_sync.setCurrentIndex(mode)
         self.window_sync.blockSignals(False)
@@ -3404,8 +3425,11 @@ class MainWindow(QMainWindow):
         self._open_documents = pane.documents
         self._active_tab = pane.active
         shown = not self.formula_bar.isHidden()
-        pane.layout.insertWidget(pane.layout.indexOf(pane.tabs) + 1, self.formula_bar)
-        self.formula_bar.setVisible(shown)
+        with self._views_kept_still():
+            # the formula bar changing panes changes both views' heights:
+            # neither view's pages move on the screen for it
+            pane.layout.insertWidget(pane.layout.indexOf(pane.tabs) + 1, self.formula_bar)
+            self.formula_bar.setVisible(shown)
         self.formula_bar.tables = pane.view.tables
         if 0 <= self._active_tab < len(self._open_documents):
             state = self._open_documents[self._active_tab]
@@ -3416,11 +3440,37 @@ class MainWindow(QMainWindow):
                 state["zoom"] = view.zoom()
                 state["hscroll"] = view.horizontalScrollBar().value()
                 state["vscroll"] = view.verticalScrollBar().value()
-                state["index"] = view.visible_page_index()
+                # the page it was last on: scrolled onto, or gone to by Page
+                # sync (zoomed out, the middle can be on the next page down)
+                state["index"] = getattr(view, "_shown_page", -1)
+                if not 0 <= state["index"] < len(state["document"].pages):
+                    state["index"] = view.visible_page_index()
             self._adopt_document_state(state)
         self._show_zoom(self.view.zoom())
         self.sheet_tabs.refresh()
         self._mark_active_pane()
+
+    @contextmanager
+    def _views_kept_still(self):
+        """Whatever is rearranged inside, each view's pages stay where they
+        are on the screen: the canvas point at a view's top left corner is
+        brought back under the same pixel of the screen."""
+        from .viewsync import ViewSync
+        held = []
+        for pane in self._panes:
+            view = pane.view
+            if view.scene() is not None:
+                corner = view.viewport().mapToGlobal(QPoint(0, 0))
+                held.append((view, corner,
+                             view.viewportTransform().inverted()[0].map(QPointF(0, 0))))
+        with ViewSync.quiet():
+            yield
+            for pane in self._panes:
+                pane.layout.activate()
+            for view, corner, point in held:
+                now = view.viewport().mapToGlobal(QPoint(0, 0))
+                view.bring_to(point, QPointF(corner - now))
+        self.view_sync.relink()
 
     def unsplit(self, keep: Optional[ViewPane] = None, carry_over: bool = True) -> None:
         """Turn the split off: *keep* (the pane being worked in) stays.
@@ -4590,71 +4640,19 @@ class MainWindow(QMainWindow):
         self.pages_panel.show_current(index)
         self.refresh_scale_label()
         self.refresh_selection()
-        self._sync_other_windows(True)
+        self.view_sync.paged(self.view, index)
 
     def _set_window_sync(self, mode: int) -> None:
-        """One synchronization choice applies to every view of this document."""
+        """One synchronization choice applies to the window's views and to
+        every window of this document. Choosing it moves nothing: the views
+        are linked where they are (viewsync.py)."""
         for other in list(type(self)._windows):
             if other is self or other.document is not self.document:
                 continue
             other.window_sync.blockSignals(True)
             other.window_sync.setCurrentIndex(mode)
             other.window_sync.blockSignals(False)
-        self._sync_other_windows(True)
-
-    def _sync_other_windows(self, document_change: bool) -> None:
-        """Copy this viewport to opted-in windows showing the same document."""
-        if (self._syncing_view or getattr(self.view, "_zooming", False)
-                or not hasattr(self, "window_sync")):
-            return
-        # Views share a scene. Resizing its pan margin changes *every*
-        # scrollbar; a peer must not echo its old zoom back during that step.
-        if any(other is not self and other.document is self.document
-               and (other._syncing_view or getattr(other.view, "_zooming", False))
-               for other in list(type(self)._windows)):
-            return
-        mode = self.window_sync.currentIndex()
-        if mode == 0:
-            return
-        source_top = self.view._page_top_value(self.current_index)
-        page_offset = self.view.verticalScrollBar().value() - source_top
-        for other in list(type(self)._windows):
-            if other is self:
-                continue
-            try:
-                if other.document is not self.document or other.window_sync.currentIndex() == 0:
-                    continue
-                other._syncing_view = True
-                if document_change and mode == 2 and other.current_index != self.current_index:
-                    other.go_to_page(self.current_index)
-                other.view.set_zoom(self.view.zoom())
-                other.view.horizontalScrollBar().setValue(
-                    self.view.horizontalScrollBar().value())
-                other.view.verticalScrollBar().setValue(
-                    round(other.view._page_top_value(other.current_index)
-                          + page_offset))
-            except RuntimeError:
-                continue
-            finally:
-                try:
-                    other._syncing_view = False
-                except RuntimeError:
-                    pass
-        # the other view of a split window, when it shows the same document
-        pane = self.other_pane()
-        if pane is not None and pane.documents:
-            state = pane.documents[pane.active]
-            if state["document"] is self.document and pane.view.scene() is self.scene:
-                index = self.current_index if mode == 2 else state["index"]
-                self._syncing_view = True
-                try:
-                    pane.view.set_zoom(self.view.zoom())
-                    pane.view.horizontalScrollBar().setValue(
-                        self.view.horizontalScrollBar().value())
-                    pane.view.verticalScrollBar().setValue(
-                        round(pane.view._page_top_value(index) + page_offset))
-                finally:
-                    self._syncing_view = False
+        self.view_sync.relink()
 
     def eventFilter(self, watched, event) -> bool:
         """Let the editor keep keys that would otherwise run global commands.
@@ -5116,7 +5114,7 @@ class MainWindow(QMainWindow):
         # clicked (the user, 2026-10-17). One page picked follows the view.
         self.pages_panel.show_current(index, keep_run=True)
         self.refresh_scale_label()
-        self._sync_other_windows(True)
+        self.view_sync.paged(self.view, index)
 
     def _structure_snapshot(self, reuse: Optional[dict] = None) -> dict:
         """Every page written out. With *reuse* (from the snapshot before a

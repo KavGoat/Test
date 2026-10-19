@@ -521,18 +521,22 @@ def test_same_document_windows_can_sync_by_page_or_document(window):
         second.go_to_page(0)
         window.window_sync.setCurrentText("Page sync")
         second.window_sync.setCurrentText("Page sync")
+        was = second.view.zoom()
         window.view.set_zoom(1.75)
         QApplication.processEvents()
-        assert second.view.zoom() == pytest.approx(1.75)
+        assert second.view.zoom() == pytest.approx(was), "Page sync leaves the zoom alone"
         window.go_to_page(1)
-        assert second.current_index == 0, "page sync leaves the pages independent"
+        assert second.current_index == 1, "Page sync follows the page (Revu)"
 
         window.window_sync.setCurrentText("Document sync")
         second.window_sync.setCurrentText("Document sync")
         window.go_to_page(0)
-        window.go_to_page(1)
         QApplication.processEvents()
-        assert second.current_index == 1, "document sync follows the page as well"
+        assert second.current_index == 0, "Document sync follows the page as well"
+        ratio = second.view.zoom() / window.view.zoom()
+        window.view.set_zoom(window.view.zoom() * 1.5)
+        assert second.view.zoom() == pytest.approx(window.view.zoom() * ratio), \
+            "and the zoom, by the same factor"
     finally:
         second.close()
         second.deleteLater()
