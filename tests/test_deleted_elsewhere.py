@@ -164,6 +164,33 @@ def test_a_page_with_only_markups_is_restored_only_when_asked(win, tmp_path):
     assert len(win.document.pages) == 2 and kinds(win, 0) == ["rect"]
 
 
+def test_a_drawing_calcforge_holds_comes_back_only_when_ticked(win, tmp_path):
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+    from PySide6.QtGui import QColor, QImage
+
+    image = QImage(200, 100, QImage.Format_RGB32)
+    image.fill(QColor("#3366cc"))
+    data = QByteArray()
+    buffer = QBuffer(data)
+    buffer.open(QIODevice.WriteOnly)
+    image.save(buffer, "PNG")
+    win.document.add_page()
+    page = win.document.pages[0]
+    page.background_key = win.document.put_asset("picture-test", bytes(data))
+    win.rebuild_scenes()
+    write_lines(win, ["c:3", "c="], page=0)
+    path = str(tmp_path / "d.pdf")
+    save_to(win, path)
+    delete_pages_elsewhere(path, 0)
+    reopen(win, path)
+    assert win.restore_deleted_pages(ask=False)
+    assert win.document.pages[0].background_key is None, "not ticked: paper"
+    win.undo_stack.undo()
+    assert win.restore_deleted_pages(ask=False, drawing=True)
+    assert win.document.pages[0].background_key == "picture-test", "ticked: the picture"
+    assert kinds(win, 0) == ["calc", "calc"]
+
+
 def test_after_saving_there_is_nothing_left_to_restore(win, tmp_path):
     a_table_then_an_equation(win)
     path = str(tmp_path / "t.pdf")

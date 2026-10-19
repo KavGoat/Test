@@ -4402,7 +4402,7 @@ class MainWindow(QMainWindow):
             self.restore_deleted_pages()
 
     def restore_deleted_pages(self, _checked: bool = False, ask: bool = True,
-                              markups: bool = False) -> bool:
+                              markups: bool = False, drawing: bool = False) -> bool:
         """Document ▸ Restore Pages…: what CalcForge itself had on the
         pages deleted in another program since the document was last saved
         here — equations, calculation blocks and text, tables, spreadsheet
@@ -4412,7 +4412,11 @@ class MainWindow(QMainWindow):
         "offer to restore but be very clear on what pages were deleted and
         those pages being restored"; "restore only applies to spreadsheet,
         table cells and equations and charts etc ... unless that becomes a
-        toggle"). One undo step; once saved, nothing is left to restore."""
+        toggle"; "also a toggle for the drawing if CalcForge has it": *drawing*,
+        the dialog's second tick, for a page whose drawing — a picture, or a
+        PDF page kept as a file of its own — CalcForge still holds; one from
+        the file's own page went with it). One undo step; once saved,
+        nothing is left to restore."""
         from ..io.pdfbase import calcforge_items
 
         here = {page.uid for page in self.document.pages}
@@ -4429,6 +4433,14 @@ class MainWindow(QMainWindow):
 
         def has_calc(e):
             return bool(calcforge_items(e["page"]) or e["page"].get("sheet"))
+
+        def has_drawing(e):
+            """Whether CalcForge still holds the page's drawing."""
+            page = e["page"]
+            assets = self.document.assets
+            return bool((page.get("pdf_key") and page["pdf_key"] in assets
+                         and not e["drawing_lost"])
+                        or (page.get("background_key") and page["background_key"] in assets))
 
         def has_markups(e):
             return any(isinstance(p, dict) and p not in calcforge_items(e["page"])
@@ -4448,20 +4460,46 @@ class MainWindow(QMainWindow):
             if only_markups:
                 text += "\n" + ", ".join(only_markups) + (" has" if len(only_markups) == 1 else
                                                           " have") + " only markups."
-            text += "\n\nThe pages' own drawings went with the file's pages and are not restored."
-            box = QMessageBox(QMessageBox.Question, "Restore Pages", text,
-                              QMessageBox.Ok | QMessageBox.Cancel, self)
-            box.button(QMessageBox.Ok).setText("Restore")
+            kept = [name(e) for e in found if has_drawing(e)]
+            gone_with_file = [name(e) for e in found
+                              if (e["page"].get("pdf_key") or e["page"].get("background_key"))
+                              and not has_drawing(e)]
+            if gone_with_file:
+                text += ("\n\nThe drawing of " + ", ".join(gone_with_file)
+                         + " was the file's own page and went with it: it can't be restored.")
+            from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QLabel,
+                                           QVBoxLayout)
+            box = QDialog(self)
+            box.setWindowTitle("Restore Pages")
+            column = QVBoxLayout(box)
+            words = QLabel(text, box)
+            words.setWordWrap(True)
+            column.addWidget(words)
             tick = QCheckBox("Also restore the markups that were on them", box)
             tick.setEnabled(any(has_markups(e) for e in found))
-            box.setCheckBox(tick)
+            column.addWidget(tick)
+            # the drawings, only those CalcForge still holds
+            pictures = QCheckBox("Also restore the page's drawing" if len(found) == 1
+                                 else "Also restore the pages' drawings", box)
+            pictures.setEnabled(bool(kept))
+            pictures.setToolTip("Only where CalcForge still holds the drawing: "
+                                + (", ".join(kept) if kept else "none of these pages"))
+            column.addWidget(pictures)
+            buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, box)
+            buttons.button(QDialogButtonBox.Ok).setText("Restore")
+            buttons.accepted.connect(box.accept)
+            buttons.rejected.connect(box.reject)
+            column.addWidget(buttons)
+            box.setMinimumWidth(420)
             try:
-                if box.exec() != QMessageBox.Ok:
+                if box.exec() != QDialog.Accepted:
                     return False
                 markups = tick.isChecked()
+                drawing = pictures.isChecked() and pictures.isEnabled()
             finally:
                 done_with(box)
-        found = [e for e in found if has_calc(e) or (markups and has_markups(e))]
+        found = [e for e in found if has_calc(e) or (markups and has_markups(e))
+                 or (drawing and has_drawing(e))]
         if not found:
             self.status_hint.setText("Nothing to restore: the pages deleted elsewhere had "
                                      "no equations, tables, spreadsheets or charts")
@@ -4477,14 +4515,19 @@ class MainWindow(QMainWindow):
                 data = copy.deepcopy(entry["page"])
                 if not markups:
                     data["items"] = calcforge_items(data)
-                # never the page's drawing (a PDF page or a picture): back as
-                # paper, with what CalcForge put on it
-                data["pdf_key"] = None
-                data["pdf_page_index"] = None
-                data["background_key"] = None
-                data["written_here"] = True
-                data["pdf_annotations"] = True
-                data["markup_annotations"] = []
+                if not (drawing and has_drawing(entry)):
+                    # not the page's drawing (a PDF page or a picture): back as
+                    # paper, with what CalcForge put on it
+                    data["pdf_key"] = None
+                    data["pdf_page_index"] = None
+                    data["background_key"] = None
+                    data["written_here"] = True
+                    data["pdf_annotations"] = True
+                    data["markup_annotations"] = []
+                elif not markups:
+                    # the drawing back, but the markups read out of it stay
+                    # out (their annotations are drawn with the page no more)
+                    data["pdf_annotations"] = False
                 runs |= {p.get("uid") for p in data.get("items", [])
                          if isinstance(p, dict) and p.get("type") == "sheet_run"}
                 at = next((i + 1 for i, e in enumerate(entries) if e.get("uid") == entry["after"]), 0)
@@ -4505,7 +4548,8 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(
             f"Restored what CalcForge had on page{'s' if len(found) != 1 else ''} {numbers}, "
             f"deleted in another program" + (", with their markups" if markups else
-                                             " (not their markups)"))
+                                             " (not their markups)")
+            + (", and the drawings CalcForge held" if drawing else ""))
         return True
 
     def save_document(self) -> bool:

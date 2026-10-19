@@ -866,8 +866,11 @@ cells' own Find and Replace — see Part 3.)
   — equations, calculation blocks and text, tables, spreadsheet cells and charts — on
   pages where they were, as one undo step. Their **markups** come back only when you
   tick **Also restore the markups that were on them** (a page that had only markups
-  is restored only then). The page's own drawing — a PDF page or a picture — is never
-  restored: it went with the file's page, so a restored page is paper.
+  is restored only then), and its **drawing** — a picture, or a PDF page CalcForge
+  kept as a file of its own — only when you tick **Also restore the page's
+  drawing**, which can be ticked only where CalcForge still holds it. A drawing that
+  was the file's own page went with it and can't come back: that page is restored as
+  paper.
 - **Flatten…** (`Ctrl+Shift+M`; Document and Batch menus, and a page's menu) is
   Revu's **Flatten Markups**: tick the markup types; **All Markups**, **Exclude
   Filtered Markups** or **Currently Selected Markups**; the **Pages**; and **Allow

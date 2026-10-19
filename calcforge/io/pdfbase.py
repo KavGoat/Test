@@ -768,8 +768,9 @@ def _what_went(deleted: list, pages: list, sheets_kept: list) -> str:
                      f"over its pages that are left.")
     lines.append("Document ▸ Restore Pages…, until the document is saved, "
                  "brings back their equations, tables, spreadsheets and charts on "
-                 "pages where they were — not their markups, unless you tick that too, "
-                 "and never the page's drawing itself, which went with the file's page.")
+                 "pages where they were — not their markups or the page's drawing, "
+                 "unless you tick those too (a drawing only where CalcForge still "
+                 "holds it: one that was the file's own page went with it).")
     return "\n".join(lines)
 
 
