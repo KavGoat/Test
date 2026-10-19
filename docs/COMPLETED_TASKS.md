@@ -3,6 +3,15 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-19 (evening) — references follow the cells, one document per file, the Checkbox, text spacing, pages deleted elsewhere (pushed at 169dd6c)
+
+- Full test runs passed at 1dd36a7, f507a97 and 169dd6c (`-n 3`, every-command tests included); 14/14 planted bugs caught each time. Runs at 8986ad9, a8cef3d and 7c246ed failed (a three-word menu label, the page menu's mirror, the panel's new rows unreached by the exerciser, Single Page Mode unreached in full runs only); fixed before 169dd6c.
+- Equations follow the cells as Excel's formulas do: renamed sheets, tables and names; inserted, deleted and moved cells (a deleted one is Sheet.#REF); retyped headings. The spreadsheet gives #REF! where moved cells land on cells something read, and renames names and structured references.
+- A file open in two tabs or windows is one document: one undo, one save; tabs are never merged.
+- Text boxes, callouts, typewriter text, Cloud+: Line Spacing and Margins, saved as Revu writes them; Alt+Z keeps to them.
+- The Checkbox markup: options only; square, rounded, circle, diamond; tick, cross, filled, dot; multiple or single; managed in the Properties panel; Checked column; a locked /Stamp in other readers.
+- Pages deleted in another program: each named with what was on it; a spreadsheet keeps all its cells; Restore Pages… brings back CalcForge's own content, with markups and the drawing (where held) only when ticked.
+
 ## 2026-10-19 — Split View sync, pictures, the user manual, tabs between windows, workbooks with names, the 162-sheet set smooth, consistency (pushed at 4bed0fb)
 
 - Full test run passed at 4bed0fb (`-n 3`, every-command tests included); 14/14 planted bugs caught. An earlier run at 11032a2 failed only the big-set wheel-zoom frame budget (95th percentile 40–58 ms against 40); fixed at 4bed0fb, five runs alone passing at 28–37 ms.
