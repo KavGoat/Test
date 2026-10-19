@@ -117,8 +117,7 @@ pick a markup and its row is picked in the list.
 Change a markup's properties and press **Set as default** in the properties
 panel: every rectangle after that is drawn the way you set that one up.
 Defaults are per kind — a rectangle and an ellipse keep their own — and are
-remembered between sessions. *Markup ▸ Forget markup defaults* puts them all
-back.
+remembered between sessions. **Tools ▸ Forget Defaults** puts them all back.
 
 The **Tool sets** panel is a tool chest. Keep anything in it, in as many named
 sets as you like, and use each entry two ways:
@@ -133,7 +132,7 @@ the number keys: press `3` on the page and you are holding the third one.
 Sets are remembered between documents, because they belong to you rather than
 to the job.
 
-**Bluebeam tool sets import.** *File ▸ Import tools…* reads a `.btx` file —
+**Bluebeam tool sets import.** **File ▸ Import ▸ Tool Set…** reads a `.btx` file —
 the real thing, not an export of one: each tool's `Raw` field is a
 zlib-compressed, hex-encoded PDF annotation dictionary, and it is parsed as
 one. The sets in `btx/` are what the reader is tested against, so the tools an
@@ -184,10 +183,12 @@ read `3600 c/c` while the takeoff total still uses what was actually measured.
 
 ### Moving and duplicating by an exact offset
 
-`Ctrl+Shift+D` (also on the right-click menu) moves or copies whatever is
-selected by a distance you type, any number of times — "across 3 m, 4 times"
-lays out a row of footings. On a scaled page the offset is a real distance
-(`3 m`); without a scale it is a paper one (`25 mm`).
+**Edit ▸ Multiply…** (`Ctrl+M` in Markup mode, also on the right-click menu)
+moves or copies whatever is selected by a distance you type, any number of
+times — "across 3 m, 4 times" lays out a row of footings. On a scaled page the
+offset is a real distance (`3 m`); without a scale it is a paper one (`25 mm`).
+**Offset** (`O`) is Revu's: a copy of a markup a set distance away, on the side
+the pointer is. (`Ctrl+Shift+D` is Revu's Delete Pages.)
 
 ---
 
@@ -204,9 +205,9 @@ so the sheet index a drawing set was issued with is in the panel rather than
 only in the file. The page's own line work stays part of the page: that is the
 drawing, not a markup, and there can be tens of thousands of it.
 
-**File ▸ Insert PDF pages** brings more in beside them — all pages or a range
+**Document ▸ Insert ▸ Pages** (`Ctrl+Shift+I`, also File ▸ Import) brings more in beside them — all pages or a range
 like `1-3,7`, keeping each page's own size or fitting to A4, with a preview of
-what is coming. A photo goes in the same way through **Insert image as a page**.
+what is coming. A photo goes in the same way through **Document ▸ Insert ▸ Image Page**.
 
 Right-clicking a page in the pages panel does everything else to it: insert a
 blank page, PDF pages or an image either side, duplicate, move, turn it a
@@ -218,10 +219,11 @@ it, or swaps one colour for another.
 
 - **One continuous canvas.** Every page is stacked down it with a gap of desk
   between them, and you scroll through the whole document the way you would
-  scroll a PDF. The wheel scrolls, `Shift`+wheel scrolls sideways,
-  `Ctrl`+wheel zooms at the pointer, `Space`+drag and the middle button pan.
-  `PgUp`/`PgDn` move a screenful, `Ctrl`+them move a page, and `Ctrl+Home` /
-  `Ctrl+End` reach the ends. Scrolling onto another page makes it the current
+  scroll a PDF. The wheel zooms at the pointer, as in Revu, `Ctrl`+wheel
+  scrolls and `Shift`+wheel scrolls sideways (Preferences ▸ Mouse wheel swaps
+  zoom and scroll); the space bar and the middle button pan. `PgUp`/`PgDn` move
+  a screenful, `Ctrl`+them turn a page, `Home` and `End` go to the first and last
+  page, and `Ctrl+Home` / `Ctrl+End` reach the ends. Scrolling onto another page makes it the current
   one; the view is never moved under you to tidy up.
 - Drawing lands on the page under the pointer, and a markup dragged onto the
   next page belongs to that page afterwards — undo covers both.
@@ -236,10 +238,10 @@ it, or swaps one colour for another.
   page's own imported line work always sits under everything drawn on it, so
   sending a markup to the back puts it behind the other markups rather than
   under the drawing, where nothing would be seen of it again.
-- **Hide** a markup you want out of the way without deleting it, and *Markup ▸
-  Show hidden* brings them all back. Anything can be left out of the print on
+- **Hide** a markup you want out of the way without deleting it, and **Edit ▸
+  Show Hidden** brings them all back. Anything can be left out of the print on
   its own, and locked so it cannot be moved.
-- **Redaction that redacts**: draw the boxes, then *Markup ▸ Apply redactions*
+- **Redaction that redacts**: draw the boxes, then **Edit ▸ PDF Content ▸ Apply Redactions…**
   to overwrite the page underneath and delete the markups they cover. It says
   plainly that this cannot be undone, and that partly-overlapping markups are
   left for you to check.
@@ -250,18 +252,20 @@ it, or swaps one colour for another.
   Both reach the saved PDF: the bookmarks become its outline and every contents
   line becomes a working link. A drawing set exported from here keeps the links
   it came in with as well.
-- **A light and a dark theme** (View ▸ Dark). The chrome, the icons and every
+- **A light and a dark theme** (**View ▸ Dark Mode**, `Ctrl+3`). The chrome, the icons and every
   panel follow it; the page itself stays paper-white in both, and what is drawn
   on it keeps its own colour — the sheet is the sheet, whatever the frame does.
 - **The window is yours.** Every panel has a pin, a float button and a close
   button in its title bar. Toolbars dock on any edge and can be locked, and
-  *View ▸ Toolbars ▸ Choose tools* picks which markup tools appear on them —
+  **Tools ▸ Toolbars ▸ Customise Toolbars…** picks which tools appear on them —
   anything taken off is still on its menu and still on its key. Where
-  everything sits comes back next time; *Reset the layout* puts the original
+  everything sits comes back next time; **Window ▸ Reset Layout** puts the original
   arrangement back.
 - **Print** and **print preview** through the normal system dialog, export
   pages as images, and export the markups list to CSV.
-- Autosave every two minutes beside the document, offered back on the next
+- Autosave every two minutes beside the document: opening a document whose
+  recovery copy is newer offers the copy back (Open Recovered, Open Saved or
+  Discard Recovered), and an untitled document's copy is offered on the next
   start.
 
 ---
@@ -298,61 +302,110 @@ annotations, the calculations as page drawing, and the record.
 
 ## Keyboard
 
+The full reference — every command, its key and where the key acts — is in the
+user manual, **Help ▸ User Manual** (`Ctrl+F1`; [docs/USER_MANUAL.md](docs/USER_MANUAL.md),
+*Keyboard shortcut reference*). The tables below are written from the program by
+`python tools/manual.py`, so they always match it.
+
 Typing straight onto the page does **nothing unless the key is bound** — which
-is what lets a bare keystroke mean "start writing here":
+is what lets a bare keystroke mean "start writing here": on bare paper in Markup
+mode `"` starts a text box, `|` a note, `@` a callout, and `'` an equation.
 
-| Key | Starts |
-|---|---|
-| `"` | A text markup where the cursor is |
-| `\|` | A note |
-| `@` | A callout |
-
-Everything is editable under **Help ▸ Keyboard shortcuts…** (`F1`): click a
-shortcut and **press the keys you want**. A single character is stored as that
-character; anything with Ctrl or Alt is stored as a key sequence and works from
-the menus too. Backspace clears one, Escape puts it back, and a key bound to
-two things outlines both rows in red and will not save until you resolve it.
+Every command is in **CalcForge ▸ Keyboard Shortcuts…** (`F1`), with a key or
+without one: click a shortcut and **press the keys you want**. A key bound to two
+things in the same place is shown in red and must be resolved before it saves.
 
 **Tool keys are silent while you are typing.** `M` in the middle of a sentence
 is a letter, and so is `Alt+M` — they only pick a tool when nothing is being
-written. Save, print and zoom stay live throughout, as they do everywhere else.
+written. Inside an equation SMath's keys win (`Ctrl+E` inserts a function there
+and exports a PDF elsewhere).
 
-| Key | Action |
+<!-- generated:readme-keys -->
+| Tool | Key |
 |---|---|
-| `Esc` | Back to Select · finish or cancel what you are doing |
-| `L` `A` `Shift+C` | Line · arrow · arc |
-| `R` `E` `C` | Rectangle · ellipse · revision cloud |
-| `P` `Alt+P` `H` `Shift+E` | Polygon · pen · highlighter · eraser |
-| `N` | Polyline |
-| `T` `Q` `Shift+Q` `S` `Shift+F` | Text box · callout · cloud callout · stamp · flag |
-| `J` | Highlight — dragged over anything, it darkens rather than covers |
-| `G` | Snapshot — copy a region and paste it back as itself |
-| `M` `Shift+Alt+A` | Measure length · measure area |
-| `Alt+M` | Dimension — asks for the text to show |
-| `Shift+Alt+Q` `Shift+Alt+P` `Shift+Alt+V` | Polylength · perimeter · volume |
-| `Shift+Alt+G` `Shift+Alt+D` `Shift+Alt+C` | Angle · diameter · count |
-| `Space`+drag, middle-drag | Pan |
-| Wheel · `Shift`+wheel | Scroll · scroll sideways |
-| `PgUp` / `PgDn` | A screenful · `Ctrl`+them for a whole page |
-| `Ctrl+Home` / `Ctrl+End` | The start and the end of the document |
-| `Ctrl`+wheel | Zoom at the pointer |
-| `Ctrl+0` `Ctrl+1` `Ctrl+2` `Ctrl+Alt+0` | Fit page · fit width · fit selection · 100% |
-| `Shift`+drag | Hold a line to 0°, 45° or 90° · square off a box · draw straight freehand |
-| Drag right / left | Select what is wholly inside · what the marquee crosses |
-| Click, click… | Lasso a shape and select what is inside it · `Enter` closes it |
-| `Ctrl`+drag | Leave a copy behind · `Ctrl` mid-drag lets go of the snapping |
-| Double-click | Edit the words · add a polyline vertex |
-| `Ctrl+Shift+D` | Move or duplicate the selection by an exact offset |
-| `Ctrl+Shift+V` | Carry what was copied on the pointer and click to drop it |
-| `Ctrl+B` | Bookmark this place |
-| `Ctrl+G` / `Ctrl+Shift+G` | Group · ungroup the selection |
-| `Ctrl+Shift+]` / `Ctrl+Shift+[` | Bring to the front · send to the back |
-| `Ctrl+]` / `Ctrl+[` | Bring forward · send backward one step |
-| `1` … `9` | Pick up that tool from **My Tools** |
-| `Ctrl+Alt+8` `Ctrl+Alt+R` … | Symbols — the full list under Insert ▸ Symbol |
-| `Ctrl+Z` / `Ctrl+Y` | Undo · redo |
+| Select | `Esc` |
+| Snapshot | `G` |
+| Pan | `Shift+V` |
+| Pen | `Alt+P` |
+| Highlight | `H` |
+| Eraser | `Shift+E` |
+| Line | `L` |
+| Arrow | `A` |
+| Arc | `Shift+C` |
+| Polyline | `N` |
+| Rectangle | `R` |
+| Ellipse | `E` |
+| Polygon | `P` |
+| Cloud | `C` |
+| Highlight Area | `J` |
+| Text Box | `T` |
+| Callout | `Q` |
+| Cloud+ | `Shift+Q` |
+| Stamp | `S` |
+| Flag | `Shift+F` |
+| Length | `M` |
+| Dimension | `Alt+M` |
+| Polylength | `Shift+Alt+Q` |
+| Area | `Shift+Alt+A` |
+| Perimeter | `Shift+Alt+P` |
+| Volume | `Shift+Alt+V` |
+| Angle | `Shift+Alt+G` |
+| Diameter | `Shift+Alt+D` |
+| Count | `Shift+Alt+C` |
 
-The mouse and canvas gestures are on the second tab of the same window.
+| Command | Key | Works |
+|---|---|---|
+| Undo | `Ctrl+Z` | Always |
+| Redo | `Ctrl+Shift+Z` | Always |
+| Redo (Revu's key) | `Ctrl+Y` | Always |
+| Select All | `Ctrl+A` | Always |
+| Cut | `Ctrl+X` | Always |
+| Copy | `Ctrl+C` | Always |
+| Paste | `Ctrl+V` | Always |
+| Paste in Place | `Ctrl+Shift+V` | Always |
+| Paste Here | `Ctrl+Alt+V` | Always |
+| Duplicate | `Ctrl+J` | Always |
+| Offset | `O` | Always |
+| Multiply | `Ctrl+M` | Markup mode |
+| Group | `Ctrl+G` | Always |
+| Ungroup | `Ctrl+Shift+G` | Always |
+| Bring to Front | `Ctrl+Shift+]` | Always |
+| Bring Forward | `Ctrl+]` | Always |
+| Send Backward | `Ctrl+[` | Always |
+| Send to Back | `Ctrl+Shift+[` | Always |
+| Add Bookmark | `Ctrl+B` | Always |
+| Fit Page | `Ctrl+9` | Always |
+| Fit Width | `Ctrl+0` | Always |
+| Zoom to Selection | `Ctrl+2` | Always |
+| Actual Size | `Ctrl+8` | Always |
+| Next Page | `Ctrl+PgDown` | Always |
+| Previous Page | `Ctrl+PgUp` | Always |
+| Insert Blank Page | `Ctrl+Shift+N` | Always |
+| Delete Pages | `Ctrl+Shift+D` | Always |
+| Set Scale | `Ctrl+Shift+K` | Always |
+| Calc/Markup mode | `F12` | Always |
+| Calculate | `F9` | Always |
+| Start equation | `'` | Markup mode |
+| Start text | `"` | Markup mode |
+| Start note | `\|` | Markup mode |
+| Start callout | `@` | Markup mode |
+| Keyboard Shortcuts | `F1` | Always |
+| User Manual | `Ctrl+F1` | Always |
+| Find Tools + Commands | `Shift+F1` | Always |
+<!-- /generated -->
+
+| Mouse | Does |
+|---|---|
+| Wheel | Zoom at the pointer, as in Revu (Preferences ▸ Mouse wheel can make it scroll) |
+| `Ctrl`+wheel | The other one: scroll (or zoom, when the wheel is set to scroll) |
+| `Shift`+wheel | Scroll sideways |
+| Trackpad two-finger scroll | Scroll (`Ctrl` zooms) |
+| Space bar held, middle button | Pan |
+| `Shift`+drag | Hold a line to 0°, 45° or 90° · square off a box |
+| Drag right / left | Select what is wholly inside · what the marquee crosses |
+| `Ctrl`+drag | Leave a copy behind · `Ctrl` while drawing lets go of snapping |
+| Double-click | Edit the words · add a polyline vertex |
+| `1` … `9` | With nothing in hand, pick up that tool from **My Tools**; with a tool in hand, draw in its numbered markup style |
 
 ---
 

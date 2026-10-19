@@ -822,3 +822,16 @@ SHORTCUT_GROUP_ORDER = [
     "Draw", "Annotate", "Measure", "Sketch to Scale", "Typing", "Symbols", "SMath",
     "Calculation", "Spreadsheet", "Panels", "Window", "Help",
 ]
+
+#: The commands README.md's keyboard table lists (by their name in Keyboard
+#: Shortcuts); their keys are read from the program, so the table cannot go
+#: out of date. The manual's reference has every one.
+README_COMMANDS = [
+    "Undo", "Redo", "Redo (Revu's key)", "Select All", "Cut", "Copy", "Paste",
+    "Paste in Place", "Paste Here", "Duplicate", "Offset", "Multiply", "Group", "Ungroup",
+    "Bring to Front", "Bring Forward", "Send Backward", "Send to Back", "Add Bookmark",
+    "Fit Page", "Fit Width", "Zoom to Selection", "Actual Size", "Next Page",
+    "Previous Page", "Insert Blank Page", "Delete Pages", "Set Scale", "Calc/Markup mode",
+    "Calculate", "Start equation", "Start text", "Start note", "Start callout",
+    "Keyboard Shortcuts", "User Manual", "Find Tools + Commands",
+]

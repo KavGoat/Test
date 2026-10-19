@@ -36,12 +36,14 @@ page you cannot lay out.
 
 A drawing set is *read*, not operated. So:
 
-- The wheel scrolls. Shift and the wheel scroll sideways. Ctrl and the wheel
-  zoom at the pointer, where the pointer is.
+- The wheel zooms at the pointer, as Revu's does; Ctrl and the wheel scroll, and
+  Shift and the wheel scroll sideways. Preferences ▸ Mouse wheel swaps the two
+  for anyone who would rather the wheel scrolled (Ctrl+wheel then zooms).
 - Every page is on one canvas, scrolled through continuously. Reaching the next
-  page is a flick of the wheel, not a command.
-- Page Up and Page Down move a screenful. Ctrl with them moves a page.
-  Ctrl+Home and Ctrl+End reach the ends.
+  page is a scroll, not a command.
+- Page Up and Page Down move a screenful. Ctrl with them (or Ctrl+Left and
+  Ctrl+Right, Revu's keys) turns a page; Home and End go to the first and last
+  page; Ctrl+Home and Ctrl+End reach the very ends.
 - Space and drag pans; so does the middle button.
 - Nothing scrolls under the reader on its own. Scrolling onto another page
   updates the page number — it never moves the view to "tidy up".
@@ -50,7 +52,7 @@ A person who has used a PDF reader already knows all of this. That is the point.
 
 ### 3. Every state is visible somewhere
 
-- The current tool is underlined in the toolbar.
+- The current tool is filled in the toolbar.
 - The page, the scale, the zoom and the problem count are always in the status
   bar.
 - A published cell is tagged with its variable name **on the sheet**, not only
@@ -79,8 +81,11 @@ crashes and data losses it found are in the commit history.
 
 ### 6. Keyboard first, for the things done all day
 
-Drawing tools are single keys. Every binding is rebindable by pressing the keys
-you want, and the manager refuses to save a key that would mean two things.
+Drawing tools are single keys. Every command is listed in CalcForge ▸ Keyboard
+Shortcuts and can be given a key by pressing the keys you want, and the manager
+refuses to save a key that would mean two things. The keys a command has out of
+the box are listed, from the program itself, in the user manual (Help ▸ User
+Manual, *Keyboard shortcut reference*).
 Typing on the page does nothing unless the key is bound — which is what allows
 a bare keystroke to mean "start writing here" rather than being a hazard.
 
