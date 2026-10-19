@@ -3070,6 +3070,39 @@ def menu_button(widget, outcome, path, each_index=None):
         outcome["clicked_again"] = True
         settle(QtWidgets.QApplication.doubleClickInterval() + 50)
         ok = open_then_walk(lambda: click_at(widget, point), path, outcome, each_index)
+    elif not ok and outcome.get("error") == "no menu opened":
+        # Not under its own pointer: something else is on top of it there —
+        # in a full run, a window another test left up over the status bar
+        # (T0160 Single Page Mode after T0159, three gate runs on 7c246ed
+        # and before, never in a run of these jobs alone). A hand brings
+        # its window to the front and clicks again; what was in the way is
+        # written down, and a second miss fails the job saying what it was.
+        try:
+            hit = QtWidgets.QApplication.widgetAt(widget.mapToGlobal(rect.center()))
+        except RuntimeError:
+            hit = None
+        in_the_way = ("nothing" if hit is None else
+                      f"{type(hit).__name__} '{hit.objectName()}' of "
+                      f"{type(hit.window()).__name__} '{hit.window().windowTitle()}'")
+        try:
+            import tempfile
+            with open(os.path.join(tempfile.gettempdir(),
+                                   "test_every_command-failures.txt"), "a") as log:
+                log.write("COVERED\t'%s' (%s) under %s, raised and clicked again\n"
+                          % (clean(widget.text()) if hasattr(widget, "text") else widget,
+                             " > ".join(path), in_the_way))
+        except OSError:
+            pass
+        own = widget.window()
+        own.raise_()
+        own.activateWindow()
+        settle(QtWidgets.QApplication.doubleClickInterval() + 50)
+        for key in ("error", "missing", "disabled"):
+            outcome.pop(key, None)
+        outcome["clicked_again"] = True
+        ok = open_then_walk(lambda: click_at(widget, point), path, outcome, each_index)
+        if not ok and outcome.get("error") == "no menu opened":
+            outcome["error"] = f"no menu opened (under the pointer: {in_the_way})"
     return ok
 
 
