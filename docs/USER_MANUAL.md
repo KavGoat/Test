@@ -861,7 +861,7 @@ cells' own Find and Replace — see Part 3.)
   what was on it — equations (and the variables that are now undefined), tables,
   markups, a page of a spreadsheet. A spreadsheet keeps all its cells, however many
   of its pages went, and is laid out again over the pages left. **Restore…** in that
-  message, or **Document ▸ Restore Deleted Pages…** at any time until the document
+  message, or **Document ▸ Restore Pages…** at any time until the document
   is saved, lists the pages again and puts back **what CalcForge itself had on them**
   — equations, calculation blocks and text, tables, spreadsheet cells and charts — on
   pages where they were, as one undo step. Their **markups** come back only when you

@@ -1618,7 +1618,7 @@ class MainWindow(QMainWindow):
                       "and whether Unflatten can bring them back")
         self._act("recover_flattened", "Unflatten", self.recover_flattened, "Ctrl+Shift+U",
                   tip="Restore source items retained by recoverable flattening")
-        self._act("restore_deleted_pages", "Restore Deleted Pages…", self.restore_deleted_pages,
+        self._act("restore_deleted_pages", "Restore Pages…", self.restore_deleted_pages,
                   tip="Bring back the pages deleted in another program since this "
                       "document was last saved here, with everything CalcForge had on them")
         self._act("preferences", "Preferences…", self.edit_preferences, "Ctrl+,",
@@ -2684,9 +2684,9 @@ class MainWindow(QMainWindow):
         for entry in self.insert_family():
             insert_pages.addAction(getattr(self, f"act_{entry[0]}"))
         fill(page_menu, (self.act_extract_pages, self.act_split_pages, self.act_delete_page,
-                         self.act_restore_deleted_pages, self.act_crop_page, None, self.act_header_footer, None,
+                         self.act_crop_page, None, self.act_header_footer, None,
                          self.act_color_processing, None, self.act_flatten_document,
-                         self.act_recover_flattened, None))
+                         self.act_recover_flattened, self.act_restore_deleted_pages, None))
         # CalcForge's own, together at the end
         self.current_page_menu = page_menu.addMenu("Current Page")
         self.current_page_menu.setObjectName("menuCurrentPage")
@@ -4403,7 +4403,7 @@ class MainWindow(QMainWindow):
 
     def restore_deleted_pages(self, _checked: bool = False, ask: bool = True,
                               markups: bool = False) -> bool:
-        """Document ▸ Restore Deleted Pages…: what CalcForge itself had on the
+        """Document ▸ Restore Pages…: what CalcForge itself had on the
         pages deleted in another program since the document was last saved
         here — equations, calculation blocks and text, tables, spreadsheet
         cells, charts — put back on pages where they were; their markups too
@@ -4449,7 +4449,7 @@ class MainWindow(QMainWindow):
                 text += "\n" + ", ".join(only_markups) + (" has" if len(only_markups) == 1 else
                                                           " have") + " only markups."
             text += "\n\nThe pages' own drawings went with the file's pages and are not restored."
-            box = QMessageBox(QMessageBox.Question, "Restore Deleted Pages", text,
+            box = QMessageBox(QMessageBox.Question, "Restore Pages", text,
                               QMessageBox.Ok | QMessageBox.Cancel, self)
             box.button(QMessageBox.Ok).setText("Restore")
             tick = QCheckBox("Also restore the markups that were on them", box)

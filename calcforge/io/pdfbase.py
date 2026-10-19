@@ -766,7 +766,7 @@ def _what_went(deleted: list, pages: list, sheets_kept: list) -> str:
     for name in sheets_kept:
         lines.append(f"The spreadsheet {name} keeps all its cells; it is laid out again "
                      f"over its pages that are left.")
-    lines.append("Restore Deleted Pages (Document menu), until the document is saved, "
+    lines.append("Document ▸ Restore Pages…, until the document is saved, "
                  "brings back their equations, tables, spreadsheets and charts on "
                  "pages where they were — not their markups, unless you tick that too, "
                  "and never the page's drawing itself, which went with the file's page.")

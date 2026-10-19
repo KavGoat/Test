@@ -8193,7 +8193,8 @@ def test_the_style_toolbar_and_the_properties_panel_agree(window):
         markup_groups = {propbar.SHAPE, propbar.HIGHLIGHT, propbar.CUTOUT,
                          propbar.UNITS, propbar.MEASURE, propbar.TOTALS,
                          propbar.AUTO_FONT,           # Revu's "A" is part of the font
-                         propbar.CHECKBOX}            # a Checkbox's Box ▾, Mark ▾, Multiple
+                         propbar.CHECKBOX,            # a Checkbox's Box ▾, Mark ▾, Multiple
+                         propbar.LINE_SPACING}        # in the panel's Text section, with the font
         on_the_toolbar = {field for field, actions in window._style_widgets.items()
                           if any(action.isVisible() for action in actions)} - markup_groups
         # Revu's line-end colour is part of the line ends (End ▾ Auto ▾ ■)

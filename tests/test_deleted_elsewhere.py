@@ -73,7 +73,7 @@ def test_a_deleted_page_with_a_table_is_named_and_can_be_restored(win, tmp_path)
     assert tables(win) == []
     (said,) = [w for w in win.document.open_warnings if "deleted in another program" in w]
     assert "page 1" in said and "the table Loads" in said, said
-    assert "Restore Deleted Pages" in said and "not their markups" in said
+    assert "Restore Pages" in said and "not their markups" in said
     assert win.restore_deleted_pages(ask=False)
     assert [t.sheet.name for t in tables(win)] == ["Loads"]
     assert len(win.document.pages) == 2
