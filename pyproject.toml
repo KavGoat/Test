@@ -31,4 +31,4 @@ calcforge = "calcforge.app:main"
 include = ["calcforge*"]
 
 [tool.setuptools.package-data]
-calcforge = ["py.typed", "data/*.txt.gz", "calc/ui/icons/*"]
+calcforge = ["py.typed", "data/*.txt.gz", "data/*.md", "calc/ui/icons/*"]

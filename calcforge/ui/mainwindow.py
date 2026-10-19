@@ -705,7 +705,7 @@ _SHORTCUT_GROUPS = {
     "renumber_counts": "Markup", "check_spelling": "Markup",
     "shortcuts": "Help", "sample": "Help",
     "find_tool": "Help", "find_text": "Edit",
-    "about": "Help",
+    "about": "Help", "user_manual": "Help",
 }
 
 
@@ -746,6 +746,9 @@ def _a_field_being_typed_in(widget) -> bool:
 #: The events MainWindow's application-wide filter acts on (eventFilter).
 _FILTERED_INPUT = frozenset((QEvent.ShortcutOverride, QEvent.KeyPress,
                              QEvent.MouseButtonPress))
+#: A window property: a window of the window's own whose keys the filter
+#: leaves alone (the user manual, ui/manual.py).
+OWN_KEYS = "cf_own_keys"
 
 
 def _moves_documents(method):
@@ -1512,6 +1515,12 @@ class MainWindow(QMainWindow):
         self._act("find_text", "Search", self.find_in_document, "Ctrl+F",
                   tip="Find words in the drawing and in the markups, on every "
                       "page, and replace them in the markups")
+        # Revu's Help is F1, which is Keyboard Shortcuts here; the manual takes
+        # the free key beside it (the user, 2026-10-19: "a user manual inside
+        # the app")
+        self._act("user_manual", "User Manual", lambda: self.show_user_manual(), "Ctrl+F1",
+                  tip="The manual: Markup, Calculation and Spreadsheets, every "
+                      "function, key and preference, with a search box")
         self._act("find_tool", "Find Tools + Commands", self.find_a_tool, "Shift+F1",
                   tip="Type what you want to do, and it says which tool does "
                       "it and which key it is on")
@@ -2706,7 +2715,7 @@ class MainWindow(QMainWindow):
 
         help_menu = bar.addMenu("&Help")
         help_menu.setObjectName("menuHelp")
-        fill(help_menu, (self.act_find_tool, None,
+        fill(help_menu, (self.act_user_manual, self.act_find_tool, None,
                          self.act_record_slowdowns, self.act_about))
 
     def _build_status(self) -> None:
@@ -3548,7 +3557,8 @@ class MainWindow(QMainWindow):
     #: one, the window and its panels, the application's own settings.
     WORKSPACE_COMMANDS = {
         "new", "new_tab", "new_window", "open", "quit", "preferences", "shortcuts",
-        "about", "find_tool", "record_slowdowns", "full_screen", "dark", "show_panels",
+        "about", "find_tool", "user_manual", "record_slowdowns", "full_screen", "dark",
+        "show_panels",
         "pin_panels", "reset_layout", "lock_toolbars", "customise_toolbar",
         "import_toolset", "manage_toolsets", "close_all", "markups_list",
     }
@@ -4692,6 +4702,10 @@ class MainWindow(QMainWindow):
             if pane is not None and pane is not self._active_pane:
                 self.activate_pane(pane)
         if kind not in _FILTERED_INPUT:
+            return False
+        if isinstance(watched, QWidget) and QWidget.window(watched).property(OWN_KEYS):
+            # a window of its own (Help ▸ User Manual): its keys are its own,
+            # Escape included — it is not the canvas's to cancel
             return False
         owner = watched if isinstance(watched, QWidget) else None
         on_canvas = False
@@ -12068,6 +12082,19 @@ class MainWindow(QMainWindow):
     def show_shortcuts(self) -> None:
         """F1 opens the one shortcut window there is."""
         self.edit_shortcuts()
+
+    def show_user_manual(self, heading: str = ""):
+        """Help ▸ User Manual: the manual in its own window (one per window),
+        at *heading* when one is given. Hands back the manual's window."""
+        from .manual import ManualWindow
+        manual = getattr(self, "_manual", None)
+        if manual is None:
+            manual = self._manual = ManualWindow(self)
+        if heading:
+            manual.open_at(heading)
+        else:
+            manual.show_window()
+        return manual
 
     def show_about(self) -> None:
         from . import release
