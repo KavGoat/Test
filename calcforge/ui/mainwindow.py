@@ -567,13 +567,10 @@ class DetachableTabBar(QTabBar):
 RECENT_FILES = 10
 
 
-def _has_unsaved_changes(state: dict) -> bool:
-    """A tab's document has changes that are not saved yet."""
-    return bool(state["document"].modified or not state["undo_stack"].isClean())
-
-
-#: Documents brought into a window that holds another copy of the same file,
-#: each with unsaved changes: the number its tab is marked with, "(2)".
+#: Documents brought into a window that holds a separate copy of the same
+#: file (two Document objects read from one file apart, such as a recovered
+#: version beside the saved one): the number its tab is marked with, "(2)".
+#: Two tabs of the *same* document are two views of it and are not marked.
 _COPY_NUMBER: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 
@@ -3239,10 +3236,48 @@ class MainWindow(QMainWindow):
             name += f" ({number})"
         return name
 
-    def _tab_of_file(self, path: str) -> int:
-        """The tab of this view holding the file at *path*, or -1."""
-        return next((i for i in range(len(self._open_documents))
-                     if _same_file(self._state_for_tab(i)["document"].path, path)), -1)
+    def _live_state_of(self, path: str) -> Optional[dict]:
+        """The live document of the file at *path* as some tab shows it — a
+        tab of this window, or of another — with its canvas and its history,
+        to be shown again as another view of it rather than read from the
+        disk a second time (the user, 2026-10-19: "Two views of one, this
+        should be the case if each tab is on its own window too"). The tab
+        in view here is not counted. None when no tab has the file open."""
+        import shiboken6
+        windows = [self] + [w for w in list(type(self)._windows) if w is not self]
+        for window in windows:
+            if not shiboken6.isValid(window) or getattr(window, "_closed_for_good", True):
+                continue
+            for document, scene, stack in window.shown_states():
+                if document is None or document is self.document \
+                        or not _same_file(document.path, path):
+                    continue
+                if scene is None or not shiboken6.isValid(scene) \
+                        or stack is None or not shiboken6.isValid(stack):
+                    continue
+                return {"document": document, "scene": scene, "undo_stack": stack,
+                        "index": 0, "tool": "select", "zoom": self.view.zoom(),
+                        "hscroll": 0, "vscroll": 0}
+        return None
+
+    def _view_live_document(self, state: dict, in_place: bool) -> None:
+        """Show the live document of *state* (_live_state_of): in place of
+        the document in view, or in a tab of its own beside it. Its pages,
+        markups, unsaved changes and undo history are the ones every other
+        view of it has; this view starts at its first page, fitted."""
+        if in_place:
+            self.view.escape_everything()
+            if 0 <= self._active_tab < len(self._open_documents):
+                self._open_documents[self._active_tab] = dict(state)
+            self._adopt_document_state(dict(state))
+        else:
+            self.add_tab_for_state(state)
+        self.current_index = 0
+        self.show_empty_workspace(False)
+        self.rebuild_scenes()
+        self.view.fit_page()
+        self.update_title()
+        self._let_go()
 
     def open_in_new_tab(self, document=None) -> int:
         """Put another document beside this one, with a tab of its own —
@@ -3431,20 +3466,23 @@ class MainWindow(QMainWindow):
         self.close_document_tab(index, moving=True)
         if all(state["undo_stack"] is not held["undo_stack"]
                for held in self._open_documents):
-            state["undo_stack"].setParent(window)
+            self._hand_stack_to(state["undo_stack"], window)
 
     @_moves_documents
     def move_document_to(self, index, target, before=-1):
-        """Move the live document, viewport and undo history between windows.
+        """Move a tab — its view of the live document, with its place, tool
+        and the document's undo history — into another window.
 
-        As in Revu, a file is not open twice in one window. A tab of a
-        document the target already shows brings that tab forward. A tab of
-        a file the target holds as a copy of its own (opened there on its
-        own) takes the copy's place when the copy has no unsaved changes,
-        and comes forward without being added when it has none of its own;
-        when both have unsaved changes neither is lost: the one brought in
-        is put beside the other, marked "(2)". A window left with no tab
-        closes, as Revu's does (the user, 2026-10-19)."""
+        A tab is never merged into another there (the user, 2026-10-19: "if
+        dragging a tab that already exists in the window it should not
+        consolidate into one"). A tab of a document the target already shows
+        arrives as a tab of its own: a second view of the same document, one
+        canvas, one history and one save, each tab with its own zoom, scroll,
+        page and tool. Nor is a separate copy of the file the target holds
+        (one read from the disk apart, such as a recovered version) merged
+        with it: both are kept, the one brought in beside the other and
+        marked "(2)". A window left with no tab closes, as Revu's does (the
+        user, 2026-10-19)."""
         if target is self or not 0 <= index < len(self._open_documents):
             return
         state = dict(self._state_for_tab(index))
@@ -3454,50 +3492,35 @@ class MainWindow(QMainWindow):
         scene = state["scene"]
         picked = list(scene.selectedItems()) if scene is not None else []
         held = [target._state_for_tab(i) for i in range(len(target._open_documents))]
-        showing = next((i for i, there in enumerate(held) if there["document"] is document), -1)
-        if showing < 0 and not held and target.document is document:
-            showing = 0
-        copy = -1 if showing >= 0 else target._tab_of_file(document.path)
-        name = os.path.basename(document.path or "")
+        also_there = (any(there["document"] is document for there in held)
+                      or (not held and target.document is document))
+        copies = [i for i, there in enumerate(held)
+                  if there["document"] is not document
+                  and _same_file(there["document"].path, document.path)]
+        name = os.path.basename(document.path or "") or "The document"
+        if copies:
+            _COPY_NUMBER[document] = 1 + len({id(held[i]["document"]) for i in copies})
+        destination = target.open_in_new_tab()
+        target._open_documents[destination] = state
+        target._adopt_document_state(state)
+        target.document_tabs.setTabText(destination, target._tab_title(document))
+        if before < 0 and copies:
+            before = copies[-1] + 1
+        if 0 <= before < target.document_tabs.count() and before != destination:
+            target.document_tabs.moveTab(destination, before)
         message = ""
-        if showing >= 0:
-            if held:
-                target.switch_to_document(showing)
-            message = f"{name or 'The document'} is already open here"
-        elif copy >= 0 and not _has_unsaved_changes(state):
-            target.switch_to_document(copy)
-            message = f"{name} is already open here"
-        elif copy >= 0 and not _has_unsaved_changes(held[copy]):
-            # the clean copy there gives way to the one brought in, with its
-            # changes, place and history
-            target.switch_to_document(copy)
-            target.view.escape_everything()
-            target._open_documents[copy] = state
-            target._adopt_document_state(state)
-            message = f"{name} brought in, in place of the copy open here"
-        else:
-            if copy >= 0:
-                _COPY_NUMBER[document] = 1 + len({
-                    id(there["document"]) for there in held
-                    if _same_file(there["document"].path, document.path)})
-            destination = target.open_in_new_tab()
-            target._open_documents[destination] = state
-            target._adopt_document_state(state)
-            target.document_tabs.setTabText(destination, target._tab_title(document))
-            if before < 0 and copy >= 0:
-                before = copy + 1
-            if before >= 0:
-                target.document_tabs.moveTab(destination, before)
-            if copy >= 0:
-                message = (f"{name} was already open here with other unsaved changes: "
-                           f"both are kept, the one brought in as "
-                           f"“{target._tab_title(document)}”. Save one with Save As… "
-                           f"so that neither is saved over the other")
+        if copies:
+            message = (f"{name} was already open here as a separate copy: both are "
+                       f"kept, the one brought in as “{target._tab_title(document)}”. "
+                       f"Save one with Save As… so that neither is saved over the other")
+        elif also_there:
+            message = (f"{name} is in two tabs here now: both show the same document, "
+                       f"each with a view of its own")
         target.update_title()
         emptied = len(self._open_documents) == 1 and not self.is_split
         self.close_document_tab(index, moving=True)
         if all(there["undo_stack"] is not state["undo_stack"] for there in self._open_documents):
-            state["undo_stack"].setParent(target)
+            self._hand_stack_to(state["undo_stack"], target)
         if picked and target.scene is scene:
             import shiboken6
             for item in picked:
@@ -3513,6 +3536,22 @@ class MainWindow(QMainWindow):
             # workspace, so there is nothing to ask about
             self._closing_confirmed = True
             self.close()
+
+    def _hand_stack_to(self, stack, window) -> None:
+        """*stack* goes with *window* — unless another window shows its
+        document too: a history shared by several windows belongs to none of
+        them, and is not deleted with the first of them to close."""
+        import shiboken6
+        if not shiboken6.isValid(stack):
+            return
+        for other in list(type(self)._windows):
+            if other is window or not shiboken6.isValid(other) \
+                    or getattr(other, "_closed_for_good", True):
+                continue
+            if any(shown is stack for _document, _scene, shown in other.shown_states()):
+                stack.setParent(None)
+                return
+        stack.setParent(window)
 
     def _state_for_tab(self, index=None):
         if index is None or index == self._active_tab:
@@ -3681,11 +3720,16 @@ class MainWindow(QMainWindow):
             if 0 <= here < len(self._open_documents):
                 # what the tab shows now (New or Open may have replaced it)
                 self._open_documents[here] = self._current_document_state()
-            held = {id(state["document"]) for state in self._open_documents}
+            # a view of a document *keep* shows already is not repeated (a
+            # split of one tab and back is one tab again), but a document the
+            # other pane showed in more tabs keeps them: two tabs of a file
+            # are two views of it, never merged into one (the user, 2026-10-19)
+            from collections import Counter
+            held = Counter(id(state["document"]) for state in self._open_documents)
             for state in leaving.documents:
-                if id(state["document"]) in held:
+                if held[id(state["document"])] > 0:
+                    held[id(state["document"])] -= 1
                     continue
-                held.add(id(state["document"]))
                 self.add_tab_for_state(state)
             self.switch_to_document(here)
         self._panes.remove(leaving)
@@ -3725,7 +3769,7 @@ class MainWindow(QMainWindow):
                 window.add_tab_for_state(state)
             if all(state["undo_stack"] is not held["undo_stack"]
                    for held in self._open_documents):
-                state["undo_stack"].setParent(window)
+                self._hand_stack_to(state["undo_stack"], window)
         return window
 
     def add_tab_for_state(self, state: dict, before: int = -1) -> int:
@@ -3752,23 +3796,20 @@ class MainWindow(QMainWindow):
 
     @_moves_documents
     def move_document_to_pane(self, index: int, pane: ViewPane, before: int = -1) -> None:
-        """A tab dragged onto the other pane: its document goes there."""
+        """A tab dragged onto the other pane: it goes there as a tab of its
+        own — beside a tab of the same document there too, as a second view
+        of it, not merged into it (the user, 2026-10-19)."""
         if pane is self._active_pane or pane not in self._panes \
                 or not 0 <= index < len(self._open_documents):
             return
         state = dict(self._state_for_tab(index))
-        showing = next((i for i, held in enumerate(pane.documents)
-                        if held["document"] is state["document"]), -1)
         if len(self._open_documents) == 1:
             # the pane's last tab going is the split going
             self.unsplit(keep=pane, carry_over=False)
         else:
             self.close_document_tab(index, moving=True)
             self.activate_pane(pane)
-        if showing >= 0:
-            self.switch_to_document(showing)
-        else:
-            self.add_tab_for_state(state, before)
+        self.add_tab_for_state(state, before)
         self.view.setFocus(Qt.OtherFocusReason)
 
     def switch_to_document(self, index: int) -> None:
@@ -4121,24 +4162,20 @@ class MainWindow(QMainWindow):
             self.switch_to_document(index)
             self.status_hint.setText(f"{os.path.basename(path)} is already open")
             return
-        # nor is it opened again beside the copy another window has open:
+        # nor is it read from the disk again when another window has it open:
         # two copies of one file, edited apart, would each save over the
-        # other. That window's tab comes forward, as in Revu (2026-10-19).
-        for other in list(type(self)._windows):
-            if other is self or getattr(other, "_closed_for_good", True) \
-                    or not other.isVisible():
-                continue
-            showing = other._tab_showing(path)
-            if showing is not None:
-                pane, index = showing
-                other.activate_pane(pane)
-                other.switch_to_document(index)
-                other.raise_()
-                other.activateWindow()
-                message = f"{os.path.basename(path)} is already open in another window"
-                other.status_hint.setText(message)
-                self.status_hint.setText(message)
-                return
+        # other. This window shows the document that window has, unsaved
+        # changes and all — two views of one document (the user, 2026-10-19:
+        # "Two views of one, this should be the case if each tab is on its
+        # own window too")
+        live = self._live_state_of(path)
+        if live is not None:
+            self._view_live_document(live, in_place=self._untouched())
+            remember_recent_file(path)
+            self.status_hint.setText(
+                f"{os.path.basename(path)} is open in another window as well: this tab "
+                f"shows the same document, its unsaved changes included")
+            return
         new_tab = not self._untouched()
         if new_tab:
             previous = self._active_tab
@@ -4226,7 +4263,17 @@ class MainWindow(QMainWindow):
             else "Save All: nothing to save — every open document is saved")
 
     def open_from_command_line(self, path: str) -> None:
-        """`calcforge drawing.pdf`: open it as File > Open would."""
+        """`calcforge drawing.pdf`: open it as File > Open would.
+
+        A file another tab or window has open is shown as that same live
+        document (_live_state_of), not read again; the file the tab in view
+        already holds is read again from the disk in its place."""
+        if not _same_file(self.document.path, path):
+            live = self._live_state_of(path)
+            if live is not None:
+                self._view_live_document(live, in_place=True)
+                remember_recent_file(path)
+                return
         if self.open_path(path) is False:
             return
         remember_recent_file(path)
@@ -4358,9 +4405,21 @@ class MainWindow(QMainWindow):
         self.undo_stack.setClean()
         self.clear_autosave()
         self.update_title()
+        self._retitle_views_of(self.document)
         said = f"Saved {self.document.path}"
         self.status_hint.setText(f"{said} — {note}" if note else said)
         return True
+
+    def _retitle_views_of(self, document) -> None:
+        """Every other window showing *document* names it afresh: one save
+        (or Save As, a new name) of a document is the save of all its views."""
+        import shiboken6
+        for window in list(type(self)._windows):
+            if window is self or not shiboken6.isValid(window) \
+                    or getattr(window, "_closed_for_good", True):
+                continue
+            if any(shown is document for shown, _scene, _stack in window.shown_states()):
+                window.update_title()
 
     def _recalculate_for_saving(self) -> None:
         """Every save recalculates first (decision 3): what goes into the file
@@ -4696,7 +4755,9 @@ class MainWindow(QMainWindow):
         if timer is not None:
             timer.stop()
         self._autosave.stop()
-        self.clear_autosave()
+        if not self._shown_in_another_window(self.document):
+            # (a document another window still shows keeps its recovery copy)
+            self.clear_autosave()
         # Every open document has an undo stack of its own, and all of them
         # report a clean change back to this window. Leaving the ones behind
         # other tabs connected means they call a window that has gone.
@@ -4886,18 +4947,24 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{name}{dirty} — {APP_NAME}")
         if 0 <= self._active_tab < self.document_tabs.count():
             self.document_tabs.setTabText(self._active_tab, name + dirty)
-        # two copies of one file side by side: each tab says which it is
-        # (a copy's mark comes and goes with the other copy)
-        if any(_COPY_NUMBER.get(state["document"]) for state in self._open_documents):
-            for index in range(min(len(self._open_documents), self.document_tabs.count())):
-                if index == self._active_tab:
+        # Every other tab too, in both views of a split: a document shown in
+        # several tabs is changed, saved and renamed (Save As) in all of them
+        # at once, and two copies of one file side by side each say which
+        # they are (a copy's mark comes and goes with the other copy).
+        for pane in getattr(self, "_panes", ()):
+            active = pane is self._active_pane
+            states = self._open_documents if active else pane.documents
+            for index in range(min(len(states), pane.tabs.count())):
+                if active and index == self._active_tab:
                     continue
-                state = self._open_documents[index]
+                state = states[index]
                 try:
                     dirty = "" if state["undo_stack"].isClean() else " •"
                 except RuntimeError:
                     continue
-                self.document_tabs.setTabText(index, self._tab_title(state["document"]) + dirty)
+                text = self._tab_title(state["document"]) + dirty
+                if pane.tabs.tabText(index) != text:
+                    pane.tabs.setTabText(index, text)
 
     def mark_modified(self) -> None:
         self.document.modified = True

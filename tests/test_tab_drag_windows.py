@@ -1,13 +1,19 @@
 """A document's tab dragged from one window into another.
 
 The user, 2026-10-19: "Had an issue where having two windows with the same
-PDF then dragging it over to one window, but only [the] tab stayed." As in
-Revu, a file is not open twice in one window: a tab of a document the other
-window already shows brings that window's tab forward, and a window left with
-no tab closes. Two copies of one file opened apart give way to whichever has
-unsaved changes, or are both kept, the one brought in marked "(2)", when each
-has its own. A tab of another file moves with its canvas, place, history and
-selection. Every drag here is a real press, move and release on the tab bar.
+PDF then dragging it over to one window, but only [the] tab stayed." Then,
+the same day: "if dragging a tab that already exists in the window it should
+not consolidate into one" — asked whether the two tabs are two views of one
+document or two copies: "Two views of one, this should be the case if each
+tab is on its own window too tho." So a tab is never merged into another: a
+tab of a document the other window already shows arrives as a second tab, a
+second view of the same document (one canvas, one history), and a window
+left with no tab closes. Two copies of one file read from the disk apart
+(a recovered version beside the saved one) are not merged either: both are
+kept, the one brought in marked "(2)". File ▸ Open of a file another window
+has open shows that window's live document. A tab of another file moves with
+its canvas, place, history and selection. Every drag here is a real press,
+move and release on the tab bar.
 """
 import pytest
 import shiboken6
@@ -108,8 +114,8 @@ def _onto_tabs(source, target, index=0):
 # -- the same document in two windows (a tab's New Window) -----------------
 
 @pytest.mark.parametrize("which", ["second onto first", "first onto second"])
-def test_the_same_document_dragged_into_its_other_window_is_not_opened_twice(make, tmp_path,
-                                                                             which):
+def test_the_same_document_dragged_into_its_other_window_is_a_second_tab(make, tmp_path,
+                                                                         which):
     a = _pdf(tmp_path / "a.pdf", pages=2)
     first = make(0, a)
     _mark(first)
@@ -119,11 +125,25 @@ def test_the_same_document_dragged_into_its_other_window_is_not_opened_twice(mak
     _settle()
     assert second.document is first.document and _names(second) == ["a.pdf"]
     source, target = (second, first) if which == "second onto first" else (first, second)
+    source.view.set_zoom(1.7)
+    target.view.set_zoom(0.6)
+    document, scene, stack = source.document, source.scene, source.undo_stack
     _onto_tabs(source, target)
     assert _gone(source), "the window left with no tab closes"
-    assert _names(target) == ["a.pdf"]
+    # not merged: two tabs, two views of the one document
+    assert _names(target) == ["a.pdf", "a.pdf"]
+    assert all(target.document_tabs.tabText(i).endswith("•") for i in range(2)), \
+        "both say the document has unsaved changes"
+    assert "two tabs" in target.status_hint.text()
     assert not target.workspace_empty
     _shows_its_documents(target)
+    zooms = []
+    for index in range(2):
+        target.switch_to_document(index)
+        assert target.document is document and target.scene is scene
+        assert target.undo_stack is stack
+        zooms.append(round(target.view.zoom(), 2))
+    assert sorted(zooms) == [0.6, 1.7], "each tab keeps its own zoom"
     assert len(_rects(target)) == 1
     target.undo_stack.undo()
     assert not _rects(target)
@@ -158,72 +178,56 @@ def test_a_new_window_of_the_document_shows_its_edits_and_closes_without_asking(
     _released_none_of(make.released, first)
 
 
-# -- two copies of one file, each opened on its own -------------------------
+# -- two copies of one file, each read from the disk apart --------------------
 
-def test_two_clean_copies_become_one_tab(make, tmp_path):
+def _separate_copy(make, x, path):
+    """A window holding a copy of *path* read from the disk on its own, as
+    a recovered version is: File ▸ Open no longer makes one (it shows the
+    live document another window has open)."""
+    other = make(x)
+    assert other.open_path(str(path)) is not False
+    other.current_index = 0
+    other.rebuild_scenes()
+    other.view.fit_page()
+    other.update_title()
+    other._let_go()
+    _settle()
+    return other
+
+
+@pytest.mark.parametrize("changed", ["neither", "the one there", "the one brought in", "both"])
+def test_two_copies_of_one_file_are_both_kept_not_merged(make, tmp_path, changed):
     a = _pdf(tmp_path / "a.pdf")
-    first, second = make(0, a), make(1040, a)
+    first = make(0, a)
+    second = _separate_copy(make, 1040, a)
     assert first.document is not second.document
-    _onto_tabs(second, first)
-    assert _gone(second)
-    assert _names(first) == ["a.pdf"]
-    _shows_its_documents(first)
-    _released_none_of(make.released, first)
-
-
-def test_the_copy_with_changes_takes_the_place_of_the_clean_one(make, tmp_path):
-    a = _pdf(tmp_path / "a.pdf")
-    first, second = make(0, a), make(1040, a)
-    _mark(second)
-    _mark(second, x=260)
-    moved = second.document
-    _onto_tabs(second, first)
-    assert _gone(second)
-    assert _names(first) == ["a.pdf"]
-    assert first.document is moved
-    _shows_its_documents(first)
-    assert len(_rects(first)) == 2 and first.undo_stack.count() == 2
-    first.undo_stack.undo()
-    assert len(_rects(first)) == 1
-    _released_none_of(make.released, first)
-
-
-def test_a_clean_copy_gives_way_to_the_one_with_changes_there(make, tmp_path):
-    a = _pdf(tmp_path / "a.pdf")
-    first, second = make(0, a), make(1040, a)
-    _mark(first)
-    kept = first.document
-    _onto_tabs(second, first)
-    assert _gone(second)
-    assert _names(first) == ["a.pdf"]
-    assert first.document is kept and len(_rects(first)) == 1
-    _shows_its_documents(first)
-    _released_none_of(make.released, first)
-
-
-def test_two_copies_each_with_changes_are_both_kept(make, tmp_path):
-    a = _pdf(tmp_path / "a.pdf")
-    first, second = make(0, a), make(1040, a)
-    _mark(first)
-    _mark(second)
-    _mark(second, x=260)
+    if changed in ("the one there", "both"):
+        _mark(first)
+    if changed in ("the one brought in", "both"):
+        _mark(second)
+        _mark(second, x=260)
+    there, brought = first.document, second.document
     _onto_tabs(second, first)
     assert _gone(second)
     assert sorted(_names(first)) == ["a.pdf", "a.pdf (2)"]
     assert "(2)" in first.status_hint.text()
     _shows_its_documents(first)
-    counts = {}
+    found = {}
     for index in range(2):
         first.switch_to_document(index)
-        counts[_names(first)[index]] = (len(_rects(first)), first.undo_stack.count())
-    assert counts == {"a.pdf": (1, 1), "a.pdf (2)": (2, 2)}
+        found[_names(first)[index]] = (first.document, len(_rects(first)),
+                                       first.undo_stack.count())
+    expected_there = 1 if changed in ("the one there", "both") else 0
+    expected_brought = 2 if changed in ("the one brought in", "both") else 0
+    assert found == {"a.pdf": (there, expected_there, expected_there),
+                     "a.pdf (2)": (brought, expected_brought, expected_brought)}
     _released_none_of(make.released, first)
     # the first copy closed, the other is just a.pdf again
     plain = _names(first).index("a.pdf")
     first.close_document_tab(plain)
     _settle()
     assert _names(first) == ["a.pdf"]
-    assert len(_rects(first)) == 2
+    assert first.document is brought and len(_rects(first)) == expected_brought
 
 
 # -- a tab of another file ---------------------------------------------------
@@ -352,18 +356,29 @@ def test_a_tab_dragged_out_to_nowhere_still_makes_a_window(make, tmp_path):
 
 # -- opening a file another window has open ----------------------------------
 
-def test_opening_a_file_another_window_has_open_brings_its_tab_forward(make, tmp_path,
-                                                                       monkeypatch):
+def test_opening_a_file_another_window_has_open_shows_the_same_live_document(make, tmp_path,
+                                                                            monkeypatch):
     a, b = _pdf(tmp_path / "a.pdf"), _pdf(tmp_path / "b.pdf")
     first = make(0, a)
     first.open_in_new_tab()
     first.open_from_command_line(str(b))
     second = make(1040, _pdf(tmp_path / "c.pdf"))
-    _mark(first)
+    first.switch_to_document(0)
+    _mark(first)                               # an unsaved change to a.pdf
+    first.switch_to_document(1)
     monkeypatch.setattr(QFileDialog, "getOpenFileName",
                         staticmethod(lambda *args, **kw: (str(a), "")))
     QTest.keyClick(second.view.viewport(), Qt.Key_O, Qt.ControlModifier)
     _settle()
-    assert _names(second) == ["c.pdf"], "not opened a second time"
-    assert first.document.path == str(a) and first._active_tab == 0
-    assert "already open in another window" in second.status_hint.text()
+    # a tab of its own here, on the document the first window has: its
+    # unsaved change is here too, and nothing was read from the disk again
+    assert _names(second) == ["c.pdf", "a.pdf"]
+    assert second.document_tabs.tabText(1).endswith("•")
+    first.switch_to_document(0)
+    assert second.document is first.document and second.scene is first.scene
+    assert second.undo_stack is first.undo_stack
+    assert len(_rects(second)) == 1
+    assert "same document" in second.status_hint.text()
+    assert _names(first) == ["a.pdf", "b.pdf"], "the first window keeps its tabs"
+    _shows_its_documents(second)
+    _released_none_of(make.released, first, second)
