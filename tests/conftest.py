@@ -97,13 +97,19 @@ def fresh_settings(settings_sandbox):
     would open with that arrangement. Each test gets a clean slate instead.
     """
     from calcforge.settings import app_settings
+    from calcforge.ui import preferences
 
     settings = app_settings()
     settings.clear()
     settings.sync()
+    # and the copy of the preferences kept in memory: cleared settings left a
+    # preference changed by one test (the thumbnails' size) in force for the
+    # next one in the same worker
+    preferences.forget()
     yield
     settings.clear()
     settings.sync()
+    preferences.forget()
 
 
 @pytest.fixture(scope="session")

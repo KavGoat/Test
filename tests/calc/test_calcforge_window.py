@@ -602,8 +602,10 @@ def test_context_menu_items_match_site(v):
     # SMath Cloud's items for a math region (Cut … Select all are CalcForge's own,
     # on the menu the Equation submenu sits in); Font … Border are decision 20's.
     # Decimal places (with its Significant figures mode) is the one lifted out.
+    # Edit Equation first, as Edit Text, Edit Table and Edit Chart… are on
+    # theirs (the user, 2026-10-19).
     assert top[:top.index("Rounding") + 1] == [
-        "Display Input Data", "-", "Go to Definition", "Show Description",
+        "Edit Equation", "-", "Display Input Data", "-", "Go to Definition", "Show Description",
         "Disable Evaluation", "-", "Ignore Units", "-", "Optimization",
         "Exponential Threshold", "Fractions", "Rounding"]
     assert "Decimal places" not in top, "lifted to the top, not copied"
