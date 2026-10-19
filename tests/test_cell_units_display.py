@@ -289,8 +289,11 @@ def test_the_formula_bars_unit_box_refuses_it_too(window):
     pump()
     assert wb.style_of(table.sheet, 0, 0).unit in (None, "")
     assert w.status_hint.text() == "kN is a force; this cell holds a moment (kN·m)"
-    assert box.text() == "", "the box goes back to the unit the cell has"
+    # as SMath (the user, 2026-10-19): what was typed stays, in red, to be
+    # put right — the cell keeps the unit it has
+    assert box.text() == "kN" and box.flagged() == w.status_hint.text()
     box.setText("kN*m")
+    assert box.flagged() is None
     box.editingFinished.emit()
     pump()
     assert wb.style_of(table.sheet, 0, 0).unit == "kN*m"

@@ -250,16 +250,16 @@ class TableControls:
         if text:
             # as the unit box on the cell: a unit of another kind than the
             # selected cells' values is refused, and why is said (the user,
-            # 2026-10-15); the box goes back to the unit they have
+            # 2026-10-15); as SMath, what was typed stays in the box in red
+            # to be put right, and the cells keep the unit they have (the
+            # user, 2026-10-19)
             why = self._unit_refusal(text)
             if why is not None:
                 from .cellunits import say_refusal
-                say_refusal(self.window.view, why, self.unit)
-                self._syncing = True
-                try:
-                    self.unit.setText((st.unit or "") if st is not None else "")
-                finally:
-                    self._syncing = False
+                if getattr(self.unit, "flagged", lambda: None)() != why:
+                    say_refusal(self.window.view, why, self.unit)
+                if hasattr(self.unit, "flag"):
+                    self.unit.flag(why)
                 return
         if st is not None and (st.unit or "") != text:
             self._set(unit=text or None)

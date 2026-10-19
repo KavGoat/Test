@@ -19,7 +19,8 @@ import re
 from typing import Optional
 
 from PySide6.QtCore import QCoreApplication, QPoint, QRectF, Qt
-from PySide6.QtGui import QColor, QFontMetricsF, QInputMethodEvent, QPainter, QTextCharFormat
+from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QInputMethodEvent, QPainter,
+                           QTextCharFormat)
 from PySide6.QtWidgets import QLineEdit
 
 UNIT_BLUE = QColor("#0000ff")              # WebSMath's unit colour (calc/ui/layout.py)
@@ -127,11 +128,145 @@ def unit_spans(text: str) -> list:
     return out
 
 
+_UNFINISHED = "*/^·('"            # a unit ending in one of these waits for more
+
+
 def box_at(text: str) -> Optional[int]:
-    """After a number alone, where SMath's black unit box goes (its index)."""
-    if _is_entry(text) and _BARE.match(text):
-        return len(text.rstrip())
+    """Where SMath's black unit box goes (its index), or None: after a number
+    alone, and where a unit is still to come — after SMath's apostrophe
+    (5', =B2*5') or a unit's *, /, ^ (5 kN/), as SMath shows it."""
+    end = len(text.rstrip())
+    if _is_entry(text):
+        if _BARE.match(text):
+            return end
+        m = _ENTRY.match(text)
+        if m is not None and m.group(3) and m.group(3)[-1] in _UNFINISHED and \
+                re.match(r"['A-Za-zµμΩ°%]", m.group(3)):
+            return end
+        return None
+    if text.startswith("=") and end and text[end - 1] == "'":
+        from .formulahelp import in_string
+        before = text[:end - 1].rstrip()
+        if before and (before[-1].isdigit() or before[-1] in ").*/") and \
+                not in_string(text, end - 1):
+            return end
     return None
+
+
+def unit_slot(text: str) -> Optional[int]:
+    """In a box holding only a unit (the unit boxes, Format Cells' field):
+    where SMath's black placeholder goes while the unit is empty or still
+    unfinished (kN/, kN*, m^), or None once it reads as complete."""
+    end = len(text.rstrip())
+    if not text.strip():
+        return 0
+    if text[end - 1] in _UNFINISHED:
+        return end
+    return None
+
+
+def unit_placeholder(font: QFont, colour: Optional[QColor] = None):
+    """SMath's empty slot as the equations draw it (calc/ui/layout.py,
+    Layout.placeholder): the "H" of SMath's equation font at *font*'s size,
+    centred on the middle of the = sign; an LRect, painted at a baseline."""
+    from ..calc.ui.layout import LRect, _equals_middle, _smath_equations_family
+    f = QFont(_smath_equations_family())
+    if font.pointSizeF() > 0:
+        f.setPointSizeF(font.pointSizeF())
+    else:
+        f.setPixelSize(max(1, font.pixelSize()))
+    m = QFontMetricsF(f)
+    r = m.tightBoundingRect("H")
+    bottom = _equals_middle(font) - r.height() / 2
+    return LRect(w=m.horizontalAdvance("H") - 2, asc=bottom + r.height(), desc=max(0.6, -bottom),
+                 color=colour, box=(r.left(), r.width(), r.height(), bottom))
+
+
+def x_of(box: QLineEdit, index: int) -> float:
+    """Where character *index* of a text box starts, in its pixels."""
+    fm = QFontMetricsF(box.font())
+    text = box.text()
+    caret = box.cursorPosition()
+    return box.cursorRect().center().x() - fm.horizontalAdvance(text[:caret]) + \
+        fm.horizontalAdvance(text[:index])
+
+
+def paint_slot(box: QLineEdit, index: int, colour: QColor) -> QRectF:
+    """SMath's black placeholder in text box *box* at character *index*;
+    where it was drawn."""
+    fm = QFontMetricsF(box.font())
+    text = box.text()
+    left = x_of(box, index) + 1.0
+    if index and (text[index - 1].isdigit() or text[index - 1] == "."):
+        left += fm.horizontalAdvance(" ") * 0.5          # 5 ■, as SMath spaces it
+    baseline = box.cursorRect().center().y() + (fm.ascent() - fm.descent()) / 2
+    slot = unit_placeholder(box.font(), colour)
+    painter = QPainter(box)
+    slot.paint(painter, left, baseline)
+    painter.end()
+    lft, w, h, bottom = slot.box
+    return QRectF(left + lft, baseline - bottom - h, w, h)
+
+
+def _error_red() -> str:
+    from ..calc.ui.layout import ERROR_RED
+    return ERROR_RED.name()
+
+
+class UnitSlot:
+    """What SMath's unit boxes share (the unit box after a cell's result,
+    the formula bar's, and Format Cells' "Show quantities in"): empty or
+    unfinished, SMath's black placeholder shows where the unit goes, and
+    nothing is said while it is typed; a finished unit that is not one (or
+    not of the cell's kind) is drawn in SMath's error red, with why in its
+    tip, until it is typed into again (the user, 2026-10-19: "does not have
+    the filler unit like smath — currently says wrong unit").
+
+    For QLineEdit subclasses: call _init_slot() from __init__ (after any
+    style sheet of its own), and paint_unit_slot() at the end of
+    paintEvent."""
+
+    _why = None                    # why the finished unit was refused
+    _tip = ""                      # the tip it had before
+    _own_sheet = ""                # its own style sheet, under the red
+
+    def _init_slot(self) -> None:
+        self._own_sheet = self.styleSheet()
+        # typed into again, or given another cell's unit: no longer refused
+        self.textChanged.connect(lambda _t: self.unflag())
+
+    def flag(self, why: str) -> None:
+        """The unit as finished is refused: red, and why in its tip."""
+        if self._why is None:
+            self._tip = self.toolTip()
+        self._why = why
+        self.setStyleSheet(self._own_sheet + "QLineEdit { color: %s; }" % _error_red())
+        self.setToolTip(why)
+
+    def unflag(self) -> None:
+        if self._why is None:
+            return
+        self._why = None
+        self.setStyleSheet(self._own_sheet)
+        self.setToolTip(self._tip)
+
+    def flagged(self) -> Optional[str]:
+        return self._why
+
+    def slot_colour(self) -> QColor:
+        """SMath's black; a dark theme's text colour on a dark box."""
+        if not self.isEnabled():
+            return QColor("#9a9a9a")
+        if self.palette().base().color().lightness() >= 128 or "background: white" in self._own_sheet:
+            return QColor("#000000")
+        return self.palette().text().color()
+
+    def paint_unit_slot(self) -> Optional[QRectF]:
+        """SMath's placeholder, if the unit is empty or unfinished."""
+        at = unit_slot(self.text())
+        if at is None:
+            return None
+        return paint_slot(self, at, self.slot_colour())
 
 
 def unit_word(text: str, caret: int) -> Optional[tuple]:
@@ -185,29 +320,16 @@ class UnitText(QLineEdit):
 
     def x_of(self, index: int) -> float:
         """Where character *index* starts, in this box's pixels."""
-        fm = QFontMetricsF(self.font())
-        text = self.text()
-        caret = self.cursorPosition()
-        return self.cursorRect().center().x() - fm.horizontalAdvance(text[:caret]) + \
-            fm.horizontalAdvance(text[:index])
+        return x_of(self, index)
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
         at = box_at(self.text())
         if at is None:
             return
-        # SMath's empty unit box: its "H" glyph box (5 x 7 px at 10 pt, 3 px
-        # left bearing), centred on the middle of the line's = sign
-        fm = QFontMetricsF(self.font())
-        px = fm.height() / 1.15
-        w, h = px * 0.376, px * 0.526
-        left = self.x_of(at) + fm.horizontalAdvance(" ") * 0.5 + px * 0.225
-        baseline = self.cursorRect().center().y() + (fm.ascent() - fm.descent()) / 2
-        middle = baseline - fm.xHeight() * 0.5
-        painter = QPainter(self)
+        # SMath's empty unit box, drawn as the equations draw theirs
         colour = self.palette().text().color() if self._dark() else QColor("#000000")
-        painter.fillRect(QRectF(left, middle - h / 2, w, h), colour)
-        painter.end()
+        paint_slot(self, at, colour)
 
 
 class UnitList:
@@ -356,12 +478,14 @@ class UnitList:
         return self.list.isVisible()
 
 
-class ResultUnit(QLineEdit):
+class ResultUnit(UnitSlot, QLineEdit):
     """SMath's unit box on a selected cell's result, typed into (the user's
     choice, 2026-10-11): click the black box after a quantity — or its unit,
     once one is set — and type the unit to show it in, with SMath's list of
     units as in an equation's result box. Enter (or leaving it) sets it, Esc
-    leaves it as it was, blank goes back to the unit as typed."""
+    leaves it as it was, blank goes back to the unit as typed. Empty or
+    unfinished, SMath's black placeholder shows in it; a unit refused at
+    Enter stays in it in red, with why, to be put right (UnitSlot)."""
 
     def __init__(self, tables):
         from ..calc.ui.suggest import SuggestionList
@@ -371,6 +495,7 @@ class ResultUnit(QLineEdit):
         self.setFrame(False)
         self.setStyleSheet("QLineEdit { background: white; color: #0000ff; "
                            "border: 1px solid #217346; padding: 0px 1px; }")
+        self._init_slot()
         self.list = SuggestionList(tables.view)
         self.list.hide()
         self.list.itemClicked.connect(lambda _i: self._take())
@@ -391,12 +516,17 @@ class ResultUnit(QLineEdit):
         width = max(48, int(self.fontMetrics().horizontalAdvance((st.unit or "") + "WW")))
         self.setGeometry(box.left() - 1, box.center().y() - self.sizeHint().height() // 2,
                          width, self.sizeHint().height())
+        self.unflag()
         self.setText(st.unit or "")
         self._done = False
         self.show()
         self.raise_()
         self.setFocus()
         self.selectAll()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        self.paint_unit_slot()
 
     def _offer(self) -> None:
         from ..calc.ui.suggest import selected_index, unit_box_entries
@@ -458,7 +588,7 @@ class ResultUnit(QLineEdit):
                 s.tooltip.hide()
                 return
         if key in (Qt.Key_Return, Qt.Key_Enter):
-            self.finish(True)
+            self.finish(True, leaving=False)
             return
         if key == Qt.Key_Escape:
             self.finish(False)
@@ -470,9 +600,27 @@ class ResultUnit(QLineEdit):
         if event.reason() not in (Qt.PopupFocusReason, Qt.ActiveWindowFocusReason):
             self.finish(True)
 
-    def finish(self, keep: bool) -> None:
+    def _refusal(self, text: str) -> Optional[str]:
+        """Why the finished unit *text* can't be the cell's, or None."""
+        item = self.tables.item
+        if not text or self.cell is None or item is None or item.uid != self.cell[0]:
+            return None
+        return output_unit_refusal(text, item.sheet.workbook.value(item.sheet, *self.cell[1]))
+
+    def finish(self, keep: bool, leaving: bool = True) -> None:
+        """Enter (*leaving* False), leaving the box, or Esc (*keep* False)."""
         if self._done:
             return
+        if keep and not leaving:
+            why = self._refusal(self.text().strip())
+            if why is not None:
+                # as SMath: the unit stays, in red, until it is put right
+                # (or Esc), and why is said
+                self.list.hide()
+                self.list.tooltip.hide()
+                self.flag(why)
+                say_refusal(self.tables.view, why, self)
+                return
         self._done = True
         self.list.hide()
         self.list.tooltip.hide()
