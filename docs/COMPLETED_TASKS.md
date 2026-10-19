@@ -3,6 +3,19 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-19 — Split View sync, pictures, the user manual, tabs between windows, workbooks with names, the 162-sheet set smooth, consistency (pushed at 4bed0fb)
+
+- Full test run passed at 4bed0fb (`-n 3`, every-command tests included); 14/14 planted bugs caught. An earlier run at 11032a2 failed only the big-set wheel-zoom frame budget (95th percentile 40–58 ms against 40); fixed at 4bed0fb, five runs alone passing at 28–37 ms.
+- Split View: Off moves nothing (each view keeps its own desk); Page sync is zoom and position on each view's own page (the user's correction); Document sync as Revu's.
+- Pictures resize with no box left behind, corners keep the proportions unless Shift, the opposite corner stays put, turned pictures keep their place.
+- User manual: Help ▸ User Manual (Ctrl+F1), docs/USER_MANUAL.md in three parts plus customisation; reference tables generated from the program and checked by a test; README key tables generated.
+- Tabs between windows: one tab per file per window, an emptied window closes, two changed copies both kept, undo follows its document; File ▸ Open of an open file brings its tab forward. A markup drawn on another page than the current one has its undo step.
+- Workbooks: the user's two compute as Excel showed them (implicit intersection); self-contained by default with clashes listed, changeable later; Sheet.H44, Sheet.Name, Book.Name from equations; a Seismic edit 198 → 95 ms. Tested on synthetic equivalents — the user's files are not in the repository.
+- The 162-sheet set: open 17.8 → 6.4 s; a soft picture of every page while moving, squares asked for ahead, shared stamps; wheel zoom and scroll held to a frame budget (tests/test_big_pdf_smooth.py).
+- Consistency: Properties panel for equations, Calculation text, blocks, tables and sheets in both modes; cells' Decimal Places and Significant Figures; F2 Edit Selected; Edit Equation; equation font controls on the Properties toolbar; Colour Processing… everywhere. Thumbnails as Revu's.
+- Manual findings: wfile/rfile/dfile in one CalcForge folder, element-wise vectorize, round's modes, custom units in equations, `]` adds a program line, tooltips, recovery copy offered, HYPERLINK on Ctrl+click.
+- Tests: each starts from the shipped preferences (a cached preference leaked between tests).
+
 ## 2026-10-18/19 — Revu's Properties per markup, line styles and hatches; Windows fixes; the crash and leaks under the test runs (pushed at f1843e7)
 
 - Full test runs passed at 24d9d61, e01d705 and f1843e7 (`-n 3`, every-command tests included); 14/14 planted bugs caught each time.
