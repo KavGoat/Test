@@ -121,6 +121,11 @@ class Looks:
         self._rules = None                # the rules worked out for (held, so compared exactly)
         self._stats: dict = {}
         self._cells: dict = {}            # (row, col) -> look, until a value or a rule changes
+        # (row, col) -> the rules whose ranges hold it: kept while the ranges
+        # stay as they are, so a changed value works out only the cells a
+        # rule covers (a sheet's thousands of others are none at once)
+        self._covering: dict = {}
+        self._ranges = None
 
     def _fresh(self) -> None:
         rules = self.sheet.cond_rules
@@ -130,6 +135,17 @@ class Looks:
             self._rules = rules
             self._stats = {}
             self._cells = {}
+            ranges = tuple(tuple(tuple(x) for x in rule.get("ranges", [])) for rule in rules)
+            if ranges != self._ranges:
+                self._ranges = ranges
+                self._covering = {}
+
+    def _covered_by(self, row: int, col: int) -> tuple:
+        got = self._covering.get((row, col))
+        if got is None:
+            got = self._covering[(row, col)] = tuple(
+                i for i, rule in enumerate(self.sheet.cond_rules) if in_rule(rule, row, col))
+        return got
 
     def stats(self, index: int, rule: dict):
         got = self._stats.get(index)
@@ -171,12 +187,15 @@ class Looks:
 
     def _look(self, row: int, col: int) -> dict:
         out: dict = {}
+        covered = self._covered_by(row, col)
+        if not covered:
+            return out
         fmt: dict = {}
         sheet = self.sheet
         value = sheet.value(row, col)
-        for index, rule in enumerate(sheet.cond_rules):
-            if not in_rule(rule, row, col):
-                continue
+        rules = sheet.cond_rules
+        for index in covered:
+            rule = rules[index]
             kind = rule.get("type")
             hit = False
             try:
