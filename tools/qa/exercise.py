@@ -1693,6 +1693,14 @@ def reset(win) -> list[str]:
     win._measure_units_next = None
     win.interactive_prompts = False
     win.new_document(confirm=False)
+    # What the last job let go of goes now: the app hands closed scenes,
+    # menus and dialogs to deleteLater(), which only a running event loop
+    # delivers. Between jobs nothing is in use, and without this a worker
+    # kept every one — 445 windows and 24 documents after 400 jobs, growing
+    # to gigabytes over the suite until the worker or the machine was killed.
+    QtCore = qt()[0]
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+    pump()
     win.view.set_zoom(1.0)
     win.select_tool("select")
     APP.clipboard().clear()

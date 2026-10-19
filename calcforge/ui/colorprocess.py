@@ -585,6 +585,8 @@ def color_processing(window, index: Optional[int] = None) -> Optional[ColorProce
         return dialog
     if dialog.exec() == QDialog.Accepted:
         finish_pages(window, dialog)
+    from . import release
+    release.done_with(dialog)          # answered: it and its document go
     return dialog
 
 
@@ -647,6 +649,8 @@ def change_colors(window, item) -> Optional[ColorProcessingDialog]:
         return dialog
     if dialog.exec() == QDialog.Accepted:
         finish_item(window, item, dialog.process())
+    from . import release
+    release.done_with(dialog)
     return dialog
 
 

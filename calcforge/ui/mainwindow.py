@@ -5541,19 +5541,24 @@ class MainWindow(QMainWindow):
         it (Auto Scale, Scale, Offset, Rotation, Centre, Fit to Media)."""
         if not isinstance(state, dict):
             state = None          # a button's or an action's "checked", not a state
+        from . import release
         dialog = self.page_setup_dialog(state)
-        answer = dialog.exec()
-        if answer == dialog.PICK:
-            # Get Line: a line dragged on the drawing, then this again
-            self._scale_dialog_state = None
-            self.select_tool("calibrate")
-            self._page_setup_state = dialog.state()
-            self.status_hint.setText("Page Setup: drag along a line on the drawing that "
-                                     "should be level — Esc goes back to Page Setup")
-            return
-        if answer != dialogs.QDialog.Accepted:
-            return
-        self.finish_page_setup(dialog)
+        try:
+            answer = dialog.exec()
+            if answer == dialog.PICK:
+                # Get Line: a line dragged on the drawing, then this again
+                self._scale_dialog_state = None
+                self.select_tool("calibrate")
+                self._page_setup_state = dialog.state()
+                self.status_hint.setText("Page Setup: drag along a line on the drawing that "
+                                         "should be level — Esc goes back to Page Setup")
+                return
+            if answer != dialogs.QDialog.Accepted:
+                return
+            self.finish_page_setup(dialog)
+        finally:
+            # answered: it goes, and the document it was opened on with it
+            release.done_with(dialog)
 
     def page_setup_line(self, start: QPointF, end: QPointF) -> None:
         """Get Line's line, dragged on the page: Page Setup comes back with
@@ -6271,16 +6276,22 @@ class MainWindow(QMainWindow):
     def calibrate_scale(self, measured_pt: Optional[float] = None) -> None:
         """Set Scale (the user, 2026-10-15): a preset, a custom scale, or —
         after Calibrate's two points — the length they measure."""
+        from . import release
         dialog = self.scale_dialog(measured_pt)
-        answer = dialog.exec()
-        if answer == dialogs.ScaleDialog.PICK:
-            # Calibrate: two clicks, then this dialog again as it was left
-            self._scale_dialog_state = dialog.state()
-            self.start_calibrating()
-            return
-        if answer != dialogs.QDialog.Accepted:
-            return
-        self.finish_scale(dialog)
+        try:
+            answer = dialog.exec()
+            if answer == dialogs.ScaleDialog.PICK:
+                # Calibrate: two clicks, then this dialog again as it was left
+                self._scale_dialog_state = dialog.state()
+                self.start_calibrating()
+                return
+            if answer != dialogs.QDialog.Accepted:
+                return
+            self.finish_scale(dialog)
+        finally:
+            # answered: not kept as a hidden window of this one (a new one is
+            # built each time, so every measurement prompt used to stay)
+            release.done_with(dialog)
 
     def finish_scale(self, dialog) -> bool:
         """Apply Scale: *dialog*'s scale on the pages it chose."""
@@ -6312,13 +6323,17 @@ class MainWindow(QMainWindow):
         if scale is None and not self.interactive_prompts:
             scale = PageScale.from_dict(page.scale.to_dict())
         if scale is None:
+            from . import release
             dialog = dialogs.ScaleDialog(page.scale, None, self, name=name)
-            if dialog.exec() != dialogs.QDialog.Accepted:
-                return False
-            scale = dialog.result_scale()
-            if scale is None:
-                return False
-            name = dialog.name.text().strip() or name
+            try:
+                if dialog.exec() != dialogs.QDialog.Accepted:
+                    return False
+                scale = dialog.result_scale()
+                if scale is None:
+                    return False
+                name = dialog.name.text().strip() or name
+            finally:
+                release.done_with(dialog)
         viewport = Viewport(name, region.x(), region.y(), region.width(),
                             region.height(), scale)
         self._change_viewports(page, page.viewports + [viewport], "Add viewport")
@@ -6330,14 +6345,19 @@ class MainWindow(QMainWindow):
 
     def edit_viewport(self, page, viewport) -> bool:
         """Rename a viewport or change its scale."""
+        from . import release
         dialog = dialogs.ScaleDialog(viewport.scale, None, self, name=viewport.name)
-        if dialog.exec() != dialogs.QDialog.Accepted:
-            return False
-        scale = dialog.result_scale()
-        if scale is None:
-            return False
+        try:
+            if dialog.exec() != dialogs.QDialog.Accepted:
+                return False
+            scale = dialog.result_scale()
+            if scale is None:
+                return False
+            new_name = dialog.name.text().strip()
+        finally:
+            release.done_with(dialog)
         from ..core.document import Viewport
-        changed = [Viewport(dialog.name.text().strip() or v.name, v.x, v.y, v.width,
+        changed = [Viewport(new_name or v.name, v.x, v.y, v.width,
                             v.height, scale) if v is viewport else v
                    for v in page.viewports]
         self._change_viewports(page, changed, "Change viewport")
@@ -10588,10 +10608,14 @@ class MainWindow(QMainWindow):
 
     def flatten_document(self) -> None:
         """Document ▸ Flatten Markups: Revu's dialog, then the flattening."""
+        from . import release
         dialog = self.flatten_dialog()
-        if dialog.exec() != dialogs.QDialog.Accepted:
-            return
-        self.finish_flatten(dialog)
+        try:
+            if dialog.exec() != dialogs.QDialog.Accepted:
+                return
+            self.finish_flatten(dialog)
+        finally:
+            release.done_with(dialog)
 
     def finish_flatten(self, dialog) -> int:
         """Flatten what *dialog* chose; how many markups that was."""
@@ -12016,11 +12040,16 @@ class MainWindow(QMainWindow):
         self.document_properties(tab="header")
 
     def document_properties(self, tab: str = "") -> None:
+        from . import release
         dialog = dialogs.DocumentPropertiesDialog(self.document, self)
         if tab:
             dialog.show_tab(tab)
-        if dialog.exec() == dialogs.QDialog.Accepted:
+        accepted = dialog.exec() == dialogs.QDialog.Accepted
+        if accepted:
             dialog.apply()
+        # answered: it goes, and the document it was opened on with it
+        release.done_with(dialog)
+        if accepted:
             self.act_grid.setChecked(self.document.settings.show_grid)
             self.act_snap.setChecked(self.document.settings.snap_to_grid)
             self.act_snap_items.setChecked(self.document.settings.snap_to_items)
@@ -12039,4 +12068,7 @@ class MainWindow(QMainWindow):
         self.edit_shortcuts()
 
     def show_about(self) -> None:
-        dialogs.AboutDialog(self).exec()
+        from . import release
+        dialog = dialogs.AboutDialog(self)
+        dialog.exec()
+        release.done_with(dialog)
