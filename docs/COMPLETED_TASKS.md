@@ -672,3 +672,19 @@ window emptied by a drag closes):
 Undo steps now find their pages through the canvas and their window as the
 one holding the document when they are applied (ui/commands.py
 `on_the_canvas`, MainWindow._on_its_window). `tests/test_tab_drag_windows.py`.
+
+## 2026-10-19 — a markup drawn on a page other than the current one is undone and redone
+
+Found while fixing the tab drag: add a page, draw a rectangle on the page
+above it, Ctrl+Z twice, Ctrl+Y twice — the page came back but the rectangle
+did not. The rectangle went onto the page pressed on, but the "before" of
+the gesture was taken only of the page the window calls current (the new
+page), so the drawing made no undo step: the first Ctrl+Z took the page and
+the rectangle with it, and nothing could bring the rectangle back. The page
+pressed on is now part of every gesture's before and after
+(view.involved_frames). `tests/test_undo_redo_sequences.py` checks the
+reported cases and, over seeded random runs of real commands (pages added,
+deleted, moved, rotated, duplicated, resized and set up, a workbook and a
+sheet page inserted, rectangles drawn with the mouse on any page, markups
+deleted with Delete), that every change is one undo step and that each
+Ctrl+Z and Ctrl+Y gives back exactly the document before and after it.
