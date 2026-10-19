@@ -7775,6 +7775,8 @@ class MainWindow(QMainWindow):
                      "setCurrentIndex"),
                     (self.dash_scale_spin, active.style.dash_scale, "setValue"),
                     (self.font_spin, active.style.font_size, "setValue"),
+                    (self.line_spacing_combo, float(getattr(active.style, "line_spacing",
+                                                            1.0) or 1.0), "setValue"),
                     (self.font_family_combo, QFont(QFontInfo(active.style.font()).family()),
                      "setCurrentFont"),
                     (self.text_colour_button, active.style.text_color, "set_color"),
@@ -8426,6 +8428,11 @@ class MainWindow(QMainWindow):
         self.font_auto_button.setChecked(False)
         self.font_auto_button.blockSignals(False)
 
+    def _style_line_spacing(self, value: float) -> None:
+        """Revu's Line Spacing ▾: how far apart a box's lines are."""
+        self._style_change(FONT, lambda style: setattr(style, "line_spacing", float(value)),
+                           "Line spacing")
+
     def _style_font_auto(self, on: bool) -> None:
         """Revu's "A": the words set at the largest size that fits the box."""
         self._style_change(FONT, lambda style: setattr(style, "font_auto", bool(on)),
@@ -8952,6 +8959,7 @@ class MainWindow(QMainWindow):
             item.style.text_color = style.stroke or item.style.text_color
             item.style.font_size = style.font_size
             item.style.font_family = style.font_family
+            item.style.line_spacing = style.line_spacing
             return
         if isinstance(item, RectItem) and item.kind in ("highlight", "redact"):
             item.style.opacity = style.opacity
@@ -8975,6 +8983,7 @@ class MainWindow(QMainWindow):
         if isinstance(item, _TextBase):
             if style.fill:
                 item.style.fill = style.fill
+            item.style.line_spacing = style.line_spacing
         else:
             item.style.fill = style.fill
         item.style.width = style.width

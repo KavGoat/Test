@@ -80,7 +80,8 @@ def shown_document(item, on_screen: bool = False):
     index = pages.index(page) if page in pages else 0
     kept = getattr(item, "_fields_shown", None)
     now = time.monotonic()
-    key = (raw, index, doc.textWidth(), bool(on_screen))
+    key = (raw, index, doc.textWidth(), bool(on_screen),
+           getattr(item, "_spacing_applied", 1.0))
     if kept is not None and kept[0] == key and now - kept[1] < FRESH_FOR:
         return kept[2]
     copy = doc.clone(item)

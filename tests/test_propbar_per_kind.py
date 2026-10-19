@@ -163,22 +163,23 @@ KINDS = {
     "link": (KIND + ["Line:", "lineColour"], ["Colour:"]),
     # a text box: Line, Fill, Font, size, A, colour, Style
     "text": (KIND + LINE + FILL + ["Font:", "fontFamily", "fontSize", "fontAuto",
-                                   "textColour", "fontStyle"],
+                                   "textColour", "fontStyle", "lineSpacing"],
              ["Colour:", "Fill Colour:", "Opacity:", "Fill Opacity:", "Line Width:", "Style:",
-              "Spacing:"] + P_FONT + ["Alignment:", "Margin:"]),
+              "Spacing:"] + P_FONT + ["Alignment:", "Line Spacing:", "Margin:", "Margins:"]),
     # shot 03: End ▾ Auto ▾, Fill, Shape ▾, fit to text, Font … A, colour, Style
     "callout": (KIND + LINE + ["End:", "lineEndEnd", "arrowSize"] + FILL
                 + ["Shape:", "calloutShapeBar", "fitToText", "Font:", "fontFamily", "fontSize",
-                   "fontAuto", "textColour", "fontStyle"],
+                   "fontAuto", "textColour", "fontStyle", "lineSpacing"],
                 ["Colour:", "Fill Colour:", "Opacity:", "Fill Opacity:", "Line Width:", "Style:",
-                 "Spacing:", "End:", "End Size:", "Shape:"] + P_FONT + ["Alignment:", "Margin:"]),
+                 "Spacing:", "End:", "End Size:", "Shape:"] + P_FONT + ["Alignment:", "Line Spacing:", "Margin:", "Margins:"]),
     "cloud_callout": (KIND + ["Line:", "lineColour", "overallOpacity", "lineStyleBar",
                               "cloudSize", "lineWidth", "End:", "lineEndEnd", "arrowSize"] + FILL
                       + ["Shape:", "calloutShapeBar", "fitToText", "Font:", "fontFamily",
-                         "fontSize", "fontAuto", "textColour", "fontStyle"],
+                         "fontSize", "fontAuto", "textColour", "fontStyle",
+                         "lineSpacing"],
                       ["Colour:", "Fill Colour:", "Opacity:", "Fill Opacity:", "Line Width:",
                        "Style:", "Spacing:", "Size:", "End:", "End Size:", "Shape:"] + P_FONT
-                      + ["Alignment:", "Margin:"]),
+                      + ["Alignment:", "Line Spacing:", "Margin:", "Margins:"]),
     # Revu's note: Colour, opacity, Icon ▾
     "note": (KIND + ["Colour:", "noteColour", "noteOpacity", "Icon:", "noteIcon"],
              ["Icon:", "Colour:", "Fill Colour:", "Opacity:", "Fill Opacity:", "Line Width:",

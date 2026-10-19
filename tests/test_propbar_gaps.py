@@ -899,7 +899,7 @@ def test_the_bars_number_boxes_show_their_widest_value(w):
     """'100%' was cut off in the fill-opacity box: every number box on the
     bar is as wide as its widest value needs, at the default font."""
     from PySide6.QtWidgets import QAbstractSpinBox
-    from calcforge.ui.propbar import CloudSizeCombo, ValueCombo
+    from calcforge.ui.propbar import CloudSizeCombo, LineSpacingCombo, ValueCombo
     box = RectItem("rect", QRectF(0, 0, 120, 60))
     w.document.pages[0].frame.add_markup(box, QPointF(200, 300))
     select(w, box)
@@ -911,8 +911,8 @@ def test_the_bars_number_boxes_show_their_widest_value(w):
         assert spin.lineEdit().width() >= widest + 4, spin.objectName()
         assert spin.width() <= widest + 50, spin.objectName()
     for combo in w.style_bar.findChildren(ValueCombo):
-        if isinstance(combo, CloudSizeCombo):
-            continue
+        if isinstance(combo, (CloudSizeCombo, LineSpacingCombo)):
+            continue                     # closed, each shows its picture only
         widest = max(combo.fontMetrics().horizontalAdvance(combo.itemText(i))
                      for i in range(combo.count()))
         assert combo.width() >= widest + 28, combo.objectName()

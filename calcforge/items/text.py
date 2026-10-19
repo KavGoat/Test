@@ -434,6 +434,7 @@ class _TextBase(MarkupItem):
     def set_text(self, text: str) -> None:
         self.written = text
         self.doc.setPlainText(text)
+        self._spacing_applied = 1.0           # plain lines, single-spaced
         self.apply_style()
 
     def html(self) -> str:
@@ -442,23 +443,33 @@ class _TextBase(MarkupItem):
     def set_html(self, html: str) -> None:
         self._load_html(html)
 
-    def _load_html(self, html: str) -> None:
+    def _load_html(self, html: str, spacing: Optional[float] = None) -> None:
         """Load rich text, sizing its runs exactly before the box fits them.
 
         Qt lays text out the moment it is set, with point sizes read at the
         screen's dpi. Growing the box to fit that first layout made a field
         that fits on one line two lines tall for good, since a box never
         shrinks on its own.
+
+        *spacing* is the line spacing the words were saved at (their line
+        heights already carry it); the box's own when not said.
         """
         growing = self.auto_size
         self.auto_size = False
         try:
             self.doc.setHtml(html)
+            self._spacing_applied = (self.line_height_factor() if spacing is None
+                                     else self._clamped_spacing(spacing))
             self._unpin_the_box_size()
             self.exact_sizes()
         finally:
             self.auto_size = growing
         if growing:
+            # fitted in the box's own font and spacing, not Qt's default:
+            # measured in that, a box sized to its words by Alt+Z came back
+            # a line or two taller every time it was opened
+            self.doc.setDefaultFont(self.style.font())
+            self._apply_line_spacing()
             self._fit_height()
 
     def _unpin_the_box_size(self) -> None:
@@ -529,6 +540,8 @@ class _TextBase(MarkupItem):
             block = block.next()
 
     def _on_contents_changed(self) -> None:
+        if self._spacing_lines:
+            return              # apply_style is setting the lines; it fits after
         self.prepareGeometryChange()
         if self.style.font_auto:
             self._fit_font()
@@ -546,6 +559,7 @@ class _TextBase(MarkupItem):
         self.doc.setDefaultTextOption(option)
         self.doc.setTextWidth(max(self.text_rect().width(), 8.0))
         self._apply_script()
+        self._apply_line_spacing()
         if self._editor is not None:
             self._editor.setDefaultTextColor(self.style.text_qcolor())
         self.prepareGeometryChange()
@@ -579,6 +593,100 @@ class _TextBase(MarkupItem):
             self.doc.blockSignals(blocked)
         self._script_applied = wanted
 
+    # -- line spacing -------------------------------------------------------
+    #
+    # Revu's Line Spacing: Single, 1.15, 1.5, Double or any multiple of the
+    # font's own spacing. It is kept on each paragraph of the document, so it
+    # is what the screen, the editor, Alt+Z and the drawn appearance all lay
+    # out with. Words set by Bluebeam carry an exact line height of their own
+    # (io/btx._rich_text): those are scaled by the change of spacing, never
+    # replaced, so an opened file keeps its own pitch until it is changed.
+
+    #: The spacing the document's lines are laid out at now.
+    _spacing_applied = 1.0
+    #: True while the lines are being set (no re-fitting part way through).
+    _spacing_lines = False
+    #: Revu takes any multiple; past these a box is unreadable.
+    SPACING_RANGE = (0.1, 10.0)
+
+    @classmethod
+    def _clamped_spacing(cls, value) -> float:
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return 1.0
+        if value != value or value <= 0:          # nan, nought or less
+            return 1.0
+        low, high = cls.SPACING_RANGE
+        return min(max(value, low), high)
+
+    def line_height_factor(self) -> float:
+        """The line spacing, as a multiple of the font's own: 1 is Single."""
+        return self._clamped_spacing(getattr(self.style, "line_spacing", 1.0))
+
+    def _apply_line_spacing(self) -> None:
+        """Every paragraph spaced as the style says.
+
+        Only paragraphs that differ are touched, so laying a box out again at
+        the spacing it already has changes nothing in its document.
+        """
+        from PySide6.QtGui import QTextBlockFormat
+
+        factor = self.line_height_factor()
+        was = self._spacing_applied or 1.0
+        single, proportional = (int(getattr(kind, "value", kind)) for kind in (
+            QTextBlockFormat.SingleHeight, QTextBlockFormat.ProportionalHeight))
+        changes = []
+        for block in _blocks(self.doc):
+            form = block.blockFormat()
+            kind = int(form.lineHeightType())
+            if kind in (single, proportional):
+                # the font's own spacing, times the factor
+                now = 1.0 if kind == single else form.lineHeight() / 100.0
+                if abs(now - factor) <= 1e-6:
+                    continue
+                wanted = (single, 0.0) if abs(factor - 1.0) <= 1e-6 else \
+                    (proportional, factor * 100.0)
+            else:
+                # an exact height of its own (a Bluebeam file's): scaled
+                if abs(factor - was) <= 1e-6:
+                    continue
+                wanted = (kind, form.lineHeight() * factor / was)
+            changes.append((block.position(), wanted))
+        self._spacing_applied = factor
+        if not changes:
+            return
+        self._spacing_lines = True
+        try:
+            cursor = QTextCursor(self.doc)
+            for position, (kind, height) in changes:
+                cursor.setPosition(position)
+                form = cursor.blockFormat()
+                form.setLineHeight(height, kind)
+                cursor.setBlockFormat(form)
+        finally:
+            self._spacing_lines = False
+
+    def _words_height(self) -> float:
+        """How tall the words stand: the document, less the room spaced lines
+        leave under the last of them. Spaced out, each line keeps its extra
+        room below it, and fitting a box to that left a blank band at the
+        bottom of every box that was not Single."""
+        from PySide6.QtGui import QTextBlockFormat
+
+        height = self.doc.size().height()
+        block = self.doc.lastBlock()
+        form = block.blockFormat()
+        proportional = int(getattr(QTextBlockFormat.ProportionalHeight, "value",
+                                   QTextBlockFormat.ProportionalHeight))
+        if int(form.lineHeightType()) != proportional:
+            return height
+        layout = block.layout()
+        if layout is None or layout.lineCount() == 0:
+            return height
+        natural = layout.lineAt(layout.lineCount() - 1).height()
+        return max(height - natural * (form.lineHeight() / 100.0 - 1.0), 1.0)
+
     #: Revu's range for Auto: from 1 point to 144, to a tenth of a point.
     AUTO_FONT_RANGE = (1.0, 144.0)
 
@@ -598,7 +706,7 @@ class _TextBase(MarkupItem):
             def fits(tenths: int) -> bool:
                 probe.font_size = tenths / 10.0
                 self.doc.setDefaultFont(probe.font())
-                return self.doc.size().height() <= room + 0.01
+                return self._words_height() <= room + 0.01
             best = low
             while low <= high:
                 middle = (low + high) // 2
@@ -633,22 +741,24 @@ class _TextBase(MarkupItem):
         """
         self.doc.setTextWidth(max(self.text_rect().width(), 8.0))
         _left, top, _right, bottom = self.margins()
-        needed = self.doc.size().height() + top + bottom
+        needed = self._words_height() + top + bottom
         if needed > self._rect.height():
             self._rect.setHeight(needed)
 
     def size_to_text(self) -> None:
-        """Shrink-wrap the box around the words in it."""
-        pad = self.style.padding
+        """Shrink-wrap the box around the words in it (Revu's Alt+Z): its
+        margins round them, its lines at their spacing. The font is kept."""
+        left, top, right, bottom = self.margins()
         self.prepareGeometryChange()
+        self._apply_line_spacing()
         self.doc.setTextWidth(max(self.text_rect().width(), 8.0))
-        ideal = self.doc.idealWidth() + 2 * pad
+        ideal = self.doc.idealWidth() + left + right
         rect = QRectF(self._rect.normalized())
         rect.setWidth(max(min(rect.width(), max(ideal, 24.0)), 24.0))
         self._rect = rect
         self.doc.setTextWidth(max(self.text_rect().width(), 8.0))
-        height = self.doc.size().height() + 2 * pad
-        self._rect.setHeight(max(height, 2 * pad + 8.0))
+        height = self._words_height() + top + bottom
+        self._rect.setHeight(max(height, top + bottom + 8.0))
         self.apply_style()
         self.touch()
         self.update()
@@ -1222,7 +1332,7 @@ class _TextBase(MarkupItem):
         self._editor.setTextWidth(max(rect.width(), 8.0))
         offset = 0.0
         if self.style.valign in ("middle", "bottom"):
-            spare = rect.height() - self.doc.size().height()
+            spare = rect.height() - self._words_height()
             offset = max(spare, 0) * (0.5 if self.style.valign == "middle" else 1.0)
         # Where the words are typed is where they are drawn: no jump when
         # editing starts or stops.
@@ -1281,7 +1391,7 @@ class _TextBase(MarkupItem):
         self.doc.setTextWidth(max(rect.width(), 8.0))
         offset = 0.0
         if self.style.valign in ("middle", "bottom"):
-            spare = rect.height() - self.doc.size().height()
+            spare = rect.height() - self._words_height()
             offset = max(spare, 0) * (0.5 if self.style.valign == "middle" else 1.0)
             painter.translate(0, offset)
         painter.translate(0, self._bluebeam_nudge(rect.height(), offset))
@@ -1318,7 +1428,19 @@ class _TextBase(MarkupItem):
         # a spot below and to the left that nobody chose. Saying "none" is a
         # different thing from not saying.
         data["leaders"] = [leader.to_dict() for leader in self.leaders]
+        if self._spacing_applied != 1.0 or self._has_exact_lines():
+            # the spacing the html's line heights were laid out at, so a look
+            # put over these words (a tool's, a style's) scales them from it
+            data["html_spacing"] = self._spacing_applied
         return data
+
+    def _has_exact_lines(self) -> bool:
+        """Whether any paragraph has a line height of its own (Bluebeam's)."""
+        from PySide6.QtGui import QTextBlockFormat
+        plain = {int(getattr(kind, "value", kind)) for kind in (
+            QTextBlockFormat.SingleHeight, QTextBlockFormat.ProportionalHeight)}
+        return any(int(block.blockFormat().lineHeightType()) not in plain
+                   for block in _blocks(self.doc))
 
     def deserialize(self, data: dict) -> None:
         values = data.get("rect", [0, 0, 160, 50])
@@ -1340,9 +1462,10 @@ class _TextBase(MarkupItem):
         self.load_base(data)
         html = data.get("html")
         if html:
-            self._load_html(html)
+            self._load_html(html, data.get("html_spacing"))
         else:
             self.doc.setPlainText(data.get("text", ""))
+            self._spacing_applied = 1.0
         self.digits = int(data.get("digits", 4))
         self.auto_bookmark = bool(data.get("bookmark", False))
         self.written = data.get("written") or self.doc.toPlainText()
@@ -1355,10 +1478,6 @@ class TextItem(_TextBase):
 
     TYPE = "text"
     NAME = "Text box"
-
-    def line_height_factor(self) -> float:
-        """The line spacing, as a multiple of single spacing."""
-        return getattr(self.style, "line_spacing", 1.0) or 1.0
 
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)

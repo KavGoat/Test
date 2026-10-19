@@ -171,7 +171,10 @@ def add_section(panel, item: CheckboxItem, look_only: bool = False) -> None:
         lambda i: _set(i, "option_gap", float(value)), "Option spacing"))
     form.addRow("Option Spacing:", spacing)
 
-    if panel.body.findChild(QDoubleSpinBox, "lineSpacing") is None:
+    from PySide6.QtWidgets import QWidget
+
+    if panel.body.findChild(QDoubleSpinBox, "lineSpacing") is None and \
+            panel.body.findChild(QWidget, "lineSpacingPanel") is None:
         # (the text box's own Line Spacing, where the panel has none yet)
         lines = _spin(float(getattr(item.style, "line_spacing", 1.0) or 1.0),
                       0.5, 5.0, 2, 0.1)
