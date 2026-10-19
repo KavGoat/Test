@@ -57,6 +57,23 @@ start an equation where the pointer is by typing `'`.
 - **File ▸ Close** (`Ctrl+W`) and **Close All** close documents, asking about
   unsaved changes. A document tab's right-click menu also has Close Others,
   New Window, Open in Split View and Duplicate Tab.
+- **Tabs and windows.** A tab's **New Window** shows the same document in a second
+  window: one document, so an edit in either window shows in both and one undo
+  history serves both; closing one of the two windows asks nothing, as the other
+  still has it. Drag a document tab out of the window to give it a window of its
+  own, or drop it on another CalcForge window (its tab bar, its page or its empty
+  workspace) to move it there with its pages, place, zoom, undo history and
+  selection. As in Revu, a file is not open twice in one window: dropping a tab of
+  a document the other window already shows just brings that tab forward. A
+  window left with no tab by the drag closes. Opening a file another window
+  already has open (**File ▸ Open**, **Open Recent**) brings that window's tab
+  forward instead of opening a second copy.
+- **Two copies of one file.** If the same file was opened separately in two
+  windows and one is dropped on the other, the copy with unsaved changes is kept
+  and the clean one gives way. When both have unsaved changes, neither is lost:
+  both tabs stay, the one brought in marked **(2)** (for example `a.pdf (2)`), and
+  the status bar says so — save one with **Save As** so that neither is saved over
+  the other.
 - **File ▸ Import** brings pages in: **Pages** (from another PDF), **Image Page**,
   **Excel Workbook** and **Tool Set** (a Bluebeam `.btx`). Each page import offers
   **Before** or **After** the current page.
