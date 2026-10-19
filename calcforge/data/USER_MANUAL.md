@@ -403,10 +403,17 @@ The **Properties panel** has the same and more, in sections:
 - **Leader** (callouts) — the hinge and how many leaders.
 - **Layout** — X, Y, Document Width, Document Height and Rotation.
 - **Measurement**, **Count**, **Stamp**, **Note**, **Image**, **Snapshot**,
-  **Contents**, **Table**, **Chart**, **Calculation block**, and for equations
-  **Result**, **Equation** and **Plot**, each described in its own section.
+  **Contents**, **Table** (or **Sheet**) and **Cells**, **Chart**, **Calculation
+  block**, and for equations **Result**, **Equation** and **Plot**, each described
+  in its own section.
 - **Options** — **Add to Tool Chest** and **Set as Default** (and **Forget
   Default** when the kind has one).
+
+The panel shows what is selected or, with nothing selected, what you are working
+in: the equation or text being typed in, or the table or spreadsheet page open
+for its cells — in Markup and Calc mode alike. A change made in the panel to an
+equation being typed in finishes the typing first (its own undo step), then makes
+the change (another).
 
 With several markups selected, a change applies to all of them in one undo step.
 Text inside a text box can be styled a word at a time: select the words while
@@ -601,11 +608,19 @@ tool set keep their own drawing.
 
 ### Pages
 
-**Thumbnails panel** (`Alt+T`). A picture of every page; click to go there; drag
-pages to reorder them (a run of picked pages moves together); drop a PDF file
-onto it to insert its pages there. `Ctrl`+wheel over the panel changes the
-picture size. Its buttons insert a blank page (**+**), insert a spreadsheet page
-(**▦**), duplicate (**⧉**) and delete (**−**).
+**Thumbnails panel** (`Alt+T`). A picture of every page, as many to a row as
+the panel has room for, with the page number (and label) centred under it and
+its scale under that when it has one; the page picked out is framed in blue.
+Click to go there; drag pages to reorder them (a run of picked pages moves
+together); drop a PDF file onto it to insert its pages there. `Ctrl`+wheel over
+the panel changes the picture size, as do **Larger Thumbnails** and **Smaller
+Thumbnails** (on the Window menu too). The panel's title, **Thumbnails ▾**, is
+its menu: every insert (Before or After), Duplicate Page, Extract Pages…, Split
+Document…, Delete Pages…, Crop Pages…, Rotate Pages, Page Setup…, Set Scale… and
+the two sizes. The buttons after it are **Insert Pages**, **Insert Blank Page**
+and **Insert Spreadsheet Page** (each with Before or After on its arrow; a click
+puts it after this page), **Duplicate Page** and **Delete Pages**; on a narrow
+panel they go on a line of their own under the title.
 
 **A page's right-click menu** (also **Document ▸ Current Page**): Page Setup…,
 Set Scale…, Cut, Copy and Paste Pages (Before or After), Move Up, Move Down,
@@ -900,7 +915,8 @@ it. Click the frame to select it; double-click to go inside.
 Right-click a block: **Self-Contained** keeps what its equations define to itself
 — nothing after the block sees those names, and a small *Self-contained* label
 above it says so on screen;
-**Select Its Equations**; **Remove Block, Keep Equations**. Blocks can sit inside
+**Select Its Equations**; **Remove Block, Keep Equations** — the Properties
+panel's Calculation block section offers the same three. Blocks can sit inside
 blocks; an equation belongs to the innermost self-contained one.
 
 ### Calc section breaks and Global
@@ -951,10 +967,14 @@ Right-click an equation:
   Numbers), Rounding (Half to Even, Away from Zero), Font size, **Colour…**,
   **Background…**, **Border** and **Conditional Formatting…**.
 
-The Properties panel shows the same as **Result** (Decimals, Threshold,
-Fractions, Rounding, **Document default**) and **Equation** (Size, Colour,
-Background, Disable Evaluation). A setting changes every selected equation in
-one undo step. The document's defaults — and the size and colour of new equations
+The Properties panel shows the same, in the menu's words and order, as
+**Result** (Variable — what the equation defines — Decimal Places, Significant
+Figures, Global, Trailing Zeros, Exponential Threshold, Fractions, Rounding,
+**Result Unit** — the unit typed into the placeholder after the result — and
+**Document default**) and **Equation** (Size, Colour, Background, Bold, Italic,
+Underline, Border, Display Input Data, Ignore Units, Disable Evaluation and
+**Conditional Formatting…**). It shows while the equation is being typed in, too.
+A setting changes every selected equation in one undo step. The document's defaults — and the size and colour of new equations
 — are in Preferences ▸ Calculations.
 
 ### Conditional formatting of equations
@@ -981,7 +1001,14 @@ An equation reads a table's (or spreadsheet's) values four ways — only tables
 **above** it in reading order (a table's place is its top-left corner):
 
 - **a named cell**: `W_total` (name it with Define Name or the Name Box — Part 3);
-- **a cell**: `Table1.D12`;
+- **a cell**: `Table1.D12`, or a spreadsheet's `Seismic_Actions.H44` — a sheet whose
+  name has spaces or other such characters is written with each run of them as one
+  `_` (`Seismic Actions` is `Seismic_Actions`, `Tables (2)` is `Tables_2`);
+- **an imported Excel workbook's name**, qualified: `Seismic_Actions_NZS1170_5.Z`
+  (the workbook's name) or `Seismic_Actions.Z` (the name as that sheet's cells read
+  it: the sheet's own name first, then its workbook's; a sheet's own name needs its
+  sheet, `Tables.ReturnPeriodFactor`). A self-contained workbook's names are never
+  read bare; see Part 3, *Excel workbooks*;
 - **a column as a vector**: `Loads.Load` is the column under the heading "Load" in
   the table's first row (the heading's first word, so "Load (kN)" is `Load`), down
   to its last filled cell — e.g. `sum(Loads.Load)`;
@@ -1209,8 +1236,8 @@ The engine has **122** built-in functions.
   (Table1…) on a tab above it, always prints, and is part of the page in the saved
   PDF. Dragging its edge or corner adds or removes rows and columns.
 - A **spreadsheet page** is a whole page of cells: **Document ▸ Insert ▸
-  Spreadsheet Page ▸ Before / After**, the Thumbnails panel's ▦ button, or a
-  page's right-click menu. Consecutive spreadsheet pages are **one sheet** that
+  Spreadsheet Page ▸ Before / After**, the Thumbnails panel's Insert Spreadsheet
+  Page button, or a page's right-click menu. Consecutive spreadsheet pages are **one sheet** that
   grows a page at a time; the columns that fit inside the page margins print, and
   everything to the right of the blue line is a **scratch area** for side
   calculations that never prints. Only markups can go on a spreadsheet page.
@@ -1337,6 +1364,21 @@ neither is `#NAME?`.
   number format (General, Number, Currency, Percent, Scientific, Fraction, Date,
   Time, Text, More…), fewer and more decimals, **Rows & Columns**, **Format
   Painter** and **Format…**.
+- **Right-click the cells**: at the top, as an equation's menu, **Variable**
+  (a name for the cells), **Decimal Places ▸** (General, 0–15: the selected cells
+  show that many places, the format's kind kept — `#,##0.00`, `0.0%`,
+  `0.00E+00` — as Excel's Increase and Decrease Decimal would leave it),
+  **Significant Figures** (the places count significant figures instead, as
+  SMath's: with three, 12345.678 shows 12300 and 0.0012345 shows 0.00123; a
+  quantity keeps its unit; a General cell takes the equations' default places)
+  and **Global**. Each is one undo step and is saved with the document; the
+  formula bar still shows what was typed. **Properties**, at the end of the menu,
+  opens the Properties panel.
+- **The Properties panel's Cells section**, while a table or sheet is open:
+  Selection, Number Format, Decimal Places, Significant Figures, Unit, Font, Size,
+  Colour, Fill, Horizontal and Vertical alignment, Bold, Italic, Underline, Wrap
+  Text, Borders and Format Cells…, following the active cell. A table also shows
+  its name, Layout and Options; a spreadsheet page its name and size.
 - Keys: `Ctrl+B`, `Ctrl+I`, `Ctrl+U`, `Ctrl+5` (strikethrough), and Excel's number
   formats `Ctrl+Shift+~` General, `Ctrl+Shift+!` Number, `Ctrl+Shift+$` Currency,
   `Ctrl+Shift+%` Percent, `Ctrl+Shift+^` Scientific, `Ctrl+Shift+#` Date,
@@ -1402,7 +1444,7 @@ column is x (or the categories), each other column a series, and headings in the
 first row name the series. A chart goes anywhere — over a sheet's cells (moving
 with them) or on any page — and follows its cells as they change.
 
-Double-click a chart (or Properties ▸ **Edit chart…**) for the **Chart** dialog:
+Double-click a chart (or Properties ▸ **Edit Chart…**) for the **Chart** dialog:
 **Type** (XY scatter, Scatter with lines, Scatter with lines only, Line, Line with
 markers, Column), the title, **Legend** (Bottom, Right, Top, None), each axis's
 title, minimum, maximum, major unit, **Logarithmic scale (base 10)** and **Major
@@ -1437,7 +1479,8 @@ the equation and R² on the chart). The axis titles carry the cells' units.
 Under the canvas, a tab for every spreadsheet in reading order (tables have none).
 Click a tab to go to it; double-click to rename; drag it to move the sheet's
 pages; **+** adds a sheet at the end. Right-click a tab for **Insert Sheet**,
-**Delete**, **Rename…** and **Go To**. Rename a table from its right-click menu
+**Delete**, **Rename…** and **Go To** — and, on a sheet of an imported Excel
+workbook, the **Self-contained** tick (see *Excel workbooks*). Rename a table from its right-click menu
 (**Rename Table…**) or the Properties panel; references follow a rename. Sheet and
 table names are unique in the whole document.
 
@@ -1453,6 +1496,41 @@ than 100 % are left out, and CalcForge says so, listing any cell whose formula
 gives another answer here than Excel last showed. A worksheet whose name is
 already used in the document is renamed `Name (2)` (then `(3)`…), and the formulas
 reading it follow. Nothing is ever written back to Excel.
+
+Formulas come out as Excel showed them, named ranges included. Where an older
+workbook's formula uses a block of cells where one value is wanted — a name of a
+column such as `s_x = $J$17:$J$39` in `=s_x*w`, or `INDIRECT` of such a name —
+Excel takes the cell in the formula's own row (implicit intersection); CalcForge
+does the same and shows it the way Excel 365 does, with `@`: `=@s_x*@w`. A name
+whose cells were deleted in Excel stays and gives `#REF!`, as in Excel.
+
+**A workbook is one, and self-contained by default.** Its sheets share its names.
+The import window has a **Self-contained** tick (ticked to start):
+
+- **Self-contained**: its names are its own. Its cells read its names first (a
+  sheet's own name wins on its sheet, as in Excel), otherwise the equation variable
+  defined above the sheet; `var(X)` still reads the equation variable X. Equations
+  below read any of its cells by sheet and cell (`Seismic_Actions.H44`) and its
+  names only qualified — `Seismic_Actions_NZS1170_5.Cd_T_min_ULS` or
+  `Seismic_Actions.Cd_T_min_ULS` — never bare. The workbook's name is its file name
+  without the extension, each run of other characters one `_`
+  (`Seismic_Actions_NZS1170.5.xlsm` is `Seismic_Actions_NZS1170_5`), made unique in
+  the document with `_2`, `_3`…; the import's message and the Properties panel say
+  it. Two workbooks with the same names stay apart.
+- **Not self-contained** (untick it): its names are document variables, read bare
+  by equations and other sheets, each defined where its sheet is in reading order.
+  Names already used in the document (equation variables, other names, SMath's
+  constants) are listed, with **Keep self-contained**, **Rename them with the
+  prefix** (suggested from the workbook's name, e.g. `Seismic_`; the workbook's
+  formulas follow) or **Go ahead** (reading order then decides which is read).
+
+Change it later with the **Self-contained** tick on the sheet tab's right-click
+menu, or in the Properties panel's **Workbook** section (shown while one of its
+sheets is open); it is one undo step and is saved with the document. Unticking it
+then lists any names already used and asks before going ahead. The Variables panel
+lists a self-contained workbook's names under a heading of its own
+(**Workbook Seismic_Actions_NZS1170_5**), written as the equations read them; the
+Name Manager's Scope shows the workbook.
 
 ### Spreadsheet functions
 

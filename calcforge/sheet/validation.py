@@ -51,7 +51,8 @@ def list_items(sheet, rule: dict, row: int = 0, col: int = 0) -> list[str]:
                     v = got.sheet.value(r, c)
                     if v is not BLANK:
                         st = got.sheet.workbook.style_of(got.sheet, r, c)
-                        out.append(format_value(v, st.number_format, st.unit).text)
+                        out.append(format_value(v, st.number_format, st.unit,
+                                                significant=st.significant).text)
             return out
         return []
     sep = ";" if ";" in source and "," not in source else ","
@@ -132,7 +133,8 @@ def invalid_cells(sheet) -> list[tuple]:
                 text = cell.input if cell else ""
                 if text.startswith("="):
                     st = sheet.workbook.styles.get(cell.style)
-                    text = format_value(cell.value, st.number_format, st.unit).text
+                    text = format_value(cell.value, st.number_format, st.unit,
+                                        significant=st.significant).text
                 if check(sheet, row, col, text) is not None:
                     out.append((row, col))
     return out

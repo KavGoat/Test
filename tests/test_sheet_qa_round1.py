@@ -690,8 +690,10 @@ def test_a_cells_menu_starts_with_its_variable_name_and_global(w):
     actions = [a for a in menu.actions() if a.isVisible()]
     holder = actions[0].defaultWidget()
     assert holder.objectName() == "cellVariableRow"
-    assert actions[1].text() == "Global (Read by Later Calc Sections)" and actions[1].isCheckable()
-    assert actions[2].isSeparator() and actions[3].text() == "Cut", "then Excel's menu, as before"
+    # Decimal Places and Significant Figures beside it, as an equation's (2026-10-19)
+    assert [a.text() for a in actions[1:3]] == ["Decimal Places", "Significant Figures"]
+    assert actions[3].text() == "Global (Read by Later Calc Sections)" and actions[3].isCheckable()
+    assert actions[4].isSeparator() and actions[5].text() == "Cut", "then Excel's menu, as before"
     labels = [a.text() for a in menu.actions()]
     assert "Make Global" not in labels and "Make Local" not in labels, "Global once, at the top"
     # typed into the box in the real menu, Enter names the cell
@@ -747,7 +749,7 @@ def test_a_cells_menu_starts_with_its_variable_name_and_global(w):
     assert calcsections.cells_global(t.sheet, [1, 1, 1, 1])
     click(w, cell_scene(t, "B2"))
     menu = w.view.tables.cell_menu()
-    assert [a for a in menu.actions() if a.isVisible()][1].isChecked()
+    assert [a for a in menu.actions() if a.isVisible()][3].isChecked()
 
 
 # -- findings 5.3: a heading's edge, dragged as in Excel -------------------------------------------

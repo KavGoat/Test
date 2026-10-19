@@ -190,6 +190,10 @@ class SheetTabs(QWidget):
             delete = menu.addAction("Delete", lambda: self.delete_sheet(index))
             delete.setToolTip("Delete this sheet and its pages")
             menu.addAction("Rename…", lambda: self._rename(index))
+            # a sheet of an imported Excel workbook: whether its names are its own
+            from .workbookscope import tab_action
+            run = self._item(self.entries[index][0]) if index < len(self.entries) else None
+            tab_action(menu, run.sheet if run is not None else None, self.window)
             menu.addSeparator()
             menu.addAction("Go To", lambda: self.go(index)).setToolTip(
                 "Go to this sheet's first page")

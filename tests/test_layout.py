@@ -375,7 +375,10 @@ def test_page_thumbnail_uses_a_centred_responsive_grid_cell(window, qapp):
     entry = page_list.item(0)
     box = page_list.visualItemRect(entry)
 
-    assert page_list.gridSize().width() == page_list.viewport().width()
+    # the one page has the whole row, short of the pixel Qt wants spare
+    # before it starts a new row (a share of the full width wrapped every
+    # row's last page: the user, 2026-10-19)
+    assert page_list.gridSize().width() == page_list.viewport().width() - 1
     assert abs(box.center().x() - page_list.viewport().rect().center().x()) <= 1
     assert entry.textAlignment() & Qt.AlignHCenter
 

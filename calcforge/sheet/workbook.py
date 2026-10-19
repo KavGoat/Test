@@ -66,6 +66,32 @@ class DefinedName:
     sheet: Optional[int] = None          # sheet id when the name is local to one sheet
     comment: str = ""
     home: Optional[int] = None           # the sheet it is saved with, when it names no cells
+    book: Optional[str] = None           # the imported workbook it belongs to (Book.id)
+
+    @property
+    def key(self) -> tuple:
+        """Its key in Workbook.names: (lower name, scope) — the sheet id of a
+        sheet-local name, the Book.id of an imported workbook's name, None for
+        a document name."""
+        return (self.name.lower(), self.sheet if self.sheet is not None else self.book)
+
+
+@dataclass
+class Book:
+    """An imported Excel workbook: its sheets share its names (Excel's
+    workbook scope). Self-contained (the default), those names are its own:
+    its cells read them, and the equations only by qualifying them
+    (``Book.Name``, ``Sheet.Name``); otherwise they are document names, read
+    by the equations bare, each defined where its sheet is in reading order."""
+
+    id: str
+    name: str                            # how equations qualify its names (an identifier)
+    file: str = ""                       # the file it came from, as a reminder
+    self_contained: bool = True
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "name": self.name, "file": self.file,
+                "self_contained": self.self_contained}
 
 
 class Sheet:
@@ -76,6 +102,7 @@ class Sheet:
         self.id = sheet_id
         self.name = name
         self.kind = kind                 # "sheet" (pages of grid) or "table" (on a page)
+        self.book: Optional[str] = None  # the imported workbook it is part of (Book.id)
         self.cells: dict[tuple, Cell] = {}
         self._rows_in_col: dict[int, list] = {}
         # where it sits in the document's reading order (set by the document)
@@ -314,7 +341,12 @@ class Workbook:
         self.sheets: list[Sheet] = []
         self._next_id = 1
         self.styles = StyleTable()
-        self.names: dict[tuple, DefinedName] = {}    # (lower name, sheet id or None)
+        self.names: dict[tuple, DefinedName] = {}    # DefinedName.key -> the name
+        self.books: dict[str, Book] = {}              # imported workbooks by Book.id
+        # where a sheet is in the document's reading order (the document sets
+        # it): a name of a workbook that isn't self-contained is read by
+        # other sheets only from after it
+        self.order_key: Optional[Callable] = None
         self.day_first = True
         # asked for a document variable: outside(sheet, name) -> value; raises KeyError
         self.outside: Optional[Callable] = None
@@ -327,9 +359,25 @@ class Workbook:
         self.listeners: list[Callable[[set], None]] = []   # told the keys whose values changed
         self._deps = _Dependents()
         self._dirty: set = set()
+        # of the dirty formulas, those worked out whatever their inputs did
+        # (typed, volatile, a name or a document variable changed...); the
+        # others only once something they read changed value (_needed)
+        self._roots: set = set()
+        self._needed: Optional[set] = None
+        self._pass_changed: set = set()
+        self._pass_cache: dict = {}
+        self._reach_memo = None             # (cells typed, kept order, dirty, roots, order)
+        self._held_order = None
+        self._changed_rows: dict = {}       # (sheet id, col) -> sorted rows changed this pass
+        self._changed_cols: dict = {}       # sheet id -> sorted columns changed this pass
         self._touched: list = []                     # cells changed since the last calculation
         self._volatile: set = set()
         self._precedents: dict[tuple, tuple] = {}    # key -> (cells, blocks) as read statically
+        # every formula's place in an order where each comes after what it
+        # reads, kept until a formula, sheet or name changes (None: to make):
+        # an edit then sorts its dirty formulas by it instead of walking them
+        self._rank: Optional[dict] = None
+        self._rank_loops: set = set()
         self._evaluating: set = set()
         self._done: set = set()
         self._in_pass = False
@@ -388,9 +436,17 @@ class Workbook:
         if name is None:
             return None
         lower = name.lower()
+        # the last found by this name, while it is still here and so called
+        # (formulas name other sheets thousands of times a calculation)
+        cache = self.__dict__.setdefault("_sheet_found", {})
+        s = cache.get(lower)
+        if s is not None and s.name.lower() == lower and any(x is s for x in self.sheets):
+            return s
         for s in self.sheets:
             if s.name.lower() == lower:
+                cache[lower] = s
                 return s
+        cache.pop(lower, None)
         return None
 
     def sheet_by_id(self, sheet_id: int) -> Optional[Sheet]:
@@ -462,6 +518,7 @@ class Workbook:
     def _names_changed(self) -> None:
         """Sheets or names came or went: anything reading them by name is
         looked at again."""
+        self._rank = None                  # a sheet came, went or was renamed
         if self.on_names_changed is not None:
             self.on_names_changed()
         waiting, self._unresolved = self._unresolved, set()
@@ -473,7 +530,7 @@ class Workbook:
         for sheet in self.sheets:
             for (row, col), cell in sheet.cells.items():
                 if cell.is_formula:
-                    self._dirty.add((sheet.id, row, col))
+                    self._mark((sheet.id, row, col))
         self._recalc_if_auto()
 
     # -- defined names ----------------------------------------------------------------
@@ -488,13 +545,26 @@ class Workbook:
         if refers_to.startswith("="):
             refers_to = refers_to[1:]
         F.parse(refers_to)              # raises FormulaError if it can't be read
-        key = (name.lower(), sheet.id if sheet else None)
+        where = home or sheet or self._first_sheet_read(refers_to)
+        # a name made on an imported workbook's sheet is that workbook's (as
+        # a new name in Excel is the workbook's)
+        book = None if sheet is not None or where is None else where.book
+        dn = DefinedName(name, refers_to, sheet.id if sheet else None, comment,
+                         where.id if where else None, book)
         with self.transaction("Define name"):
-            self._set_name(key, DefinedName(name, refers_to, sheet.id if sheet else None, comment,
-                                            (home or sheet).id if (home or sheet) else None))
+            self._set_name(dn.key, dn)
 
-    def remove_name(self, name: str, sheet: Optional[Sheet] = None) -> None:
-        key = (name.lower(), sheet.id if sheet else None)
+    def _first_sheet_read(self, refers_to: str) -> Optional[Sheet]:
+        try:
+            tokens = F.tokenize(refers_to)
+        except F.FormulaError:
+            return None
+        first = next((t for t in tokens if t.kind == "ref" and t.ref.sheet), None)
+        return self.sheet(first.ref.sheet) if first is not None else None
+
+    def remove_name(self, name: str, sheet: Optional[Sheet] = None,
+                    book: Optional[str] = None) -> None:
+        key = (name.lower(), sheet.id if sheet else book)
         if key in self.names:
             with self.transaction("Delete name"):
                 self._set_name(key, None)
@@ -518,16 +588,96 @@ class Workbook:
     def _name_dirty(self, lower: str) -> None:
         if self.on_names_changed is not None:
             self.on_names_changed()
-        self._dirty_many(list(self._deps.names.get(lower, ())), include_self=True)
+        readers = list(self._deps.names.get(lower, ()))
+        self._relearn(readers)
+        self._dirty_many(readers, include_self=True)
         self._recalc_if_auto()
 
+    def _relearn(self, keys) -> None:
+        """What these formulas read, found again: a name they use came, went
+        or now means other cells (a sheet that names them was put in after
+        them, a workbook's names became its own)."""
+        for key in keys:
+            sheet = self.sheet_by_id(key[0])
+            cell = sheet.cells.get(key[1:]) if sheet is not None else None
+            if cell is not None and cell.is_formula:
+                self._learn(sheet, key[1], key[2], cell)
+
     def find_name(self, name: str, sheet: Optional[Sheet]) -> Optional[DefinedName]:
+        """The defined name a formula on *sheet* means by *name*, Excel's way:
+        the sheet's own (local) name, then its workbook's, then a document
+        name; then a name of a workbook that isn't self-contained, from a
+        sheet after it in reading order."""
         lower = name.lower()
+        names = self.names
         if sheet is not None:
-            local = self.names.get((lower, sheet.id))
+            local = names.get((lower, sheet.id))
             if local is not None:
                 return local
-        return self.names.get((lower, None))
+            if sheet.book is not None:
+                mine = names.get((lower, sheet.book))
+                if mine is not None:
+                    return mine
+        found = names.get((lower, None))
+        if found is not None or not self.books:
+            return found
+        return self.open_book_name(lower, sheet)
+
+    def open_book_name(self, lower: str, reader: Optional[Sheet], at_key=None):
+        """A name of a workbook that isn't self-contained, read from *reader*
+        (a sheet of another workbook, or none) or from reading key *at_key*:
+        the latest such definition before it in reading order (any, when
+        neither is known)."""
+        best = best_key = None
+        order = self.order_key
+        if at_key is None and reader is not None and order is not None:
+            at_key = order(reader)
+        for book in self.books.values():
+            if book.self_contained or (reader is not None and reader.book == book.id):
+                continue
+            dn = self.names.get((lower, book.id))
+            if dn is None:
+                continue
+            if order is None or at_key is None:
+                return dn
+            home = self.sheet_by_id(dn.home) if dn.home is not None else None
+            key = order(home) if home is not None else None
+            if key is None or not key < tuple(at_key):
+                continue
+            if best_key is None or key > best_key:
+                best, best_key = dn, key
+        return best
+
+    def book_names(self, book_id: str) -> list:
+        """The names of an imported workbook (its own scope, not sheet-local)."""
+        return [dn for (lower, scope), dn in self.names.items() if scope == book_id]
+
+    def set_self_contained(self, book_id: str, on: bool) -> None:
+        """Whether a workbook's names are its own (one undo step); every
+        formula that reads a name is worked out again."""
+        book = self.books.get(book_id)
+        if book is None or book.self_contained == bool(on):
+            return
+        with self.transaction("Self-contained"):
+            was = book.self_contained
+            self.book_state(book_id, bool(on))
+            self._record(lambda: self.book_state(book_id, was),
+                         lambda: self.book_state(book_id, bool(on)))
+
+    def book_state(self, book_id: str, self_contained: bool) -> None:
+        """Puts a workbook's setting in place (no undo step of its own) and
+        works out again every formula reading a name."""
+        book = self.books.get(book_id)
+        if book is None or book.self_contained == self_contained:
+            return
+        book.self_contained = self_contained
+        self._names_changed()
+        readers = set()
+        for lower in {k[0] for k in self.names}:
+            readers |= self._deps.names.get(lower, set())
+        self._relearn(list(readers))
+        self._dirty_many(list(readers), include_self=True)
+        self._recalc_if_auto()
 
     # -- transactions and undo -------------------------------------------------------------
     @contextmanager
@@ -691,7 +841,7 @@ class Workbook:
         self._forget(key)
         if cell is not None and cell.is_formula:
             self._learn(sheet, row, col, cell)
-            self._dirty.add(key)
+            self._mark(key)
         elif cell is not None:
             value, _fmt = read_value(text, self.day_first)
             if cell.value != value or type(cell.value) is not type(value):
@@ -720,11 +870,11 @@ class Workbook:
             anchor = cell.spill_from
             cell.spill_from = None                     # typed over: its own cell now
             cell.value = BLANK
-            self._dirty.add((sheet.id,) + anchor)
+            self._mark((sheet.id,) + anchor)
         for anchor, (rows, cols) in list(sheet.wanted.items()):
             if anchor != (row, col) and anchor[0] <= row < anchor[0] + rows \
                     and anchor[1] <= col < anchor[1] + cols:
-                self._dirty.add((sheet.id,) + anchor)
+                self._mark((sheet.id,) + anchor)
 
     def _recalc_if_auto(self) -> None:
         if self.auto and self._open is None and not self._replaying and not self._in_pass:
@@ -732,6 +882,8 @@ class Workbook:
 
     # -- what each formula reads ------------------------------------------------------------
     def _forget(self, key) -> None:
+        if self._rank is not None and key in self._rank:
+            self._rank = None              # a formula went: the kept order with it
         self._unresolved.discard(key)
         self._deps.remove(key)
         self._precedents.pop(key, None)
@@ -740,6 +892,7 @@ class Workbook:
 
     def _learn(self, sheet: Sheet, row: int, col: int, cell: Cell) -> None:
         key = (sheet.id, row, col)
+        self._rank = None
         try:
             cell.parsed = F.parse(cell.input[1:], row, col)
             cell.problem = None
@@ -809,10 +962,52 @@ class Workbook:
         if cell.parsed.volatile:
             self._volatile.add(key)
 
+    def _mark(self, key) -> None:
+        """A formula to work out on the next pass, whatever its inputs did."""
+        self._dirty.add(key)
+        self._roots.add(key)
+
+    def _note_changed(self, key) -> None:
+        """A cell's value changed in this pass (or it was typed): what reads
+        it is worked out when its turn comes (_inputs_changed)."""
+        if key in self._pass_changed:
+            return
+        self._pass_changed.add(key)
+        sid, row, col = key
+        rows = self._changed_rows.get((sid, col))
+        if rows is None:
+            rows = self._changed_rows[(sid, col)] = []
+            bisect.insort(self._changed_cols.setdefault(sid, []), col)
+        bisect.insort(rows, row)
+
+    def _inputs_changed(self, key) -> bool:
+        """Whether anything a formula reads (cells, blocks, the cells of the
+        names it uses) changed value in this pass."""
+        cells, blocks = self._precedents.get(key, ((), ()))
+        changed = self._pass_changed
+        for k in cells:
+            if k in changed:
+                return True
+        if blocks:
+            by_col, cols_of = self._changed_rows, self._changed_cols
+            for sid, top, left, bottom, right in blocks:
+                cols = cols_of.get(sid)
+                if not cols:
+                    continue
+                i = bisect.bisect_left(cols, left)
+                j = bisect.bisect_right(cols, right)
+                for col in cols[i:j]:
+                    rows = by_col[(sid, col)]
+                    a = bisect.bisect_left(rows, top)
+                    if a < len(rows) and rows[a] <= bottom:
+                        return True
+        return False
+
     def _dirty_many(self, keys, include_self: bool) -> None:
         seen = set(keys)
         if include_self:
             self._dirty.update(keys)
+            self._roots.update(keys)
         frontier = list(keys)
         cell_readers = self._deps.cell
         while frontier:
@@ -852,25 +1047,63 @@ class Workbook:
         if self._in_pass:
             return set()
         edited = bool(self._touched) or bool(self._dirty)
+        touched = ()
+        memo = None
         if self._touched:
             touched, self._touched = self._touched, []
-            self._dirty_many(touched, include_self=False)
+            # the same cells typed into again (one input, value after
+            # value): what they reach, and its order, are as last time while
+            # no formula has changed (the kept order still stands)
+            if not self._dirty and not everything and self._rank is not None and \
+                    not any(x.spills or x.wanted for x in self.sheets):
+                memo = (frozenset(touched), self._rank)
+                held = self._reach_memo
+                if held is not None and held[0] == memo[0] and held[1] is memo[1]:
+                    self._dirty.update(held[2])
+                    self._roots.update(held[3])
+                    self._held_order = held[4]
+                    edited = False                     # (its volatile ones are in it)
+                    touched_known = True
+                else:
+                    touched_known = False
+            else:
+                touched_known = False
+            if not touched_known:
+                self._dirty_many(touched, include_self=False)
         if everything:
             for sheet in self.sheets:
                 for (row, col), cell in sheet.cells.items():
                     if cell.is_formula:
-                        self._dirty.add((sheet.id, row, col))
+                        self._mark((sheet.id, row, col))
         if edited and self._volatile:
             self._dirty_many(list(self._volatile), include_self=True)
         if not self._dirty:
+            self._roots.clear()
             changed, self._changed = self._changed, set()
             if changed:
                 self._tell(changed)
             return changed
         self._in_pass = True
         self._columns = {}
+        self._pass_cache = {}              # what stands still during a pass (DocumentBook._reach)
+        # Only what can have changed is worked out: the roots, and a formula
+        # once something it reads changed value — a dependent whose inputs
+        # came out the same is left as it is (the user's seismic workbook:
+        # its INDIRECTs, volatile, recalculated 4000 formulas for any edit)
+        self._needed = None if everything else (self._roots & self._dirty)
+        self._roots = set()
+        self._pass_changed, self._changed_rows, self._changed_cols = set(), {}, {}
+        for key in touched:
+            self._note_changed(key)
         try:
-            order, loops = self._order()
+            held_order, self._held_order = self._held_order, None
+            if held_order is not None:
+                order, loops = held_order, set()
+            else:
+                order, loops = self._order()
+                if memo is not None and not loops and self._rank is memo[1]:
+                    self._reach_memo = (memo[0], memo[1], frozenset(self._dirty),
+                                        frozenset(self._needed or ()), order)
             kept = {k for k in self.circular if k not in self._dirty}
             self.circular = sorted(kept | loops)
             for key in loops:
@@ -881,9 +1114,14 @@ class Workbook:
                     self._changed.add(key)
                 self._done.add(key)
                 self._dirty.discard(key)
+            needed = self._needed
             for key in order:
                 if key not in self._done:
-                    self._compute(key)
+                    if needed is not None and key not in needed and \
+                            not self._inputs_changed(key):
+                        self._done.add(key)        # nothing it reads changed
+                    else:
+                        self._compute(key)
                     self._dirty.discard(key)
             # spilled blocks that changed: what reads them, again (a few
             # rounds at most: a spill that feeds itself settles or stops)
@@ -895,6 +1133,7 @@ class Workbook:
                 self._dirty_many(moved, include_self=False)
                 self._done -= self._dirty
                 self._columns = {}         # values seen final may change again
+                self._needed = None
                 order, loops = self._order()
                 for key in order:
                     if key not in self._done:
@@ -905,6 +1144,7 @@ class Workbook:
             self._dirty.clear()
             self._done.clear()
             self._columns = {}
+            self._needed = None
             self._in_pass = False
         changed, self._changed = self._changed, set()
         if changed:
@@ -917,7 +1157,51 @@ class Workbook:
             listener(changed)
 
     def _order(self):
-        """The dirty formulas, each after those it reads; and the ones in loops."""
+        """The dirty formulas, each after those it reads; and the ones in loops.
+
+        Sorted by the kept order of every formula (_rank) when it can be:
+        the formulas haven't changed since it was made, none of the dirty
+        ones is in a loop, and nothing spills (a spill moves what reads
+        what as it is worked out). Otherwise worked out afresh (_walk_order)."""
+        if any(s.spills or s.wanted for s in self.sheets):
+            return self._walk_order()
+        rank = self._rank
+        dirty = self._dirty
+        if rank is None:
+            # made when a pass is most of the formulas anyway (costing about
+            # what walking them does), not for small ones: loading sheet
+            # after sheet would make it again and again
+            if len(dirty) * 2 < len(self._precedents):
+                return self._walk_order()
+            rank = self._make_rank()
+        if self._rank_loops and not self._rank_loops.isdisjoint(dirty):
+            return self._walk_order()
+        order = []
+        for key in dirty:
+            if key in rank:
+                order.append(key)
+                continue
+            sheet = self.sheet_by_id(key[0])
+            cell = sheet.cells.get(key[1:]) if sheet is not None else None
+            if cell is not None and cell.is_formula:
+                return self._walk_order()      # (not in the kept order: never)
+        order.sort(key=rank.__getitem__)
+        return order, set()
+
+    def _make_rank(self) -> dict:
+        everything = {(sheet.id, row, col) for sheet in self.sheets
+                      for (row, col), cell in sheet.cells.items() if cell.is_formula}
+        dirty, self._dirty = self._dirty, everything
+        try:
+            order, loops = self._walk_order()
+        finally:
+            self._dirty = dirty
+        self._rank = {key: i for i, key in enumerate(order)}
+        self._rank_loops = set(loops)
+        return self._rank
+
+    def _walk_order(self):
+        """_order, worked out by walking the dirty formulas."""
         dirty = self._dirty
         state: dict = {}
         order: list = []
@@ -1002,12 +1286,14 @@ class Workbook:
                                                        min(b, bottom), min(r, right))):
                         yield anchor
 
+        any_spills = any(s.spills for s in sheets.values())
+
         def precedents(key):
             cells, blocks = self._precedents.get(key, ((), ()))
             for k in cells:
                 if k in dirty:
                     yield k
-                else:
+                elif any_spills:
                     a = anchor_of(k)
                     if a is not None:
                         yield a
@@ -1046,36 +1332,43 @@ class Workbook:
         return order, loops
 
     def _compute(self, key) -> None:
-        evaluate_cell = _evaluate_cell()
         sheet = self.sheet_by_id(key[0])
-        cell = sheet.cells.get(key[1:]) if sheet else None
-        if cell is None:
-            self._done.add(key)
+        cell = sheet.cells.get((key[1], key[2])) if sheet else None
+        done = self._done
+        if cell is None or not cell.input.startswith("=") or len(cell.input) < 2:
+            done.add(key)
             return
-        if not cell.is_formula:
-            self._done.add(key)
-            return
-        self._evaluating.add(key)
+        evaluating = self._evaluating
+        evaluating.add(key)
         try:
-            if cell.parsed is None and cell.problem is None:
+            parsed = cell.parsed
+            if parsed is None and cell.problem is None:
                 self._learn(sheet, key[1], key[2], cell)
-            if cell.parsed is None:
+                parsed = cell.parsed
+            if parsed is None:
                 value = NAME.because(cell.problem) if cell.problem else BLANK
-                reads = set()
+                reads = None
             else:
-                value, reads = evaluate_cell(self, sheet, key[1], key[2], cell.parsed.tree)
+                value, reads = _evaluate_cell()(self, sheet, key[1], key[2], parsed.tree, parsed)
         finally:
-            self._evaluating.discard(key)
-        self._done.add(key)
+            evaluating.discard(key)
+        done.add(key)
         self._dirty.discard(key)
         if reads:
             self._outside_reads[key] = reads
-        else:
-            self._outside_reads.pop(key, None)
+        elif key in self._outside_reads:
+            del self._outside_reads[key]
         value = self._spill(sheet, key, value)
-        if not _same(cell.value, value):
-            cell.value = value
-            self._changed.add(key)
+        old = cell.value
+        if type(old) is float and type(value) is float:
+            if old == value or (old != old and value != value):
+                return
+        elif _same(old, value):
+            return
+        cell.value = value
+        self._changed.add(key)
+        if self._needed is not None:
+            self._note_changed(key)
 
     # -- dynamic arrays ---------------------------------------------------------------------------
     def _spill_blocked(self, sheet: Sheet, anchor: tuple, rows: int, cols: int) -> bool:
@@ -1101,6 +1394,9 @@ class Workbook:
         """Put a block result into the cells it spills over; what the formula's
         own cell shows (its top-left value, or #SPILL!)."""
         anchor = (key[1], key[2])
+        if type(value) is not Array and anchor not in sheet.spills and \
+                anchor not in sheet.wanted and anchor not in sheet.spill_values:
+            return value                   # (the usual: one value, nothing spilled before)
         old = sheet.spills.pop(anchor, None)
         old_values = sheet.spill_values.pop(anchor, None)
         new = None
@@ -1218,7 +1514,7 @@ class Workbook:
             self._unspill(sheet, anchor)
         for anchor in list(sheet.wanted):
             sheet.wanted.pop(anchor, None)
-            self._dirty.add((sheet.id,) + anchor)
+            self._mark((sheet.id,) + anchor)
 
     def _move_cells(self, sheet: Sheet, mapping: Callable[[int, int], Optional[tuple]],
                     change=None) -> frozenset:

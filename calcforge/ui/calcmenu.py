@@ -36,10 +36,19 @@ def change(window, items: list, description: str, apply, refresh: bool = True) -
     """Apply *apply(region)* to each equation, recalculate, one undo step."""
     from ..calc.docsheet import sheet_for
 
+    view = window.view
+    calc = view.calc
+    if calc.editing() and calc.item in items:
+        # the equation being typed in (shown in Properties while it is):
+        # the typing is finished as its own step first, and the equation
+        # stays picked, so the setting is one step of its own after it
+        calc.leave()
+        items = [i for i in items if i.scene() is not None and i.region is not None]
+        for item in items:
+            item.setSelected(True)
     items = [i for i in items if not getattr(i, "locked", False)]
     if not items:
         return
-    view = window.view
     view.begin_snapshot(view.involved_frames(*items))
     sheet = sheet_for(window.document)
     for item in items:

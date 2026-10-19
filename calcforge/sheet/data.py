@@ -86,7 +86,7 @@ def shown(sheet, row: int, col: int) -> str:
     if cell is None or cell.value is BLANK:
         return ""
     st = sheet.workbook.styles.get(cell.style)
-    return format_value(cell.value, st.number_format, st.unit).text
+    return format_value(cell.value, st.number_format, st.unit, significant=st.significant).text
 
 
 def column_values(sheet, col: int) -> list:
@@ -157,7 +157,7 @@ def apply_filter(wb, sheet) -> None:
         for other in wb.sheets:
             for (r, c), cell in other.cells.items():
                 if cell.parsed is not None and cell.parsed.functions & {"SUBTOTAL", "AGGREGATE"}:
-                    wb._dirty.add((other.id, r, c))
+                    wb._mark((other.id, r, c))
                     wb._touched.append((other.id, r, c))
         wb._recalc_if_auto()
 

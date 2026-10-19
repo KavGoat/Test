@@ -12,7 +12,7 @@ def _shown(sheet, cell) -> str:
     if cell.value is BLANK:
         return ""
     st = sheet.workbook.styles.get(cell.style)
-    return format_value(cell.value, st.number_format, st.unit).text
+    return format_value(cell.value, st.number_format, st.unit, significant=st.significant).text
 
 
 def _pattern(what: str, case: bool, whole: bool):

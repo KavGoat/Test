@@ -219,6 +219,10 @@ def _bars_and_panels(walk, state=""):
         pump()
         if dock.widget() is not None:
             walk.widgets(dock.widget(), f"{title} panel{state}")
+        # a panel's own buttons on its title bar (Thumbnails', after its ▾)
+        tools = getattr(dock.widget(), "header_tools", None)
+        if tools is not None:
+            walk.widgets(tools, f"{title} panel{state}")
         if was_hidden:
             window.show_panel(dock.objectName(), False)
     if not window.markups_panel.isVisible():
@@ -354,6 +358,8 @@ def markup_scenarios(walk):
     pump()
     point = strip.visualItemRect(strip.item(0)).center()
     walk.capture(lambda: window.pages_panel._context_menu(point), "Right-click a thumbnail")
+    # the panel's own menu, its title: "Thumbnails ▾"
+    walk.open_and_read(window.pages_panel.build_options_menu(), "Thumbnails ▾")
     # a document tab (two documents open)
     window.open_in_new_tab()
     pump()

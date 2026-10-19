@@ -11,6 +11,7 @@ from __future__ import annotations
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QComboBox, QFontComboBox, QLabel, QMenu, QToolButton)
 
+from ..sheet.numfmt import with_decimals as _with_decimals
 from .widgets import ColorButton
 
 NUMBER_FORMATS = [("General", None), ("Number", "0.00"), ("Currency", "$#,##0.00"),
@@ -245,7 +246,12 @@ class TableControls:
     def _unit_chosen(self) -> None:
         if self._syncing:
             return
-        text = self.unit.text().strip()
+        self.set_unit(self.unit.text().strip(), self.unit)
+
+    def set_unit(self, text: str, box) -> bool:
+        """The selected cells shown in unit *text* (blank: as typed), typed
+        into *box* — the formula bar's unit box or the Properties panel's.
+        False, and why under the box, when it is refused."""
         st = self._style()
         if text:
             # as the unit box on the cell: a unit of another kind than the
@@ -256,13 +262,14 @@ class TableControls:
             why = self._unit_refusal(text)
             if why is not None:
                 from .cellunits import say_refusal
-                if getattr(self.unit, "flagged", lambda: None)() != why:
-                    say_refusal(self.window.view, why, self.unit)
-                if hasattr(self.unit, "flag"):
-                    self.unit.flag(why)
-                return
+                if getattr(box, "flagged", lambda: None)() != why:
+                    say_refusal(self.window.view, why, box)
+                if hasattr(box, "flag"):
+                    box.flag(why)
+                return False
         if st is not None and (st.unit or "") != text:
             self._set(unit=text or None)
+        return True
 
     def _unit_refusal(self, text: str):
         """Why *text* can't be the output unit of the selected cells (the
@@ -345,49 +352,3 @@ def format_index(code) -> int:
              "Custom": "Number"}.get(category, category)
     labels = [name for name, _c in NUMBER_FORMATS]
     return labels.index(label) if label in labels else 1
-
-
-def _with_decimals(code: str, step: int):
-    """The format with one decimal place more or fewer: 0.00 -> 0.000 / 0.0,
-    #,##0 -> #,##0.0, 0.0% -> 0.00%, in every section."""
-    out = []
-    for sec in code.split(";"):
-        out.append(_section_decimals(sec, step))
-    new = ";".join(out)
-    return new if new != code else None
-
-
-def _section_decimals(sec: str, step: int) -> str:
-    # where the number's digits are, outside quoted text and [colours]
-    plain = []
-    quoted = bracket = False
-    for i, ch in enumerate(sec):
-        if ch == '"':
-            quoted = not quoted
-        elif ch == "[" and not quoted:
-            bracket = True
-        elif ch == "]" and not quoted:
-            bracket = False
-        elif not quoted and not bracket:
-            plain.append(i)
-    digits = [i for i in plain if sec[i] in "0#?"]
-    if not digits:
-        return sec
-    exp = next((i for i in plain if sec[i] in "Ee" and i + 1 < len(sec) and sec[i + 1] in "+-"), None)
-    mantissa = [i for i in digits if exp is None or i < exp]
-    point = next((i for i in plain if sec[i] == "." and (exp is None or i < exp)), None)
-    if point is not None:
-        after = [i for i in mantissa if i > point]
-        places = len(after)
-        if step > 0:
-            insert_at = (after[-1] + 1) if after else point + 1
-            return sec[:insert_at] + "0" + sec[insert_at:]
-        if places == 0:
-            return sec
-        if places == 1:
-            return sec[:point] + sec[after[-1] + 1:]
-        return sec[:after[-1]] + sec[after[-1] + 1:]
-    if step < 0:
-        return sec
-    last = mantissa[-1]
-    return sec[:last + 1] + ".0" + sec[last + 1:]
