@@ -1618,6 +1618,9 @@ class MainWindow(QMainWindow):
                       "and whether Unflatten can bring them back")
         self._act("recover_flattened", "Unflatten", self.recover_flattened, "Ctrl+Shift+U",
                   tip="Restore source items retained by recoverable flattening")
+        self._act("restore_deleted_pages", "Restore Deleted Pages…", self.restore_deleted_pages,
+                  tip="Bring back the pages deleted in another program since this "
+                      "document was last saved here, with everything CalcForge had on them")
         self._act("preferences", "Preferences…", self.edit_preferences, "Ctrl+,",
                   tip="Your name, the mouse wheel, drawing snap, spelling, equation "
                       "results and the other settings")
@@ -2681,7 +2684,7 @@ class MainWindow(QMainWindow):
         for entry in self.insert_family():
             insert_pages.addAction(getattr(self, f"act_{entry[0]}"))
         fill(page_menu, (self.act_extract_pages, self.act_split_pages, self.act_delete_page,
-                         self.act_crop_page, None, self.act_header_footer, None,
+                         self.act_restore_deleted_pages, self.act_crop_page, None, self.act_header_footer, None,
                          self.act_color_processing, None, self.act_flatten_document,
                          self.act_recover_flattened, None))
         # CalcForge's own, together at the end
@@ -4375,13 +4378,92 @@ class MainWindow(QMainWindow):
 
     def _say_what_opening_found(self, warnings: list) -> None:
         """Warnings from opening a file (decision 3): in the status bar, and
-        in a message box when the window may ask things."""
+        in a message box when the window may ask things — with a Restore
+        button when pages were deleted in another program."""
         if not warnings:
             return
         text = "\n\n".join(warnings)
-        self.status_hint.setText(" ".join(warnings))
-        if self.interactive_prompts:
+        self.status_hint.setText(" ".join(w.replace("\n", " ") for w in warnings))
+        if not self.interactive_prompts:
+            return
+        if not getattr(self.document, "deleted_elsewhere", None):
             QMessageBox.warning(self, "Open document", text)
+            return
+        from .release import done_with
+        box = QMessageBox(QMessageBox.Warning, "Open document", text, QMessageBox.NoButton, self)
+        restore = box.addButton(self._restore_button_text(), QMessageBox.AcceptRole)
+        box.addButton("Keep Them Deleted", QMessageBox.RejectRole)
+        try:
+            box.exec()
+            if box.clickedButton() is restore:
+                self.restore_deleted_pages(ask=False)
+        finally:
+            done_with(box)
+
+    def _restore_button_text(self) -> str:
+        numbers = [str(e["number"]) for e in self.document.deleted_elsewhere]
+        return ("Restore Page " if len(numbers) == 1 else "Restore Pages ") + ", ".join(numbers)
+
+    def restore_deleted_pages(self, _checked: bool = False, ask: bool = True) -> bool:
+        """Document ▸ Restore Deleted Pages…: the pages deleted in another
+        program since the document was last saved here, put back where they
+        were with everything CalcForge had on them (the user, 2026-10-19:
+        "offer to restore but be very clear on what pages were deleted and
+        those pages being restored"). One undo step; once the document is
+        saved there is nothing left to restore."""
+        here = {page.uid for page in self.document.pages}
+        found = [entry for entry in getattr(self.document, "deleted_elsewhere", None) or []
+                 if entry["page"].get("uid") not in here]      # (not already back)
+        if not found:
+            self.status_hint.setText("No pages were deleted in another program since "
+                                     "this document was last saved here")
+            return False
+        if ask and self.interactive_prompts:
+            listing = "\n".join(f"• page {e['number']}"
+                                 + (f" “{e['page'].get('label')}”" if e["page"].get("label") else "")
+                                 for e in found)
+            if QMessageBox.question(
+                    self, "Restore Deleted Pages",
+                    f"These pages were deleted in another program and will be put back "
+                    f"where they were, with everything CalcForge had on them:\n\n{listing}",
+                    QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+                return False
+        import copy
+
+        from ..core.document import Page
+
+        def mutate():
+            entries = list(self._structure_snapshot()["pages"])
+            restored, runs = [], set()
+            for entry in sorted(found, key=lambda e: e["number"]):
+                data = copy.deepcopy(entry["page"])
+                if entry["drawing_lost"] or (data.get("pdf_key")
+                                             and data["pdf_key"] not in self.document.assets):
+                    # its drawing was the file's own page, deleted with it:
+                    # back as paper, with what CalcForge put on it
+                    data["pdf_key"] = None
+                    data["pdf_page_index"] = None
+                    data["written_here"] = True
+                runs |= {p.get("uid") for p in data.get("items", [])
+                         if isinstance(p, dict) and p.get("type") == "sheet_run"}
+                at = next((i + 1 for i, e in enumerate(entries) if e.get("uid") == entry["after"]), 0)
+                entries.insert(at, data)
+                restored.append(data)
+            # a spreadsheet's cells went to its first page left when it was
+            # opened: with its first page back, they are on that again
+            for e in entries:
+                if any(e is r for r in restored):
+                    continue
+                e["items"] = [p for p in e.get("items", []) if not (
+                    isinstance(p, dict) and p.get("type") == "sheet_run" and p.get("uid") in runs)]
+            self.document.pages = [Page.from_dict(e) for e in entries]
+            first = min(e["number"] for e in found) - 1
+            self.current_index = max(0, min(first, len(self.document.pages) - 1))
+        self._structural_change("Restore deleted pages", mutate)
+        numbers = ", ".join(str(e["number"]) for e in found)
+        self.status_hint.setText(f"Restored page{'s' if len(found) != 1 else ''} {numbers}, "
+                                 f"deleted in another program")
+        return True
 
     def save_document(self) -> bool:
         # A line still being typed is part of the document being saved, so it
@@ -4403,6 +4485,9 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Save", f"Could not save:\n{exc}")
             return False
         self.undo_stack.setClean()
+        # what was deleted elsewhere is not in the file saved now: nothing to
+        # bring back from it any more
+        self.document.deleted_elsewhere = []
         self.clear_autosave()
         self.update_title()
         self._retitle_views_of(self.document)

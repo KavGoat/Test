@@ -581,6 +581,7 @@ def read(document, path: str) -> bool:
         return False
     record, assets = read_record(found)
     document.open_warnings = []
+    document.deleted_elsewhere = []
     document.signed_source = None
     if isinstance(record.get(FILE_FACTS), dict):
         with open(path, "rb") as handle:
@@ -612,6 +613,7 @@ def _take_the_file_back(document, data: bytes, record: dict, assets: dict) -> No
     try:
         signed = calclayer.is_signed(source)
         record_pages = {page.get("uid"): page for page in record.get("pages", [])}
+        record_order = [page.get("uid") for page in record.get("pages", [])]
         key = f"asset_{uuid.uuid4().hex[:12]}.pdf"
         pages: list = []
         changed: list = []
@@ -653,6 +655,22 @@ def _take_the_file_back(document, data: bytes, record: dict, assets: dict) -> No
         _read_their_markups(document, cleaned, index, pages[index], numbers, assets,
                             replaced)
     gone = list(record_pages.values())
+    # What was deleted, as it was saved here, for Restore — taken before a
+    # spreadsheet's cells are moved off its deleted first page below
+    import copy
+
+    document.deleted_elsewhere = []
+    for page in gone:
+        at = record_order.index(page.get("uid"))
+        # the page it came after as saved (restored together, a deleted
+        # page before it is back by then)
+        before = record_order[at - 1] if at > 0 else None
+        drawing_lost = bool(page.get("pdf_key") and page["pdf_key"] in itself
+                            and not page.get("written_here"))
+        document.deleted_elsewhere.append({"number": at + 1, "after": before,
+                                           "page": copy.deepcopy(page),
+                                           "drawing_lost": drawing_lost})
+    sheets_kept = _keep_the_sheets_of(gone, pages)
     record["pages"] = pages or record.get("pages", [])
     document.signed_source = (key, data) if signed else None
     warnings = []
@@ -661,17 +679,92 @@ def _take_the_file_back(document, data: bytes, record: dict, assets: dict) -> No
             "The calculations on page " + ", ".join(str(n) for n in changed)
             + " were changed in another program. CalcForge has rebuilt them from "
             "its own record; the changes made elsewhere are not kept.")
-    lost_equations = [payload for page in gone for payload in page.get("items", [])
-                      if isinstance(payload, dict) and payload.get("type") == "calc"]
     if gone:
-        text = (f"{len(gone)} page(s) were deleted in another program"
-                + (", with the equations on them" if lost_equations else "") + ".")
-        names = _names_lost(lost_equations, pages)
-        if names:
-            text += " " + ", ".join(names) + (" is" if len(names) == 1 else " are") + \
-                " no longer defined."
-        warnings.append(text)
+        warnings.append(_what_went(document.deleted_elsewhere, pages, sheets_kept))
     document.open_warnings = warnings
+
+
+def _keep_the_sheets_of(gone: list, pages: list) -> list:
+    """A spreadsheet laid out over several pages keeps all its cells when
+    some of its pages were deleted elsewhere (the user, 2026-10-19: "keep
+    cells but warn"): its cells, kept with its first page, go to the first
+    of its pages left. The names of the spreadsheets so kept."""
+    kept = []
+    for page in gone:
+        run = page.get("sheet")
+        if not run:
+            continue
+        left = [other for other in pages if other.get("sheet") == run]
+        for payload in list(page.get("items", [])):
+            if not (isinstance(payload, dict) and payload.get("type") == "sheet_run"):
+                continue
+            if left:
+                page["items"].remove(payload)
+                left[0].setdefault("items", []).insert(0, payload)
+        if left:
+            name = _sheet_name_of(run, pages, gone)
+            if name not in kept:
+                kept.append(name)
+    return kept
+
+
+def _sheet_name_of(run: str, *page_lists) -> str:
+    for pages in page_lists:
+        for page in pages:
+            for payload in page.get("items", []):
+                if isinstance(payload, dict) and payload.get("type") == "sheet_run" \
+                        and payload.get("uid") == run:
+                    return (payload.get("table") or {}).get("name") or "the spreadsheet"
+    return "the spreadsheet"
+
+
+def _what_went(deleted: list, pages: list, sheets_kept: list) -> str:
+    """The warning for pages deleted elsewhere, page by page: which pages
+    (their numbers as saved here, and labels), what was on each, what that
+    leaves undefined, and that Restore can bring them back."""
+    lines = [f"{len(deleted)} page{'s' if len(deleted) != 1 else ''} saved here "
+             f"{'were' if len(deleted) != 1 else 'was'} deleted in another program:"]
+    equations = []
+    for entry in deleted:
+        page = entry["page"]
+        label = (page.get("label") or "").strip()
+        what = []
+        mine = [p for p in page.get("items", []) if isinstance(p, dict)]
+        calc = [p for p in mine if p.get("type") == "calc"]
+        equations.extend(calc)
+        if calc:
+            what.append(f"{len(calc)} equation{'s' if len(calc) != 1 else ''}")
+        tables = [(p.get("table") or {}).get("name") or "a table"
+                  for p in mine if p.get("type") == "table"]
+        if tables:
+            what.append(("the table " if len(tables) == 1 else "the tables ") + ", ".join(tables))
+        if page.get("sheet"):
+            what.append(f"a page of the spreadsheet {_sheet_name_of(page['sheet'], pages, [page])}")
+        others = [p for p in mine if p.get("type") not in ("calc", "table", "sheet_run")]
+        if others:
+            what.append(f"{len(others)} markup{'s' if len(others) != 1 else ''}")
+        text = f"• page {entry['number']}" + (f" “{label}”" if label else "")
+        if what:
+            text += " — " + "; ".join(what)
+        lines.append(text)
+    names = _names_lost(equations, pages)
+    if names:
+        lines.append(", ".join(names) + (" is" if len(names) == 1 else " are")
+                     + " no longer defined.")
+    for name in sheets_kept:
+        lines.append(f"The spreadsheet {name} keeps all its cells; it is laid out again "
+                     f"over its pages that are left.")
+    lines.append("Restore Deleted Pages (Document menu) brings "
+                 + ("it" if len(deleted) == 1 else "them")
+                 + " back where " + ("it was" if len(deleted) == 1 else "they were")
+                 + ", with everything on " + ("it" if len(deleted) == 1 else "them")
+                 + ", until the document is saved.")
+    if any(entry["drawing_lost"] for entry in deleted):
+        lost = ", ".join(str(e["number"]) for e in deleted if e["drawing_lost"])
+        lines.append(f"(The drawing of page {lost} itself was in the file and cannot be "
+                     f"brought back: restored, it is a blank page with what CalcForge put "
+                     f"on it.)")
+    return "\n".join(lines)
 
 
 def _plain_page(source, index: int) -> dict:

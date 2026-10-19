@@ -626,6 +626,11 @@ class Document:
         self.signed_source: Optional[tuple] = None
         # What opening the file found worth saying (io/pdfbase.py). Not saved.
         self.open_warnings: list[str] = []
+        # Pages CalcForge's record still has but the file no longer did when
+        # it was opened — deleted in another program — as they were saved
+        # here, for Restore (pdfbase._take_the_file_back): each a dict
+        # {"number", "after", "page", "drawing_lost"}.
+        self.deleted_elsewhere: list[dict] = []
 
     # -- pages -------------------------------------------------------------
     def add_page(self, index: Optional[int] = None, setup: Optional[PageSetup] = None) -> Page:

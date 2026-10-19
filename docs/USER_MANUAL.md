@@ -807,6 +807,16 @@ cells' own Find and Replace — see Part 3.)
   tables, charts and spreadsheet pages are written into the page as drawing
   (their own layer), so every reader shows them and none can change them; CalcForge
   takes that layer off and rebuilds it from the record when it opens the file.
+- **Pages deleted in another program.** When the file is opened again, a message
+  lists each page deleted elsewhere by its number as saved here and its label, and
+  what was on it — equations (and the variables that are now undefined), tables,
+  markups, a page of a spreadsheet. A spreadsheet keeps all its cells, however many
+  of its pages went, and is laid out again over the pages left. **Restore Pages …**
+  in that message, or **Document ▸ Restore Deleted Pages…** at any time until the
+  document is saved, puts exactly those pages back where they were with everything
+  CalcForge had on them, as one undo step (the list of pages is shown first). A page
+  whose drawing was the file's own page comes back as blank paper with what
+  CalcForge put on it — the drawing itself went with the file's page.
 - **Flatten…** (`Ctrl+Shift+M`; Document and Batch menus, and a page's menu) is
   Revu's **Flatten Markups**: tick the markup types; **All Markups**, **Exclude
   Filtered Markups** or **Currently Selected Markups**; the **Pages**; and **Allow
