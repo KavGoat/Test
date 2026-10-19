@@ -627,12 +627,143 @@ def general_fit(x: float, fits: Callable[[str], bool]) -> str:
     return scientific if scientific is not None else full
 
 
+def with_decimals(code: str, step: int):
+    """The format with one decimal place more or fewer: 0.00 -> 0.000 / 0.0,
+    #,##0 -> #,##0.0, 0.0% -> 0.00%, in every section."""
+    out = []
+    for sec in code.split(";"):
+        out.append(section_decimals(sec, step))
+    new = ";".join(out)
+    return new if new != code else None
+
+
+def section_decimals(sec: str, step: int) -> str:
+    # where the number's digits are, outside quoted text and [colours]
+    plain = []
+    quoted = bracket = False
+    for i, ch in enumerate(sec):
+        if ch == '"':
+            quoted = not quoted
+        elif ch == "[" and not quoted:
+            bracket = True
+        elif ch == "]" and not quoted:
+            bracket = False
+        elif not quoted and not bracket:
+            plain.append(i)
+    digits = [i for i in plain if sec[i] in "0#?"]
+    if not digits:
+        return sec
+    exp = next((i for i in plain if sec[i] in "Ee" and i + 1 < len(sec) and sec[i + 1] in "+-"), None)
+    mantissa = [i for i in digits if exp is None or i < exp]
+    point = next((i for i in plain if sec[i] == "." and (exp is None or i < exp)), None)
+    if point is not None:
+        after = [i for i in mantissa if i > point]
+        places = len(after)
+        if step > 0:
+            insert_at = (after[-1] + 1) if after else point + 1
+            return sec[:insert_at] + "0" + sec[insert_at:]
+        if places == 0:
+            return sec
+        if places == 1:
+            return sec[:point] + sec[after[-1] + 1:]
+        return sec[:after[-1]] + sec[after[-1] + 1:]
+    if step < 0:
+        return sec
+    last = mantissa[-1]
+    return sec[:last + 1] + ".0" + sec[last + 1:]
+
+# -- decimal places and significant figures (the Decimal Places entries) --------
+
+def _fixed_section(section) -> bool:
+    """A section of plain digits (0.00, #,##0.0, 0.0%, 0.00E+00), not a
+    fraction, a date, text or General."""
+    return section.kind == "number" and not any(k == "slash" for k, _t in section.tokens)
+
+
+def _section_places(section) -> int:
+    """How many digits a section shows after the point (before any E+00)."""
+    count = seen_point = 0
+    for kind, _t in section.tokens:
+        if kind == "exp":
+            break
+        if kind == "point":
+            seen_point = 1
+        elif kind == "digit" and seen_point:
+            count += 1
+    return count
+
+
+def places_of(code: Optional[str]) -> Optional[int]:
+    """The decimal places a number format shows (its first section's), or
+    None when it does not fix them (General, a date, a fraction, text)."""
+    if not code or code.lower() == "general":
+        return None
+    sections = _parse(code)
+    if not sections or not _fixed_section(sections[0]):
+        return None
+    return _section_places(sections[0])
+
+
+def with_places(code: Optional[str], places: int) -> str:
+    """*code* showing *places* decimal places, as Excel's Increase and
+    Decrease Decimal would get it there, its kind kept (#,##0.00,
+    0.0%, 0.00E+00, currency, colours); General, a date, a fraction or text
+    becomes plain 0.00 (Excel's Number)."""
+    places = max(0, min(int(places), 30))
+    plain = "0" + ("." + "0" * places if places else "")
+    if places_of(code) is None:
+        return plain
+    out = []
+    for raw, section in zip(code.split(";"), _parse(code)):
+        if _fixed_section(section):
+            have = _section_places(section)
+            while have != places:
+                step = 1 if have < places else -1
+                changed = section_decimals(raw, step)
+                if changed == raw:
+                    break
+                raw, have = changed, have + step
+        out.append(raw)
+    return ";".join(out)
+
+
+def _to_significant(x: float, code: str):
+    """SMath's significant figures for a cell (the user, 2026-10-19): the
+    format's decimal places count significant figures instead — 0.000 shows
+    three, 12345 as 12300 and 0.0012345 as 0.00123 — the format's kind
+    (thousands, percent, colours, text) kept. (value, code) to show."""
+    sections = _parse(code)
+    section, _own = _pick(sections, x)
+    if not _fixed_section(section) or any(k == "exp" for k, _t in section.tokens) \
+            or x == 0 or not math.isfinite(x):
+        return x, code
+    figures = max(_section_places(section), 1)
+    factor = (100 ** section.percent) / (1000 ** section.scale)
+    shown = Decimal(repr(abs(x * factor)))
+    exponent = shown.adjusted()
+    rounded = shown.quantize(Decimal(1).scaleb(exponent - figures + 1), rounding=ROUND_HALF_UP)
+    if rounded.adjusted() != exponent:              # 9.99 -> 10.0: one decade up
+        exponent = rounded.adjusted()
+        rounded = shown.quantize(Decimal(1).scaleb(exponent - figures + 1),
+                                 rounding=ROUND_HALF_UP)
+    value = math.copysign(float(rounded) / factor, x)
+    index = sections.index(section)
+    raws = code.split(";")
+    if index < len(raws):
+        raws[index] = with_places(raws[index], max(figures - 1 - exponent, 0)) \
+            if places_of(raws[index]) is not None else raws[index]
+    return value, ";".join(raws)
+
+
 def format_number(x: float, code: Optional[str],
-                  fit: Optional[Callable[[str], bool]] = None) -> Shown:
+                  fit: Optional[Callable[[str], bool]] = None,
+                  significant: bool = False) -> Shown:
     if not code or code.lower() == "general":
         return Shown(general_fit(x, fit) if fit is not None else _general(x), None, True)
     if not math.isfinite(x):
         return Shown("#NUM!", None, True)
+    if significant:
+        x, code = _to_significant(x, code)
     sections = _parse(code)
     section, own_sign = _pick(sections, x)
     if section.kind == "general":
@@ -669,15 +800,18 @@ def format_text(t: str, code: Optional[str]) -> Shown:
 
 
 def format_value(value, code: Optional[str] = None, unit: Optional[str] = None,
-                 fit: Optional[Callable[[str], bool]] = None) -> Shown:
+                 fit: Optional[Callable[[str], bool]] = None,
+                 significant: bool = False) -> Shown:
     """How a cell shows its value with this number format (and unit). With
     *fit* — whether a text fits the cell — a number in General is shortened
-    to fit, as Excel does (see general_fit); its unit is kept whole."""
+    to fit, as Excel does (see general_fit); its unit is kept whole. With
+    *significant*, the format's decimal places count significant figures
+    (SMath's, for a cell; Style.significant)."""
     if value is BLANK:
         return Shown("")
     if isinstance(value, Array):
         value = value.get(0, 0) if value.height and value.width else BLANK
-        return format_value(value, code, unit, fit)
+        return format_value(value, code, unit, fit, significant)
     if isinstance(value, bool):
         return Shown("TRUE" if value else "FALSE")
     if isinstance(value, ErrorValue):
@@ -701,13 +835,14 @@ def format_value(value, code: Optional[str] = None, unit: Optional[str] = None,
         # kN*m is written kN·m, as CalcForge's equations write it
         unit = shown_unit.replace('*', '·') if shown_unit else ""
         tail = f" {unit}" if unit else ""
-        got = format_number(x, code, None if fit is None else (lambda t: fit(t + tail)))
+        got = format_number(x, code, None if fit is None else (lambda t: fit(t + tail)),
+                            significant)
         if unit:
             got.unit = unit
         got.text += tail
         return got
     if isinstance(value, (int, float)):
-        return format_number(float(value), code, fit)
+        return format_number(float(value), code, fit, significant)
     return Shown(str(value))
 
 

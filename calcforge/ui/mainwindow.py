@@ -7,6 +7,8 @@ import base64
 import json
 import os
 import re
+import weakref
+from contextlib import contextmanager
 from typing import Optional
 
 from PySide6.QtCore import (QBuffer, QByteArray, QEvent, QIODevice, QMimeData, QModelIndex, QObject,
@@ -565,6 +567,21 @@ class DetachableTabBar(QTabBar):
 RECENT_FILES = 10
 
 
+def _has_unsaved_changes(state: dict) -> bool:
+    """A tab's document has changes that are not saved yet."""
+    return bool(state["document"].modified or not state["undo_stack"].isClean())
+
+
+#: Documents brought into a window that holds another copy of the same file,
+#: each with unsaved changes: the number its tab is marked with, "(2)".
+_COPY_NUMBER: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _same_file(first: str, second: str) -> bool:
+    return bool(first and second) and (os.path.normcase(os.path.abspath(first))
+                                       == os.path.normcase(os.path.abspath(second)))
+
+
 def recent_files() -> list:
     """File ▸ Open Recent: the newest first."""
     from ..settings import app_settings
@@ -705,7 +722,7 @@ _SHORTCUT_GROUPS = {
     "renumber_counts": "Markup", "check_spelling": "Markup",
     "shortcuts": "Help", "sample": "Help",
     "find_tool": "Help", "find_text": "Edit",
-    "about": "Help",
+    "about": "Help", "user_manual": "Help",
 }
 
 
@@ -746,6 +763,9 @@ def _a_field_being_typed_in(widget) -> bool:
 #: The events MainWindow's application-wide filter acts on (eventFilter).
 _FILTERED_INPUT = frozenset((QEvent.ShortcutOverride, QEvent.KeyPress,
                              QEvent.MouseButtonPress))
+#: A window property: a window of the window's own whose keys the filter
+#: leaves alone (the user manual, ui/manual.py).
+OWN_KEYS = "cf_own_keys"
 
 
 def _moves_documents(method):
@@ -773,7 +793,10 @@ class MainWindow(QMainWindow):
         self.destroyed.connect(
             lambda *_: type(self)._windows.remove(self)
             if self in type(self)._windows else None)
-        self._syncing_view = False
+        # Window Sync: Split View's views, and other windows of a document,
+        # kept in step (viewsync.py)
+        from .viewsync import ViewSync
+        self.view_sync = ViewSync(self)
         from ..items import hatches
         hatches.load_custom()          # the hatch patterns of one's own, from before
         from ..items import linestyles
@@ -1512,6 +1535,12 @@ class MainWindow(QMainWindow):
         self._act("find_text", "Search", self.find_in_document, "Ctrl+F",
                   tip="Find words in the drawing and in the markups, on every "
                       "page, and replace them in the markups")
+        # Revu's Help is F1, which is Keyboard Shortcuts here; the manual takes
+        # the free key beside it (the user, 2026-10-19: "a user manual inside
+        # the app")
+        self._act("user_manual", "User Manual", lambda: self.show_user_manual(), "Ctrl+F1",
+                  tip="The manual: Markup, Calculation and Spreadsheets, every "
+                      "function, key and preference, with a search box")
         self._act("find_tool", "Find Tools + Commands", self.find_a_tool, "Shift+F1",
                   tip="Type what you want to do, and it says which tool does "
                       "it and which key it is on")
@@ -2706,7 +2735,7 @@ class MainWindow(QMainWindow):
 
         help_menu = bar.addMenu("&Help")
         help_menu.setObjectName("menuHelp")
-        fill(help_menu, (self.act_find_tool, None,
+        fill(help_menu, (self.act_user_manual, self.act_find_tool, None,
                          self.act_record_slowdowns, self.act_about))
 
     def _build_status(self) -> None:
@@ -2880,7 +2909,9 @@ class MainWindow(QMainWindow):
         self.window_sync.addItems(["Sync off", "Page sync", "Document sync"])
         self.window_sync.currentIndexChanged.connect(self._set_window_sync)
         self.window_sync.setToolTip(
-            "Link this view with other windows showing the same document")
+            "Keep the two views of Split View (and other windows of this document) "
+            "in step — Page sync: the same zoom and spot on each view's own page; "
+            "Document sync: scroll, zoom and page together")
 
         # as wide as what it says now, not as its longest choice: the status
         # bar's room is what lets the page number sit under the page's middle
@@ -2986,15 +3017,19 @@ class MainWindow(QMainWindow):
         view.statusMessage.connect(active(self.status_hint.setText))
         view.cursorMoved.connect(active(self._show_position))
         view.zoomChanged.connect(active(self._show_zoom))
-        view.zoomChanged.connect(active(lambda _zoom: self._sync_other_windows(True)))
         view.selectionChanged.connect(active(self._selection_changed_on_the_canvas))
         view.toolFinished.connect(active(self.select_tool))
         view.documentEdited.connect(active(self.mark_modified))
         view.pageChanged.connect(active(self.follow_scrolled_page))
-        view.horizontalScrollBar().valueChanged.connect(
-            active(lambda _value: self._sync_other_windows(False)))
-        view.verticalScrollBar().valueChanged.connect(
-            active(lambda _value: self._sync_other_windows(False)))
+        # Window Sync hears every view, the one in hand or not: the wheel
+        # zooms and scrolls the other view of a split without a click
+        sync = self.view_sync
+        view.zoomChanged.connect(lambda _zoom, v=view: sync.moved(v))
+        view.horizontalScrollBar().valueChanged.connect(lambda _value, v=view: sync.moved(v))
+        view.verticalScrollBar().valueChanged.connect(lambda _value, v=view: sync.moved(v))
+        # (the view in hand is heard through follow_scrolled_page)
+        view.pageChanged.connect(
+            lambda index, v=view: sync.paged(v, index) if self.view is not v else None)
 
     def _connect(self) -> None:
         self._wire_view(self.view)
@@ -3091,6 +3126,15 @@ class MainWindow(QMainWindow):
                 "vscroll": self.view.verticalScrollBar().value()}
 
     def _adopt_document_state(self, state: dict) -> None:
+        """Show the document of *state* where it was left. Coming into view
+        is not a move for Window Sync to repeat: the views are linked anew
+        as they then stand (viewsync.py)."""
+        from .viewsync import ViewSync
+        with ViewSync.quiet():
+            self._take_document_state(state)
+        self.view_sync.relink()
+
+    def _take_document_state(self, state: dict) -> None:
         initial_fit = getattr(self, "_initial_fit", None)
         if initial_fit is not None:
             initial_fit.stop()
@@ -3113,14 +3157,31 @@ class MainWindow(QMainWindow):
         self._refresh_undo_actions()
         self._show_page_layout()
 
+        # another window of this document brings its sync; otherwise the
+        # window's own stays (a tab switched in Split View keeps the sync)
         mode = next((other.window_sync.currentIndex() for other in type(self)._windows
-                     if other is not self and other.document is self.document), 0)
+                     if other is not self and other.document is self.document),
+                    self.window_sync.currentIndex())
         self.window_sync.blockSignals(True)
         self.window_sync.setCurrentIndex(mode)
         self.window_sync.blockSignals(False)
 
     def _tab_title(self, document) -> str:
-        return os.path.basename(document.path) if document.path else "Untitled"
+        name = os.path.basename(document.path) if document.path else "Untitled"
+        number = _COPY_NUMBER.get(document)
+        if number and any(
+                state["document"] is not document
+                and _same_file(state["document"].path, document.path)
+                for state in (self._state_for_tab(i) for i in range(len(self._open_documents)))):
+            # a second copy of a file, with changes of its own, beside the
+            # first (move_document_to)
+            name += f" ({number})"
+        return name
+
+    def _tab_of_file(self, path: str) -> int:
+        """The tab of this view holding the file at *path*, or -1."""
+        return next((i for i in range(len(self._open_documents))
+                     if _same_file(self._state_for_tab(i)["document"].path, path)), -1)
 
     def open_in_new_tab(self, document=None) -> int:
         """Put another document beside this one, with a tab of its own —
@@ -3240,7 +3301,28 @@ class MainWindow(QMainWindow):
         state = self._state_for_tab(index)
         window = self.open_new_window()
         window._adopt_document_state(dict(state))
+        # its one tab holds this document, not the blank one the window was
+        # made with: a tab of this document dragged onto that window found
+        # the blank one there and opened the document a second time beside
+        # itself (the user, 2026-10-19)
+        window._open_documents[window._active_tab] = window._current_document_state()
+        window.update_title()
+        window._let_go()
         return window
+
+    def _window_under(self, global_point: QPoint) -> Optional["MainWindow"]:
+        """The CalcForge window (another one, not this) that a tab dropped
+        at *global_point* lands on: the uppermost one there, its own floating
+        panels included."""
+        if global_point.isNull():
+            return None
+        widget = QApplication.topLevelAt(global_point)
+        while widget is not None and not isinstance(widget, MainWindow):
+            widget = widget.parentWidget()
+        if widget is None or widget is self or widget not in type(self)._windows \
+                or getattr(widget, "_closed_for_good", True) or not widget.isVisible():
+            return None
+        return widget
 
     @_moves_documents
     def tear_off_document(self, index: int, global_point: QPoint = QPoint()) -> None:
@@ -3261,10 +3343,25 @@ class MainWindow(QMainWindow):
         for other in type(self)._windows:
             if other is self or not other.isVisible():
                 continue
-            bar = other.document_tabs
-            if bar.isVisible() and bar.rect().contains(bar.mapFromGlobal(global_point)):
-                self.move_document_to(index, other, bar.tabAt(bar.mapFromGlobal(global_point)))
-                return
+            for pane in other._panes:
+                bar = pane.tabs
+                if bar.isVisible() and bar.rect().contains(bar.mapFromGlobal(global_point)):
+                    other.activate_pane(pane)
+                    self.move_document_to(index, other,
+                                          bar.tabAt(bar.mapFromGlobal(global_point)))
+                    return
+        # anywhere else on another window (its canvas, its empty workspace)
+        # is that window too, as a tab dropped on a split's canvas goes to
+        # that view: not a third window laid over it
+        other = self._window_under(global_point)
+        if other is not None:
+            pane = next((p for p in other._panes
+                         if p.widget.rect().contains(p.widget.mapFromGlobal(global_point))),
+                        None)
+            if pane is not None:
+                other.activate_pane(pane)
+            self.move_document_to(index, other)
+            return
         state = self._state_for_tab(index)
         window = self.open_new_window()
         window._adopt_document_state(dict(state))
@@ -3277,29 +3374,84 @@ class MainWindow(QMainWindow):
 
     @_moves_documents
     def move_document_to(self, index, target, before=-1):
-        """Move the live document, viewport and undo history between windows."""
+        """Move the live document, viewport and undo history between windows.
+
+        As in Revu, a file is not open twice in one window. A tab of a
+        document the target already shows brings that tab forward. A tab of
+        a file the target holds as a copy of its own (opened there on its
+        own) takes the copy's place when the copy has no unsaved changes,
+        and comes forward without being added when it has none of its own;
+        when both have unsaved changes neither is lost: the one brought in
+        is put beside the other, marked "(2)". A window left with no tab
+        closes, as Revu's does (the user, 2026-10-19)."""
         if target is self or not 0 <= index < len(self._open_documents):
             return
         state = dict(self._state_for_tab(index))
-        # A document the target already shows is not opened a second time:
-        # its tab comes forward (as when Revu's split panes swap a file).
-        showing = next((i for i, held in enumerate(target._open_documents)
-                        if held["document"] is state["document"]), -1)
-        if showing < 0 and not target._open_documents and target.document is state["document"]:
+        document = state["document"]
+        # what is picked goes with it (putting the canvas down here, as a tab
+        # going does, would let go of it)
+        scene = state["scene"]
+        picked = list(scene.selectedItems()) if scene is not None else []
+        held = [target._state_for_tab(i) for i in range(len(target._open_documents))]
+        showing = next((i for i, there in enumerate(held) if there["document"] is document), -1)
+        if showing < 0 and not held and target.document is document:
             showing = 0
+        copy = -1 if showing >= 0 else target._tab_of_file(document.path)
+        name = os.path.basename(document.path or "")
+        message = ""
         if showing >= 0:
-            if target._open_documents:
+            if held:
                 target.switch_to_document(showing)
+            message = f"{name or 'The document'} is already open here"
+        elif copy >= 0 and not _has_unsaved_changes(state):
+            target.switch_to_document(copy)
+            message = f"{name} is already open here"
+        elif copy >= 0 and not _has_unsaved_changes(held[copy]):
+            # the clean copy there gives way to the one brought in, with its
+            # changes, place and history
+            target.switch_to_document(copy)
+            target.view.escape_everything()
+            target._open_documents[copy] = state
+            target._adopt_document_state(state)
+            message = f"{name} brought in, in place of the copy open here"
         else:
+            if copy >= 0:
+                _COPY_NUMBER[document] = 1 + len({
+                    id(there["document"]) for there in held
+                    if _same_file(there["document"].path, document.path)})
             destination = target.open_in_new_tab()
             target._open_documents[destination] = state
             target._adopt_document_state(state)
-            target.document_tabs.setTabText(destination, target._tab_title(state["document"]))
+            target.document_tabs.setTabText(destination, target._tab_title(document))
+            if before < 0 and copy >= 0:
+                before = copy + 1
             if before >= 0:
                 target.document_tabs.moveTab(destination, before)
+            if copy >= 0:
+                message = (f"{name} was already open here with other unsaved changes: "
+                           f"both are kept, the one brought in as "
+                           f"“{target._tab_title(document)}”. Save one with Save As… "
+                           f"so that neither is saved over the other")
+        target.update_title()
+        emptied = len(self._open_documents) == 1 and not self.is_split
         self.close_document_tab(index, moving=True)
-        if all(held["undo_stack"] is not state["undo_stack"] for held in self._open_documents):
+        if all(there["undo_stack"] is not state["undo_stack"] for there in self._open_documents):
             state["undo_stack"].setParent(target)
+        if picked and target.scene is scene:
+            import shiboken6
+            for item in picked:
+                if shiboken6.isValid(item) and item.scene() is scene:
+                    item.setSelected(True)
+            target.refresh_selection()
+        if message:
+            target.status_hint.setText(message)
+        target.raise_()
+        target.activateWindow()
+        if emptied:
+            # nothing is left in it but the blank document behind its empty
+            # workspace, so there is nothing to ask about
+            self._closing_confirmed = True
+            self.close()
 
     def _state_for_tab(self, index=None):
         if index is None or index == self._active_tab:
@@ -3404,8 +3556,11 @@ class MainWindow(QMainWindow):
         self._open_documents = pane.documents
         self._active_tab = pane.active
         shown = not self.formula_bar.isHidden()
-        pane.layout.insertWidget(pane.layout.indexOf(pane.tabs) + 1, self.formula_bar)
-        self.formula_bar.setVisible(shown)
+        with self._views_kept_still():
+            # the formula bar changing panes changes both views' heights:
+            # neither view's pages move on the screen for it
+            pane.layout.insertWidget(pane.layout.indexOf(pane.tabs) + 1, self.formula_bar)
+            self.formula_bar.setVisible(shown)
         self.formula_bar.tables = pane.view.tables
         if 0 <= self._active_tab < len(self._open_documents):
             state = self._open_documents[self._active_tab]
@@ -3416,11 +3571,37 @@ class MainWindow(QMainWindow):
                 state["zoom"] = view.zoom()
                 state["hscroll"] = view.horizontalScrollBar().value()
                 state["vscroll"] = view.verticalScrollBar().value()
-                state["index"] = view.visible_page_index()
+                # the page it was last on: scrolled onto, or gone to by Page
+                # sync (zoomed out, the middle can be on the next page down)
+                state["index"] = getattr(view, "_shown_page", -1)
+                if not 0 <= state["index"] < len(state["document"].pages):
+                    state["index"] = view.visible_page_index()
             self._adopt_document_state(state)
         self._show_zoom(self.view.zoom())
         self.sheet_tabs.refresh()
         self._mark_active_pane()
+
+    @contextmanager
+    def _views_kept_still(self):
+        """Whatever is rearranged inside, each view's pages stay where they
+        are on the screen: the canvas point at a view's top left corner is
+        brought back under the same pixel of the screen."""
+        from .viewsync import ViewSync
+        held = []
+        for pane in self._panes:
+            view = pane.view
+            if view.scene() is not None:
+                corner = view.viewport().mapToGlobal(QPoint(0, 0))
+                held.append((view, corner,
+                             view.viewportTransform().inverted()[0].map(QPointF(0, 0))))
+        with ViewSync.quiet():
+            yield
+            for pane in self._panes:
+                pane.layout.activate()
+            for view, corner, point in held:
+                now = view.viewport().mapToGlobal(QPoint(0, 0))
+                view.bring_to(point, QPointF(corner - now))
+        self.view_sync.relink()
 
     def unsplit(self, keep: Optional[ViewPane] = None, carry_over: bool = True) -> None:
         """Turn the split off: *keep* (the pane being worked in) stays.
@@ -3548,7 +3729,8 @@ class MainWindow(QMainWindow):
     #: one, the window and its panels, the application's own settings.
     WORKSPACE_COMMANDS = {
         "new", "new_tab", "new_window", "open", "quit", "preferences", "shortcuts",
-        "about", "find_tool", "record_slowdowns", "full_screen", "dark", "show_panels",
+        "about", "find_tool", "user_manual", "record_slowdowns", "full_screen", "dark",
+        "show_panels",
         "pin_panels", "reset_layout", "lock_toolbars", "customise_toolbar",
         "import_toolset", "manage_toolsets", "close_all", "markups_list",
     }
@@ -3638,6 +3820,8 @@ class MainWindow(QMainWindow):
         other = self.other_pane()
         if other is not None and target["document"] in other.documents_held():
             shared = True
+        # nor is a document another window still shows (File ▸ New Window)
+        shared = shared or self._shown_in_another_window(target["document"])
         if not moving and not shared:
             previous = self._active_tab
             self.switch_to_document(index)
@@ -3675,10 +3859,24 @@ class MainWindow(QMainWindow):
         self.document_tabs.setVisible(True)
         if was_active:
             self._adopt_document_state(self._open_documents[self._active_tab])
+        else:
+            self.update_title()                  # (a copy's "(2)" may go)
         if not moving:
             # a tab being moved is shown somewhere else next; one closed is
             # gone, and what it held goes with it
             self._let_go()
+
+    def _shown_in_another_window(self, document) -> bool:
+        """Another open window shows *document* (File ▸ New Window, or a tab's
+        New Window): closing it here loses nothing, so nothing is asked."""
+        import shiboken6
+        for window in list(type(self)._windows):
+            if window is self or not shiboken6.isValid(window) \
+                    or getattr(window, "_closed_for_good", True):
+                continue
+            if any(shown is document for shown, _scene, _stack in window.shown_states()):
+                return True
+        return False
 
     def confirm_all_documents(self) -> bool:
         """Include inactive tabs — and the other view's, in Split View — in
@@ -3703,6 +3901,8 @@ class MainWindow(QMainWindow):
             if id(document) in seen:
                 continue
             seen.add(id(document))
+            if self._shown_in_another_window(document):
+                continue                 # it is not closed: that window has it
             self.switch_to_document(index)
             if not self.confirm_discard():
                 self.switch_to_document(previous)
@@ -3860,6 +4060,24 @@ class MainWindow(QMainWindow):
             self.switch_to_document(index)
             self.status_hint.setText(f"{os.path.basename(path)} is already open")
             return
+        # nor is it opened again beside the copy another window has open:
+        # two copies of one file, edited apart, would each save over the
+        # other. That window's tab comes forward, as in Revu (2026-10-19).
+        for other in list(type(self)._windows):
+            if other is self or getattr(other, "_closed_for_good", True) \
+                    or not other.isVisible():
+                continue
+            showing = other._tab_showing(path)
+            if showing is not None:
+                pane, index = showing
+                other.activate_pane(pane)
+                other.switch_to_document(index)
+                other.raise_()
+                other.activateWindow()
+                message = f"{os.path.basename(path)} is already open in another window"
+                other.status_hint.setText(message)
+                self.status_hint.setText(message)
+                return
         new_tab = not self._untouched()
         if new_tab:
             previous = self._active_tab
@@ -4531,7 +4749,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "_workspace_empty", False):
             self.setWindowTitle(APP_NAME)
             return
-        name = os.path.basename(self.document.path) if self.document.path else "Untitled"
+        name = self._tab_title(self.document)
         try:
             dirty = "" if self.undo_stack.isClean() else " •"
         except RuntimeError:            # the window is being torn down
@@ -4539,6 +4757,18 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{name}{dirty} — {APP_NAME}")
         if 0 <= self._active_tab < self.document_tabs.count():
             self.document_tabs.setTabText(self._active_tab, name + dirty)
+        # two copies of one file side by side: each tab says which it is
+        # (a copy's mark comes and goes with the other copy)
+        if any(_COPY_NUMBER.get(state["document"]) for state in self._open_documents):
+            for index in range(min(len(self._open_documents), self.document_tabs.count())):
+                if index == self._active_tab:
+                    continue
+                state = self._open_documents[index]
+                try:
+                    dirty = "" if state["undo_stack"].isClean() else " •"
+                except RuntimeError:
+                    continue
+                self.document_tabs.setTabText(index, self._tab_title(state["document"]) + dirty)
 
     def mark_modified(self) -> None:
         self.document.modified = True
@@ -4564,6 +4794,13 @@ class MainWindow(QMainWindow):
         self.go_to_page(index)
 
     def go_to_page(self, index: int) -> None:
+        """Show page *index* — gone to, not scrolled onto: Page sync leaves
+        the other view on its own page (viewsync.py)."""
+        from .viewsync import ViewSync
+        with ViewSync.jumping():
+            self._go_to_page(index)
+
+    def _go_to_page(self, index: int) -> None:
         if not 0 <= index < len(self.document.pages):
             return
         if index == self.current_index:
@@ -4590,71 +4827,22 @@ class MainWindow(QMainWindow):
         self.pages_panel.show_current(index)
         self.refresh_scale_label()
         self.refresh_selection()
-        self._sync_other_windows(True)
+        self.view_sync.paged(self.view, index)
 
     def _set_window_sync(self, mode: int) -> None:
-        """One synchronization choice applies to every view of this document."""
+        """One synchronization choice applies to the window's views and to
+        every window of this document. Choosing it moves nothing: the views
+        are linked where they are (viewsync.py)."""
         for other in list(type(self)._windows):
             if other is self or other.document is not self.document:
                 continue
             other.window_sync.blockSignals(True)
             other.window_sync.setCurrentIndex(mode)
             other.window_sync.blockSignals(False)
-        self._sync_other_windows(True)
-
-    def _sync_other_windows(self, document_change: bool) -> None:
-        """Copy this viewport to opted-in windows showing the same document."""
-        if (self._syncing_view or getattr(self.view, "_zooming", False)
-                or not hasattr(self, "window_sync")):
-            return
-        # Views share a scene. Resizing its pan margin changes *every*
-        # scrollbar; a peer must not echo its old zoom back during that step.
-        if any(other is not self and other.document is self.document
-               and (other._syncing_view or getattr(other.view, "_zooming", False))
-               for other in list(type(self)._windows)):
-            return
-        mode = self.window_sync.currentIndex()
-        if mode == 0:
-            return
-        source_top = self.view._page_top_value(self.current_index)
-        page_offset = self.view.verticalScrollBar().value() - source_top
-        for other in list(type(self)._windows):
-            if other is self:
-                continue
-            try:
-                if other.document is not self.document or other.window_sync.currentIndex() == 0:
-                    continue
-                other._syncing_view = True
-                if document_change and mode == 2 and other.current_index != self.current_index:
-                    other.go_to_page(self.current_index)
-                other.view.set_zoom(self.view.zoom())
-                other.view.horizontalScrollBar().setValue(
-                    self.view.horizontalScrollBar().value())
-                other.view.verticalScrollBar().setValue(
-                    round(other.view._page_top_value(other.current_index)
-                          + page_offset))
-            except RuntimeError:
-                continue
-            finally:
-                try:
-                    other._syncing_view = False
-                except RuntimeError:
-                    pass
-        # the other view of a split window, when it shows the same document
-        pane = self.other_pane()
-        if pane is not None and pane.documents:
-            state = pane.documents[pane.active]
-            if state["document"] is self.document and pane.view.scene() is self.scene:
-                index = self.current_index if mode == 2 else state["index"]
-                self._syncing_view = True
-                try:
-                    pane.view.set_zoom(self.view.zoom())
-                    pane.view.horizontalScrollBar().setValue(
-                        self.view.horizontalScrollBar().value())
-                    pane.view.verticalScrollBar().setValue(
-                        round(pane.view._page_top_value(index) + page_offset))
-                finally:
-                    self._syncing_view = False
+        self.view_sync.relink()
+        if mode == 1:
+            # Page sync: the other view takes this one's zoom and spot now
+            self.view_sync.moved(self.view)
 
     def eventFilter(self, watched, event) -> bool:
         """Let the editor keep keys that would otherwise run global commands.
@@ -4692,6 +4880,10 @@ class MainWindow(QMainWindow):
             if pane is not None and pane is not self._active_pane:
                 self.activate_pane(pane)
         if kind not in _FILTERED_INPUT:
+            return False
+        if isinstance(watched, QWidget) and QWidget.window(watched).property(OWN_KEYS):
+            # a window of its own (Help ▸ User Manual): its keys are its own,
+            # Escape included — it is not the canvas's to cancel
             return False
         owner = watched if isinstance(watched, QWidget) else None
         on_canvas = False
@@ -5116,7 +5308,7 @@ class MainWindow(QMainWindow):
         # clicked (the user, 2026-10-17). One page picked follows the view.
         self.pages_panel.show_current(index, keep_run=True)
         self.refresh_scale_label()
-        self._sync_other_windows(True)
+        self.view_sync.paged(self.view, index)
 
     def _structure_snapshot(self, reuse: Optional[dict] = None) -> dict:
         """Every page written out. With *reuse* (from the snapshot before a
@@ -5176,13 +5368,37 @@ class MainWindow(QMainWindow):
         if self.interactive_prompts:
             QMessageBox.warning(self, "Variables undefined", text)
 
+    def _on_its_window(self, act):
+        """*act(window, …)* for an undo step, run on the window that has this
+        document in hand when the step is undone or redone — not on the one
+        that recorded it. The document goes to another window with its
+        history when its tab is dragged there, and the window it came from
+        may show another document by then, or have closed (the user,
+        2026-10-19)."""
+        import shiboken6
+        document = self.document
+        recorder = self
+
+        def run(*args):
+            showing = [window for window in list(type(recorder)._windows)
+                       if shiboken6.isValid(window)
+                       and not getattr(window, "_closed_for_good", True)
+                       and window.document is document]
+            active = QApplication.activeWindow()
+            window = next((w for w in showing if w is active),
+                          recorder if recorder in showing
+                          else (showing[0] if showing else recorder))
+            return act(window, *args)
+        return run
+
     def record_structure_change(self, before: dict, description: str) -> None:
         """One undo step from *before* to how the document is now, for a
         change already made (equations moved on to new pages, say)."""
         after = self._structure_snapshot()
         self.undo_stack.push(DocumentStructureCommand(
             before, after, description,
-            lambda snapshot: self._restore_structure(snapshot, True)))
+            self._on_its_window(lambda window, snapshot:
+                                window._restore_structure(snapshot, True))))
         self.mark_modified()
 
     def _structural_change(self, description: str, mutate,
@@ -5221,20 +5437,20 @@ class MainWindow(QMainWindow):
             # nothing about the pages changed (Page Setup OK'd as it was, say):
             # nothing to undo either (QA F-28)
             return False
-        restore = (lambda snapshot: self._restore_structure(snapshot, True)) \
-            if preserve_view else self._restore_structure
+        restore = (lambda window, snapshot: window._restore_structure(snapshot, True)) \
+            if preserve_view else (lambda window, snapshot: window._restore_structure(snapshot))
         if bookmarks:
             before["bookmarks"] = marks_before
             after["bookmarks"] = [mark.to_dict() for mark in self.document.bookmarks]
             pages_back = restore
 
-            def restore(snapshot, pages_back=pages_back):
+            def restore(window, snapshot, pages_back=pages_back):
                 from ..core.document import Bookmark
-                self.document.bookmarks = [Bookmark.from_dict(mark)
-                                           for mark in snapshot.get("bookmarks", [])]
-                pages_back(snapshot)
+                window.document.bookmarks = [Bookmark.from_dict(mark)
+                                             for mark in snapshot.get("bookmarks", [])]
+                pages_back(window, snapshot)
         self.undo_stack.push(DocumentStructureCommand(before, after, description,
-                                                      restore))
+                                                      self._on_its_window(restore)))
         self.mark_modified()
         return True
 
@@ -6373,9 +6589,11 @@ class MainWindow(QMainWindow):
         from .commands import ViewportsCommand
         before = [v.to_dict() for v in page.viewports]
         after = [v.to_dict() for v in viewports]
+        document = self.document
         self.undo_stack.push(ViewportsCommand(
-            page, before, after, text, self._viewports_changed,
-            find_page=lambda uid: next((p for p in self.document.pages if p.uid == uid), None)))
+            page, before, after, text,
+            self._on_its_window(lambda window, changed: window._viewports_changed(changed)),
+            find_page=lambda uid: next((p for p in document.pages if p.uid == uid), None)))
 
     def _viewports_changed(self, page) -> None:
         """Measurements re-read against the new regions, and the page redrawn."""
@@ -7104,7 +7322,9 @@ class MainWindow(QMainWindow):
             return
         if hasattr(self, "table_controls"):
             self.table_controls.show(False)
-        items = self.selected_items()
+        # what Properties shows: the equation being typed in counts, as a
+        # picked one does (it read "Nothing selected", 2026-10-19)
+        items = self.panel_subjects()
         active = items[0] if items else None
         self._style_own_look = False
         if items:
@@ -7802,7 +8022,7 @@ class MainWindow(QMainWindow):
             item.touch()
             item.update()
         self.view.commit_snapshot("Note icon")
-        self.properties_panel.show_items(self.selected_items())
+        self.properties_panel.show_items(self.panel_subjects())
 
     def _style_line_ending(self, attribute: str, value: str) -> None:
         if self._edit_markup_style(lambda item: setattr(item.style, attribute, value)):
@@ -7953,7 +8173,7 @@ class MainWindow(QMainWindow):
             one.subject = text
             one.touch()
         self.view.commit_snapshot("Subject")
-        self.properties_panel.show_items(self.selected_items())
+        self.properties_panel.show_items(self.panel_subjects())
 
     def _style_highlight(self, on: bool) -> None:
         """Revu's highlight button: the markup multiplies onto the page."""
@@ -7995,7 +8215,7 @@ class MainWindow(QMainWindow):
                 item.apply_style()
             item.update()
         self.view.commit_snapshot("Callout shape")
-        self.properties_panel.show_items(self.selected_items())
+        self.properties_panel.show_items(self.panel_subjects())
 
     def _measure_setting(self, attr: str, value, description: str) -> None:
         """Caption ▾: something of the selected measurements, as one undo step."""
@@ -8016,7 +8236,7 @@ class MainWindow(QMainWindow):
             item.touch()
             item.update()
         self.view.commit_snapshot(description)
-        self.properties_panel.show_items(self.selected_items())
+        self.properties_panel.show_items(self.panel_subjects())
 
     def _fill_caption_menu(self) -> None:
         from .propbar import sketched
@@ -8065,7 +8285,7 @@ class MainWindow(QMainWindow):
             item.touch()
             item.update()
         self.view.commit_snapshot("Caption")
-        self.properties_panel.show_items(self.selected_items())
+        self.properties_panel.show_items(self.panel_subjects())
 
     def _measure_page_index(self) -> int:
         """The page of the selected measurement (the current page otherwise)."""
@@ -8199,7 +8419,7 @@ class MainWindow(QMainWindow):
             item.touch()
             item.update()
         self.view.commit_snapshot(description)
-        self.properties_panel.show_items(self.selected_items())
+        self.properties_panel.show_items(self.panel_subjects())
 
     def _style_cloud(self, value: float) -> None:
         if self._edit_markup_style(lambda item: setattr(item, "cloud_size", float(value))):
@@ -8497,6 +8717,23 @@ class MainWindow(QMainWindow):
             return []
         return [item for item in scene.selectedItems() if isinstance(item, MarkupItem)]
 
+    def panel_subjects(self) -> list[MarkupItem]:
+        """What the Properties panel shows: the selection or, with nothing
+        picked, what is being worked in — the equation or text being typed
+        into, or the table or spreadsheet open for its cells. In either mode:
+        the panel showed nothing for those, as a click opens them rather
+        than picking them (the user, 2026-10-19)."""
+        items = self.selected_items()
+        if items:
+            return items
+        view = self.view
+        calc = view.calc
+        for working in (calc.item if calc.editing() else None, view.editing_item(),
+                        view.tables.item):
+            if isinstance(working, MarkupItem) and working.scene() is not None:
+                return [working]
+        return []
+
     def _selection_changed_on_the_canvas(self) -> None:
         """While the mouse button is down, the panels wait for it to come up:
         rebuilding Properties for a markup somebody has just grabbed held up
@@ -8522,13 +8759,20 @@ class MainWindow(QMainWindow):
                 return
             self.view.tables.refresh_bar()          # a table picked out shows the formula bar
             shown = self.properties_panel._items
-            picked = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
+            picked = self.selected_items()
             if picked:
                 # something picked: SMath's red cross goes, as SMath's does when
                 # a region is selected (it stayed behind a pasted picture or a
                 # snapshot being recoloured, 2026-10-14)
                 self.view.calc.clear_cross()
-            if len(shown) != len(picked) or any(a is not b for a, b in zip(shown, picked)):
+            wanted = self.panel_subjects()
+            # a table picked, then opened for its cells, is the same table:
+            # its Cells section comes (or goes) all the same
+            opened = self.view.tables.item
+            cells = (opened is not None and opened in wanted) != \
+                (self.properties_panel._cells is not None)
+            if len(shown) != len(wanted) or any(a is not b for a, b in zip(shown, wanted)) \
+                    or cells:
                 self._selection_changed_on_the_canvas()
         QTimer.singleShot(0, check)
 
@@ -8537,7 +8781,7 @@ class MainWindow(QMainWindow):
         if scene is not None and hasattr(scene, "selection_reshaped"):
             scene.selection_reshaped()        # grouped or ungrouped, perhaps
         items = self.selected_items()
-        self.properties_panel.show_items(items)
+        self.properties_panel.show_items(self.panel_subjects())
         self.default_button.setEnabled(len(items) == 1)
         self._refresh_style_controls()
         if len(items) == 1:
@@ -11182,11 +11426,12 @@ class MainWindow(QMainWindow):
         if after == before:
             return False
 
-        def restore(marks: list) -> None:
-            self.document.bookmarks = [Bookmark.from_dict(mark) for mark in marks]
-            self.bookmarks_changed()
+        def restore(window, marks: list) -> None:
+            window.document.bookmarks = [Bookmark.from_dict(mark) for mark in marks]
+            window.bookmarks_changed()
 
-        self.undo_stack.push(DocumentStructureCommand(before, after, description, restore))
+        self.undo_stack.push(DocumentStructureCommand(before, after, description,
+                                                      self._on_its_window(restore)))
         self.bookmarks_changed()
         return True
 
@@ -12068,6 +12313,19 @@ class MainWindow(QMainWindow):
     def show_shortcuts(self) -> None:
         """F1 opens the one shortcut window there is."""
         self.edit_shortcuts()
+
+    def show_user_manual(self, heading: str = ""):
+        """Help ▸ User Manual: the manual in its own window (one per window),
+        at *heading* when one is given. Hands back the manual's window."""
+        from .manual import ManualWindow
+        manual = getattr(self, "_manual", None)
+        if manual is None:
+            manual = self._manual = ManualWindow(self)
+        if heading:
+            manual.open_at(heading)
+        else:
+            manual.show_window()
+        return manual
 
     def show_about(self) -> None:
         from . import release

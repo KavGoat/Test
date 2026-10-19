@@ -8,6 +8,9 @@ it has one. Clicking a row goes to the equation that defines it.
 Below them, under Tables (the user's choice, 2026-10-10), what the tables
 give the equations: each defined name (W_total) and each column a table's
 headings name (Loads.Load), with its value; clicking one goes to its cells.
+A self-contained imported workbook's names come last, under the workbook,
+written as the equations read them (Seismic_Actions_NZS1170_5.Z; a sheet's
+own name as Tables.ReturnPeriodFactor) — they are not document variables.
 
 A name defined twice has two rows: SMath allows redefining, and which
 definition an equation sees depends on where it is — the latest one before
@@ -47,6 +50,7 @@ class VariableRow:
     section: int = 1            # the calc section it is in (1-based)
     is_global: bool = False     # read by later sections too
     key: Optional[tuple] = None  # where it is defined in reading order
+    group: str = ""             # a self-contained workbook's name, for its own heading
 
 
 def _split_value(shown: str) -> tuple:
@@ -109,23 +113,24 @@ def table_rows(document) -> list:
     from ..sheet.numfmt import format_value
     from ..sheet.values import Array, ErrorValue, Qty, SheetError
 
-    book = book_for(document)
-    wb = book.workbook
+    docbook = book_for(document)
+    wb = docbook.workbook
+    book_key = docbook._key
     pages = {page.uid: index for index, page in enumerate(document.pages)}
-    calc = book._calc()
+    calc = docbook._calc()
     sectioned = bool(calc.section_starts())
 
     def placed(sheet, cells) -> dict:
         """The section a table is in, and whether these of its cells are global."""
         if not sectioned or sheet is None:
             return {}
-        out = {"section": calc.section_of_key(book._key(sheet)) + 1}
+        out = {"section": calc.section_of_key(book_key(sheet)) + 1}
         if cells is not None:
-            out["is_global"] = book._within(cells[1], (sheet.page or {}).get("global_cells") or [])
+            out["is_global"] = docbook._within(cells[1], (sheet.page or {}).get("global_cells") or [])
         return out
     homes = {}
-    for uid, sheet in book.by_uid.items():
-        place = book._places.get(uid)
+    for uid, sheet in docbook.by_uid.items():
+        place = docbook._places.get(uid)
         if place is not None and place[0] in pages:
             homes[sheet.id] = pages[place[0]] + 1
 
@@ -148,9 +153,13 @@ def table_rows(document) -> list:
         text = ", ".join(texts) + ("…" if len(values) > 4 else "")
         return text, (units.pop() if len(units) == 1 else ""), error
 
-    rows = []
+    from ..sheet.docbook import sheet_ident
+
+    rows, own = [], []
     for (lower, scope), dn in sorted(wb.names.items(), key=lambda kv: kv[1].name.lower()):
-        home = wb.sheet_by_id(scope) if scope else None
+        home = wb.sheet_by_id(scope) if isinstance(scope, int) else None
+        book = wb.books.get(scope) if isinstance(scope, str) else \
+            (wb.books.get(home.book) if home is not None and home.book else None)
         try:
             got = ev(F.parse(dn.refers_to).tree, Ctx(wb, home or (wb.sheets[0] if wb.sheets else None), 0, 0))
         except (F.FormulaError, SheetError, AttributeError) as e:
@@ -167,9 +176,18 @@ def table_rows(document) -> list:
         text, unit, error = shown(values)
         page = homes.get(sheet.id, 0) if sheet is not None else 0
         name = dn.name + (f" ({home.name})" if home is not None else "")
-        rows.append(VariableRow(name, text, unit, page, f"Page {page}" if page else "",
-                                error, -1, "Table", cells, **placed(sheet, cells),
-                                key=book._key(sheet) if sheet is not None else None))
+        group = ""
+        if book is not None and home is not None:
+            name = f"{sheet_ident(home.name)}.{dn.name}"     # a sheet's own name: Sheet.Name
+            group = book.name
+        elif book is not None and book.self_contained:
+            name = f"{book.name}.{dn.name}"                  # the workbook's: Book.Name
+            group = book.name
+        made = VariableRow(name, text, unit, page, f"Page {page}" if page else "",
+                           error, -1, "Workbook" if group else "Table", cells,
+                           **placed(sheet, cells),
+                           key=book_key(sheet) if sheet is not None else None, group=group)
+        (own if group else rows).append(made)
     for sheet in wb.sheets:
         if sheet.kind != "table" or not sheet.size:
             continue
@@ -184,8 +202,9 @@ def table_rows(document) -> list:
             cells = (sheet.name, (1, col, max(1, height - 1), col))
             rows.append(VariableRow(f"{sheet.name}.{_ident(cell.value)}", text, unit, page,
                                     f"Page {page}" if page else "", error, -1, "Table",
-                                    cells, **placed(sheet, cells), key=book._key(sheet)))
-    return rows
+                                    cells, **placed(sheet, cells), key=book_key(sheet)))
+    # a self-contained workbook's names, under the workbook
+    return rows + sorted(own, key=lambda r: (r.group.lower(), r.name.lower()))
 
 
 def in_force(document, rows: list, region=None) -> dict:
@@ -439,9 +458,16 @@ class VariablesPanel(QWidget):
         listed = sections(document) if has_sections(document) else []
         headed = False
         section_shown = None
+        group_shown = None
         for index, row in enumerate(self.rows):
             if wanted and wanted not in row.name.lower():
                 continue
+            if row.group and row.group != group_shown:
+                group_shown = row.group
+                section_shown = None
+                self._heading(f"Workbook {row.group}",
+                              "An imported Excel workbook's own names: equations read them as "
+                              f"{row.group}.Name, or Sheet.Name for a sheet's own")
             if row.source == "Table" and not headed:
                 headed = True
                 section_shown = None

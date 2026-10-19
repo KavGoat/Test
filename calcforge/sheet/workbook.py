@@ -66,6 +66,32 @@ class DefinedName:
     sheet: Optional[int] = None          # sheet id when the name is local to one sheet
     comment: str = ""
     home: Optional[int] = None           # the sheet it is saved with, when it names no cells
+    book: Optional[str] = None           # the imported workbook it belongs to (Book.id)
+
+    @property
+    def key(self) -> tuple:
+        """Its key in Workbook.names: (lower name, scope) — the sheet id of a
+        sheet-local name, the Book.id of an imported workbook's name, None for
+        a document name."""
+        return (self.name.lower(), self.sheet if self.sheet is not None else self.book)
+
+
+@dataclass
+class Book:
+    """An imported Excel workbook: its sheets share its names (Excel's
+    workbook scope). Self-contained (the default), those names are its own:
+    its cells read them, and the equations only by qualifying them
+    (``Book.Name``, ``Sheet.Name``); otherwise they are document names, read
+    by the equations bare, each defined where its sheet is in reading order."""
+
+    id: str
+    name: str                            # how equations qualify its names (an identifier)
+    file: str = ""                       # the file it came from, as a reminder
+    self_contained: bool = True
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "name": self.name, "file": self.file,
+                "self_contained": self.self_contained}
 
 
 class Sheet:
@@ -76,6 +102,7 @@ class Sheet:
         self.id = sheet_id
         self.name = name
         self.kind = kind                 # "sheet" (pages of grid) or "table" (on a page)
+        self.book: Optional[str] = None  # the imported workbook it is part of (Book.id)
         self.cells: dict[tuple, Cell] = {}
         self._rows_in_col: dict[int, list] = {}
         # where it sits in the document's reading order (set by the document)
@@ -314,7 +341,12 @@ class Workbook:
         self.sheets: list[Sheet] = []
         self._next_id = 1
         self.styles = StyleTable()
-        self.names: dict[tuple, DefinedName] = {}    # (lower name, sheet id or None)
+        self.names: dict[tuple, DefinedName] = {}    # DefinedName.key -> the name
+        self.books: dict[str, Book] = {}              # imported workbooks by Book.id
+        # where a sheet is in the document's reading order (the document sets
+        # it): a name of a workbook that isn't self-contained is read by
+        # other sheets only from after it
+        self.order_key: Optional[Callable] = None
         self.day_first = True
         # asked for a document variable: outside(sheet, name) -> value; raises KeyError
         self.outside: Optional[Callable] = None
@@ -488,13 +520,26 @@ class Workbook:
         if refers_to.startswith("="):
             refers_to = refers_to[1:]
         F.parse(refers_to)              # raises FormulaError if it can't be read
-        key = (name.lower(), sheet.id if sheet else None)
+        where = home or sheet or self._first_sheet_read(refers_to)
+        # a name made on an imported workbook's sheet is that workbook's (as
+        # a new name in Excel is the workbook's)
+        book = None if sheet is not None or where is None else where.book
+        dn = DefinedName(name, refers_to, sheet.id if sheet else None, comment,
+                         where.id if where else None, book)
         with self.transaction("Define name"):
-            self._set_name(key, DefinedName(name, refers_to, sheet.id if sheet else None, comment,
-                                            (home or sheet).id if (home or sheet) else None))
+            self._set_name(dn.key, dn)
 
-    def remove_name(self, name: str, sheet: Optional[Sheet] = None) -> None:
-        key = (name.lower(), sheet.id if sheet else None)
+    def _first_sheet_read(self, refers_to: str) -> Optional[Sheet]:
+        try:
+            tokens = F.tokenize(refers_to)
+        except F.FormulaError:
+            return None
+        first = next((t for t in tokens if t.kind == "ref" and t.ref.sheet), None)
+        return self.sheet(first.ref.sheet) if first is not None else None
+
+    def remove_name(self, name: str, sheet: Optional[Sheet] = None,
+                    book: Optional[str] = None) -> None:
+        key = (name.lower(), sheet.id if sheet else book)
         if key in self.names:
             with self.transaction("Delete name"):
                 self._set_name(key, None)
@@ -518,16 +563,96 @@ class Workbook:
     def _name_dirty(self, lower: str) -> None:
         if self.on_names_changed is not None:
             self.on_names_changed()
-        self._dirty_many(list(self._deps.names.get(lower, ())), include_self=True)
+        readers = list(self._deps.names.get(lower, ()))
+        self._relearn(readers)
+        self._dirty_many(readers, include_self=True)
         self._recalc_if_auto()
 
+    def _relearn(self, keys) -> None:
+        """What these formulas read, found again: a name they use came, went
+        or now means other cells (a sheet that names them was put in after
+        them, a workbook's names became its own)."""
+        for key in keys:
+            sheet = self.sheet_by_id(key[0])
+            cell = sheet.cells.get(key[1:]) if sheet is not None else None
+            if cell is not None and cell.is_formula:
+                self._learn(sheet, key[1], key[2], cell)
+
     def find_name(self, name: str, sheet: Optional[Sheet]) -> Optional[DefinedName]:
+        """The defined name a formula on *sheet* means by *name*, Excel's way:
+        the sheet's own (local) name, then its workbook's, then a document
+        name; then a name of a workbook that isn't self-contained, from a
+        sheet after it in reading order."""
         lower = name.lower()
+        names = self.names
         if sheet is not None:
-            local = self.names.get((lower, sheet.id))
+            local = names.get((lower, sheet.id))
             if local is not None:
                 return local
-        return self.names.get((lower, None))
+            if sheet.book is not None:
+                mine = names.get((lower, sheet.book))
+                if mine is not None:
+                    return mine
+        found = names.get((lower, None))
+        if found is not None or not self.books:
+            return found
+        return self.open_book_name(lower, sheet)
+
+    def open_book_name(self, lower: str, reader: Optional[Sheet], at_key=None):
+        """A name of a workbook that isn't self-contained, read from *reader*
+        (a sheet of another workbook, or none) or from reading key *at_key*:
+        the latest such definition before it in reading order (any, when
+        neither is known)."""
+        best = best_key = None
+        order = self.order_key
+        if at_key is None and reader is not None and order is not None:
+            at_key = order(reader)
+        for book in self.books.values():
+            if book.self_contained or (reader is not None and reader.book == book.id):
+                continue
+            dn = self.names.get((lower, book.id))
+            if dn is None:
+                continue
+            if order is None or at_key is None:
+                return dn
+            home = self.sheet_by_id(dn.home) if dn.home is not None else None
+            key = order(home) if home is not None else None
+            if key is None or not key < tuple(at_key):
+                continue
+            if best_key is None or key > best_key:
+                best, best_key = dn, key
+        return best
+
+    def book_names(self, book_id: str) -> list:
+        """The names of an imported workbook (its own scope, not sheet-local)."""
+        return [dn for (lower, scope), dn in self.names.items() if scope == book_id]
+
+    def set_self_contained(self, book_id: str, on: bool) -> None:
+        """Whether a workbook's names are its own (one undo step); every
+        formula that reads a name is worked out again."""
+        book = self.books.get(book_id)
+        if book is None or book.self_contained == bool(on):
+            return
+        with self.transaction("Self-contained"):
+            was = book.self_contained
+            self.book_state(book_id, bool(on))
+            self._record(lambda: self.book_state(book_id, was),
+                         lambda: self.book_state(book_id, bool(on)))
+
+    def book_state(self, book_id: str, self_contained: bool) -> None:
+        """Puts a workbook's setting in place (no undo step of its own) and
+        works out again every formula reading a name."""
+        book = self.books.get(book_id)
+        if book is None or book.self_contained == self_contained:
+            return
+        book.self_contained = self_contained
+        self._names_changed()
+        readers = set()
+        for lower in {k[0] for k in self.names}:
+            readers |= self._deps.names.get(lower, set())
+        self._relearn(list(readers))
+        self._dirty_many(list(readers), include_self=True)
+        self._recalc_if_auto()
 
     # -- transactions and undo -------------------------------------------------------------
     @contextmanager

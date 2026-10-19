@@ -178,11 +178,15 @@ def _settings_step(window, before, description: str) -> bool:
         window.document.settings.calc_rules = before
         return False
 
-    def restore(store) -> None:
-        window.document.settings.calc_rules = copy.deepcopy(store)
-        window.document.modified = True
-        redraw_all(window)
+    def restore(showing, store) -> None:
+        # (on the window that has the document then: MainWindow._on_its_window)
+        showing.document.settings.calc_rules = copy.deepcopy(store)
+        showing.document.modified = True
+        redraw_all(showing)
 
+    on_its_window = getattr(window, "_on_its_window", None)
+    restore = on_its_window(restore) if on_its_window is not None \
+        else (lambda store, act=restore: act(window, store))
     window.undo_stack.push(DocumentStructureCommand(before, after, description, restore))
     return True
 

@@ -166,6 +166,31 @@ class ViewportsCommand(QUndoCommand):
         self._apply(self.before)
 
 
+def on_the_canvas(scene):
+    """(on_apply, find_frame) for a step on the pages of *scene*.
+
+    They reach the pages through the canvas when the step is undone or
+    redone, not through the view that recorded it: the document goes to
+    another window with its canvas and history when its tab is dragged
+    there, and the window it came from may have closed since (the user,
+    2026-10-19). Every view showing the canvas is told (a document shown
+    in two windows by File ▸ New Window)."""
+    def after_undo():
+        for view in list(scene.views()):
+            if getattr(getattr(view, "window", None), "_closed_for_good", False):
+                continue
+            settle = getattr(view, "after_undo", None)
+            if settle is not None:
+                settle()
+
+    def find_frame(page_uid):
+        for frame in getattr(scene, "frames", ()) or ():
+            if getattr(frame.page, "uid", None) == page_uid:
+                return frame
+        return None
+    return after_undo, find_frame
+
+
 class SnapshotGuard:
     """Context manager that pushes a :class:`PageEditCommand` when work changes.
 
@@ -188,7 +213,8 @@ class SnapshotGuard:
         frame = self.view.frame()
         after = frame.serialize_items()
         if after != self.before:
+            on_apply, find_frame = on_the_canvas(frame.scene())
             self.view.push_command(PageEditCommand(
                 frame, self.before, after, self.text,
-                on_apply=self.view.after_undo, find_frame=self.view.frame_for_page))
+                on_apply=on_apply, find_frame=find_frame))
         return False

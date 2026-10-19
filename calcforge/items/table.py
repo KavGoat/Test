@@ -595,12 +595,16 @@ class TableItem(MarkupItem):
         # formatting colours it or it is part of a merged cell. (Walking
         # every place of the grid in view was a thousand style look-ups for
         # a screenful of a mostly empty sheet.) Row by row, as before.
-        if sheet.cond_rules:
-            grid = [(r, c) for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)]
-        else:
-            held = set(sheet.positions_in(r0, c0, r1, c1))
-            held.update(p for p in covered if r0 <= p[0] <= r1 and c0 <= p[1] <= c1)
-            grid = sorted(held)
+        held = set(sheet.positions_in(r0, c0, r1, c1))
+        held.update(p for p in covered if r0 <= p[0] <= r1 and c0 <= p[1] <= c1)
+        # an empty cell is coloured by a rule only inside the rule's ranges
+        # (walking every place in view for the rules took a second a screen
+        # on the user's seismic workbook)
+        for rule in sheet.cond_rules:
+            for t, l, b, r in rule.get("ranges", []):
+                t, l, b, r = max(t, r0), max(l, c0), min(b, r1), min(r, c1)
+                held.update((y, x) for y in range(t, b + 1) for x in range(l, r + 1))
+        grid = sorted(held)
         # fills
         for r, c in grid:
             m = covered.get((r, c))
@@ -688,7 +692,7 @@ class TableItem(MarkupItem):
     def _paint_text(self, painter, r, c, cell, rows, cols, covered) -> None:
         sheet = self.sheet
         st = self._shown_style(r, c)
-        shown = format_value(cell.value, st.number_format, st.unit)
+        shown = format_value(cell.value, st.number_format, st.unit, significant=st.significant)
         text = shown.text
         if not text:
             return
@@ -847,7 +851,7 @@ class TableItem(MarkupItem):
         st = self._shown_style(r, c)
         if st.wrap or st.rotation or st.shrink:
             return None
-        shown = format_value(cell.value, st.number_format, st.unit)
+        shown = format_value(cell.value, st.number_format, st.unit, significant=st.significant)
         text = shown.text
         if not text:
             return None
@@ -902,7 +906,7 @@ class TableItem(MarkupItem):
                     bool(st.italic), bool(st.underline), bool(st.strike))
         key = None
         if _METRICS.get(font_key) is metrics:          # (measured with the cell's own font)
-            key = (repr(value), st.number_format, st.unit, font_key, room)
+            key = (repr(value), st.number_format, st.unit, st.significant, font_key, room)
             got = _FITTED.get(key)
             if got is not None:
                 return got
@@ -913,7 +917,7 @@ class TableItem(MarkupItem):
             return sum(max(metrics.horizontalAdvance(ch), digit) for ch in number) + \
                 (metrics.horizontalAdvance(space + unit) if space else 0.0)
         got = format_value(value, st.number_format, st.unit,
-                           fit=lambda t: width(t) <= room).text
+                           fit=lambda t: width(t) <= room, significant=st.significant).text
         if key is not None:
             if len(_FITTED) > 20000:
                 _FITTED.clear()

@@ -37,6 +37,7 @@ here is new.
 | Tables in the PDF | Like equations: page drawing on the calc layer, editable only in CalcForge. |
 | Clicks on sheet pages | Mode-aware. Markup mode: markup tools draw over the grid; Select picks a markup if one is hit, else a cell. Calc mode: clicks and typing go to cells. |
 | xlsx (confirmed 2026-10-10) | Open `.xlsx` as sheet pages (adds openpyxl): cells only — values, formulas, formatting, sizes, merges, names, comments, validation, conditional formatting and the page layout; charts and pictures are left out (said so on opening). No export to `.xlsx`. Copy/paste with Excel keeps formulas and formatting. |
+| An imported workbook's names (2026-10-19, by pop-up) | A workbook comes in as one: its sheets share its names. **Self-contained** (the default, a tick in the import chooser) its names are its own: equations below read any of its cells by sheet and cell (`Seismic_Actions.H44`) and its names only qualified (`Seismic_Actions_NZS1170_5.Cd_T_min_ULS` or `Seismic_Actions.Cd_T_min_ULS`), never bare. Inside its cells a bare name is the workbook's own name first (a sheet-local name wins on its sheet, Excel's rule), otherwise the equation variable defined above the sheet; `var(X)` still reads the equation variable. **Unticked**, its names are document variables, each defined where its sheet is in reading order; the import lists the names that clash with the document's (equation variables, defined names, SMath's constants) and offers: keep self-contained, rename them with a prefix (suggested: the workbook name's first part, `Seismic_`), or go ahead (reading order then decides). Changeable later from the sheet tab's right-click menu (Self-contained) and the Properties panel's Workbook section; one undo step; saved with the document. Two self-contained workbooks with the same names stay apart. |
 | In scope | Charts, dynamic arrays (spill, FILTER/SORT/UNIQUE/SEQUENCE), named ranges and structured references, and everything else Excel does: fill handle, copy/cut/paste, Paste Special, formatting, borders, merge, number formats, Format Painter, conditional formatting (highlight rules, top/bottom, data bars, colour scales, icon sets, formula rules, rules manager), sort/filter, data validation, comments, find/replace, insert/delete/hide/resize/autofit, point mode, F4, Ctrl+arrows, drag-moving cells. **Out:** pivot tables. |
 | Printing | Excel's defaults: gridlines on screen only, row/column headings never printed (both switchable per sheet); cell borders always print. |
 | Page layout | Fit to N pages wide, repeat header rows (Print Titles), print area, margins and centring. |
@@ -167,6 +168,67 @@ here is new.
   their structured references the cells they name; a print scale other than
   100 % is left out (said), Fit to page width is kept; cells Excel shows but a
   formula here gives otherwise are listed by address after opening.
+
+* **Excel's implicit intersection** (2026-10-19, the user's two engineering
+  workbooks). A formula an `.xlsx` stores plainly (not as an array formula)
+  is worked out as Excel did before dynamic arrays: a name of a block
+  (`s_x = $J$17:$J$39`), a block reference, or what INDIRECT or OFFSET give,
+  standing where one value is wanted, is the cell of the block in the
+  formula's own row (a column) or column (a row). The reader writes Excel
+  365's `@` there, as Excel 365 shows such a formula (`=@s_x*@w`), so the
+  cell keeps Excel's answer and says why (`sheet/legacy.py`). Where a value
+  is wanted follows each function's arguments: SUM's, COUNTIF's range,
+  VLOOKUP's table, OFFSET's reference take a block as it is; SUMPRODUCT,
+  INDEX's array, LOOKUP's vectors, LARGE, MMULT work over whole arrays;
+  IF's and CHOOSE's results pass on what they are given; every other
+  argument and the operands of `+ - * / ^ & = < >` take one value. An array
+  formula (Ctrl+Shift+Enter, or a dynamic one) is left as it is.
+* **A name whose cells were deleted** in Excel (`Wp = 'Seismic Actions'!#REF!`)
+  comes in as a name giving `#REF!`, as Excel keeps it, instead of being
+  left out. A sheet-local name is kept with its own sheet whichever cells it
+  names.
+* **How an imported workbook is named** (2026-10-19). Its name for the
+  equations is its file name without the extension, each run of characters
+  an identifier can't hold made one `_` (a leading digit gets a `_` before
+  it), unique among the document's sheet names (as equations write them)
+  and other workbooks' names by `_2`, `_3`…:
+  `Seismic_Actions_NZS1170.5.xlsm` is `Seismic_Actions_NZS1170_5`; the same
+  file inserted again is `Seismic_Actions_NZS1170_5_2`. A sheet is written
+  in equations as its name, or, when its name holds spaces or other such
+  characters, with each run of them one `_` (`Seismic Actions` is
+  `Seismic_Actions`, `Tables (2)` is `Tables_2`); its exact name still
+  works. In an equation:
+    - `Sheet.H44` — that cell of the sheet (a table's too: `Loads.D12`);
+    - `Sheet.Name` — the defined name as that sheet's cells read it: the
+      sheet's own name first, then its workbook's (so any sheet of the
+      workbook qualifies a workbook name; a sheet-local name needs its own
+      sheet: `Tables.ReturnPeriodFactor`);
+    - `Book.Name` — the workbook's own (workbook-wide) name;
+    - `Table.Heading` — a table's column, as before (a defined name of the
+      same spelling on that sheet wins);
+    - a bare `Name` — a document name: one defined on a table or sheet made
+      here, or of an imported workbook that isn't self-contained (the latest
+      one before the equation in reading order).
+  Qualified names follow reading order like any other: the sheet must be
+  above the equation.
+* **Which name a cell reads** (Excel's order, then the document's): the
+  cell's sheet's own name; its workbook's name; a document name (defined on
+  a table or sheet made here — read by every cell, as before); a name of a
+  workbook that isn't self-contained, from a sheet after that workbook's
+  sheet in reading order; the equation variable defined before the sheet;
+  a unit. `var(X)` goes straight to the equation variable. `Sheet!Name`
+  reads the name as that sheet's cells do.
+* **Where the setting lives.** Each sheet of an imported workbook carries
+  the workbook (`"book": {"id", "name", "file", "self_contained"}`) in its
+  record, so it is saved with the document and undone with the pages
+  (`Workbook.books`, `Sheet.book`, `DefinedName.book`; a workbook name's key
+  is `(name, book id)`). The Variables panel lists a self-contained
+  workbook's names last, under "Workbook <name>", written as the equations
+  read them; the Name Manager's Scope says "<name> (self-contained)" or
+  "<name> (document variables)". Renaming at import changes the clashing
+  workbook names and every formula, name, rule and validation of the
+  workbook that reads them (a sheet's own name of the same spelling is left
+  alone); unticking later lists the clashes and asks to go ahead.
 
 ## Tables on pages (phase 2)
 
