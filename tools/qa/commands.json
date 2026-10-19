@@ -9777,7 +9777,7 @@
    "id": "T0165",
    "area": "Toolbars",
    "where": "Status bar",
-   "name": "Link this view with other windows showing the same document",
+   "name": "Keep the two views of Split View (and other windows of this document) in step — Page sync: the same page; Document sync: scroll, zoom and page",
    "note": "list",
    "shortcut": "",
    "state": "fresh",
@@ -9785,7 +9785,7 @@
     {
      "via": "widget",
      "container": "Status bar",
-     "label": "Link this view with other windows showing the same document",
+     "label": "Keep the two views of Split View (and other windows of this document) in step — Page sync: the same page; Document sync: scroll, zoom and page",
      "kind": "list"
     }
    ]

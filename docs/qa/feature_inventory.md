@@ -455,7 +455,7 @@ All 31 are in the last section.
 | Status bar ▸ Snap | Snap to Content *(toggle)* |  | ≈ test_usability.py::test_a_markup_drawn_on_an_opened_pdf_can_be_picked_up_and_moved |
 | Status bar ▸ Snap | Align to Markups *(toggle)* |  | ≈ test_usability.py::test_a_markup_drawn_on_an_opened_pdf_can_be_picked_up_and_moved |
 | Status bar ▸ Snap | Align to Content *(toggle)* |  | ≈ test_usability.py::test_every_label_the_user_reads_is_one_or_two_words (+2) |
-| Status bar | Link this view with other windows showing the same document *(list)* |  | ≈ test_september17_review.py::test_sync_choice_propagates_and_zoom_preserves_source_anchor (+3) |
+| Status bar | Keep the two views of Split View (and other windows of this document) in step — Page sync: the same page; Document sync: scroll, zoom and page *(list)* |  | ≈ test_september17_review.py::test_sync_choice_propagates_and_zoom_preserves_source_anchor (+3) |
 | Status bar | A4 210×297 *(button)* |  | ≈ test_layout.py::test_nothing_in_the_footer_is_drawn_on_top_of_anything_else (+3) |
 | Status bar | (unlabelled) *(list)* |  | ≈ test_layout.py::test_nothing_in_the_footer_is_drawn_on_top_of_anything_else (+2) |
 | Menu-bar corner | Markup *(button)* |  | ≈ test_calc_modes.py::test_the_status_bar_shows_the_mode_and_f12_switches_it (+5) |
