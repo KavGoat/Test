@@ -1176,6 +1176,82 @@ def _natural_key(text: str) -> tuple:
                  for part in re.findall(r"\d+(?:\.\d+)?|\D+", text or ""))
 
 
+def _type_of(item) -> str:
+    """The Markups list's Type column: what kind of markup it is, as
+    Revu's Type, with its label in the Label column rather than here."""
+    label = getattr(item, "label", "")
+    if not label:
+        return item.display_name()
+    item.label = ""                    # a plain attribute: display_name reads it
+    try:
+        return item.display_name()
+    finally:
+        item.label = label
+
+
+def _flat(text: str) -> str:
+    """*text* on one line for a cell's editor, a character for each one
+    (a line break becomes a space), so an edit made on the one line can be
+    put back into the text with its other line breaks kept."""
+    return (text or "").replace("\r", " ").replace("\n", " ")
+
+
+def _spliced(before: str, after: str) -> tuple:
+    """(start, end, words): what changed from *before* to *after*, as the
+    span of *before* to replace and what to put there."""
+    most = min(len(before), len(after))
+    start = 0
+    while start < most and before[start] == after[start]:
+        start += 1
+    tail = 0
+    while tail < most - start and before[-1 - tail] == after[-1 - tail]:
+        tail += 1
+    return start, len(before) - tail, after[start:len(after) - tail]
+
+
+class _MarkupCellDelegate(QStyledItemDelegate):
+    """Revu's in-place editing of the Markups list's cells: Subject, Label,
+    Author and Comment (a text box's or callout's words) take a box in the
+    cell; Enter keeps what was typed, Esc leaves the cell as it was. The
+    other columns (Page, Type, Date, the measured Value, the look) are read
+    only: no box opens on them."""
+
+    def __init__(self, panel):
+        super().__init__(panel.tree)
+        self.panel = panel
+
+    def createEditor(self, parent, option, index):            # noqa: N802
+        if self.panel.editable_at(index) is None:
+            return None
+        editor = QLineEdit(parent)
+        editor.setObjectName("markupCellEditor")
+        editor.setFrame(False)
+        return editor
+
+    def setEditorData(self, editor, index) -> None:           # noqa: N802
+        found = self.panel.editable_at(index)
+        if found is not None:
+            editor.setText(self.panel.cell_text(*found))
+            editor.selectAll()
+
+    def setModelData(self, editor, model, index) -> None:     # noqa: N802
+        found = self.panel.editable_at(index)
+        if found is None:
+            return
+        text = editor.text()
+        # Kept once the editor has closed: putting it in rebuilds the list,
+        # which must not happen under the editor that is closing.
+        QTimer.singleShot(0, self.panel, lambda: self.panel.set_cell(*found, text))
+
+    def eventFilter(self, editor, event) -> bool:             # noqa: N802
+        if event.type() == QEvent.ShortcutOverride and event.key() != Qt.Key_Escape:
+            # typing in the cell never fires a shortcut (V, Delete, Ctrl+Z
+            # are the words' own while the box is open)
+            event.accept()
+            return False
+        return super().eventFilter(editor, event)
+
+
 class _MarkupRow(QTreeWidgetItem):
     """A row (or a page heading) of the Markups list, sorted as a person
     reads it: Page 2 before Page 10, a width of 2 before 10."""
@@ -1189,55 +1265,198 @@ class _MarkupRow(QTreeWidgetItem):
 class _FilterHeader(QHeaderView):
     """The Markups list's headings with Revu's filter button on each.
 
-    A left-click on a heading sorts by it; a left-click on the funnel at its
-    right end opens that column's filter list (Revu's Filter List), which
-    used to be only on a right-click nobody looks for (novice finding 14).
-    The funnel is blue while the column is filtered."""
+    A left-click on a heading sorts by it; a left-click on the filter button
+    at its right end opens that column's filter list (Revu's Filter List),
+    which used to be only on a right-click nobody looks for (novice finding
+    14). The button is a small ▾, brighter under the pointer, and a blue
+    funnel while the column is filtered.
+
+    Each heading is drawn as Revu draws it, flat with a thin separator: the
+    title on the left, cut short with "…" when the column is narrow, the
+    sort arrow just after it, and the filter button at the right edge. The
+    three never overlap at any width (the user, 2026-10-19: Qt's own sort
+    arrow sat under the funnel); ``parts`` says where each one is.
+    """
 
     filterClicked = Signal(int, QPoint)
     BUTTON = 14
+    #: the sort arrow's box, and the gaps around the parts
+    ARROW = 9
+    PAD = 6
+    GAP = 4
 
     def __init__(self, panel):
         super().__init__(Qt.Horizontal)
         self.panel = panel
         self.setSectionsClickable(True)
         self.setMouseTracking(True)
+        self.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        #: (section under the pointer, whether it is on that section's button)
+        self._hover = (-1, False)
+        self._fit_minimum()
+
+    # -- where things are --------------------------------------------------
+    def _button_size(self) -> int:
+        return max(self.BUTTON, round(self.fontMetrics().height() * 0.9))
+
+    def _fit_minimum(self) -> None:
+        """No column narrower than its sort arrow and filter button side by
+        side: a narrower one would have to draw one over the other."""
+        self.setMinimumSectionSize(self.PAD + self.ARROW + self.GAP // 2
+                                   + self._button_size() + 3 + 2)
+
+    def changeEvent(self, event) -> None:                       # noqa: N802
+        if event.type() in (QEvent.FontChange, QEvent.StyleChange):
+            self._fit_minimum()
+        super().changeEvent(event)
+
+    def section_rect(self, logical: int) -> QRect:
+        """Column *logical*'s heading, in the header."""
+        return QRect(self.sectionViewportPosition(logical), 0,
+                     self.sectionSize(logical), self.viewport().height())
+
+    def _parts_in(self, rect: QRect, logical: int) -> tuple:
+        """(title, shown title, sort arrow, filter button) of the heading
+        drawn in *rect*; an empty QRect for a part not shown."""
+        metrics = self.fontMetrics()
+        title = str(self.model().headerData(logical, Qt.Horizontal, Qt.DisplayRole) or "") \
+            if self.model() is not None else ""
+        right = rect.right() + 1 - self.PAD
+        button = QRect()
+        if self.panel.filter_list_on():
+            size = self._button_size()
+            button = QRect(rect.right() + 1 - 3 - size, rect.top() + (rect.height() - size) // 2,
+                           size, size)
+            right = button.left() - self.GAP // 2
+        left = rect.left() + self.PAD
+        sorted_here = self.isSortIndicatorShown() and self.sortIndicatorSection() == logical
+        arrow = QRect()
+        room = right - left
+        if sorted_here and room >= self.ARROW:
+            room -= self.ARROW + self.GAP
+        shown = metrics.elidedText(title, Qt.ElideRight, max(room, 0)) if room > 0 else ""
+        width = min(metrics.horizontalAdvance(shown), max(room, 0)) if shown else 0
+        text = QRect(left, rect.top(), width, rect.height())
+        if sorted_here and right - left >= self.ARROW:
+            x = left + width + (self.GAP if width else 0)
+            arrow = QRect(x, rect.top() + (rect.height() - self.ARROW) // 2,
+                          self.ARROW, self.ARROW)
+        return text, shown, arrow, button
+
+    def parts(self, logical: int) -> tuple:
+        """(title, sort arrow, filter button) of column *logical*'s heading,
+        in the header; an empty QRect for a part not shown."""
+        text, _shown, arrow, button = self._parts_in(self.section_rect(logical), logical)
+        return text, arrow, button
 
     def filter_rect(self, logical: int) -> QRect:
         """Where column *logical*'s filter button is, in the header."""
-        x = self.sectionViewportPosition(logical)
-        width = self.sectionSize(logical)
-        size = self.BUTTON
-        return QRect(x + width - size - 3, (self.height() - size) // 2, size, size)
+        return self._parts_in(self.section_rect(logical), logical)[3]
 
     def sectionSizeFromContents(self, logical: int) -> QSize:   # noqa: N802
         size = super().sectionSizeFromContents(logical)
-        return QSize(size.width() + self.BUTTON + 4, size.height())
+        title = str(self.model().headerData(logical, Qt.Horizontal, Qt.DisplayRole) or "") \
+            if self.model() is not None else ""
+        wide = (self.PAD + self.fontMetrics().horizontalAdvance(title) + self.GAP + self.ARROW
+                + self.GAP + self._button_size() + 3)
+        return QSize(max(wide, self.minimumSectionSize()), size.height())
 
+    # -- drawing -----------------------------------------------------------
     def paintSection(self, painter: QPainter, rect: QRect, logical: int) -> None:  # noqa: N802
+        if not rect.isValid():
+            return
+        from PySide6.QtWidgets import QStyle, QStyleOptionHeader
+        option = QStyleOptionHeader()
+        self.initStyleOptionForIndex(option, logical)
+        option.rect = rect
+        option.text = ""
+        option.icon = QIcon()
+        option.sortIndicator = QStyleOptionHeader.SortIndicator.None_
         painter.save()
-        super().paintSection(painter, rect, logical)
+        # the theme's flat heading with its thin separator, and nothing on it:
+        # the title, the arrow and the button are put where they fit below
+        self.style().drawControl(QStyle.CE_HeaderSection, option, painter, self)
         painter.restore()
-        if not self.panel.filter_list_on():
-            return                     # Filter List off: no filters on the headings
-        button = QRect(rect.right() - self.BUTTON - 2, rect.top() + (rect.height() - self.BUTTON) // 2,
-                       self.BUTTON, self.BUTTON)
-        filtered = logical in self.panel.column_filters
-        colour = QColor("#0083db") if filtered else self.palette().buttonText().color()
-        if not filtered:
-            colour.setAlpha(150)
+        text, shown, arrow, button = self._parts_in(rect, logical)
+        ink = self.palette().windowText().color()
         painter.save()
+        painter.setClipRect(rect)
+        if shown:
+            painter.setPen(ink)
+            painter.setFont(self.font())
+            painter.drawText(text, Qt.AlignLeft | Qt.AlignVCenter, shown)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(colour)
-        b = QRectF(button).adjusted(2.5, 3, -2.5, -3)
-        funnel = QPolygonF([QPointF(b.left(), b.top()), QPointF(b.right(), b.top()),
-                            QPointF(b.center().x() + 1.2, b.center().y() + 0.5),
-                            QPointF(b.center().x() + 1.2, b.bottom()),
-                            QPointF(b.center().x() - 1.2, b.bottom() - 1.5),
-                            QPointF(b.center().x() - 1.2, b.center().y() + 0.5)])
-        painter.drawPolygon(funnel)
+        if not arrow.isNull():
+            # a small line chevron, up while A to Z and down while Z to A —
+            # drawn in line, not filled, so it is never taken for the filter's ▾
+            soft = QColor(ink)
+            soft.setAlpha(210)
+            pen = QPen(soft, 1.3)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            box = QRectF(arrow).adjusted(1, 2.5, -1, -2.5)
+            if self.sortIndicatorOrder() == Qt.AscendingOrder:
+                points = [QPointF(box.left(), box.bottom()), QPointF(box.center().x(), box.top()),
+                          QPointF(box.right(), box.bottom())]
+            else:
+                points = [QPointF(box.left(), box.top()), QPointF(box.center().x(), box.bottom()),
+                          QPointF(box.right(), box.top())]
+            painter.drawPolyline(QPolygonF(points))
+        if not button.isNull():
+            self._paint_button(painter, button, logical, ink)
         painter.restore()
+
+    def _paint_button(self, painter: QPainter, button: QRect, logical: int, ink: QColor) -> None:
+        hovered, on_button = self._hover
+        filtered = logical in self.panel.column_filters
+        if hovered == logical and on_button:
+            back = QColor(ink)
+            back.setAlpha(40)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(back)
+            painter.drawRoundedRect(QRectF(button), 2, 2)
+        painter.setPen(Qt.NoPen)
+        if filtered:
+            # the funnel, blue, while the column is narrowed
+            painter.setBrush(QColor("#0083db"))
+            b = QRectF(button).adjusted(2.5, 3, -2.5, -3)
+            funnel = QPolygonF([QPointF(b.left(), b.top()), QPointF(b.right(), b.top()),
+                                QPointF(b.center().x() + 1.2, b.center().y() + 0.5),
+                                QPointF(b.center().x() + 1.2, b.bottom()),
+                                QPointF(b.center().x() - 1.2, b.bottom() - 1.5),
+                                QPointF(b.center().x() - 1.2, b.center().y() + 0.5)])
+            painter.drawPolygon(funnel)
+            return
+        # the drop-down's small ▾: faint until the pointer is on the heading
+        glyph = QColor(ink)
+        glyph.setAlpha(230 if hovered == logical else 120)
+        painter.setBrush(glyph)
+        centre = QRectF(button).center()
+        painter.drawPolygon(QPolygonF([QPointF(centre.x() - 3.5, centre.y() - 1.75),
+                                       QPointF(centre.x() + 3.5, centre.y() - 1.75),
+                                       QPointF(centre.x(), centre.y() + 2.25)]))
+
+    # -- the pointer -------------------------------------------------------
+    def _set_hover(self, point) -> None:
+        if point is None:
+            hover = (-1, False)
+        else:
+            logical = self.logicalIndexAt(point)
+            hover = (logical, logical >= 0 and self.panel.filter_list_on()
+                     and self.filter_rect(logical).contains(point))
+        if hover != self._hover:
+            self._hover = hover
+            self.viewport().update()
+
+    def mouseMoveEvent(self, event) -> None:                     # noqa: N802
+        self._set_hover(event.position().toPoint())
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:                         # noqa: N802
+        self._set_hover(None)
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event) -> None:                    # noqa: N802
         if event.button() == Qt.LeftButton:
@@ -1278,8 +1497,11 @@ class MarkupsPanel(QWidget):
     markupPicked = Signal(int, str)
     markupsPicked = Signal(list)          # [(page index, uid), ...]
 
-    COLUMNS = ["Page", "Type", "Subject", "Colour", "Fill", "Line", "Width",
+    COLUMNS = ["Page", "Type", "Subject", "Label", "Colour", "Fill", "Line", "Width",
                "Opacity", "Font", "Size", "Value", "Author", "Date", "Comment"]
+    #: the columns edited in place, as Revu's, and what each one changes
+    EDITABLE = {"Subject": "subject", "Label": "label", "Author": "author",
+                "Comment": "comment"}
     GROUPS = ["Page", "Type", "Subject", "Colour", "Author", "None"]
 
     def __init__(self, window):
@@ -1349,6 +1571,13 @@ class MarkupsPanel(QWidget):
         self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tree.itemDoubleClicked.connect(self._activate)
         self.tree.itemSelectionChanged.connect(self._picked)
+        # Revu's in-place editing: a click on a picked row's cell, a
+        # double-click, or F2 opens the cell's box (editable columns only)
+        self.tree.setItemDelegate(_MarkupCellDelegate(self))
+        self.tree.setEditTriggers(QAbstractItemView.DoubleClicked
+                                  | QAbstractItemView.SelectedClicked
+                                  | QAbstractItemView.EditKeyPressed)
+        self.tree.installEventFilter(self)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._row_menu)
         # Values each column is narrowed to; a column not here shows all.
@@ -1397,7 +1626,7 @@ class MarkupsPanel(QWidget):
     def row_for(index: int, item) -> list[str]:
         style = item.style
         text_like = hasattr(item, "doc")
-        return [str(index + 1), item.display_name(), item.subject,
+        return [str(index + 1), _type_of(item), item.subject, item.label,
                 style.stroke or "none", style.fill or "none",
                 style.line_style, f"{style.width:g}",
                 f"{round(style.opacity * 100):d}%",
@@ -1523,7 +1752,9 @@ class MarkupsPanel(QWidget):
             node = _MarkupRow(row)
             node.setData(0, Qt.UserRole, (index, item.uid))
             node.setIcon(1, icon(_icon_for(item), 16))
-            for place, colour in ((3, item.style.stroke), (4, item.style.fill)):
+            node.setFlags(node.flags() | Qt.ItemIsEditable)
+            for place, colour in ((self.COLUMNS.index("Colour"), item.style.stroke),
+                                  (self.COLUMNS.index("Fill"), item.style.fill)):
                 if colour:
                     node.setIcon(place, _swatch(colour))
             if item.locked:
@@ -1647,6 +1878,104 @@ class MarkupsPanel(QWidget):
         if data:
             self.markupActivated.emit(data[0], data[1])
 
+    # -- editing in place (Revu: click a picked row's cell, or F2) -----------
+    def editable_at(self, index):
+        """(page index, uid, column name) when the list's cell at model
+        *index* can be edited in place, else None."""
+        if not index.isValid():
+            return None
+        name = self.COLUMNS[index.column()] if index.column() < len(self.COLUMNS) else ""
+        if name not in self.EDITABLE:
+            return None
+        data = index.siblingAtColumn(0).data(Qt.UserRole)
+        if not data or tuple(data) not in self._items:
+            return None
+        item = self._items[tuple(data)]
+        if getattr(item, "locked", False):
+            return None                # a locked markup is not changed (Revu)
+        return data[0], data[1], name
+
+    def cell_text(self, page: int, uid: str, column: str) -> str:
+        """What a cell's box starts with: the whole of it, on one line."""
+        item = self._items.get((page, uid))
+        if item is None:
+            return ""
+        if column == "Comment":
+            return _flat(self._comment_source(item))
+        return getattr(item, self.EDITABLE[column], "") or ""
+
+    @staticmethod
+    def _comment_source(item) -> str:
+        """The words the Comment column shows: the markup's comment, or a
+        text box's or callout's own words when it has none (_comment_of)."""
+        if getattr(item, "comment", ""):
+            return item.comment
+        if hasattr(item, "doc"):
+            return item.text()
+        return ""
+
+    def set_cell(self, page: int, uid: str, column: str, text: str) -> bool:
+        """Put *text* into a markup's cell, as one step Ctrl+Z takes back.
+        True when the markup changed."""
+        import shiboken6
+        item = self._items.get((page, uid))
+        if not shiboken6.isValid(self) or item is None or not shiboken6.isValid(item) \
+                or column not in self.EDITABLE or item.scene() is None:
+            return False               # the markup went while its cell was open
+        frame = item.parentItem()
+        if column == "Comment":
+            words = item.text() if not getattr(item, "comment", "") and hasattr(item, "doc") \
+                else None
+            before = self._comment_source(item)
+            if _flat(before) == text:
+                return False
+        else:
+            text = text.strip()
+            if (getattr(item, self.EDITABLE[column], "") or "") == text:
+                return False
+        view = self.window.view
+        view.begin_snapshot([frame] if frame is not None else view.all_frames())
+        if column != "Comment":
+            setattr(item, self.EDITABLE[column], text)
+        elif words is not None:
+            self._splice_words(item, words, text)
+        else:
+            # the rest of the comment's line breaks are kept
+            start, end, put = _spliced(_flat(before), text)
+            item.comment = before[:start] + put + before[end:]
+        item.touch()
+        item.update()
+        view.commit_snapshot(f"Edit {column}")
+        self.window.refresh_lists()
+        self._reselect([(page, uid)])
+        return True
+
+    @staticmethod
+    def _splice_words(item, words: str, text: str) -> None:
+        """A text box's (callout's) words changed to *text*: only the part
+        typed over is replaced, so the rest keeps its line breaks, bold and
+        colours."""
+        from PySide6.QtGui import QTextCursor
+        start, end, put = _spliced(_flat(words), text)
+        cursor = QTextCursor(item.doc)
+        cursor.beginEditBlock()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        cursor.insertText(put)
+        cursor.endEditBlock()
+        if _flat(item.text()) != text:      # the document's places were not its words'
+            item.set_text(text)
+        item.written = item.text()
+
+    def eventFilter(self, watched, event) -> bool:             # noqa: N802
+        """F2 on the list edits the current cell, as Revu's (and any list
+        on Windows); no shortcut elsewhere takes it first."""
+        if watched is self.tree and event.type() == QEvent.ShortcutOverride \
+                and event.key() == Qt.Key_F2 and event.modifiers() == Qt.NoModifier:
+            event.accept()
+            return True
+        return super().eventFilter(watched, event)
+
     def _picked(self) -> None:
         """Picking rows picks those markups on the page — all of them."""
         if self._echoing:
@@ -1683,7 +2012,12 @@ class MarkupsPanel(QWidget):
                     if chosen and first is None:
                         first = node
             if first is not None:
+                # up or down to the row only: a click on a row's Comment cell
+                # threw the list back to its first column, under the pointer
+                # that was about to click the cell again to edit it
+                across = self.tree.horizontalScrollBar().value()
                 self.tree.scrollToItem(first)
+                self.tree.horizontalScrollBar().setValue(across)
         finally:
             self._echoing = False
 

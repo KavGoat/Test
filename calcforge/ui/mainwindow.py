@@ -4728,9 +4728,11 @@ class MainWindow(QMainWindow):
                 and QApplication.activePopupWidget() is None
                 and watched is not self.view and not self.view.isAncestorOf(watched)
                 and watched is not self.document_tabs
-                # Rename Page Label's in-place box: Escape leaves the label
+                # Rename Page Label's in-place box, and a Markups List cell's:
+                # Escape leaves the label (the cell) as it was
                 and not (isinstance(watched, QLineEdit)
-                         and watched.objectName() == "pageLabelEditor")):
+                         and watched.objectName() in ("pageLabelEditor",
+                                                      "markupCellEditor"))):
             if event.type() == QEvent.KeyPress:
                 self.view.escape_everything()
             event.accept()
