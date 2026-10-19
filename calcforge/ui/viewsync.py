@@ -3,9 +3,17 @@ same document) kept in step, as Revu's Sync keeps its split views.
 
 - **Sync off**: each view is its own. Nothing done in one — a zoom, a scroll,
   a page turned, the split resized — moves the other.
-- **Page sync**: going to a page in one view goes to the same page number in
-  the other (its last page, when it has fewer). Zoom and scroll stay each
-  view's own.
+- **Page sync**: zoom and position only; which page does not matter (the
+  user, 2026-10-19: "x, y and zoom relative to whatever page is in focus,
+  no matter what"). Each view stays on its own page; when one zooms or
+  scrolls, the other takes the same zoom and shows the same spot of *its*
+  page in focus — the same points from the page's top left corner, as the
+  page lies on screen (turned pages included), so pages of different sizes
+  line up at the same physical spot. A spot past the edge of a smaller page
+  stops at that edge; desk showing beyond a page's edge shows beyond the
+  other's edge too. Going to another page in one view leaves the other on
+  its page (at the same spot of it); scrolling on across a page boundary
+  carries the other across its own boundary with it.
 - **Document sync**: the views are locked together. A scroll, zoom or page
   change in one is repeated in the other by the same relative amount, across
   two different documents too.
@@ -21,6 +29,10 @@ difference. Page sizes and turns differ from document to document; shares
 of the page do not. A view that cannot follow (it has fewer pages, or is at
 the zoom limit) stays as near as it can and comes back into step as soon as
 the other comes back.
+
+Page sync keeps which page each view is on (its page in focus) rather than
+reading it afresh from the middle of the view each time, so a view sitting
+in the gap between two pages does not flip between them.
 
 Whatever is being repeated is repeated once: while one view's move is being
 carried to the others, nothing they do in turn is carried anywhere.
@@ -126,6 +138,29 @@ def put(view, place: Place) -> None:
                           box.top() + place.down * box.height()), middle_of(view))
 
 
+def focus_page(view) -> Optional[int]:
+    """The page under the middle of *view* (the nearest, on the desk)."""
+    frames = _frames(view)
+    if not frames:
+        return None
+    point = view.viewportTransform().inverted()[0].map(middle_of(view))
+    frame = view.scene().frame_at(point)
+    return frames.index(frame) if frame in frames else None
+
+
+def same_spot(offset: float, size: float, other_size: float) -> float:
+    """Page sync, along one side: the spot *offset* points into a page
+    *size* long, on a page *other_size* long. On the page it is the same
+    number of points in, stopping at the edge of a shorter page; on the
+    desk before the page it is as far before; on the desk past its end, as
+    far past the other's end."""
+    if offset < 0:
+        return offset
+    if offset > size:
+        return other_size + (offset - size)
+    return min(offset, other_size)
+
+
 def one_page_at_a_time(view) -> bool:
     return getattr(view.scene(), "page_mode", "continuous") in ("single", "side")
 
@@ -143,33 +178,9 @@ class Follower:
     def in_hand(self) -> bool:
         return self.view is self.window.view
 
-    def page(self) -> int:
-        if self.in_hand:
-            return self.window.current_index
-        return int(getattr(self.view, "_shown_page", 0))
-
-    def go_to_page(self, index: int) -> None:
-        """Page sync: go to page *index* (kept to the pages it has), as
-        going to it there would — unless it is on that page already."""
-        count = len(_frames(self.view))
-        if not count:
-            return
-        index = max(0, min(index, count - 1))
-        if index == self.page():
-            return
-        if self.in_hand:
-            self.window.go_to_page(index)
-            return
-        view = self.view
-        view.scene().show_page(index)
-        view._shown_page = index
-        view.go_to_page_top(index)
-        view._shown_page = index
-        self._note_page(index)
-
     def bring_page_on(self, index: int) -> None:
-        """Document sync: in Single Page (or Side-by-Side), page *index*
-        comes onto the canvas before the view is put on it."""
+        """In Single Page (or Side-by-Side), page *index* comes onto the
+        canvas before the view is put on it."""
         frames = _frames(self.view)
         if not frames or not one_page_at_a_time(self.view):
             return
@@ -198,6 +209,11 @@ class ViewSync:
     _carrying = False
     #: (first view, second view) -> (the two views, their canvases then, the Link)
     _links: dict = {}
+    #: Page sync: each view's page in focus -> (its canvas then, the page)
+    _focus = weakref.WeakKeyDictionary()
+    #: a page gone to (not scrolled onto) is being shown: Page sync leaves
+    #: the other view on its own page
+    _jumping = False
 
     def __init__(self, window):
         self._window = weakref.ref(window)
@@ -225,6 +241,38 @@ class ViewSync:
     @classmethod
     def carrying(cls) -> bool:
         return cls._carrying
+
+    @classmethod
+    @contextmanager
+    def jumping(cls):
+        """A page gone to — Thumbnails, the page box, a key, a bookmark, a
+        link, a Find result — rather than scrolled onto."""
+        was, cls._jumping = cls._jumping, True
+        try:
+            yield
+        finally:
+            cls._jumping = was
+
+    # -- Page sync: the page each view is on ---------------------------------
+    @classmethod
+    def _page_in_focus(cls, view) -> Optional[int]:
+        frames = _frames(view)
+        held = cls._focus.get(view)
+        if held is not None:
+            canvas, index = held
+            if canvas() is view.scene() and 0 <= index < len(frames) \
+                    and frames[index].isVisible():
+                return index
+        index = focus_page(view)
+        cls._note_focus(view, index)
+        return index
+
+    @classmethod
+    def _note_focus(cls, view, index: Optional[int]) -> None:
+        if index is None or view.scene() is None:
+            cls._focus.pop(view, None)
+        else:
+            cls._focus[view] = (weakref.ref(view.scene()), index)
 
     # -- who follows ---------------------------------------------------------
     def _document_in(self, view):
@@ -311,8 +359,10 @@ class ViewSync:
             return
         views = [pane.view for pane in getattr(window, "_panes", ())] or [window.view]
         for view in views:
+            self._note_focus(view, focus_page(view))
             for follower in self._all_followers(view):
                 self.link(view, follower.view)
+                self._note_focus(follower.view, focus_page(follower.view))
 
     def _all_followers(self, view) -> list:
         """As followers(), whatever the sync is now."""
@@ -337,7 +387,11 @@ class ViewSync:
         """*view* was zoomed or scrolled (by anything at all)."""
         if self._carrying or getattr(view, "_zooming", False) or view.scene() is None:
             return
-        if self.mode() != DOCUMENT:
+        mode = self.mode()
+        if mode == PAGE:
+            self._page_moved(view)
+            return
+        if mode != DOCUMENT:
             return
         followers = self.followers(view)
         if not followers:
@@ -351,6 +405,47 @@ class ViewSync:
                     self._follow(view, here, follower)
                 except RuntimeError:
                     continue                   # a view being taken down
+
+    def _page_moved(self, source) -> None:
+        """Page sync: the other views take *source*'s zoom and its spot on
+        its page in focus, each on its own page in focus."""
+        was = self._page_in_focus(source)
+        here = focus_page(source)
+        if here is None or was is None:
+            return
+        # scrolled on across a page boundary: the others go on across theirs
+        step = 0 if self._jumping else here - was
+        self._note_focus(source, here)
+        followers = self.followers(source)
+        if not followers:
+            return
+        box = page_box(_frames(source)[here])
+        middle = source.viewportTransform().inverted()[0].map(middle_of(source))
+        offset = middle - box.topLeft()
+        with self.quiet():
+            for follower in followers:
+                try:
+                    self._take_spot(source, offset, box, step, follower)
+                except RuntimeError:
+                    continue
+
+    def _take_spot(self, source, offset: QPointF, box: QRectF, step: int,
+                   follower: Follower) -> None:
+        view = follower.view
+        frames = _frames(view)
+        if not frames:
+            return
+        index = self._page_in_focus(view)
+        index = max(0, min((index if index is not None else 0) + step, len(frames) - 1))
+        if view.scene() is source.scene() and one_page_at_a_time(source):
+            index = focus_page(source)          # one canvas, one spread shown: its page
+        follower.bring_page_on(index)
+        view.set_zoom(source.zoom())
+        there = page_box(frames[index])
+        view.bring_to(QPointF(there.left() + same_spot(offset.x(), box.width(), there.width()),
+                              there.top() + same_spot(offset.y(), box.height(), there.height())),
+                      middle_of(view))
+        self._note_focus(view, index)
 
     def _follow(self, source, here: Place, follower: Follower) -> None:
         link = self.link_from(source, follower.view)
@@ -367,18 +462,5 @@ class ViewSync:
         """*view* went to (or was scrolled onto) page *index*."""
         if self._carrying or view.scene() is None:
             return
-        mode = self.mode()
-        if mode == DOCUMENT:
+        if self.mode() in (PAGE, DOCUMENT):
             self.moved(view)
-            return
-        if mode != PAGE:
-            return
-        followers = self.followers(view)
-        if not followers:
-            return
-        with self.quiet():
-            for follower in followers:
-                try:
-                    follower.go_to_page(index)
-                except RuntimeError:
-                    continue
