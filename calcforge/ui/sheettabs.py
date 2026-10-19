@@ -87,8 +87,11 @@ class SheetTabs(QWidget):
         # showing while there are tabs, or they would go with it.
         view = getattr(self.window, "view", None)
         if view is not None:
-            view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn if found
-                                              else Qt.ScrollBarAsNeeded)
+            policy = Qt.ScrollBarAlwaysOn if found else Qt.ScrollBarAsNeeded
+            if view.horizontalScrollBarPolicy() != policy:
+                # Qt lays the whole view out again when told, changed or not:
+                # 80 ms of every page scrolled onto in a drawing set (2026-10-19)
+                view.setHorizontalScrollBarPolicy(policy)
             scroll = view.horizontalScrollBar()
             name = "sheetRowScroll" if found else ""
             if scroll.objectName() != name:

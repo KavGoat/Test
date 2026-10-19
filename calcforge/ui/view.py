@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import time
 
 import numpy  # noqa: F401  (loaded now: the first drag that snaps needs it at once)
 import os
@@ -1430,12 +1431,55 @@ class PageView(QGraphicsView):
         viewport.setAcceptDrops(self.acceptDrops())
         return self.gpu
 
+    def paintEvent(self, event) -> None:
+        """Paint the canvas, the pages first saying whether their markups
+        stay inside them (PageFrame.say_whether_markups_stay_in), so Qt can
+        pass by the markups of a page that is not being repainted."""
+        now = time.monotonic()
+        for frame in getattr(self.scene(), "frames", None) or ():
+            frame.say_whether_markups_stay_in(now)
+        super().paintEvent(event)
+
+    #: (across, down, when): which way the view last scrolled, each -1, 0 or
+    #: 1 (down and right positive), and when (time.monotonic)
+    _heading = (0, 0, 0.0)
+
+    def heading(self) -> tuple:
+        """Which way the view is scrolling — (across, down), each -1, 0 or 1
+        — or (0, 0) once it has been still a moment. The page asks for its
+        squares further ahead that way (PageFrame.paint_the_pdf)."""
+        across, down, when = self._heading
+        return (across, down) if time.monotonic() - when < 0.5 else (0, 0)
+
     def scrollContentsBy(self, dx: int, dy: int) -> None:
         if self._scroll_batch is not None:
             self._scroll_batch[0] += dx
             self._scroll_batch[1] += dy
             return
+        self._moved_by(dx, dy)
         super().scrollContentsBy(dx, dy)
+
+    def _moved_by(self, dx: int, dy: int) -> None:
+        """The view has scrolled: note which way, and soon give up what is
+        still to be drawn of pages it has left behind."""
+        if (not dx and not dy) or getattr(self, "_zooming", False):
+            return                    # a zoom keeping its point in place is not a scroll
+        # the contents move the other way to the view
+        self._heading = ((dx < 0) - (dx > 0), (dy < 0) - (dy > 0), time.monotonic())
+        timer = getattr(self, "_far_timer", None)
+        if timer is None:
+            timer = self._far_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._forget_far_pages)
+        if not timer.isActive():
+            timer.start(60)
+
+    def _forget_far_pages(self) -> None:
+        scene = self.scene()
+        if not isinstance(scene, DocumentScene):
+            return
+        from ..io import pdftiles
+        pdftiles.TILES.give_up_out_of_sight(scene.pages_near_the_screen())
 
     def scroll_both(self, dx: int, dy: int) -> None:
         """Move the view by (dx, dy) as one scroll. Set across and then down,
@@ -1451,6 +1495,7 @@ class PageView(QGraphicsView):
             moved_x, moved_y = self._scroll_batch
             self._scroll_batch = None
         if moved_x or moved_y:
+            self._moved_by(moved_x, moved_y)
             super().scrollContentsBy(moved_x, moved_y)
 
     def finish_scrolling(self) -> None:

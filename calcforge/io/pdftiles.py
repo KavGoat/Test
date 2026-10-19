@@ -38,6 +38,13 @@ TILE = 1024
 #: The longest edge of the small picture kept of a whole page.
 THUMBNAIL_EDGE = 1100
 
+#: The longest edge of the smallest picture of a page: the bottom rung of the
+#: ladder, drawn for every page of the document in the background once it
+#: opens, so a page scrolled or zoomed into view faster than anything sharper
+#: can be drawn shows itself, soft, rather than a blank sheet, as Bluebeam's
+#: does (the user, 2026-10-19). A quarter of a megabyte a page.
+PREVIEW_EDGE = 256
+
 def _installed_memory() -> int:
     """Physical memory in bytes, or 0 when the system will not say."""
     try:
@@ -71,6 +78,8 @@ def _installed_memory() -> int:
 CACHE_BYTES = max(192 * 1024 * 1024,
                   min(_installed_memory() // 8, 2048 * 1024 * 1024))
 SHEET_CACHE_BYTES = max(32 * 1024 * 1024, CACHE_BYTES // 6)
+#: Every page's preview of a 500-sheet set, and the most a small one may take.
+PREVIEW_CACHE_BYTES = 128 * 1024 * 1024
 
 #: The most tiles one repaint will ask for. A screenful is about a dozen, so
 #: this is several screenfuls of margin and still a bound: past it the answers
@@ -163,6 +172,12 @@ class SheetKey:
     annotations: bool
     #: The page's own annotations to leave out — see :class:`TileKey`.
     without: tuple = ()
+    #: Its longest edge, in pixels: the sheet's, or the preview's.
+    edge: int = THUMBNAIL_EDGE
+
+    @property
+    def preview(self) -> bool:
+        return self.edge != THUMBNAIL_EDGE
 
 
 class _Worker(QThread):
@@ -181,6 +196,9 @@ class _Worker(QThread):
         from .pdfrender import worker_count
         self.process_count = max(1, min(8, int(processes))) if processes is not None else worker_count()
         self._work = {}
+        # Asked for in the background (each page's preview): drawn, oldest
+        # first, only while nothing above is waiting.
+        self._later = {}
         self._lock = threading.Lock()
         self._ready = threading.Event()
         self._wanted = wanted if wanted is not None else set()
@@ -188,10 +206,11 @@ class _Worker(QThread):
         self._forgotten = set()
         self.stats = {}
 
-    def submit(self, key, data, width, height):
+    def submit(self, key, data, width, height, later=False):
         with self._lock:
             self._work.pop(key, None)
-            self._work[key] = (key, data, width, height)
+            self._later.pop(key, None)
+            (self._later if later else self._work)[key] = (key, data, width, height)
         self._ready.set()
 
     def stop(self):
@@ -201,15 +220,20 @@ class _Worker(QThread):
     def drop(self, source):
         with self._lock:
             self._forgotten.add(source)
-            for key in list(self._work):
-                if not source or key.source == source:
-                    self._work.pop(key, None)
+            for queue in (self._work, self._later):
+                for key in list(queue):
+                    if not source or key.source == source:
+                        queue.pop(key, None)
         self._ready.set()
 
     def _next(self):
         with self._lock:
             while self._work:
                 _, job = self._work.popitem()
+                if job[0] in self._wanted:
+                    return job
+            while self._later:
+                job = self._later.pop(next(iter(self._later)))
                 if job[0] in self._wanted:
                     return job
         return None
@@ -356,7 +380,7 @@ class _Worker(QThread):
                                 continue
                             if isinstance(key, SheetKey):
                                 region = (0., 0., width, height)
-                                scale = min(THUMBNAIL_EDGE / max(width, height, 1.), 4.)
+                                scale = min(key.edge / max(width, height, 1.), 4.)
                             else:
                                 scale = key.scale
                                 size = TILE / scale
@@ -411,6 +435,7 @@ class _Worker(QThread):
                     finish_slot(slot)
                 with self._lock:
                     self._work.clear()
+                    self._later.clear()
 
 
 class TileCache(QObject):
@@ -427,6 +452,13 @@ class TileCache(QObject):
         super().__init__()
         self._tiles: dict[TileKey, QPixmap] = {}
         self._sheets: dict[SheetKey, QPixmap] = {}
+        # the bottom rung: every page small (PREVIEW_EDGE), oldest out first
+        self._previews: dict[SheetKey, QPixmap] = {}
+        self._preview_bytes = 0
+        # what is waiting in the background queue (preview(later=True))
+        self._behind: set = set()
+        # the sheets (not previews) asked for, some perhaps arrived since
+        self._sheets_out: set = set()
         self._sheet_counts: dict = {}     # source -> sheets arrived or failed (see sheet_count)
         # Shared with the worker, which reads it to decide whether a job it is
         # about to start is still worth doing. A set of immutable keys, added
@@ -511,7 +543,31 @@ class TileCache(QObject):
             # that arrives repaints the canvas, which asks for the next few, so
             # they fill in from the top instead of all being waited for.
             self._ask(key, data, page, sheet=True)
+            if key in self._waiting:
+                self._sheets_out.add(key)
         return None
+
+    def preview(self, source: str, data: bytes, index: int, page: QRectF,
+                annotations: bool = True, ask: bool = True, without: tuple = (),
+                later: bool = False) -> Optional[QPixmap]:
+        """The smallest picture of the whole page (PREVIEW_EDGE), asking for
+        it if need be — *later*: in the background, behind everything asked
+        for on screen, in the order asked."""
+        key = SheetKey(source, index, annotations, tuple(without), PREVIEW_EDGE)
+        found = self._previews.get(key)
+        if found is not None:
+            if not later:
+                self._previews.pop(key)
+                self._previews[key] = found
+            return found if not found.isNull() else None
+        if ask:
+            self._ask(key, data, page, sheet=True, later=later)
+        return None
+
+    def has_preview(self, source: str, index: int, annotations: bool = True,
+                    without: tuple = ()) -> bool:
+        return SheetKey(source, index, annotations, tuple(without), PREVIEW_EDGE) \
+            in self._previews
 
     def sheet_count(self, source) -> int:
         """How many small pictures of *source*'s pages are drawn (or wanted):
@@ -520,7 +576,10 @@ class TileCache(QObject):
         return counts.get(source, 0)
 
     def _sheets_wanted(self) -> int:
-        return sum(1 for key in self._waiting if isinstance(key, SheetKey))
+        # (not every key waiting looked through: with every page's preview
+        # asked for, that was a few hundred on each repaint of each page)
+        self._sheets_out &= self._waiting
+        return len(self._sheets_out)
 
     # -- a zoom in progress --------------------------------------------------
     def hold(self, seconds: float = 0.15) -> None:
@@ -862,6 +921,31 @@ class TileCache(QObject):
                 self.annotation_preview(source, data, index, page, step, xref, outer)
         return ready
 
+    def expect_annotation(self, source: str, data: bytes, index: int, page: QRectF,
+                          scale: float, xref: int, box: QRectF) -> None:
+        """A zoom is on its way to *scale*: the squares of one of the page's
+        markups at it, asked for now (as annotation_tiles asks, without
+        working out what stands in meanwhile: nothing is drawn from this,
+        and working it out for every markup in view at every notch of the
+        wheel was 40 ms a notch on a marked-up set, 2026-10-19)."""
+        step = zoom_step(scale)
+        size = TILE / step
+        outer = QRectF(box).intersected(page)
+        if size <= 0 or outer.isEmpty():
+            return
+        edges = (math.floor(outer.left()), math.floor(outer.top()),
+                 math.ceil(outer.right()), math.ceil(outer.bottom()))
+        asked = 0
+        for row in range(max(int(outer.top() // size), 0), int((outer.bottom() - 1e-6) // size) + 1):
+            for col in range(max(int(outer.left() // size), 0), int((outer.right() - 1e-6) // size) + 1):
+                key = AnnotationTileKey(source, index, xref, step, col, row, edges)
+                if key in self._tiles:
+                    continue
+                self._ask(key, data, page, sheet=False)
+                asked += 1
+                if asked >= MOST_TILES_AT_ONCE:
+                    return
+
     def annotation_preview(self, source: str, data: bytes, index: int, page: QRectF,
                            scale: float, xref: int, box: QRectF) -> None:
         """Make sure something of a markup is drawn, at whatever zoom: if
@@ -956,17 +1040,40 @@ class TileCache(QObject):
                              for scale, omitted, area in retained)]
         self._waiting.difference_update(stale)
 
-    def _ask(self, key, data: bytes, page: QRectF, sheet: bool) -> None:
-        if key in self._waiting or not data:
+    def give_up_out_of_sight(self, near: set) -> None:
+        """Give up the squares still wanted of pages no window is near now
+        (*near*: the (source, page) pairs on or about the screens). A fast
+        scroll through a set asks for every sheet it passes; drawn after it
+        has gone by, they kept the render processes from the sheet it had
+        come to (2026-10-19). The pictures of whole pages are kept asked
+        for: they are what a page scrolled back to shows first."""
+        stale = [key for key in self._waiting
+                 if not isinstance(key, SheetKey)
+                 and (key.source, key.index) not in near
+                 and key not in self._ahead]
+        self._waiting.difference_update(stale)
+
+    def _ask(self, key, data: bytes, page: QRectF, sheet: bool,
+             later: bool = False) -> None:
+        if not data:
+            return
+        if key in self._waiting:
+            if not later and key in self._behind:
+                # asked for in the background, and now wanted on screen:
+                # to the front of the queue
+                self._behind.discard(key)
+                self._started().submit(key, data, page.width(), page.height())
             return
         failed = self._failures.get(key)
         if failed is not None and (failed[0] >= 3 or time.monotonic() < failed[1]):
             return
         worker = self._started()
         self._waiting.add(key)
+        if later:
+            self._behind.add(key)
         # Onto the queue and straight back: a repaint must never wait for a
         # page to be drawn.
-        worker.submit(key, data, page.width(), page.height())
+        worker.submit(key, data, page.width(), page.height(), later)
 
     # -- what comes back ---------------------------------------------------
     def _tile_arrived(self, key: TileKey, image: QImage) -> None:
@@ -986,11 +1093,20 @@ class TileCache(QObject):
         if key not in self._waiting:
             return
         self._waiting.discard(key)
+        self._behind.discard(key)
         if image.isNull():
             self._render_failed(key)
             return
         self._failures.pop(key, None)
         pixmap = QPixmap.fromImage(image)
+        if key.preview:
+            self._preview_bytes -= _weight(self._previews.pop(key, None))
+            self._previews[key] = pixmap
+            self._preview_bytes += _weight(pixmap)
+            while self._preview_bytes > PREVIEW_CACHE_BYTES and self._previews:
+                self._preview_bytes -= _weight(self._previews.pop(next(iter(self._previews))))
+            self.sheetReady.emit(key)
+            return
         self._sheet_bytes -= _weight(self._sheets.pop(key, None))
         self._sheets[key] = pixmap
         self._sheet_counts[key.source] = self._sheet_counts.get(key.source, 0) + 1
@@ -1026,9 +1142,12 @@ class TileCache(QObject):
             self._tiles.clear()
             self._index.clear()
             self._sheets.clear()
+            self._previews.clear()
             self._held = 0
             self._sheet_bytes = 0
+            self._preview_bytes = 0
             self._waiting.clear()
+            self._behind.clear()
             self._ahead.clear()
             self._expected.clear()
             self._failures.clear()
@@ -1037,6 +1156,7 @@ class TileCache(QObject):
                 self._worker.drop("")
             return
         self._waiting.difference_update(key for key in list(self._waiting) if key.source == source)
+        self._behind.difference_update(key for key in list(self._behind) if key.source == source)
         self._ahead.difference_update(key for key in list(self._ahead) if key.source == source)
         for key in list(self._failures):
             if key.source == source:
@@ -1049,6 +1169,8 @@ class TileCache(QObject):
             self._drop(key)
         for key in [k for k in self._sheets if k.source == source]:
             self._sheet_bytes -= _weight(self._sheets.pop(key, None))
+        for key in [k for k in self._previews if k.source == source]:
+            self._preview_bytes -= _weight(self._previews.pop(key, None))
         if self._worker is not None:
             self._worker.drop(source)
 

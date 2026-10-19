@@ -13,12 +13,14 @@ to sit on the canvas today.
 from __future__ import annotations
 
 import math
+import time
 from typing import Optional
 
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer, Signal, QSignalBlocker
 from PySide6.QtGui import (QBrush, QColor, QImage, QLinearGradient, QPainter,
                            QPen, QPicture, QPixmap, QTransform)
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsScene, QGraphicsItemGroup
+from PySide6.QtWidgets import (QGraphicsItem, QGraphicsObject, QGraphicsScene,
+                               QGraphicsItemGroup, QGraphicsView)
 
 from ..core.document import MM_TO_PT, Document, Page
 from ..theme import CANVAS, LIGHT
@@ -480,6 +482,7 @@ class PageFrame(QGraphicsObject):
     def set_sheet_rect(self, rect: Optional[QRectF]) -> None:
         if rect == self.sheet_rect:
             return
+        self.markups_may_have_moved()
         self.prepareGeometryChange()
         self.sheet_rect = QRectF(rect) if rect is not None else None
 
@@ -491,6 +494,61 @@ class PageFrame(QGraphicsObject):
     def boundingRect(self) -> QRectF:
         room = self.MARKUP_ROOM
         return self.page_rect().adjusted(-room, -room, SHADOW_DEPTH + room, SHADOW_DEPTH + room)
+
+    # -- telling Qt the markups stay on the page --------------------------
+    #: Whether Qt has been told every markup lies inside the page's shape
+    #: (ItemContainsChildrenInShape), and until when not to say so again
+    #: after a markup has changed (time.monotonic).
+    _says_markups_inside = False
+    _markups_settle_at = 0.0
+    _markups_checked_at = -1.0e9
+
+    def keeps_its_markups_in(self) -> bool:
+        """Whether everything on this page lies inside the page itself — its
+        shape, the box a click on it hits.
+
+        Qt, with no index of the canvas's items, goes down every page's
+        markups asking each how big it is: a call into Python per markup, a
+        thousand of them on a marked-up set, on every frame of a scroll or a
+        zoom, whether the page is on screen or not (20 ms a frame on a
+        162-sheet set, the user, 2026-10-19). A page whose markups all lie
+        inside it says so (say_whether_markups_stay_in) and Qt passes it by
+        when it is not where the repaint is. Inside the page's shape rather
+        than its drawing room: then a click, a marquee or a snap asking what
+        is where finds exactly what it found before — anything it could hit
+        on such a page is inside the page. Qt keeps the box round the markups
+        itself, and works it out again only when one has moved or changed
+        size, so asking is cheap."""
+        inner = self.page_rect().adjusted(-1, -1, SHADOW_DEPTH + 1, SHADOW_DEPTH + 1)
+        return inner.contains(self.childrenBoundingRect())
+
+    def markups_may_have_moved(self) -> None:
+        """A markup on this page is changing: until it has been still a
+        moment, Qt goes through this page's markups as it always did."""
+        self._markups_settle_at = time.monotonic() + 0.5
+        if self._says_markups_inside:
+            self._says_markups_inside = False
+            self.setFlag(QGraphicsItem.ItemContainsChildrenInShape, False)
+
+    def say_whether_markups_stay_in(self, now: float) -> None:
+        """Tell Qt whether this page keeps its markups inside it, if that has
+        changed: when a markup on it has been still a moment, and every
+        quarter of a second besides (PageView.paintEvent). Said only when it
+        changes: telling Qt has it go through every markup of the page."""
+        if now < self._markups_settle_at:
+            return
+        if now - self._markups_checked_at < 0.25 and self._markups_checked_at >= self._markups_settle_at:
+            return
+        self._markups_checked_at = now
+        inside = self.keeps_its_markups_in()
+        if inside != self._says_markups_inside:
+            self._says_markups_inside = inside
+            self.setFlag(QGraphicsItem.ItemContainsChildrenInShape, inside)
+
+    def itemChange(self, change, value):
+        if change in (QGraphicsItem.ItemChildAddedChange, QGraphicsItem.ItemChildRemovedChange):
+            self.markups_may_have_moved()
+        return super().itemChange(change, value)
 
     def shape(self):
         """What a click on the page hits: the page and its shadow, not the
@@ -664,9 +722,25 @@ class PageFrame(QGraphicsObject):
             # — rendered on the spare cores while the screen is looked at, so
             # what scrolls in is already sharp (2026-10-01). The tiles nearest
             # the middle are asked for first.
-            margin_x = shown_part.width() * 0.25
-            margin_y = shown_part.height() * 0.75
-            asked = shown_part.adjusted(-margin_x, -margin_y, margin_x, margin_y)
+            # Of the whole window, not of the strip a scroll has just
+            # uncovered: measured from a strip thirty pixels high, the margin
+            # was a few pixels, and asking for it gave up the squares the
+            # last full repaint had asked for ahead (2026-10-19). Further
+            # ahead the way the window is going, less behind it.
+            view = consumer.parentWidget() if consumer is not None else None
+            window = (self.mapRectFromScene(view.mapToScene(view.viewport().rect())
+                                            .boundingRect()).intersected(whole)
+                      if isinstance(view, QGraphicsView) else QRectF())
+            basis = window if window.contains(shown_part) else shown_part
+            across, down = getattr(view, "heading", lambda: (0, 0))() \
+                if view is not None else (0, 0)
+            margin_x = basis.width() * 0.25
+            margin_y = basis.height() * 0.75
+            asked = basis.adjusted(
+                -margin_x * (0.5 if across > 0 else 2.0 if across < 0 else 1.0),
+                -margin_y * (0.33 if down > 0 else 2.0 if down < 0 else 1.0),
+                margin_x * (0.5 if across < 0 else 2.0 if across > 0 else 1.0),
+                margin_y * (0.33 if down < 0 else 2.0 if down > 0 else 1.0))
             if self.file_draws:
                 self._patch_what_changed(data, index, whole, scale, shown, without)
             tiles, missing, covered = pdftiles.TILES.tiles(
@@ -688,6 +762,13 @@ class PageFrame(QGraphicsObject):
                                          shown, without=without,
                                          ask=(scale > pdftiles._sheet_scale(whole)
                                               or pdftiles.TILES.held()))
+            if sheet is None:
+                # the bottom rung of the ladder, drawn for every page as the
+                # document opened (DocumentScene.ask_for_previews): a page
+                # come into view faster than anything sharper is soft, never
+                # blank
+                sheet = pdftiles.TILES.preview(page.pdf_key, data, index, whole,
+                                               shown, without=without)
             if sheet is not None:
                 part = shown_part if not shown_part.isEmpty() else whole
                 across = sheet.width() / max(whole.width(), 1.0)
@@ -698,6 +779,8 @@ class PageFrame(QGraphicsObject):
                            part.width() * across, part.height() * down))
                 drew = True
         for where, tile in tiles:
+            if not where.intersects(shown_part):
+                continue                  # ready, but not where this repaint is
             _draw_on_the_pixel_grid(painter, where, tile)
             drew = True
         if self._patches:
@@ -842,9 +925,8 @@ class PageFrame(QGraphicsObject):
                 continue
             where = QRectF(*box).adjusted(-1, -1, 1, 1)
             if where.intersects(region):
-                pdftiles.TILES.annotation_tiles(page.pdf_key, data, index, whole, scale,
-                                                where, item.from_annotation, where,
-                                                expecting=True)
+                pdftiles.TILES.expect_annotation(page.pdf_key, data, index, whole, scale,
+                                                 item.from_annotation, where)
 
     def markups_drawn_alone(self) -> tuple:
         """The page's own annotations that came in as markups: on screen the
@@ -1874,6 +1956,12 @@ class DocumentScene(QGraphicsScene):
         self._settling.setSingleShot(True)
         self._settling.setInterval(0)
         self._settling.timeout.connect(self._draw_what_arrived)
+        # Once the pages are laid out: every page's preview, in the
+        # background (ask_for_previews).
+        self._previews_soon = QTimer(self)
+        self._previews_soon.setSingleShot(True)
+        self._previews_soon.setInterval(0)
+        self._previews_soon.timeout.connect(self.ask_for_previews)
 
     def selection_reshaped(self) -> None:
         """The selection changed, or what it is made of did (grouped or
@@ -1944,9 +2032,59 @@ class DocumentScene(QGraphicsScene):
         for frame in self.frames:
             if frame.shows(key):
                 frame.update()
+        if getattr(key, "preview", False):
+            return                  # the bottom rung: no sheet waits for it
+        # Only the pages in a window: a page off the screen is not painted,
+        # so it asks for its picture when it is scrolled to. Asking every
+        # page of a 162-sheet set whether it had one was 20 ms of every
+        # picture arriving, felt as a hitch in a scroll (2026-10-19).
+        seen = [view.mapToScene(view.viewport().rect()).boundingRect()
+                for view in self.views()]
         for frame in self.frames:
-            if frame.wants_its_page_drawn():
+            box = frame.sceneBoundingRect()
+            if any(box.intersects(area) for area in seen) and frame.wants_its_page_drawn():
                 frame.update()
+
+    def ask_for_previews(self) -> None:
+        """Every page's preview — the bottom rung of the ladder, a picture
+        of the whole page PREVIEW_EDGE pixels long — asked for in the
+        background, behind anything the screen wants, nearest the page in
+        view first. However fast the pages go by, each shows itself, soft,
+        until its sharper pictures are drawn (the user, 2026-10-19: Bluebeam
+        draws low resolution while zoomed out)."""
+        from ..io import pdftiles
+
+        here = 0
+        for view in self.views():
+            if hasattr(view, "visible_page_index"):
+                here = view.visible_page_index()
+                break
+        for i in sorted(range(len(self.frames)), key=lambda i: abs(i - here)):
+            frame = self.frames[i]
+            page = frame.page
+            if page.pdf_key is None or page.pdf_page_index is None or frame.is_sheet:
+                continue
+            data = self.document.asset(page.pdf_key)
+            if not data:
+                continue
+            pdftiles.TILES.preview(page.pdf_key, data, int(page.pdf_page_index),
+                                   frame.page_rect(),
+                                   bool(getattr(page, "pdf_annotations", True)),
+                                   without=frame.markups_drawn_alone(), later=True)
+
+    def pages_near_the_screen(self) -> set:
+        """(source, page) of every PDF page in a window, or within a screen
+        of one: what is worth drawing squares of (pdftiles.give_up_out_of_sight)."""
+        near = set()
+        for view in self.views():
+            seen = view.mapToScene(view.viewport().rect()).boundingRect()
+            seen.adjust(-seen.width(), -seen.height(), seen.width(), seen.height())
+            for frame in self.frames:
+                page = frame.page
+                if page.pdf_key is not None and page.pdf_page_index is not None \
+                        and frame.sceneBoundingRect().intersects(seen):
+                    near.add((page.pdf_key, int(page.pdf_page_index)))
+        return near
 
     def set_canvas_colour(self, colour: str) -> None:
         self.setBackgroundBrush(QBrush(QColor(colour)))
@@ -2056,6 +2194,7 @@ class DocumentScene(QGraphicsScene):
                     box = rect if box.isNull() else box.united(rect)
             self._pages_rect = box
             self._apply_desk_margin()
+            self._previews_soon.start()
             return
         for frame in self.frames:
             if not frame.isVisible():
@@ -2063,6 +2202,7 @@ class DocumentScene(QGraphicsScene):
         height = max(y - PAGE_GAP, 0.0)
         self._pages_rect = QRectF(0, 0, right, height)
         self._apply_desk_margin()
+        self._previews_soon.start()
 
     def set_desk_margin(self, across: float, down: float) -> None:
         """Leave enough canvas around the pages to centre any page edge."""
