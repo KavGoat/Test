@@ -11,8 +11,9 @@ This is Microsoft's documented pattern, "Custom Window Frame Using DWM":
 
 * WM_NCCALCSIZE takes away the top of the non-client area only, so the client
   area reaches the top of the window; the side and bottom borders stay
-  Windows' (resizing, shadow). Maximised, the top is pushed down by the frame
-  thickness, the part of a maximised window that hangs off the screen.
+  Windows' (resizing, shadow). Maximised as well: the window's contents are
+  then moved down by the frame's thickness, the part of a maximised window
+  that hangs off the screen (client_rect, content_top).
 * DwmExtendFrameIntoClientArea extends the frame down behind the title row,
   so the desktop window manager keeps drawing its caption buttons there. Qt
   paints the title row; the place where the buttons are is left transparent
@@ -86,6 +87,84 @@ def caption_button_at(point, caption_buttons_rect):
         return None
     third = (p.x() - rect.left()) / rect.width() * 3
     return (HTMINBUTTON, HTMAXBUTTON, HTCLOSE)[min(2, max(0, int(third)))]
+
+
+# -- the frame's geometry, maximised and not: pure, so it is tested anywhere --
+#
+# The user, 2026-10-19: "when not full screen the window controls buttons show
+# hover colouring but when in full screen [maximised] it does not work."
+#
+# A maximised window is made bigger than its monitor by its resize border
+# (SM_CXSIZEFRAME + SM_CXPADDEDBORDER, 8 device pixels at 100 %, 10 at 125 %,
+# 12 at 150 %) all round, so the border hangs off the screen. The window used
+# to take the top of the frame away only while restored: maximised, the
+# client area began that border's thickness below the window's top, leaving
+# a strip of non-client frame along the top. With a top frame of its own,
+# Windows treats the window as having a caption of its own up there, off the
+# screen, and DWM's lighting of its caption buttons does not follow the
+# pointer over the buttons it draws in the extended frame: they still click
+# (the window answers the hit test itself) but never light. Chrome, whose
+# caption buttons are DWM's too, keeps the top inset at nothing maximised as
+# well ("the top inset must be 0 or else Windows will draw a full native
+# titlebar outside the client area"), as does Microsoft's own sample. So now
+# the client area reaches the top of the window in both states, exactly as it
+# does restored, where the lighting works, and the window's contents are
+# moved down by the border instead (content_top), so the menus are on the
+# screen.
+
+def client_rect(window_rect, frame):
+    """The client area WM_NCCALCSIZE leaves, in screen device pixels, for a
+    window at *window_rect* (left, top, right, bottom) with a resize border
+    *frame* device pixels thick: Windows' own border at the sides and the
+    bottom, none at the top — maximised as well as restored."""
+    left, top, right, bottom = window_rect
+    return (left + frame, top, right - frame, bottom - frame)
+
+
+def content_top(frame, ratio, maximised):
+    """How far down the window's contents start, in its own (device-
+    independent) pixels: maximised, below the border that hangs off the top
+    of the screen; otherwise at the top. Rounded up to a whole pixel, so the
+    title row never starts off the screen."""
+    if not maximised or frame <= 0:
+        return 0
+    return math.ceil(frame / (ratio or 1.0) - 1e-6)
+
+
+def caption_buttons_in_client(bounds, window_rect, client_origin, ratio):
+    """Where Windows draws its caption buttons, in the window's client
+    coordinates (device-independent pixels), from DWMWA_CAPTION_BUTTON_BOUNDS
+    *bounds* (left, top, right, bottom, relative to the window's rect); None
+    when Windows did not say. *client_origin* is the client area's top left
+    on the screen (ClientToScreen of 0, 0)."""
+    if bounds is None:
+        return None
+    left, top, right, bottom = bounds
+    if right <= left or bottom <= top:
+        return None
+    dx = client_origin[0] - window_rect[0]
+    dy = client_origin[1] - window_rect[1]
+    ratio = ratio or 1.0
+    return QRectF((left - dx) / ratio, (top - dy) / ratio,
+                  (right - left) / ratio, (bottom - top) / ratio)
+
+
+def caption_button_under(screen_point, window_rect, maximised, bounds, dpi, frame):
+    """Which caption button is under *screen_point* (device pixels):
+    HTMINBUTTON, HTMAXBUTTON, HTCLOSE, or None — for a window at
+    *window_rect* on the screen, maximised or not, with Windows' caption
+    button *bounds* (DWMWA_CAPTION_BUTTON_BOUNDS), at *dpi* with a resize
+    border *frame* device pixels thick. What the window answers WM_NCHITTEST
+    with over the buttons, worked out as NativeTitleBar works it out: while
+    restored the top edge, a border deep, resizes, over the buttons too;
+    maximised the buttons reach the top of the screen."""
+    ratio = (dpi or 96) / 96.0
+    client = client_rect(window_rect, frame)
+    buttons = caption_buttons_in_client(bounds, window_rect, client[:2], ratio)
+    point = QPointF((screen_point[0] - client[0]) / ratio, (screen_point[1] - client[1]) / ratio)
+    if not maximised and point.y() < frame / ratio:
+        return None                           # the top edge: resizing
+    return caption_button_at(point, buttons)
 
 
 def hit_test(point, title_rect, widgets_rects, edge, caption_buttons_rect, maximised):
@@ -329,8 +408,12 @@ class _Win32:
         if not self.GetWindowRect(hwnd, self.ctypes.byref(window)):
             return None
         self.ClientToScreen(hwnd, self.ctypes.byref(origin))
-        dx, dy = origin.x - window.left, origin.y - window.top
-        return (bounds.left - dx, bounds.top - dy, bounds.right - dx, bounds.bottom - dy)
+        rect = caption_buttons_in_client((bounds.left, bounds.top, bounds.right, bounds.bottom),
+                                         (window.left, window.top, window.right, window.bottom),
+                                         (origin.x, origin.y), 1.0)
+        if rect is None:
+            return None
+        return (rect.left(), rect.top(), rect.right(), rect.bottom())
 
     def extend_frame(self, hwnd, top: int) -> None:
         margins = self.MARGINS(0, 0, max(0, int(top)), 0)
@@ -453,6 +536,9 @@ class NativeTitleBar(QObject):
         #: from the window's right edge, top, width, height), in
         #: device-independent pixels; None until it has
         self.caption = None
+        #: how far down the window's contents start: maximised, below the
+        #: border that hangs off the top of the screen (content_top)
+        self.top = 0
         self._hwnd = None
         bar.installEventFilter(self)
         window.installEventFilter(self)
@@ -501,7 +587,7 @@ class NativeTitleBar(QObject):
         if self.caption is not None:
             from_right, top, width, height = self.caption
         else:
-            from_right, top = 0, 0
+            from_right, top = 0, self.top
             width, height = FALLBACK_CAPTION_SIZE
         return QRectF(self.window.width() - from_right - width, top, width, height)
 
@@ -520,7 +606,12 @@ class NativeTitleBar(QObject):
             elif kind == QEvent.Show:
                 self.refresh(new_window=True)
                 QTimer.singleShot(0, self, self.refresh)
-            elif kind in (QEvent.Resize, QEvent.WindowStateChange, QEvent.ParentChange,
+            elif kind == QEvent.WindowStateChange:
+                # maximised or not: the contents step down off the hidden
+                # border, or back, before the window is next painted
+                self._follow_maximised()
+                QTimer.singleShot(0, self, self.refresh)
+            elif kind in (QEvent.Resize, QEvent.ParentChange,
                           QEvent.ActivationChange, QEvent.ScreenChangeInternal):
                 QTimer.singleShot(0, self, self.refresh)
         return False
@@ -559,6 +650,7 @@ class NativeTitleBar(QObject):
             if new_window or hwnd != self._hwnd:
                 self._hwnd = hwnd
                 api.frame_changed(hwnd)       # the client area takes the caption's place
+            self._follow_maximised(api, hwnd)
             bounds = api.caption_button_bounds(hwnd)
             ratio = self._ratio()
             if bounds is not None:
@@ -575,6 +667,23 @@ class NativeTitleBar(QObject):
             self.follow_theme(hwnd)
         self.bar.update()
 
+    def _follow_maximised(self, api=None, hwnd=None) -> None:
+        """Maximised, start the window's contents below the border that
+        hangs off the top of the screen (content_top); otherwise at the top."""
+        api = api or _api()
+        if hwnd is None:
+            if api is None or not (self.window.isWindow()
+                                   and self.window.testAttribute(Qt.WA_WState_Created)):
+                return
+            hwnd = int(self.window.winId())
+        top = 0
+        if self.showing() and api.has_caption(hwnd):
+            top = content_top(api.frame_thickness(hwnd), self._ratio(), bool(api.IsZoomed(hwnd)))
+        if top != self.top:
+            self.top = top
+            self.caption = None               # Windows says again where its buttons are
+            self.window.setContentsMargins(0, top, 0, 0)
+
     def _fit_title_row(self, caption) -> None:
         """Make room on the row for the caption buttons, and make the row at
         least as tall as they are."""
@@ -584,7 +693,8 @@ class NativeTitleBar(QObject):
             self._set_padding(None)
         else:
             self.gap.setFixedSize(max(0, math.ceil(self.window.width() - caption.left())), 1)
-            self._set_padding(math.ceil(caption.bottom()))
+            # the row starts below the hidden border, maximised
+            self._set_padding(max(1, math.ceil(caption.bottom() - self.top)))
         if (self.gap.width(), self._padding) != before:
             # the menu bar lays its corners out only when it is resized
             QApplication.sendEvent(self.bar, QResizeEvent(self.bar.size(), self.bar.size()))
@@ -736,15 +846,17 @@ class NativeTitleBar(QObject):
         if not msg.wParam or not api.has_caption(msg.hWnd):
             return None
         params = api.NCCALCSIZE_PARAMS.from_address(msg.lParam)
-        top, left = params.rgrc[0].top, params.rgrc[0].left
+        top = params.rgrc[0].top
         result = api.DefWindowProcW(msg.hWnd, WM_NCCALCSIZE, msg.wParam, msg.lParam)
         if result != 0:
             return True, result
-        # Only the top of the frame goes; the sides and bottom stay Windows'.
-        # A maximised window hangs off the screen by the frame's thickness —
-        # the side border's — so its top is pushed back onto the screen.
-        border = params.rgrc[0].left - left
-        params.rgrc[0].top = top + (border if api.IsZoomed(msg.hWnd) else 0)
+        # Only the top of the frame goes; the sides and bottom stay Windows'
+        # (client_rect). Maximised too: the window hangs off the screen by
+        # its border then, and its contents are moved down by that instead
+        # (content_top) — a strip of frame left along the top made Windows
+        # keep a caption of its own up there, and DWM's buttons stopped
+        # lighting up under the pointer (the user, 2026-10-19).
+        params.rgrc[0].top = top
         return True, 0
 
     def _hit(self, api, hwnd, lparam):

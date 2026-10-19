@@ -428,7 +428,7 @@ def draw_chart(painter: QPainter, rect: QRectF, spec: dict, data: list, wb=None)
         xaxis = None
         category = max((len(d.ys) for d in data), default=0)
     painter.save()
-    painter.setClipRect(rect)
+    painter.setClipRect(rect, Qt.IntersectClip)
     # gridlines and tick labels
     grid = QPen(GRID, 0.75)
     painter.setFont(af)
@@ -474,7 +474,7 @@ def draw_chart(painter: QPainter, rect: QRectF, spec: dict, data: list, wb=None)
         painter.setPen(QPen(GRID, 0.75))
         painter.drawLine(QPointF(plot.left(), base), QPointF(plot.right(), base))
     # the series
-    painter.setClipRect(plot.adjusted(-6, -6, 6, 6))
+    painter.setClipRect(plot.adjusted(-6, -6, 6, 6), Qt.IntersectClip)
     k = len(data)
     placed = []                     # every point drawn, so labels keep clear of them
     labels = []                     # trendlines' equations, placed once all is drawn

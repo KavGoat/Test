@@ -254,8 +254,11 @@ def test_sync_choice_propagates_and_zoom_preserves_source_anchor(window, qapp):
         assert other.window_sync.currentIndex() == 2
         at = window.view.viewport().rect().center()
         before = window.view.mapToScene(at)
+        factor = 2 / window.view.zoom()
+        was = other.view.zoom()
         window.view.set_zoom(2, at=at)
-        assert other.view.zoom() == 2
+        # the same zoom change in the other window (viewsync.py)
+        assert other.view.zoom() == pytest.approx(was * factor)
         assert (window.view.mapToScene(at) - before).manhattanLength() < 2
         other.window_sync.setCurrentIndex(0)
         assert window.window_sync.currentIndex() == 0

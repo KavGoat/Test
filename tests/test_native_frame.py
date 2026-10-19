@@ -301,12 +301,16 @@ def test_the_top_of_the_frame_goes_and_the_sides_stay(title_row, fake_win32):
     assert title_row.native_event(address) == (True, 0)
     rect = params.rgrc[0]
     assert (rect.left, rect.top, rect.right, rect.bottom) == (108, 100, 1092, 792)
-    # maximised, the top comes down by the frame that hangs off the screen
+    # maximised the same: the client area reaches the window's top, the
+    # border hanging off the screen with it, and the contents move down
+    # instead (a strip of frame left at the top stopped DWM lighting its
+    # buttons, the user, 2026-10-19)
     fake_win32.zoomed = True
     params.rgrc[0].left, params.rgrc[0].top = -8, -8
     params.rgrc[0].right, params.rgrc[0].bottom = 1928, 1048
     assert title_row.native_event(address) == (True, 0)
-    assert (params.rgrc[0].left, params.rgrc[0].top) == (0, 0)
+    assert (params.rgrc[0].left, params.rgrc[0].top) == (0, -8)
+    assert (params.rgrc[0].right, params.rgrc[0].bottom) == (1920, 1040)
     # full screen (a bare popup) and wParam FALSE are Windows' own
     fake_win32.caption_style = False
     assert title_row.native_event(address) is None
@@ -507,3 +511,148 @@ def test_full_screen_leaves_every_message_to_windows(window, scaled):
     assert _send(frame, N.WM_NCHITTEST, 0, at(right - 23, 18)) is None
     assert _send(frame, N.WM_NCLBUTTONUP, HTCLOSE, at(right - 23, 18)) is None
     assert fake.commands == []
+
+
+# -- maximised and restored, at 100, 125 and 150 % (the user, 2026-10-19:
+# "when not full screen the window controls buttons show hover colouring but
+# when in full screen [maximised] it does not work") -------------------------
+
+#: Windows' numbers: dpi, the resize border (SM_CYSIZEFRAME +
+#: SM_CXPADDEDBORDER at that dpi) and a caption button's size there
+SCALES = [(96, 8, 46, 30), (120, 10, 58, 38), (144, 12, 69, 45)]
+
+
+def _windows(dpi, frame, button_w, button_h):
+    """A restored window and a maximised one on a 1920 x 1040 work area, as
+    Windows has them: the maximised one bigger than the screen by its border
+    all round, DWMWA_CAPTION_BUTTON_BOUNDS relative to each window's rect
+    (restored: at the very top, inside the right-hand border; maximised: below
+    the border hanging off the top)."""
+    width = 3 * button_w
+    restored = (300, 200, 1500, 1000)
+    restored_bounds = (1200 - frame - width, 0, 1200 - frame, button_h)
+    maximised = (-frame, -frame, 1920 + frame, 1040 + frame)
+    full = 1920 + 2 * frame
+    maximised_bounds = (full - frame - width, frame, full - frame, frame + button_h)
+    return (restored, restored_bounds), (maximised, maximised_bounds)
+
+
+@pytest.mark.parametrize("dpi, frame, button_w, button_h", SCALES,
+                         ids=["100%", "125%", "150%"])
+def test_the_buttons_are_found_maximised_exactly_as_restored(dpi, frame, button_w, button_h):
+    (restored, restored_bounds), (maximised, maximised_bounds) = _windows(
+        dpi, frame, button_w, button_h)
+    for window_rect, bounds, zoomed in ((restored, restored_bounds, False),
+                                        (maximised, maximised_bounds, True)):
+        left = window_rect[0] + bounds[0]
+        top = window_rect[1] + bounds[1]
+        # the middle of each button, on the screen, is that button
+        for index, code in enumerate((HTMINBUTTON, HTMAXBUTTON, HTCLOSE)):
+            x = left + button_w * index + button_w // 2
+            y = top + button_h // 2 + (frame if not zoomed else 0)
+            assert nativeframe.caption_button_under((x, y), window_rect, zoomed, bounds,
+                                                    dpi, frame) == code, (dpi, zoomed, code)
+        # either side of them and below them, nothing
+        y = top + button_h // 2
+        assert nativeframe.caption_button_under((left - 3, y), window_rect, zoomed, bounds,
+                                                dpi, frame) is None
+        assert nativeframe.caption_button_under((left + 3 * button_w + 1, y + frame),
+                                                window_rect, zoomed, bounds, dpi,
+                                                frame) is None
+        assert nativeframe.caption_button_under((left + 5, top + button_h + 2), window_rect,
+                                                zoomed, bounds, dpi, frame) is None
+    # maximised, the buttons reach the very top of the screen (y = 0) and the
+    # top right corner is Close; restored, the top border resizes instead
+    assert nativeframe.caption_button_under((1919, 0), maximised, True, maximised_bounds,
+                                            dpi, frame) == HTCLOSE
+    corner = (restored[0] + restored_bounds[2] - 2, restored[1] + 1)
+    assert nativeframe.caption_button_under(corner, restored, False, restored_bounds,
+                                            dpi, frame) is None
+
+
+@pytest.mark.parametrize("dpi, frame, button_w, button_h", SCALES,
+                         ids=["100%", "125%", "150%"])
+def test_maximised_the_client_area_is_framed_as_restored_and_the_contents_step_down(
+        dpi, frame, button_w, button_h):
+    (restored, _), (maximised, _) = _windows(dpi, frame, button_w, button_h)
+    ratio = dpi / 96
+    for window_rect in (restored, maximised):
+        left, top, right, bottom = nativeframe.client_rect(window_rect, frame)
+        assert top == window_rect[1], "no frame along the top, maximised or not"
+        assert (left, right, bottom) == (window_rect[0] + frame, window_rect[2] - frame,
+                                         window_rect[3] - frame)
+    # maximised, the menus start on the screen: the client top is the
+    # window's, a border above the screen, and the contents start that far
+    # down (whole pixels of the window's own, never short of it)
+    step = nativeframe.content_top(frame, ratio, True)
+    client_top = nativeframe.client_rect(maximised, frame)[1]
+    assert client_top + step * ratio >= 0
+    assert client_top + step * ratio < 1 * ratio
+    assert nativeframe.content_top(frame, ratio, False) == 0
+
+
+@pytest.mark.parametrize("dpi, frame, button_w, button_h", SCALES,
+                         ids=["100%", "125%", "150%"])
+def test_caption_button_bounds_come_into_the_client_area_the_same_maximised(
+        dpi, frame, button_w, button_h):
+    (restored, restored_bounds), (maximised, maximised_bounds) = _windows(
+        dpi, frame, button_w, button_h)
+    ratio = dpi / 96
+    shown = []
+    for window_rect, bounds in ((restored, restored_bounds), (maximised, maximised_bounds)):
+        client = nativeframe.client_rect(window_rect, frame)
+        rect = nativeframe.caption_buttons_in_client(bounds, window_rect, client[:2], ratio)
+        width = (client[2] - client[0]) / ratio
+        # at the right-hand edge of the client area, three buttons wide
+        assert rect.right() == pytest.approx(width)
+        assert rect.width() == pytest.approx(3 * button_w / ratio)
+        shown.append(rect.top())
+    # maximised they sit a border lower in the client area: where the screen
+    # starts, and where the contents start (content_top)
+    assert shown[0] == pytest.approx(0)
+    assert shown[1] == pytest.approx(frame / ratio)
+    assert nativeframe.caption_buttons_in_client(None, restored, (0, 0), ratio) is None
+
+
+def test_maximised_the_title_row_steps_down_off_the_hidden_border(window, title_row,
+                                                                  fake_win32):
+    """Through the window procedure's stand-in: maximised, the menus move
+    down by the border that hangs off the screen, the buttons are found
+    where Windows then says they are, and restored it all goes back."""
+    bar = window.menuBar()
+    restored_top = bar.geometry().top()
+    fake_win32.bounds = (window.width() - 138, 0, window.width(), 30)
+    title_row.refresh()
+    _settle()
+    restored_height = bar.height()
+    fake_win32.zoomed = True
+    fake_win32.bounds = (window.width() - 138, 8, window.width(), 8 + 30)
+    title_row.refresh()
+    _settle()
+    title_row.refresh()
+    assert title_row.top == 8
+    assert window.contentsMargins().top() == 8
+    assert bar.geometry().top() == restored_top + 8
+    assert bar.height() == restored_height, "the row is as tall as the buttons, not taller"
+    caption = title_row.caption_rect()
+    assert caption.top() == pytest.approx(8)
+    # the buttons answer the hit test where they are drawn, from the top of
+    # the screen (8 down the client area: the border above it is off it)
+    for x, code in ((window.width() - 115, HTMINBUTTON), (window.width() - 69, HTMAXBUTTON),
+                    (window.width() - 23, HTCLOSE)):
+        for y in (8, 20, 37):
+            _msg, address = _message(nativeframe.WM_NCHITTEST, 0, _lparam(x, y))
+            assert title_row.native_event(address) == (True, code), (x, y)
+    # the frame still reaches behind the whole row
+    fake_win32.calls.clear()
+    title_row.refresh()
+    (extended,) = [call[1] for call in fake_win32.calls if call[0] == "extend"]
+    assert extended >= bar.geometry().bottom()
+    # restored: back to the top
+    fake_win32.zoomed = False
+    fake_win32.bounds = (window.width() - 138, 0, window.width(), 30)
+    title_row.refresh()
+    _settle()
+    assert title_row.top == 0
+    assert window.contentsMargins().top() == 0
+    assert bar.geometry().top() == restored_top

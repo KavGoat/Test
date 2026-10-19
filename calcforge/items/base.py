@@ -1082,33 +1082,36 @@ class MarkupItem(QGraphicsObject):
     def drag_handle(self, key: str, local_pos: QPointF, keep_ratio: bool = False) -> None:
         """A handle dragged to *local_pos*: a scale-box corner scales the
         markup about the opposite corner, in proportion unless Shift is held
-        (Bluebeam's); any other handle is the markup's own."""
+        (Bluebeam's; for a scale-box corner *keep_ratio* is whether Shift is
+        held); any other handle is the markup's own."""
         if not key.startswith("scale_"):
             self.move_handle(key, local_pos, keep_ratio)
             return
         rect = self.local_rect().normalized()
         box = self.scale_box()
         corner = key[len("scale_"):]
-        anchor = QPointF(box.right() if "w" in corner else box.left(),
-                         box.bottom() if "n" in corner else box.top())
-        wide, high = max(box.width(), 1e-6), max(box.height(), 1e-6)
-        sx = abs(local_pos.x() - anchor.x()) / wide
-        sy = abs(local_pos.y() - anchor.y()) / high
+        # The corner of the markup's own box opposite the one dragged stays
+        # where it is. Scaling about the scale box's corner instead — which
+        # stands a few points off the markup — moved the markup by a little
+        # with every step of the drag (the user, 2026-10-19: "the image moved
+        # while resizing").
+        across = -1.0 if "w" in corner else 1.0
+        down = -1.0 if "n" in corner else 1.0
+        anchor = QPointF(rect.right() if across < 0 else rect.left(),
+                         rect.bottom() if down < 0 else rect.top())
+        pad_x = (rect.left() - box.left()) if across < 0 else (box.right() - rect.right())
+        pad_y = (rect.top() - box.top()) if down < 0 else (box.bottom() - rect.bottom())
+        wide, high = max(rect.width(), 1e-6), max(rect.height(), 1e-6)
+        # the box's corner under the pointer: the markup's corner a pad in
+        sx = ((local_pos.x() - anchor.x()) * across - pad_x) / wide
+        sy = ((local_pos.y() - anchor.y()) * down - pad_y) / high
         if not keep_ratio:
             sx = sy = max(sx, sy)
         sx, sy = max(sx, 0.02), max(sy, 0.02)
-        # the shape's own box, scaled about the anchor the same way
-        left = anchor.x() + (rect.left() - anchor.x()) * sx
-        right = anchor.x() + (rect.right() - anchor.x()) * sx
-        top = anchor.y() + (rect.top() - anchor.y()) * sy
-        bottom = anchor.y() + (rect.bottom() - anchor.y()) * sy
-        new_rect = QRectF(QPointF(left, top), QPointF(right, bottom)).normalized()
-        if new_rect.width() < 2 or new_rect.height() < 2:
+        width, height = rect.width() * sx, rect.height() * sy
+        if width < 2 or height < 2:
             return
-        self.prepareGeometryChange()
-        self.set_local_rect(new_rect)
-        self.touch()
-        self.geometryChanged.emit()
+        self._resize_to(self._box_from(anchor, across, down, width, height))
 
     def move_handle(self, key: str, local_pos: QPointF, keep_ratio: bool = False) -> None:
         rect = self.local_rect().normalized()
@@ -1118,6 +1121,23 @@ class MarkupItem(QGraphicsObject):
                                             local_pos.x() - centre.x())) + 90
             angle = round(angle / (15 if keep_ratio else 1)) * (15 if keep_ratio else 1)
             self.set_item_rotation(angle)
+            return
+        if keep_ratio and rect.width() > 0 and rect.height() > 0 \
+                and key in ("nw", "ne", "se", "sw"):
+            # In proportion, about the opposite corner, which stays put: the
+            # size the pointer asks for along whichever way it has gone
+            # further. (Only the width was read, and the height was then set
+            # from the top down — so dragging a top corner moved the bottom
+            # of the markup, and the markup with it.)
+            across = -1.0 if "w" in key else 1.0
+            down = -1.0 if "n" in key else 1.0
+            anchor = QPointF(rect.right() if across < 0 else rect.left(),
+                             rect.bottom() if down < 0 else rect.top())
+            scale = max((local_pos.x() - anchor.x()) * across / rect.width(),
+                        (local_pos.y() - anchor.y()) * down / rect.height())
+            scale = max(scale, 2.0 / rect.width(), 2.0 / rect.height())
+            self._resize_to(self._box_from(anchor, across, down,
+                                           rect.width() * scale, rect.height() * scale))
             return
         left, top, right, bottom = rect.left(), rect.top(), rect.right(), rect.bottom()
         if "w" in key:
@@ -1129,17 +1149,50 @@ class MarkupItem(QGraphicsObject):
         if "s" in key:
             bottom = local_pos.y()
         new_rect = QRectF(QPointF(left, top), QPointF(right, bottom)).normalized()
-        if keep_ratio and rect.width() > 0 and rect.height() > 0 and len(key) == 2:
-            ratio = rect.height() / rect.width()
-            new_rect.setHeight(max(new_rect.width() * ratio, 1.0))
+        # too small: kept the least size from the side that is not moving
         if new_rect.width() < 2:
-            new_rect.setWidth(2)
+            if "w" in key:
+                new_rect.setLeft(new_rect.right() - 2)
+            else:
+                new_rect.setWidth(2)
         if new_rect.height() < 2:
-            new_rect.setHeight(2)
+            if "n" in key:
+                new_rect.setTop(new_rect.bottom() - 2)
+            else:
+                new_rect.setHeight(2)
+        self._resize_to(new_rect)
+
+    @staticmethod
+    def _box_from(anchor: QPointF, across: float, down: float,
+                  width: float, height: float) -> QRectF:
+        """The box with a corner at *anchor*, reaching *width* by *height*
+        the way *across* and *down* (each 1 or -1) point."""
+        return QRectF(QPointF(anchor.x(), anchor.y()),
+                      QPointF(anchor.x() + across * width,
+                              anchor.y() + down * height)).normalized()
+
+    def _resize_to(self, new_rect: QRectF) -> None:
+        """Give the markup its new box, keeping it where it is on the page."""
         self.prepareGeometryChange()
         self.set_local_rect(new_rect)
+        self._turn_about_centre()
         self.touch()
         self.geometryChanged.emit()
+
+    def _turn_about_centre(self) -> None:
+        """A turned markup turns about the middle of its box: once its box has
+        been resized, about the new middle — with its place on the page
+        exactly as it was. It is saved, undone and reopened turning about its
+        middle, so left turning about the old one it came back from any of
+        those somewhere else."""
+        if not self.rotation() or hasattr(self, "show_upright"):
+            return
+        centre = self.local_rect().center()
+        if self.transformOriginPoint() == centre:
+            return
+        was = self.mapToParent(QPointF(0, 0))
+        self.setTransformOriginPoint(centre)
+        self.setPos(self.pos() + was - self.mapToParent(QPointF(0, 0)))
 
     def paint_handles(self, painter: QPainter) -> None:
         """Bluebeam's selection: the shape's box dashed in blue, gold control
@@ -1304,6 +1357,8 @@ class MarkupItem(QGraphicsObject):
             painter.restore()
             return
         painter.save()
+        from ..ui.markuplayer import align_with_squares
+        align_with_squares(painter, self)
         if not (self.split_theirs and (not getattr(frame, "print_mode", True)
                                        or self.split_from in getattr(frame, "file_drew_split", ()))):
             if self.multiplies_inside_only():

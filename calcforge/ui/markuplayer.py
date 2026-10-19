@@ -30,7 +30,7 @@ import time
 import weakref
 from collections import OrderedDict
 
-from PySide6.QtCore import QRectF, QTimer
+from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QImage, QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem
 
@@ -65,6 +65,9 @@ _held = [0]
 #: Set while squares are being drawn: a markup that asks to be repainted
 #: from inside its own paint is not changing.
 _drawing = [False]
+#: Set while markups are drawn into a square (not onto the screen): no
+#: move onto the screen's pixels there (align_with_squares).
+_into_square = [False]
 
 
 #: Until when the reader is scrolling, panning, zooming or dragging: squares
@@ -114,6 +117,89 @@ def _touch(layer, key) -> None:
         _ALL.move_to_end(marker)
 
 
+def square_step(scale: float) -> float:
+    """The resolution a page's squares are drawn at for a painter showing
+    *scale* (device pixels to a point): the zoom on screen itself, so a
+    square of TILE pixels covers exactly TILE pixels of the screen and is
+    copied onto it as it is.
+
+    The page's own tiles keep to four figures (pdftiles.zoom_step); squares
+    of markups drawn at that were up to half a pixel short of the screen's,
+    so each was stretched onto it, softened: at a zoom such as fit-to-width
+    at 150 % the words in markups came out a shade blurred and wider than the
+    same words drawn live, and changed as a markup went live and back (the
+    user, 2026-10-19). To nine figures a square is off the screen's pixels
+    by far less than a millionth of one, and the same zoom still finds the
+    same squares."""
+    return float(f"{min(max(float(scale), 0.02), 64.0):.9g}")
+
+
+def snap_of(device: QTransform) -> tuple:
+    """How far a page's squares move, in device pixels (dx, dy), to lie on
+    whole pixels of the screen, for a page drawn through *device* (its
+    coordinates to the device's pixels).
+
+    Each square is laid on whole pixels (scene._draw_on_the_pixel_grid), so
+    at 125 % or 150 % — or wherever the page sits part way through a pixel —
+    everything drawn from the squares lands up to half a pixel from where the
+    same markup drawn live would. A square's corner is a whole number of
+    square sides from the page's corner and a side is a whole number of
+    pixels (square_step), so the move is the same for every square: the
+    page's corner's. Worked out once a paint and kept (MarkupLayer.snap), a
+    corner exactly half way between two pixels, common at 150 %, goes the
+    same way for every square and for the markups drawn live. Nothing on a
+    turned page, which the squares do not snap."""
+    if abs(device.m12()) > 1e-9 or abs(device.m21()) > 1e-9 or not device.isAffine():
+        return 0.0, 0.0
+    x, y = device.dx(), device.dy()
+    return round(x) - x, round(y) - y
+
+
+def align_with_squares(painter: QPainter, item) -> None:
+    """Move *painter* so *item*, drawn live, lands on exactly the pixels it
+    has when drawn from its page's squares.
+
+    A markup goes from the squares to being drawn live the moment it is
+    picked out, hovered into a change or neighbours a markup just placed,
+    and back a moment later. Off by the squares' rounding, its words
+    shifted by part of a pixel each way, and with them how every letter
+    falls on the pixels: they flickered and seemed to change size, then
+    went back (the user, 2026-10-19). Moved as the squares were when the
+    page was last drawn (MarkupLayer.snap), it is the same picture either
+    way. Nothing is moved into a square itself, on a page being printed or
+    exported, or on a page not drawing squares."""
+    page = item.parentItem()
+    while page is not None and getattr(page, "layer", None) is None:
+        page = page.parentItem()
+    layer = getattr(page, "layer", None)
+    if (layer is None or not layer.enabled or layer.snap is None or _into_square[0]
+            or not layer._on_screen()):
+        return
+    dx, dy = layer.snap
+    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        return
+    # the shift is in the device's pixels; the world's are the device's
+    # divided by its pixel ratio, which Qt keeps out of the world
+    world = painter.worldTransform()
+    inverse, invertible = world.inverted()
+    if not invertible:
+        return
+    ratio = inverse * painter.deviceTransform()
+    painter.setWorldTransform(world * QTransform.fromTranslate(dx / (ratio.m11() or 1.0),
+                                                              dy / (ratio.m22() or 1.0)))
+
+
+def _square_picture(image: QImage) -> QPixmap:
+    """A square's drawing as a picture that keeps its transparency.
+
+    Qt drops the alpha channel of a picture whose pixels all happen to be
+    opaque — a square wholly inside a photo — and the square then had no
+    clear left in it: when the photo was made smaller, the part of the square
+    it left was cleared to opaque black, and that stood behind the photo as a
+    dark box until the page was drawn again (the user, 2026-10-19)."""
+    return QPixmap.fromImage(image, Qt.NoOpaqueDetection)
+
+
 class _Square:
     __slots__ = ("pixmap", "stale", "redo")
 
@@ -143,6 +229,10 @@ class MarkupLayer:
         self._wrong: list = []
         self._mend = None
         self.enabled = True
+        #: how far the squares were last moved to lie on the screen's pixels
+        #: (snap_of), for the markups drawn live beside them; None until the
+        #: page is first drawn on screen
+        self.snap = None
         #: what the screen last showed: (step, page region, its middle)
         self.wanted = None
         #: Counts every change to any markup on the page: whoever keeps a
@@ -447,9 +537,10 @@ class MarkupLayer:
         if self._suspended:
             self._resume()
         self._put_right()
+        self.snap = snap_of(painter.deviceTransform())
         if not self.members and not self.pending:
             return
-        step = pdftiles.zoom_step(scale)
+        step = square_step(scale)
         size = TILE / step
         held = pdftiles.TILES.held()
         seen = _visible_part(self.frame) or exposed
@@ -503,7 +594,7 @@ class MarkupLayer:
         for where, pixmap in standing:
             painter.drawPixmap(where, pixmap, QRectF(pixmap.rect()))
         for where, pixmap in drawn:
-            _draw_on_the_pixel_grid(painter, where, pixmap)
+            _draw_on_the_pixel_grid(painter, where, pixmap, self.snap)
         painter.restore()
         self._paint_handles(painter, exposed)
         if idle_work or self.pending:
@@ -680,7 +771,8 @@ class MarkupLayer:
         part = QRectF(area.left() + left / step, area.top() + top / step,
                       (right - left) / step, (bottom - top) / step)
         if square.pixmap is not None:
-            image = square.pixmap.toImage()
+            # with its transparency: a part cleared below must come out clear
+            image = square.pixmap.toImage().convertToFormat(QImage.Format_ARGB32_Premultiplied)
         else:
             image = QImage(TILE, TILE, QImage.Format_ARGB32_Premultiplied)
             image.fill(0)
@@ -695,14 +787,14 @@ class MarkupLayer:
         base.scale(step, step)
         base.translate(-area.left(), -area.top())
         before = pdftiles.TILES.short
-        _drawing[0] = True
+        _drawing[0] = _into_square[0] = True
         try:
             for item in self._drawn_in(part):
                 self._paint_item(painter, item, base)
         finally:
-            _drawing[0] = False
+            _drawing[0] = _into_square[0] = False
             painter.end()
-        square.pixmap = QPixmap.fromImage(image)
+        square.pixmap = _square_picture(image)
         square.redo = square.redo or pdftiles.TILES.short != before
 
     def _draw(self, step: float, col: int, row: int, held: bool) -> _Square:
@@ -724,15 +816,15 @@ class MarkupLayer:
             base.scale(step, step)
             base.translate(-area.left(), -area.top())
             before = pdftiles.TILES.short
-            _drawing[0] = True
+            _drawing[0] = _into_square[0] = True
             try:
                 for item in inside:
                     self._paint_item(painter, item, base)
             finally:
-                _drawing[0] = False
+                _drawing[0] = _into_square[0] = False
                 painter.end()
             short = pdftiles.TILES.short != before
-            pixmap = QPixmap.fromImage(image)
+            pixmap = _square_picture(image)
         square = _Square(pixmap, redo=short)
         self.tiles.setdefault(step, {})[(col, row)] = square
         _remember(self, (step, col, row), pixmap)

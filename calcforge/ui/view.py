@@ -9,7 +9,7 @@ import re
 from copy import deepcopy
 from typing import Optional
 
-from PySide6.QtCore import (QEvent, QObject, QPoint, QPointF, QRect, QRectF, Qt,
+from PySide6.QtCore import (QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt,
                             QTimer, Signal)
 from PySide6.QtGui import (QBrush, QColor, QCursor, QKeyEvent,
                            QMouseEvent, QPainter, QPen, QPolygonF, QTextCursor,
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QApplication, QGraphicsProxyWidget,
 
 from ..core.document import MM_TO_PT
 from ..items.calc import CalcBlockItem, CalcItem, CalcTextItem
-from ..items.base import (HANDLE_SCREEN_PX, HANDLE_SIZE,
+from ..items.base import (CORNER_HANDLES, HANDLE_SCREEN_PX, HANDLE_SIZE,
                           MarkupItem, build_item, cursor_for_handle, rename_groups)
 from ..items.contents import ContentsItem
 from .scene import DocumentScene, PageFrame, detach
@@ -222,6 +222,11 @@ SCALE_PROMPT_TOOLS = frozenset({
     # Revu's Sketch to Scale shapes, drawn to a real size (the user,
     # 2026-10-16); the plain Rectangle and Ellipse never ask
     "sketch_rect", "sketch_ellipse"})
+
+
+#: The handles that resize a picture or a snapshot: its box's corners and
+#: edges and its scale box's corners (not its rotation handle).
+_PICTURE_RESIZE_HANDLES = CORNER_HANDLES + ("scale_nw", "scale_ne", "scale_se", "scale_sw")
 
 
 class _SizeEdit(QLineEdit):
@@ -569,7 +574,13 @@ class PageView(QGraphicsView):
                             QPainter.SmoothPixmapTransform)
         self.setDragMode(QGraphicsView.NoDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
+        # A resize keeps what is in the middle of the view in the middle —
+        # done in resizeEvent from the exact canvas point, rather than by
+        # Qt's AnchorViewCenter, which re-read the middle to the pixel at
+        # every resize, so dragging the split crept a view a pixel at a time
+        self.setResizeAnchor(QGraphicsView.NoAnchor)
+        self._middle_held = None
+        self._viewport_was = None
         self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -1014,8 +1025,15 @@ class PageView(QGraphicsView):
             # that had been taken apart (QA F-01: Offset, then New PDF, then
             # a drag crashed the application).
             self.leave_the_canvas()
+        if previous is not None and scene is not previous:
+            try:
+                previous.sceneRectChanged.disconnect(self._canvas_relaid)
+            except (RuntimeError, TypeError):
+                pass
         super().setScene(scene)
-        self._update_desk_margin()
+        if scene is not None and scene is not previous and isinstance(scene, DocumentScene):
+            scene.sceneRectChanged.connect(self._canvas_relaid)
+        self._update_desk_margin(keep_centre=scene is previous)
         if scene is not None and scene is not previous:
             # The turn belongs to the document's canvas, not to the view
             # (QA F-09): coming to another document shows it at its own.
@@ -1061,19 +1079,71 @@ class PageView(QGraphicsView):
         self._snapshot = []
 
     def resizeEvent(self, event) -> None:
+        was = self._viewport_was
+        kept = None
+        if was is not None and was.width() > 0 and was.height() > 0 and self.scene() is not None:
+            held = self._middle_held
+            if held is not None and held[1:] == (self.horizontalScrollBar().value(),
+                                                  self.verticalScrollBar().value()):
+                kept = held[0]                 # not scrolled since: the exact point
+            else:
+                old_middle = QPointF(QRect(QPoint(0, 0), was).center())
+                kept = self.viewportTransform().inverted()[0].map(old_middle)
         super().resizeEvent(event)
-        self._update_desk_margin()
+        self._viewport_was = QSize(self.viewport().size())
+        self._update_desk_margin(keep_centre=kept is None)
+        if kept is not None:
+            self.bring_to(kept, QPointF(self.viewport().rect().center()))
+            self._middle_held = (kept, self.horizontalScrollBar().value(),
+                                 self.verticalScrollBar().value())
         self.sheet_headings.refresh_soon()
         self.rulers.place()
 
-    def _update_desk_margin(self) -> None:
-        """Keep enough off-page desk to centre a page edge or corner."""
+    def _update_desk_margin(self, keep_centre: bool = True) -> None:
+        """Keep enough off-page desk to centre a page edge or corner.
+
+        The desk round the pages is this view's own, not the canvas's. Two
+        views of one document (Split View, or a second window) are different
+        sizes at different zooms; when the desk was the shared canvas's, the
+        view zooming in shrank it, and the other view, near the edge of its
+        desk, was pulled in with it (the user, 2026-10-19: "zooming on one
+        (without any sync) moved the other a little bit"). With
+        *keep_centre* the canvas point in the middle of the view stays there
+        as the desk grows or shrinks.
+        """
         scene = self.scene()
         if not isinstance(scene, DocumentScene):
+            if scene is not None:
+                self.setSceneRect(QRectF())        # the canvas's own, then
             return
         scale = max(getattr(self, "_zoom", 1.0), MIN_ZOOM)
-        scene.set_desk_margin(self.viewport().width() / (2.0 * scale) + 12.0,
-                              self.viewport().height() / (2.0 * scale) + 12.0)
+        across = max(self.viewport().width() / (2.0 * scale) + 12.0, scene.desk_minimum())
+        down = max(self.viewport().height() / (2.0 * scale) + 12.0, scene.desk_minimum())
+        rect = scene.pages_rect().adjusted(-across, -down, across, down)
+        if rect == self.sceneRect():
+            return
+        middle = QPointF(self.viewport().rect().center())
+        kept = self.viewportTransform().inverted()[0].map(middle) if keep_centre else None
+        self.setSceneRect(rect)
+        if kept is not None:
+            self.bring_to(kept, middle)
+
+    def _canvas_relaid(self, _rect=None) -> None:
+        """The pages were laid out again (one added, a page mode, a turn):
+        the desk round them follows, and what is in the middle stays."""
+        self._update_desk_margin(keep_centre=True)
+
+    def bring_to(self, scene_point: QPointF, view_point: QPointF) -> None:
+        """Scroll so canvas *scene_point* lands on *view_point* of the
+        viewport, to the nearest pixel."""
+        landed = self.viewportTransform().map(QPointF(scene_point))
+        drift = landed - QPointF(view_point)
+        if abs(drift.x()) >= 0.5:
+            bar = self.horizontalScrollBar()
+            bar.setValue(bar.value() + round(drift.x()))
+        if abs(drift.y()) >= 0.5:
+            bar = self.verticalScrollBar()
+            bar.setValue(bar.value() + round(drift.y()))
 
     def set_zoom(self, factor: float, anchor_mouse: bool = False,
                  at: Optional[QPointF] = None,
@@ -1111,7 +1181,7 @@ class PageView(QGraphicsView):
         self._zooming = True
         self._zoom = factor
         self.apply_view_transform()
-        self._update_desk_margin()
+        self._update_desk_margin(keep_centre=False)
         # Where that page point landed, and how far it has to come back.
         landed = self.viewportTransform().map(keep_scene)
         drift = landed - keep_view
@@ -2682,10 +2752,18 @@ class PageView(QGraphicsView):
                 # changes what the drag is doing, which is not something
                 # anybody asks for.
                 keep_ratio = self._handle_shift
-            if getattr(self._handle_item, "keep_aspect", False):
+            if getattr(self._handle_item, "keep_aspect", False) \
+                    and self._handle_key in _PICTURE_RESIZE_HANDLES:
                 # Images and snapshots protect their proportions by default;
-                # Shift is the deliberate exception that releases the lock.
-                keep_ratio = not keep_ratio
+                # Shift is the deliberate exception that releases the lock
+                # (the user, 2026-10-19). A scale-box corner is already in
+                # proportion unless Shift is held, so it is told Shift as it
+                # is; only the picture's own corners turn it round. An edge
+                # stretches the one way, as in Revu.
+                if not self._handle_key.startswith("scale_"):
+                    keep_ratio = not keep_ratio
+                self.statusMessage.emit(self._picture_resize_hint(
+                    self._handle_key, bool(event.modifiers() & Qt.ShiftModifier)))
             self._handle_item.drag_handle(self._handle_key, local, keep_ratio)
             if isinstance(self._handle_item, MeasureItem):
                 self._handle_item.refresh(page=self.page_of(self._handle_item))
@@ -4719,6 +4797,16 @@ class PageView(QGraphicsView):
             return bool(event.modifiers() & Qt.ShiftModifier)
         return None
 
+    @staticmethod
+    def _picture_resize_hint(key: str, shift: bool) -> str:
+        """What the status bar says while a picture or snapshot is resized."""
+        corner = key.startswith("scale_") or len(key) == 2
+        if not corner:
+            return "Resize: the edge stretches one way · a corner keeps the proportions"
+        if shift:
+            return "Free resize · let go of Shift to keep the proportions"
+        return "Resize in proportion · Shift: free resize"
+
     _opened_block = None
     _moved_yet = False
     _edit_was_theirs = None
@@ -5745,15 +5833,6 @@ class PageView(QGraphicsView):
         self._shown_page = index
         if window.current_index != index:
             window.follow_scrolled_page(index)
-
-    def _page_top_value(self, index: int) -> float:
-        scene = self.scene()
-        if scene is None or not scene.frames:
-            return float(self.verticalScrollBar().value())
-        index = max(0, min(index, len(scene.frames) - 1))
-        frame = scene.frames[index]
-        top = frame.mapRectToScene(frame.page_rect()).top()
-        return (top - scene.sceneRect().top()) * self._zoom
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Control:
