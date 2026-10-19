@@ -2885,7 +2885,8 @@ class MainWindow(QMainWindow):
         self.window_sync.currentIndexChanged.connect(self._set_window_sync)
         self.window_sync.setToolTip(
             "Keep the two views of Split View (and other windows of this document) "
-            "in step — Page sync: the same page; Document sync: scroll, zoom and page")
+            "in step — Page sync: the same zoom and spot on each view's own page; "
+            "Document sync: scroll, zoom and page together")
 
         # as wide as what it says now, not as its longest choice: the status
         # bar's room is what lets the page number sit under the page's middle
@@ -4614,6 +4615,13 @@ class MainWindow(QMainWindow):
         self.go_to_page(index)
 
     def go_to_page(self, index: int) -> None:
+        """Show page *index* — gone to, not scrolled onto: Page sync leaves
+        the other view on its own page (viewsync.py)."""
+        from .viewsync import ViewSync
+        with ViewSync.jumping():
+            self._go_to_page(index)
+
+    def _go_to_page(self, index: int) -> None:
         if not 0 <= index < len(self.document.pages):
             return
         if index == self.current_index:
@@ -4653,6 +4661,9 @@ class MainWindow(QMainWindow):
             other.window_sync.setCurrentIndex(mode)
             other.window_sync.blockSignals(False)
         self.view_sync.relink()
+        if mode == 1:
+            # Page sync: the other view takes this one's zoom and spot now
+            self.view_sync.moved(self.view)
 
     def eventFilter(self, watched, event) -> bool:
         """Let the editor keep keys that would otherwise run global commands.

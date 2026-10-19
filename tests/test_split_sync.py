@@ -5,8 +5,10 @@ also had issues in Split View where zooming on one (without any sync) moved
 the other a little bit." Revu's three choices (calcforge/ui/viewsync.py):
 
 - Sync off: nothing done in one view moves the other, by even a pixel;
-- Page sync: going to a page in one goes to the same page number in the
-  other (its last page when it has fewer); zoom and scroll are each its own;
+- Page sync (the user's correction, 2026-10-19: "only zoom and positioning,
+  it doesn't care what page"): each view stays on its own page and takes
+  the other's zoom and its spot on its page in focus — the same points
+  from the page's top left as it lies on screen;
 - Document sync: scroll, zoom and page changes in one are repeated in the
   other by the same relative amount, across different documents too.
 
@@ -249,77 +251,184 @@ def test_sync_off_clicking_into_the_other_view_moves_neither(window, tmp_path):
 
 # -- Page sync -----------------------------------------------------------------
 
-def test_page_sync_follows_the_page_by_thumbnails_page_box_and_keys(window, tmp_path):
+def _focus(view):
+    return viewsync.ViewSync._page_in_focus(view)
+
+
+def _spot(view, index=None):
+    """The middle of *view* in points from the top left of its page in
+    focus (as the page lies on screen), and that page's box."""
+    index = _focus(view) if index is None else index
+    box = viewsync.page_box(view.scene().frames[index])
+    return _centre(view) - box.topLeft(), box
+
+
+def _same_spot(source, follower):
+    """The follower is at the source's zoom, at the same spot of its own
+    page in focus — to the pixel, except along a side where it has run out
+    of room to scroll."""
+    assert follower.zoom() == pytest.approx(source.zoom(), rel=1e-9), "not the same zoom"
+    offset, box = _spot(source, viewsync.focus_page(source))
+    there, other = _spot(follower)
+    wanted = QPointF(viewsync.same_spot(offset.x(), box.width(), other.width()),
+                     viewsync.same_spot(offset.y(), box.height(), other.height()))
+    pixel = 0.5 / follower.zoom() + 1e-6
+    for axis, bar in (("x", follower.horizontalScrollBar()), ("y", follower.verticalScrollBar())):
+        if bar.value() in (bar.minimum(), bar.maximum()):
+            continue                            # out of room that way
+        assert abs(getattr(there, axis)() - getattr(wanted, axis)()) <= pixel, \
+            f"not the same spot along {axis}: {there} != {wanted}"
+
+
+def _onto_page(window, pane, index):
+    """With Sync off, put *pane*'s view on page *index* (it stays in hand)."""
+    _set_sync(window, viewsync.OFF)
+    _in_hand(window, pane)
+    window.go_to_page(index)
+    _settle()
+
+
+@pytest.mark.parametrize("same", [False, True], ids=["two documents", "one document"])
+def test_page_sync_takes_the_zoom_and_spot_on_each_views_own_page(window, tmp_path, same):
+    left, right = _open_split(window, tmp_path, same)
+    _onto_page(window, right, 1)
+    _in_hand(window, left)
+    _set_sync(window, viewsync.PAGE)                  # chosen: in step at once
+    _same_spot(left.view, right.view)
+    view = left.view
+    rect = view.viewport().rect()
+    for x, y, notches in ((30, 40, 120), (rect.width() - 20, rect.height() - 30, 240),
+                          (rect.width() // 2, 60, -120)):
+        wheel(view, notches, at=QPointF(x, y))
+        _same_spot(view, right.view)
+    for action in (window.act_zoom_in, window.act_zoom_out, window.act_fit_width):
+        action.trigger()
+        _settle(1)
+        _same_spot(view, right.view)
+    for modifiers, notches in ((Qt.ShiftModifier, -120), (Qt.ControlModifier, -120),
+                               (Qt.ControlModifier, 120)):
+        wheel(view, notches, modifiers)
+        _same_spot(view, right.view)
+    assert _focus(right.view) == 1, "the other view stays on its own page"
+    # and the other way, by the wheel over the view not in hand
+    wheel(right.view, 240, at=QPointF(60, 70))
+    _same_spot(right.view, left.view)
+    assert window.view is left.view
+
+
+def test_page_sync_going_to_a_page_leaves_the_other_on_its_page(window, tmp_path):
     left, right = _open_split(window, tmp_path)       # a.pdf (5 pages) | b.pdf (3)
+    _onto_page(window, right, 1)
     _in_hand(window, left)
     _set_sync(window, viewsync.PAGE)
-    assert window.document.path.endswith("a.pdf")
-    assert _document_of(window, right).path.endswith("b.pdf")
-    other = right.view
-    zoom = other.zoom()
-    # a thumbnail clicked
     window.show_panel("dock_pages", True)
     _settle()
     strip = window.pages_panel.list
-    point = strip.visualItemRect(strip.item(1)).center()
-    QTest.mouseClick(strip.viewport(), Qt.LeftButton, Qt.NoModifier, point)
+    point = strip.visualItemRect(strip.item(2)).center()
+    QTest.mouseClick(strip.viewport(), Qt.LeftButton, Qt.NoModifier, point)   # a thumbnail
     _settle()
-    assert window.current_index == 1 and _page(window, right) == 1
-    # the page box
+    assert window.current_index == 2
+    assert _focus(right.view) == 1
+    _same_spot(left.view, right.view)
     window.page_spin.setFocus()
     window.page_spin.selectAll()
-    QTest.keyClicks(window.page_spin, "3")
+    QTest.keyClicks(window.page_spin, "2")                                      # the page box
     QTest.keyClick(window.page_spin, Qt.Key_Return)
     _settle()
-    assert window.current_index == 2 and _page(window, right) == 2
-    # Page Up, then past the other's last page: it stays on its last
-    QTest.keyClick(window.view, Qt.Key_Right, Qt.ControlModifier)
-    _settle()
-    assert window.current_index == 3 and _page(window, right) == 2
-    QTest.keyClick(window.view, Qt.Key_End)
-    _settle()
-    assert window.current_index == 4 and _page(window, right) == 2
-    QTest.keyClick(window.view, Qt.Key_Home)
-    _settle()
-    assert window.current_index == 0 and _page(window, right) == 0
-    assert other.zoom() == pytest.approx(zoom), "Page sync leaves the zoom alone"
+    assert window.current_index == 1 and _focus(right.view) == 1
+    for key, modifiers, page in ((Qt.Key_Right, Qt.ControlModifier, 2),
+                                 (Qt.Key_End, Qt.NoModifier, 4),
+                                 (Qt.Key_Home, Qt.NoModifier, 0)):
+        QTest.keyClick(window.view, key, modifiers)
+        _settle()
+        assert window.current_index == page
+        assert _focus(right.view) == 1, "going to a page leaves the other on its page"
+        _same_spot(left.view, right.view)
 
 
-def test_page_sync_the_zoom_and_scroll_stay_each_views_own(window, tmp_path):
+def test_page_sync_by_bookmark_find_and_link_leaves_the_other_on_its_page(window, tmp_path):
     left, right = _open_split(window, tmp_path)
+    _onto_page(window, right, 2)
     _in_hand(window, left)
     _set_sync(window, viewsync.PAGE)
-    still = _where(right.view)
-    wheel(left.view, 240, at=QPointF(60, 60))
-    window.act_zoom_out.trigger()
-    wheel(left.view, -60, Qt.ShiftModifier)
-    _unmoved(right.view, still)
+    window.go_to_bookmark(3, 100.0)                   # a bookmark
+    assert window.current_index == 3 and _focus(right.view) == 2
+    _same_spot(left.view, right.view)
+    panel = window.search_panel                       # a Find result
+    panel.query.setText("a page 2")
+    QTest.keyClick(panel.query, Qt.Key_Return)
+    _settle()
+    panel.show_hit(panel.results.topLevelItem(0))
+    _settle()
+    assert window.current_index == 1 and _focus(right.view) == 2
+    _same_spot(left.view, right.view)
+    from calcforge.items.link import PAGE, LinkItem   # a link, double-clicked
+    from PySide6.QtCore import QRectF
+    window.go_to_page(0)
+    link = LinkItem(QRectF(0, 0, 120, 30))
+    link.kind, link.target_page = PAGE, 4
+    window.view.frame().add_markup(link, QPointF(100, 100))
+    _settle()
+    centre = link.sceneBoundingRect().center()
+    window.view.centerOn(centre)
+    _settle()
+    QTest.mouseDClick(window.view.viewport(), Qt.LeftButton, Qt.NoModifier,
+                      window.view.mapFromScene(centre))
+    _settle()
+    assert window.current_index == 4 and _focus(right.view) == 2
+    _same_spot(left.view, right.view)
 
 
-def test_page_sync_scrolling_across_a_page_boundary_turns_the_other(window, tmp_path):
-    left, right = _open_split(window, tmp_path)
-    _in_hand(window, left)
+def test_page_sync_a_smaller_or_turned_page_lines_up_in_points(window, tmp_path):
+    """A wide page beside a small one: the same points in, stopping at the
+    small page's edge; on a turned page, points as it lies on screen."""
+    left, right = _open_split(window, tmp_path)       # a.pdf | b.pdf
+    _onto_page(window, right, 0)                      # b: 420 x 297
+    _onto_page(window, left, 2)                       # a: 1191 x 842, wide
     _set_sync(window, viewsync.PAGE)
-    for _ in range(80):
+    for _ in range(3):
+        wheel(left.view, 120, at=QPointF(left.view.viewport().rect().center()))
+    box = viewsync.page_box(left.view.scene().frames[2])
+    middle = QPointF(left.view.viewport().rect().center())
+    for spot, expected in ((QPointF(100, 80), QPointF(100, 80)),           # on both pages
+                           (QPointF(900, 600), QPointF(420, 297)),         # past b's edge
+                           (QPointF(-10, 30), QPointF(-10, 30))):          # the desk before
+        left.view.bring_to(box.topLeft() + spot, middle)
+        _settle(1)
+        _same_spot(left.view, right.view)
+        there, _box = _spot(right.view)
+        assert abs(there.x() - expected.x()) <= 1.0 / right.view.zoom()
+        assert abs(there.y() - expected.y()) <= 1.0 / right.view.zoom()
+    # page 4 of a.pdf is turned: it lies wider than tall, and lines up as it lies
+    window.go_to_page(3)
+    turned = viewsync.page_box(left.view.scene().frames[3])
+    assert turned.width() > turned.height()
+    left.view.bring_to(turned.topLeft() + QPointF(150, 120), middle)
+    _settle(1)
+    _same_spot(left.view, right.view)
+    assert _focus(right.view) == 0
+
+
+def test_page_sync_scrolling_on_across_a_page_boundary_carries_the_other(window, tmp_path):
+    left, right = _open_split(window, tmp_path)       # a.pdf (5) | b.pdf (3)
+    _in_hand(window, left)
+    window.go_to_page(0)
+    _set_sync(window, viewsync.PAGE)
+    assert _focus(right.view) == 0
+    seen = set()
+    for _ in range(400):
         wheel(left.view, -240, Qt.ControlModifier)
-        if window.current_index >= 1:
+        seen.add((viewsync.focus_page(left.view), _focus(right.view)))
+        _same_spot(left.view, right.view)
+        if viewsync.focus_page(left.view) == 4:
             break
-    assert window.current_index == 1
-    assert _page(window, right) == 1
-    # and from the view not in hand: its scroll turns the one in hand
-    _in_hand(window, left)
-    for _ in range(80):
-        wheel(right.view, -240, Qt.ControlModifier)
-        if right.view._shown_page >= 2:
-            break
-    _settle()
-    assert right.view._shown_page == 2
-    assert window.current_index == 2
+    assert (1, 1) in seen and (2, 2) in seen, "the other went on across its own pages"
+    assert _focus(right.view) == 2, "b.pdf has three pages: it stays on its last"
 
 
 def test_page_sync_does_not_echo_back(window, tmp_path):
     """Going to a page moves the other view once; the view gone from stays
-    exactly where going to the page put it."""
+    exactly where going to the page put it, and nothing goes back and forth."""
     left, right = _open_split(window, tmp_path, same=True)
     _in_hand(window, left)
     _set_sync(window, viewsync.PAGE)
@@ -335,79 +444,44 @@ def test_page_sync_does_not_echo_back(window, tmp_path):
     window.go_to_page = counted
     try:
         window.go_to_page(2)
-        here = _where(left.view)
+        here, there = _where(left.view), _where(right.view)
         _settle(6)
         _unmoved(left.view, here)
+        _unmoved(right.view, there)
         assert calls == [2], f"went to pages {calls}: the move came back"
-        assert _page(window, right) == 2
     finally:
         del window.go_to_page
-
-
-def test_page_sync_by_bookmark_find_and_link(window, tmp_path):
-    left, right = _open_split(window, tmp_path)
-    _in_hand(window, left)
-    _set_sync(window, viewsync.PAGE)
-    # a bookmark
-    window.go_to_bookmark(2, 100.0)
-    assert window.current_index == 2 and _page(window, right) == 2
-    # a Find result: the page it is on, the words brought into view
-    panel = window.search_panel
-    panel.query.setText("a page 2")
-    QTest.keyClick(panel.query, Qt.Key_Return)
-    _settle()
-    assert panel.results.topLevelItemCount() >= 1
-    panel.show_hit(panel.results.topLevelItem(0))
-    _settle()
-    assert window.current_index == 1 and _page(window, right) == 1
-    # a link on the page, double-clicked
-    from calcforge.items.link import PAGE, LinkItem
-    from PySide6.QtCore import QRectF
-    window.go_to_page(0)
-    link = LinkItem(QRectF(0, 0, 120, 30))
-    link.kind, link.target_page = PAGE, 4
-    window.view.frame().add_markup(link, QPointF(100, 100))
-    _settle()
-    centre = link.sceneBoundingRect().center()
-    window.view.centerOn(centre)
-    _settle()
-    QTest.mouseDClick(window.view.viewport(), Qt.LeftButton, Qt.NoModifier,
-                      window.view.mapFromScene(centre))
-    _settle()
-    assert window.current_index == 4
-    assert _page(window, right) == 2, "b.pdf has three pages: it stays on its last"
 
 
 def test_page_sync_survives_mode_changes_split_off_and_on_and_tab_switches(window, tmp_path):
     left, right = _open_split(window, tmp_path)
     _in_hand(window, left)
     _set_sync(window, viewsync.PAGE)
-    window.go_to_page(1)
-    assert _page(window, right) == 1
+    wheel(left.view, 120, at=QPointF(40, 40))
+    _same_spot(left.view, right.view)
     _set_sync(window, viewsync.OFF)
-    window.go_to_page(3)
-    assert _page(window, right) == 1, "Sync off: the other stays"
+    still = _where(right.view)
+    wheel(left.view, 240, at=QPointF(40, 40))
+    _unmoved(right.view, still)
     _set_sync(window, viewsync.PAGE)
-    window.go_to_page(0)
-    assert _page(window, right) == 0
-    # the right view shows another document now (its other tab)
+    _same_spot(left.view, right.view)
+    # the right view shows its other document now
     _in_hand(window, right)
-    right.tabs.setCurrentIndex(0 if right.tabs.currentIndex() else 1) \
-        if right.tabs.count() > 1 else None
+    right.tabs.setCurrentIndex(1 - right.tabs.currentIndex())
     _settle()
-    window.go_to_page(2)
-    assert _page(window, left) == 2
+    wheel(right.view, -120, at=QPointF(70, 50))
+    _same_spot(right.view, left.view)
     # split off and on again
     window.act_split_view.trigger()
     _settle()
     assert not window.is_split
     window.act_split_view.trigger()
     _settle()
-    left, right = window._panes
     _set_sync(window, viewsync.PAGE)
-    window.go_to_page(1)
-    other = left if window.view is right.view else right
-    assert _page(window, other) == 1
+    first, second = window._panes
+    other = first if window.view is second.view else second
+    wheel(window.view, 120, at=QPointF(30, 30))
+    _same_spot(window.view, other.view)
 
 
 # -- Document sync ------------------------------------------------------------
