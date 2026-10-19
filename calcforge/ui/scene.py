@@ -218,11 +218,14 @@ def _draw_on_the_pixel_grid(painter, where: QRectF, tile, shift=None) -> None:
     if not invertible:
         return
     exact = (right - left == tile.width() and bottom - top == tile.height())
-    painter.save()
+    # only the smoothing changes, and is put back (a save and restore of the
+    # whole painter, for every square of every markup on screen, cost more
+    # than drawing the square)
+    smooth = painter.testRenderHint(QPainter.SmoothPixmapTransform)
     painter.setRenderHint(QPainter.SmoothPixmapTransform, not exact)
     painter.drawPixmap(inverse.mapRect(QRectF(left, top, right - left, bottom - top)),
                        tile, QRectF(tile.rect()))
-    painter.restore()
+    painter.setRenderHint(QPainter.SmoothPixmapTransform, smooth)
 
 
 def _outline_where_exposed(painter, rect: QRectF, exposed: Optional[QRectF]) -> None:
@@ -885,13 +888,15 @@ class PageFrame(QGraphicsObject):
         numbers = set(getattr(page, "markup_annotations", ()) or ())
         if not numbers or not shown or self.file_draws:
             return
+        index = int(page.pdf_page_index)
         for item in self.markups():
             box = getattr(item, "their_box", ())
             if (not box or not getattr(item, "still_theirs", False)
-                    or item.from_annotation not in numbers or not item.isVisible()):
+                    or item.from_annotation not in numbers or not item.isVisible()
+                    or pdftiles.TILES.drawn_at_all(page.pdf_key, index, item.from_annotation)):
                 continue
             where = QRectF(*box)              # x, y, width, height (_TheirLook)
-            pdftiles.TILES.annotation_preview(page.pdf_key, data, int(page.pdf_page_index),
+            pdftiles.TILES.annotation_preview(page.pdf_key, data, index,
                                               whole, scale, item.from_annotation,
                                               where.adjusted(-1, -1, 1, 1))
 
@@ -918,12 +923,20 @@ class PageFrame(QGraphicsObject):
         if self.file_draws or not shown:
             return
         numbers = set(getattr(page, "markup_annotations", ()) or ())
+        left, top, right, bottom = (region.left() - 1, region.top() - 1,
+                                    region.right() + 1, region.bottom() + 1)
         for item in self.markups():
             box = getattr(item, "their_box", ())
             if (not box or not getattr(item, "still_theirs", False)
                     or item.from_annotation not in numbers or not item.isVisible()):
                 continue
-            where = QRectF(*box).adjusted(-1, -1, 1, 1)
+            # (off the region, passed by in plain numbers: a rectangle made
+            # for each of every markup on five pages, at every notch of the
+            # wheel, was a good part of the notch)
+            x, y, width, height = box
+            if x >= right or y >= bottom or x + width <= left or y + height <= top:
+                continue
+            where = QRectF(x, y, width, height).adjusted(-1, -1, 1, 1)
             if where.intersects(region):
                 pdftiles.TILES.expect_annotation(page.pdf_key, data, index, whole, scale,
                                                  item.from_annotation, where)

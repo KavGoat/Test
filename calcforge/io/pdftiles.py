@@ -438,6 +438,51 @@ class _Worker(QThread):
                     self._later.clear()
 
 
+def _page_of(key):
+    """The page or markup a square is of."""
+    if isinstance(key, AnnotationTileKey):
+        return ("markup", key.source, key.index, key.xref)
+    return ("page", key.source, key.index, key.annotations, key.without)
+
+
+class _AheadSquares(set):
+    """The squares asked for ahead, also filed by the page or markup each is
+    of. Each markup on screen asks for its squares ahead every time it is
+    drawn, and finding the ones it asked for before by going through every
+    square ahead was a fifth of a frame zoomed out over a marked-up set."""
+
+    def __init__(self):
+        super().__init__()
+        self._by_page: dict = {}
+
+    def of(self, page_key) -> set:
+        return self._by_page.get(page_key, set())
+
+    def add(self, key) -> None:
+        super().add(key)
+        self._by_page.setdefault(_page_of(key), set()).add(key)
+
+    def discard(self, key) -> None:
+        if key not in self:
+            return
+        super().discard(key)
+        page_key = _page_of(key)
+        filed = self._by_page.get(page_key)
+        if filed is not None:
+            filed.discard(key)
+            if not filed:
+                del self._by_page[page_key]
+
+    def difference_update(self, *others) -> None:
+        for other in others:
+            for key in list(other):
+                self.discard(key)
+
+    def clear(self) -> None:
+        super().clear()
+        self._by_page.clear()
+
+
 class TileCache(QObject):
     """What has been drawn, and what has been asked for.
 
@@ -484,9 +529,14 @@ class TileCache(QObject):
         # Squares asked for ahead — what is on screen at twice the zoom, drawn
         # while nothing else is wanted (see ahead()). A zoom does not give
         # them up the way it gives up the zoom before it.
-        self._ahead: set = set()
+        self._ahead = _AheadSquares()
         # page key -> the squares of the zoom a zoom is heading for (expect())
         self._expected: dict = {}
+        # page or markup key -> how many times its squares have come or gone,
+        # and, while a zoom moves, what each markup on screen drew last
+        # (annotation_tiles)
+        self._changes: dict = {}
+        self._while_held: dict = {}
         #: Counts the markups drawn from squares not all here yet, so whoever
         #: keeps a drawing of them (ui/markuplayer.py) knows to draw it again.
         self.short = 0
@@ -668,8 +718,7 @@ class TileCache(QObject):
 
     def _ask_ahead(self, keys, page_key, data, page) -> None:
         # what was ahead for this page before, and is not now, is given up
-        stale = {key for key in self._ahead
-                 if self._page_of(key) == page_key and key not in keys}
+        stale = self._ahead.of(page_key).difference(keys)
         self._waiting.difference_update(stale)
         self._ahead.difference_update(stale)
         if len(keys) > self.MOST_AHEAD:
@@ -680,23 +729,22 @@ class TileCache(QObject):
                 self._ask(key, data, page, sheet=False)
 
     # -- the index -------------------------------------------------------------
-    @staticmethod
-    def _page_of(key):
-        if isinstance(key, AnnotationTileKey):
-            return ("markup", key.source, key.index, key.xref)
-        return ("page", key.source, key.index, key.annotations, key.without)
+    _page_of = staticmethod(_page_of)
 
     def _keep(self, key, pixmap: QPixmap) -> None:
         self._held -= _weight(self._tiles.pop(key, None))
         self._tiles[key] = pixmap
         self._held += _weight(pixmap)
-        self._index.setdefault(self._page_of(key), {}).setdefault(
-            key.scale, set()).add(key)
+        page_key = self._page_of(key)
+        self._index.setdefault(page_key, {}).setdefault(key.scale, set()).add(key)
+        self._changes[page_key] = self._changes.get(page_key, 0) + 1
 
     def _drop(self, key) -> None:
         pixmap = self._tiles.pop(key, None)
         self._held -= _weight(pixmap)
-        page = self._index.get(self._page_of(key))
+        page_key = self._page_of(key)
+        self._changes[page_key] = self._changes.get(page_key, 0) + 1
+        page = self._index.get(page_key)
         if page is None:
             return
         rung = page.get(key.scale)
@@ -759,6 +807,11 @@ class TileCache(QObject):
             if not here:
                 continue
             chosen.append(here)
+            if any(where.contains(wanted) for where, _pixmap in here):
+                # one square of it holds it all — a markup, zoomed out, is
+                # one square — and working that out square by square was half
+                # of drawing each markup while a zoom moved
+                return [entry for here in reversed(chosen) for entry in here], True
             for where, _pixmap in here:
                 cover(where)
             if inside() >= area * 0.999 or len(chosen) >= 3:
@@ -871,7 +924,45 @@ class TileCache(QObject):
                          expecting: bool = False) -> list[tuple[QRectF, QPixmap]]:
         """One of the page's markups as its file draws it: the squares of it
         inside *region* that are ready (other zooms standing in for the ones
-        still coming), asking for the rest."""
+        still coming), asking for the rest.
+
+        While a zoom moves (held()), what a markup drew in the frame before
+        is drawn again until one of its own squares comes or goes, and then
+        for a moment more (REDRAWN_WHILE_HELD): nothing new is asked for
+        meanwhile, so the answer would be the squares of the zoom before
+        scaled again — and working that out afresh for every markup on
+        screen, every frame, was most of a frame zoomed out over a marked-up
+        set (the user's 162 sheets, 2026-10-19). A square arriving mid-zoom
+        shows a few frames later rather than at once; the zoom it stops at
+        is worked out afresh."""
+        if not self.held() or expecting:
+            if self._while_held:
+                self._while_held.clear()
+            return self._annotation_tiles(source, data, index, page, scale, region,
+                                          xref, box, expecting)
+        memo = (source, index, xref, QRectF(region).getRect(), QRectF(box).getRect())
+        changes = self._changes.get(("markup", source, index, xref), 0)
+        known = self._while_held.get(memo)
+        now = time.monotonic()
+        if known is not None and (known[0] == changes
+                                  or now - known[3] < self.REDRAWN_WHILE_HELD):
+            if known[2]:
+                self.short += 1          # (still short of the zoom on screen)
+            return known[1]
+        before = self.short
+        ready = self._annotation_tiles(source, data, index, page, scale, region,
+                                       xref, box, expecting)
+        if ready:
+            self._while_held[memo] = (changes, ready, self.short != before, now)
+        return ready
+
+    #: While a zoom moves, how long a markup goes on drawing what it drew
+    #: before when squares of it have come since (annotation_tiles), seconds.
+    REDRAWN_WHILE_HELD = 0.05
+
+    def _annotation_tiles(self, source: str, data: bytes, index: int, page: QRectF,
+                          scale: float, region: QRectF, xref: int, box: QRectF,
+                          expecting: bool = False) -> list[tuple[QRectF, QPixmap]]:
         step = zoom_step(scale)
         size = TILE / step
         outer = QRectF(box).intersected(page)
@@ -945,6 +1036,11 @@ class TileCache(QObject):
                 asked += 1
                 if asked >= MOST_TILES_AT_ONCE:
                     return
+
+    def drawn_at_all(self, source: str, index: int, xref: int) -> bool:
+        """Whether anything of one of the page's markups is drawn, at any
+        zoom."""
+        return bool(self._index.get(("markup", source, index, xref)))
 
     def annotation_preview(self, source: str, data: bytes, index: int, page: QRectF,
                            scale: float, xref: int, box: QRectF) -> None:
@@ -1138,6 +1234,7 @@ class TileCache(QObject):
             self._drop(next(iter(self._tiles)))
 
     def forget(self, source: str = "") -> None:
+        self._while_held.clear()
         if not source:
             self._tiles.clear()
             self._index.clear()

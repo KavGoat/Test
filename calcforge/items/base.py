@@ -1372,6 +1372,12 @@ class MarkupItem(QGraphicsObject):
             self._paint_blend_pass(painter, blend_pass)
             painter.restore()
             return
+        if self.still_theirs:
+            # its file draws it (_TheirLook): nothing of it is drawn here but
+            # its handles — and this, for every markup of a marked-up set on
+            # screen, every frame, was a tenth of one zoomed out
+            self.paint_handles(painter)
+            return
         painter.save()
         from ..ui.markuplayer import align_with_squares
         align_with_squares(painter, self)
@@ -1468,16 +1474,15 @@ class MarkupItem(QGraphicsObject):
         if (page is None or not number or getattr(frame, "print_mode", False)
                 or not getattr(page, "pdf_key", None) or page.pdf_page_index is None
                 or not getattr(page, "pdf_annotations", True)
-                or number not in set(page.markup_annotations or ())):
+                or number not in (page.markup_annotations or ())):
             return
         data = frame.document.asset(page.pdf_key)
         if not data:
             return
-        from ..io import pdftiles
-        from ..ui.scene import _draw_on_the_pixel_grid, _painted_scale
-
-        to_page = self.sceneTransform() * frame.sceneTransform().inverted()[0]
-        back, ok = to_page.inverted()
+        pdftiles, _draw_on_the_pixel_grid, _painted_scale = _their_file_tools()
+        to_page, ok = self.itemTransform(frame)
+        back, inverted = to_page.inverted()
+        ok = ok and inverted
         if not ok:
             return
         if box is None:
@@ -2125,6 +2130,22 @@ def _cloud_path(polygon: QPolygonF, radius: float, closed: bool = True,
                     start + sweep * (piece + 1) / pieces)
     path.closeSubpath()
     return path
+
+
+_THEIR_FILE_TOOLS = None
+
+
+def _their_file_tools():
+    """The tile cache and the scene's drawing on the pixel grid, imported
+    once (they import this module): an import in a paint goes through
+    PySide's import hook, a dozen microseconds for every markup on screen
+    every frame."""
+    global _THEIR_FILE_TOOLS
+    if _THEIR_FILE_TOOLS is None:
+        from ..io import pdftiles
+        from ..ui.scene import _draw_on_the_pixel_grid, _painted_scale
+        _THEIR_FILE_TOOLS = (pdftiles, _draw_on_the_pixel_grid, _painted_scale)
+    return _THEIR_FILE_TOOLS
 
 
 class _TheirLook(QGraphicsItem):
