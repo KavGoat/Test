@@ -945,7 +945,14 @@ An equation reads a table's (or spreadsheet's) values four ways — only tables
 **above** it in reading order (a table's place is its top-left corner):
 
 - **a named cell**: `W_total` (name it with Define Name or the Name Box — Part 3);
-- **a cell**: `Table1.D12`;
+- **a cell**: `Table1.D12`, or a spreadsheet's `Seismic_Actions.H44` — a sheet whose
+  name has spaces or other such characters is written with each run of them as one
+  `_` (`Seismic Actions` is `Seismic_Actions`, `Tables (2)` is `Tables_2`);
+- **an imported Excel workbook's name**, qualified: `Seismic_Actions_NZS1170_5.Z`
+  (the workbook's name) or `Seismic_Actions.Z` (the name as that sheet's cells read
+  it: the sheet's own name first, then its workbook's; a sheet's own name needs its
+  sheet, `Tables.ReturnPeriodFactor`). A self-contained workbook's names are never
+  read bare; see Part 3, *Excel workbooks*;
 - **a column as a vector**: `Loads.Load` is the column under the heading "Load" in
   the table's first row (the heading's first word, so "Load (kN)" is `Load`), down
   to its last filled cell — e.g. `sum(Loads.Load)`;
@@ -1391,7 +1398,8 @@ the equation and R² on the chart). The axis titles carry the cells' units.
 Under the canvas, a tab for every spreadsheet in reading order (tables have none).
 Click a tab to go to it; double-click to rename; drag it to move the sheet's
 pages; **+** adds a sheet at the end. Right-click a tab for **Insert Sheet**,
-**Delete**, **Rename…** and **Go To**. Rename a table from its right-click menu
+**Delete**, **Rename…** and **Go To** — and, on a sheet of an imported Excel
+workbook, the **Self-contained** tick (see *Excel workbooks*). Rename a table from its right-click menu
 (**Rename Table…**) or the Properties panel; references follow a rename. Sheet and
 table names are unique in the whole document.
 
@@ -1407,6 +1415,41 @@ than 100 % are left out, and CalcForge says so, listing any cell whose formula
 gives another answer here than Excel last showed. A worksheet whose name is
 already used in the document is renamed `Name (2)` (then `(3)`…), and the formulas
 reading it follow. Nothing is ever written back to Excel.
+
+Formulas come out as Excel showed them, named ranges included. Where an older
+workbook's formula uses a block of cells where one value is wanted — a name of a
+column such as `s_x = $J$17:$J$39` in `=s_x*w`, or `INDIRECT` of such a name —
+Excel takes the cell in the formula's own row (implicit intersection); CalcForge
+does the same and shows it the way Excel 365 does, with `@`: `=@s_x*@w`. A name
+whose cells were deleted in Excel stays and gives `#REF!`, as in Excel.
+
+**A workbook is one, and self-contained by default.** Its sheets share its names.
+The import window has a **Self-contained** tick (ticked to start):
+
+- **Self-contained**: its names are its own. Its cells read its names first (a
+  sheet's own name wins on its sheet, as in Excel), otherwise the equation variable
+  defined above the sheet; `var(X)` still reads the equation variable X. Equations
+  below read any of its cells by sheet and cell (`Seismic_Actions.H44`) and its
+  names only qualified — `Seismic_Actions_NZS1170_5.Cd_T_min_ULS` or
+  `Seismic_Actions.Cd_T_min_ULS` — never bare. The workbook's name is its file name
+  without the extension, each run of other characters one `_`
+  (`Seismic_Actions_NZS1170.5.xlsm` is `Seismic_Actions_NZS1170_5`), made unique in
+  the document with `_2`, `_3`…; the import's message and the Properties panel say
+  it. Two workbooks with the same names stay apart.
+- **Not self-contained** (untick it): its names are document variables, read bare
+  by equations and other sheets, each defined where its sheet is in reading order.
+  Names already used in the document (equation variables, other names, SMath's
+  constants) are listed, with **Keep self-contained**, **Rename them with the
+  prefix** (suggested from the workbook's name, e.g. `Seismic_`; the workbook's
+  formulas follow) or **Go ahead** (reading order then decides which is read).
+
+Change it later with the **Self-contained** tick on the sheet tab's right-click
+menu, or in the Properties panel's **Workbook** section (shown while one of its
+sheets is open); it is one undo step and is saved with the document. Unticking it
+then lists any names already used and asks before going ahead. The Variables panel
+lists a self-contained workbook's names under a heading of its own
+(**Workbook Seismic_Actions_NZS1170_5**), written as the equations read them; the
+Name Manager's Scope shows the workbook.
 
 ### Spreadsheet functions
 
