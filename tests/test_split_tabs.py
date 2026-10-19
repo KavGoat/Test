@@ -276,15 +276,24 @@ def test_file_open_keeps_worked_on_untitled(window, tmp_path, monkeypatch):
 
 
 def test_window_sync_moves_the_other_view_of_the_same_document(window, two_files):
+    """Document sync repeats a zoom in the other view (by the same factor);
+    Page sync gives it the same zoom (and spot on its own page); Sync off
+    leaves the zoom each view's own (tests/test_split_sync.py has the rest)."""
     left, right = _split(window)                     # b.pdf in both views
+    window.window_sync.setCurrentIndex(2)            # Document sync
+    ratio = left.view.zoom() / right.view.zoom()
+    _zoom_in_by_wheel(right.view)
+    _settle()
+    assert left.view.zoom() == pytest.approx(right.view.zoom() * ratio)
     window.window_sync.setCurrentIndex(1)            # Page sync
     _zoom_in_by_wheel(right.view)
     _settle()
     assert left.view.zoom() == pytest.approx(right.view.zoom())
-    window.window_sync.setCurrentIndex(0)
+    window.window_sync.setCurrentIndex(0)            # Sync off
+    was = left.view.zoom()
     _zoom_in_by_wheel(right.view)
     _settle()
-    assert left.view.zoom() < right.view.zoom()
+    assert left.view.zoom() == was
 
 
 def test_a_view_zoomed_while_not_in_hand_stays_as_it_was_left(window, two_files):

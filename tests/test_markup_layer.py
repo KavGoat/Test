@@ -336,3 +336,56 @@ def test_four_hundred_picked_out_markups_nudge_at_once(window, qapp):
     frame.layer.release_all()
     _pump(qapp, 0.05)
     assert _difference(from_squares, _image(view)) < _close(view)
+
+
+def test_a_square_put_right_in_part_draws_nothing_outside_that_part(window, qapp):
+    """The user, 2026-10-19: words in markups changed size when another
+    markup was placed. Putting part of a square right (a markup placed or
+    moved near another) draws the markups under that part again, held to it
+    — but a text box's words set a clip of their own in place of that one,
+    and were drawn again over themselves across the whole square: heavier,
+    until the square was redrawn. A square put right in part is the square
+    drawn afresh."""
+    import numpy as np
+    from calcforge.items.shapes import RectItem
+    from calcforge.items.text import CalloutItem, TextItem
+
+    view = window.view
+    frame = view.scene().frames[0]
+    text = TextItem("Words held still 123", QRectF(0, 0, 220, 70))
+    callout = CalloutItem("Callout words gjq", QRectF(0, 0, 160, 40), [QPointF(-30, 60)])
+    for item, where in ((text, QPointF(100, 100)), (callout, QPointF(420, 120))):
+        item.apply_style()
+        frame.add_markup(item, where)
+    beside = RectItem("rect", QRectF(0, 0, 60, 40))
+    frame.add_markup(beside, QPointF(300, 150))
+    view.set_zoom(1.0)
+    view.centerOn(frame.mapToScene(QPointF(300, 150)))
+    _settled(qapp, view, frame.layer)
+    layer = frame.layer
+    assert {text, callout} <= layer.members
+    # the bottom strip of each box, below its words, goes wrong and is put
+    # right, as when a markup is placed there
+    for item in (text, callout):
+        box = item.mapRectToParent(item.local_rect())
+        layer.dirty(QRectF(box.left() - 4, box.bottom() - 6, box.width() + 8, 10))
+    layer._put_right()
+
+    def array(pixmap):
+        image = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
+        raw = np.frombuffer(bytes(image.constBits()), np.uint8)
+        return raw.reshape(image.height(), image.bytesPerLine())[:, :image.width() * 4] \
+            .reshape(image.height(), image.width(), 4).astype(int)
+
+    step = layer.wanted[0]
+    patched = {key: array(square.pixmap) for key, square in layer.tiles[step].items()
+               if square.pixmap is not None}
+    assert patched
+    for (col, row), before in patched.items():
+        fresh = layer._draw(step, col, row, False)
+        apart = np.abs(before - array(fresh.pixmap)).max(axis=2)
+        # a stroke's edge drawn clipped can come out a shade apart; letters
+        # drawn twice are dozens of pixels far darker
+        assert (apart > 40).sum() <= 2, \
+            f"square {(col, row)} put right in part is not the square drawn afresh: " \
+            f"{int((apart > 40).sum())} pixels, up to {int(apart.max())}"

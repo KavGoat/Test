@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
                                QInputDialog, QMenu, QStyle,
                                QStyleOptionGraphicsItem)
 
+from ..core.typography import PAGE_TEXT
 from .base import CLOUD_SIZE, HANDLE_SIZE, MarkupItem, Style, draw_head, register_item
 
 STAMP_PRESETS = {
@@ -49,8 +50,14 @@ class _InlineEditor(QGraphicsTextItem):
         trimmed = QStyleOptionGraphicsItem(option)
         trimmed.state &= ~QStyle.State_HasFocus
         trimmed.state &= ~QStyle.State_Selected
+        # the words on the pixels they have before and after typing
+        # (ui/markuplayer.align_with_squares): no jump as editing ends
+        from ..ui.markuplayer import align_with_squares
+        painter.save()
+        align_with_squares(painter, self)
         super().paint(painter, trimmed, widget)
         self._paint_misspellings(painter)
+        painter.restore()
 
     def _paint_misspellings(self, painter: QPainter) -> None:
         """A red wave under each misspelt word, the same size at any zoom.
@@ -395,6 +402,7 @@ class _TextBase(MarkupItem):
         # narrower than the same title in Bluebeam.
         unkerned = self.doc.defaultFont()
         unkerned.setKerning(False)
+        unkerned.setStyleStrategy(PAGE_TEXT)      # smoothed in grey (typography)
         self.doc.setDefaultFont(unkerned)
         self.doc.setDocumentMargin(0)
         self.doc.setPlainText(text)
@@ -1265,7 +1273,11 @@ class _TextBase(MarkupItem):
         rect = self.text_rect()
         painter.save()
         painter.translate(rect.topLeft())
-        painter.setClipRect(QRectF(0, 0, rect.width() + 1, rect.height() + 1))
+        # within whatever the painter is already held to: drawn into part of
+        # a square (markuplayer._patch), the words were drawn again over
+        # themselves outside it — heavier, until the square was redrawn
+        painter.setClipRect(QRectF(0, 0, rect.width() + 1, rect.height() + 1),
+                            Qt.IntersectClip)
         self.doc.setTextWidth(max(rect.width(), 8.0))
         offset = 0.0
         if self.style.valign in ("middle", "bottom"):
@@ -1744,6 +1756,7 @@ def paint_note_icon(painter: QPainter, rect: QRectF, icon: str, body, ink,
         font = QFont()
         font.setBold(True)
         font.setPixelSize(max(int(high * 0.7), 4))
+        font.setStyleStrategy(PAGE_TEXT)
         painter.setFont(font)
         painter.drawText(rect, Qt.AlignCenter, "?")
     elif icon == "Insert":
@@ -1767,6 +1780,7 @@ def paint_note_icon(painter: QPainter, rect: QRectF, icon: str, body, ink,
         font = QFont()
         font.setBold(True)
         font.setPixelSize(max(int(high * (0.62 if icon == "Paragraph" else 0.5)), 4))
+        font.setStyleStrategy(PAGE_TEXT)
         painter.setFont(font)
         painter.drawText(rect, Qt.AlignCenter, "¶" if icon == "Paragraph" else "NP")
     else:

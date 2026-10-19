@@ -113,6 +113,12 @@ units included.
   key, F-keys, or a single letter for tools) to it. This covers menu-bar
   items, right-click commands, toolbar buttons and panel buttons.
   `tests/test_every_command_is_bindable.py` enforces it.
+- **Every user-visible change updates docs/USER_MANUAL.md in the same commit**
+  (run `python tools/manual.py` to regenerate the reference tables) (the user,
+  2026-10-19: "Keep this up to date"). The manual ships as
+  `calcforge/data/USER_MANUAL.md` and opens from Help ▸ User Manual;
+  `tests/test_user_manual.py` fails when it drifts — a function, preference,
+  default key or markup tool it does not describe.
 - **Never replace the native window frame.** Use the system's own title bar,
   window controls, dragging and snapping. On Windows the menus sit inside the
   native title bar, as in Revu (decided 2026-10-16).

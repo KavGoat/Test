@@ -184,7 +184,7 @@ def _out_to_device_pixels(painter, rect: QRectF) -> QRectF:
     return inverse.mapRect(grown) if invertible else QRectF(rect)
 
 
-def _draw_on_the_pixel_grid(painter, where: QRectF, tile) -> None:
+def _draw_on_the_pixel_grid(painter, where: QRectF, tile, shift=None) -> None:
     """Draw a tile so its pixels sit exactly on the device's pixels.
 
     A tile placed at a fractional position, or a pixel or so off its own
@@ -194,12 +194,20 @@ def _draw_on_the_pixel_grid(painter, where: QRectF, tile) -> None:
     place in its window at 125 % or 150 % is snapped too — and, when that is
     the tile's own size, it is copied without any smoothing at all. Turned
     pages keep the ordinary smoothed draw.
+
+    *shift*, when given, is how far (device pixels, each way) the caller's
+    tiles move to lie on whole pixels, worked out once for all of them, so
+    that a tile's corner exactly half way between two pixels,
+    common at 150 %, cannot go one way for one tile and the other way for the
+    next, or for the markups drawn live beside them (markuplayer.snap_of).
     """
     device = painter.deviceTransform()
     if abs(device.m12()) > 1e-9 or abs(device.m21()) > 1e-9:
         painter.drawPixmap(where, tile, QRectF(tile.rect()))
         return
     placed = device.mapRect(QRectF(where))
+    if shift is not None:
+        placed.translate(shift[0], shift[1])
     left, top = round(placed.left()), round(placed.top())
     right, bottom = round(placed.right()), round(placed.bottom())
     if right <= left or bottom <= top:
@@ -2055,6 +2063,16 @@ class DocumentScene(QGraphicsScene):
         height = max(y - PAGE_GAP, 0.0)
         self._pages_rect = QRectF(0, 0, right, height)
         self._apply_desk_margin()
+
+    def pages_rect(self) -> QRectF:
+        """Where the pages (or the spread in view) lie on the canvas; each
+        view keeps its own desk round this (PageView._update_desk_margin)."""
+        return QRectF(self._pages_rect)
+
+    @staticmethod
+    def desk_minimum() -> float:
+        """The least desk round the pages, whatever the zoom."""
+        return float(PAGE_GAP)
 
     def set_desk_margin(self, across: float, down: float) -> None:
         """Leave enough canvas around the pages to centre any page edge."""
