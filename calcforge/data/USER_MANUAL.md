@@ -799,9 +799,11 @@ Here** has Equation, Calc Text, Calculation Block and Plot.
 - **The unit box.** After `=`, the result has a small black box after it. Press →
   (or click the box) and type the unit you want the answer in — `kN·m`, `MPa`,
   `mm`, or a custom unit (below). Leave it empty for SMath's own choice.
-- **Custom units.** A quantity you define, such as `kip:4.448'kN`, is used in an
-  equation as a name (`3*kip`) and typed into a unit box as a unit (`kip`). In
-  cells it is a unit written with the apostrophe (`2'kip`).
+- **Custom units.** A quantity you define, such as `kips:1000'lbf`, is a unit
+  wherever it is written with the apostrophe, as in SMath: `2'kips` in an equation
+  below the definition (drawn blue like any unit), `kips` in a unit box, and
+  `2'kips` in cells. It can still be used as a name too (`3*kips`). A built-in
+  unit of the same name (CalcForge already has `kip`) wins over the definition.
 - `Enter` leaves the equation and puts the red cross below it; `Tab` and
   `Shift+Tab` go to the next or previous equation in reading order; the arrow keys
   move the red cross. `Esc` lets go of the equation.
@@ -810,7 +812,7 @@ Here** has Equation, Calc Text, Calculation Block and Plot.
 
 | Type | You get |
 |---|---|
-| `:` | `≔` (definition) |
+| `:` | `≔` (definition): once in an equation, and once in each line of a program block (local definitions: `f(x):`, `]`, `a:x+1`, `]`, `2*a`) |
 | `=` | evaluation (or a definition, as above) |
 | `/` | a fraction: what is left of the cursor goes on top, and you type the bottom |
 | `^` | a power: type the exponent, then → to come out |
@@ -818,7 +820,8 @@ Here** has Equation, Calc Text, Calculation Block and Plot.
 | `[` | an index (element): `v[2` is `v₂`; → comes out |
 | `\` | a square root |
 | `.` in a name | a subscript: `L.beam` is L with *beam* below |
-| `'` | a unit follows |
+| `'` | a unit follows (a built-in one, or a custom unit defined above) |
+| `]` | SMath's Add line: a program block of two lines; inside one, a new line after the one you are in. With part of the equation selected, that part becomes its first line |
 | `*` | multiply (`×` too); a number then a letter multiplies by itself: `2x` is 2·x |
 | `&` and `\|` | logical and (∧) and or (∨) |
 | a word and a space | turns a lone word into Calculation text |
@@ -844,6 +847,16 @@ toolbar**. The **Maths panel** has SMath's side panel: Arithmetic, Matrices,
 Boolean, Functions, Plot, Programming, Units and Constants, plus **All
 functions…**, **All units…** and **Table of all constants…**; each button types
 into the equation, or starts one at the red cross.
+
+**Data files.** `wfile(value, "name")` keeps a value — a number, quantity,
+matrix or text — in a file for another equation or document to read back with
+`rfile("name")`; `dfile("name")` deletes it. As in SMath, these files live in one
+folder of the application's own (`user` in CalcForge's data folder), whatever
+document calls them, and an equation can name only a file in it, never a folder or
+path, so a document from someone else cannot read, change or delete anything else
+on your computer. The file is written or deleted when you leave the equation, not
+while you type. (`importData` reads any text or CSV file, relative to the
+document.) Files SMath Studio wrote are in SMath's own format and are not read.
 
 **Calculation ▸ Selection** works on the part of the equation selected: **Solve**
 (solve for the variable under the cursor; the roots go below), **Calculate
@@ -995,7 +1008,7 @@ Type a function's name and an opening bracket, or use **Calculation ▸
 Function…** (`Ctrl+E`). Every built-in function:
 
 <!-- generated:smath-functions -->
-The engine has **119** built-in functions.
+The engine has **122** built-in functions.
 
 #### Arithmetic and rounding
 
@@ -1010,7 +1023,7 @@ The engine has **119** built-in functions.
 | `nthroot(x, n)` | The n-th root of x. |
 | `perc(x, p)` | p per cent of x: perc(100, 5) is 5. |
 | `random(n)` | A random number from 0 up to n, evenly spread. |
-| `round(x, n) · round(x, n, mode)` | x rounded to n decimal places (0 to 15), halves away from zero; the third argument is accepted but has no effect. |
+| `round(x, n) · round(x, n, mode)` | x rounded to n decimal places (0 to 15), halves away from zero; the mode, as in SMath, is "te" (halves to the even neighbour: round(2.5, 0, "te") is 2) or "afz" (halves away from zero). |
 | `sign(x)` | 1 if x is positive, −1 if negative, 0 if zero. |
 | `sqrt(x)` | Square root (also typed with \\); units are rooted too. |
 | `trunc(x)` | The whole-number part of x, with the fraction cut off. |
@@ -1103,7 +1116,7 @@ The engine has **119** built-in functions.
 | `submatrix(M, r1, r2, c1, c2)` | The part of M from rows r1–r2 and columns c1–c2. |
 | `tr(M)` | The trace: the sum of the main diagonal. |
 | `transpose(M)` | The transpose (Mᵀ). |
-| `vectorize(expression)` | Accepted for SMath compatibility; CalcForge evaluates the expression as it stands (it does not yet apply operators element by element). |
+| `vectorize(expression)` | The expression worked element by element on the vectors and matrices in it: vectorize(v*v) is the column of squares (v*v alone is the dot product), vectorize(f(v)) calls f on each element. |
 | `vminor(M, i, j)` | M with row i and column j taken out. |
 
 #### Interpolation
@@ -1136,7 +1149,7 @@ The engine has **119** built-in functions.
 | Function | What it does |
 |---|---|
 | `concat(s1, s2, …)` | The strings joined together. |
-| `description(name)` | SMath's description text of a definition; CalcForge equations have none, so it gives empty text. |
+| `description(name)` | SMath's description text of a definition. CalcForge's equations have none, so it gives empty text; it is kept so SMath worksheets that use it calculate, and is not offered in Insert Function. |
 | `error(s)` | Stops with the red error message s. |
 | `findstr(s, find)` | The positions where find starts in s (−1 if it does not). |
 | `IsString(x)` | 1 if x is a string, otherwise 0. |
@@ -1155,7 +1168,7 @@ The engine has **119** built-in functions.
 | `continue` | Goes straight to the loop's next pass. |
 | `for(i, range, body) · for(start, condition, step, body)` | A loop over a range of values, or with a start, a condition and a step. |
 | `if(condition, then, else)` | then when the condition is true (1), else otherwise; also the If button and Calculation ▸ Program ▸ If. |
-| `line(…)` | Groups several lines into one program block (Calculation ▸ Program ▸ Line). |
+| `line(…)` | Groups several lines into one program block: `]` in an equation (or Calculation ▸ Program ▸ Line) starts one, and adds a line in one. |
 | `Sleep(ms)` | Waits the given milliseconds (at most 10 s). |
 | `time(x)` | Milliseconds since midnight, 1 January 1601 (for timing). |
 | `trace("text {0} {1}", a, b) · trace(a, …)` | The values as a string, placed into the text's {0}, {1}… when given. |
@@ -1174,7 +1187,10 @@ The engine has **119** built-in functions.
 
 | Function | What it does |
 |---|---|
+| `dfile(name)` | Deletes the file name from CalcForge's data folder when the equation is left; 1 if it was there, otherwise 0. |
 | `importData(file) · importData(file, …)` | A matrix read from a text or CSV file (relative to the document); further arguments set the decimal symbol, separators and the rows and columns to read. |
+| `rfile(name)` | The value wfile wrote to name (in CalcForge's data folder), as a number, quantity, matrix or text. |
+| `wfile(expression, name)` | Writes the value to the file name in CalcForge's data folder (a file name only, no folder) when the equation is left; 1 if it was written, 0 if not. A file of the same name is replaced. |
 <!-- /generated -->
 
 ## Part 3 — Spreadsheets and tables (Excel-style)

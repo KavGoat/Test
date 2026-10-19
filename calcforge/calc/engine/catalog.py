@@ -1,5 +1,12 @@
 """Function and unit catalogue as listed by SMath Cloud (Insert Function / Insert Unit)."""
 
+# Functions SMath lists that CalcForge evaluates (so SMath worksheets using
+# them still calculate) but does not offer in Insert Function or the
+# suggestions, because they cannot do anything useful here: description()
+# reads a definition's Description text, which CalcForge's equations do not
+# have (it gives empty text).
+NOT_OFFERED = frozenset({"description"})
+
 # (name, argument count (-1 = any), category, description)
 FUNCTIONS = [('abs', 1, 'Unknown', 'abs("complexNumber") — Absolute value.'),
  ('acos', 1, 'Trigonometric', 'acos("complexNumber") — Returns the inverse cosine.'),

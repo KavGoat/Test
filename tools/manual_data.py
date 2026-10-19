@@ -33,8 +33,9 @@ SMATH = {
     "trunc": ("Arithmetic and rounding", "trunc(x)",
               "The whole-number part of x, with the fraction cut off."),
     "round": ("Arithmetic and rounding", "round(x, n) · round(x, n, mode)",
-              "x rounded to n decimal places (0 to 15), halves away from zero; "
-              "the third argument is accepted but has no effect."),
+              "x rounded to n decimal places (0 to 15), halves away from zero; the "
+              "mode, as in SMath, is \"te\" (halves to the even neighbour: "
+              "round(2.5, 0, \"te\") is 2) or \"afz\" (halves away from zero)."),
     "mod": ("Arithmetic and rounding", "mod(a, b)",
             "The remainder of a divided by b (real numbers)."),
     "sign": ("Arithmetic and rounding", "sign(x)",
@@ -143,8 +144,9 @@ SMATH = {
     "range": ("Matrices and vectors", "range(a, b) · range(a, b, second)",
               "A column of values from a to b, in steps of 1, or of (second − a)."),
     "vectorize": ("Matrices and vectors", "vectorize(expression)",
-                  "Accepted for SMath compatibility; CalcForge evaluates the expression as "
-                  "it stands (it does not yet apply operators element by element)."),
+                  "The expression worked element by element on the vectors and matrices "
+                  "in it: vectorize(v*v) is the column of squares (v*v alone is the dot "
+                  "product), vectorize(f(v)) calls f on each element."),
     # -- interpolation -----------------------------------------------------------
     "linterp": ("Interpolation", "linterp(xs, ys, x)",
                 "Straight-line interpolation of the data vectors xs, ys at x."),
@@ -197,8 +199,9 @@ SMATH = {
     "IsString": ("Text (strings)", "IsString(x)", "1 if x is a string, otherwise 0."),
     "error": ("Text (strings)", "error(s)", "Stops with the red error message s."),
     "description": ("Text (strings)", "description(name)",
-                    "SMath's description text of a definition; CalcForge equations have "
-                    "none, so it gives empty text."),
+                    "SMath's description text of a definition. CalcForge's equations have "
+                    "none, so it gives empty text; it is kept so SMath worksheets that use "
+                    "it calculate, and is not offered in Insert Function."),
     # -- programming ---------------------------------------------------------------
     "if": ("Programming", "if(condition, then, else)",
            "then when the condition is true (1), else otherwise; also the If button "
@@ -208,7 +211,8 @@ SMATH = {
     "while": ("Programming", "while(condition, body)",
               "Repeats the body while the condition holds."),
     "line": ("Programming", "line(…)",
-             "Groups several lines into one program block (Calculation ▸ Program ▸ Line)."),
+             "Groups several lines into one program block: `]` in an equation (or "
+             "Calculation ▸ Program ▸ Line) starts one, and adds a line in one."),
     "break": ("Programming", "break", "Leaves the loop it is in."),
     "continue": ("Programming", "continue", "Goes straight to the loop's next pass."),
     "try": ("Programming", "try(expr, otherwise)",
@@ -232,6 +236,16 @@ SMATH = {
                    "A matrix read from a text or CSV file (relative to the document); "
                    "further arguments set the decimal symbol, separators and the rows "
                    "and columns to read."),
+    "wfile": ("Files", "wfile(expression, name)",
+              "Writes the value to the file name in CalcForge's data folder (a file "
+              "name only, no folder) when the equation is left; 1 if it was written, "
+              "0 if not. A file of the same name is replaced."),
+    "rfile": ("Files", "rfile(name)",
+              "The value wfile wrote to name (in CalcForge's data folder), as a number, "
+              "quantity, matrix or text."),
+    "dfile": ("Files", "dfile(name)",
+              "Deletes the file name from CalcForge's data folder when the equation is "
+              "left; 1 if it was there, otherwise 0."),
 }
 
 # ---------------------------------------------------------------------------

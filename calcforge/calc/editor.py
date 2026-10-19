@@ -413,7 +413,7 @@ class MathEditor:
             self._insert_box(Index(Row()), into=0)
             return
         if ch == "]":
-            self._close(Index)
+            self.add_program_line()
             return
         if ch == "\\":
             self._insert_box(Sqrt(Row()), into=0)
@@ -562,9 +562,33 @@ class MathEditor:
         self.cursor = Cursor(pieces[-1], 0)
         return True
 
+    def add_program_line(self) -> None:
+        """SMath's Add line (the "]" key and Programming ▸ line): inside a
+        line block, a new empty line after the one the cursor is in (or the
+        empty one already there); elsewhere a new line block of two empty
+        lines (f(x):= then "]" starts a program)."""
+        r = self.row
+        while r.parent is not None:
+            box = r.parent
+            if isinstance(box, Program) and box.name == "line":
+                k = box.rows.index(r) + 1
+                if k < len(box.rows) and box.rows[k].is_empty():
+                    nr = box.rows[k]          # the empty line already there
+                else:
+                    nr = Row()
+                    box.rows.insert(k, nr)
+                    nr.parent = box
+                self.cursor = Cursor(nr, 0)
+                return
+            r = box.parent_row
+        self._insert_box(Program("line", Row(), Row()), into=0)
+
     def insert_structure(self, name: str) -> None:
         """Insert a toolbox structure: for(,,  while(,  sum(,,, ..."""
         self._push_undo()
+        if name == "line":
+            self.add_program_line()
+            return
         rows = TOOLBOX_ROWS.get(name, 2)
         if name == "el":
             self._insert_box(Index(Row()), into=0)
@@ -587,7 +611,8 @@ class MathEditor:
         (1+2·3)=7, a silently wrong answer; the user, 2026-10-15: "Close
         the bracket").  Exponents, fractions and subscripts on the way out
         are left too.  With no bracket around the cursor ")" is ignored, as
-        before; "]" is always ignored (the right arrow leaves an index)."""
+        before.  "]" is SMath's Add line (add_program_line); the right
+        arrow leaves an index."""
         if kind is not Paren:
             return
         r = self.row
@@ -643,10 +668,24 @@ class MathEditor:
             self.cursor = Cursor(frac.rows[1], 0)
 
     def _define_sign(self) -> None:
-        """":" inserts ":=" at the cursor, wherever it is (as SMath does)."""
-        if self.in_unit or "≔" in self.root.items:
+        """":" inserts ":=" at the cursor, wherever it is (as SMath does): once
+        per equation, and once more in each line of a program block, where
+        local definitions go (f(x):= then "]" then a:x+1)."""
+        if self.in_unit:
+            return
+        if "≔" in self.root.items and not self._in_program_line():
+            return
+        if "≔" in self.row.items:
             return
         self._insert_char("≔")
+
+    def _in_program_line(self) -> bool:
+        r = self.row
+        while r.parent is not None:
+            if isinstance(r.parent, Program):
+                return True
+            r = r.parent.parent_row
+        return False
 
     def _equals(self) -> None:
         if self.in_unit or self.plot_input:
@@ -839,7 +878,16 @@ class MathEditor:
         r, a, b = self.selection
         self.selection = None
         ch = OPERATOR_KEYS.get(ch, ch)
-        if ch == ")" or ch == "]":
+        if ch == "]":
+            # Add line on a selection: it becomes the first line of a block
+            first = Row(r.items[a:b])
+            del r.items[a:b]
+            box = Program("line", first, Row())
+            r.insert(a, box)
+            self._fix_parents(r, r.parent)
+            self.cursor = Cursor(box.rows[1], 0)
+            return
+        if ch == ")":
             return
         if ch == "/":
             self.cursor = Cursor(r, b)

@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 from . import ast as A
-from .errors import SMathError, err
-from .units import is_unit, unit_offset, unit_quantity
+from .errors import MESSAGES, SMathError, err
+from .units import Quantity, is_unit, unit_offset, unit_quantity
 from .values import (Matrix, Q, String, add, compare, cross, div, mul, need_int, need_real, neg,
                      power, sub, truth)
 
@@ -441,7 +441,21 @@ class Evaluator:
 
     def _UnitRef(self, n: A.UnitRef, ctx):
         if not is_unit(n.name):
-            raise err("not_defined", "'" + n.name, node=n)
+            # SMath's custom units: kip := 1000'lbf above, then 2'kip is 2
+            # of it, drawn as a unit; a built-in unit of the name wins
+            if ctx.lookup(n.name) is None and (EXTERNAL is None or n.name in BUILTIN_CONSTANTS):
+                if self.reads is not None:
+                    self.reads.add(n.name)
+                raise err("not_defined", "'" + n.name, node=n)
+            try:
+                v = self._Var(A.Var(n.name, src=n.src), ctx)
+            except SMathError as e:
+                if e.message == MESSAGES["not_defined"].format(n.name):
+                    raise err("not_defined", "'" + n.name, node=n) from None
+                raise
+            if self.ignore_units and isinstance(v, Quantity):
+                return Q(v.value)
+            return v
         q = unit_quantity(n.name)
         if self.ignore_units:
             # right-click > Ignore units (observed: 5'm+2 = 7, 5'm*2'kg = 10)

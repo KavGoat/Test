@@ -107,7 +107,7 @@ class Checker:
             raise Fail(n.name)
         if isinstance(n, A.UnitRef):
             if n.name not in UNITS:
-                raise Fail(n.name)
+                return self.ev(A.Var(n.name), env)    # a custom unit: its definition
             return self._unit(n.name)
         if isinstance(n, A.Unary) and n.op in "-+":
             v = self.ev(n.arg, env)

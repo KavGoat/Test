@@ -1339,7 +1339,8 @@ class MainWindow(QMainWindow):
                 ("if", "If", "if … else: a condition, in a program block"),
                 ("for", "For", "for: a loop over a range, in a program block"),
                 ("while", "While", "while: a loop while a condition holds"),
-                ("line", "Line", "Add a line to a program block (] in an equation)")):
+                ("line", "Line", "Add a line to the program block the cursor is in, "
+                                 "or start a block of two lines (] in an equation)")):
             self._act(f"prog_{name}", label,
                       lambda _checked=False, which=name: self.insert_program(which),
                       tip=tip)
