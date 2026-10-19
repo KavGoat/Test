@@ -294,6 +294,12 @@ def _text_look(annotation: dict) -> dict:
                 look["padding"] = float(margin.group(1)) + 1.0
             except ValueError:
                 pass
+        sides = _four_margins(settings)
+        if sides:
+            look["text_margins"] = sides
+    spacing = _line_spacing(annotation)
+    if spacing:
+        look["line_spacing"] = spacing
         if re.search(r"font\s*:\s*[^;]*\bbold\b", settings):
             look["bold"] = True
         if re.search(r"font\s*:\s*[^;]*\bitalic\b", settings):
@@ -314,6 +320,76 @@ def _text_look(annotation: dict) -> dict:
             if found:
                 look["text_color"] = found
     return look
+
+
+def _four_margins(settings: str) -> tuple:
+    """A margin that differs side to side — CSS's ``margin: top right bottom
+    left`` in /DS — as a box's (left, top, right, bottom), each a point
+    further in as Bluebeam sets them, but for the right, where the point is
+    kept back for the caret as for every box read in (pdfmarkups._free_text).
+    Empty when it is one number, which is the padding."""
+    found = re.search(r"(?<![-\w])margin\s*:\s*([^;]*)", settings or "")
+    if not found:
+        return ()
+    values = re.findall(r"([\d.]+)\s*(?:pt|px)?", found.group(1))
+    try:
+        numbers = [float(value) for value in values][:4]
+    except ValueError:
+        return ()
+    if len(numbers) < 2:
+        return ()
+    # CSS's shorthand: two say top-and-bottom, sides; three top, sides, bottom
+    if len(numbers) == 2:
+        numbers = numbers * 2
+    elif len(numbers) == 3:
+        numbers = numbers + [numbers[1]]
+    top, right, bottom, left = numbers
+    return (left + 1.0, top + 1.0, right, bottom + 1.0)
+
+
+#: The font's own spacing, as Revu writes a Single line height: 1.15 of the
+#: type size (13.8 pt for 12 pt words).
+SINGLE_LINE = 1.15
+
+
+def _line_spacing(annotation: dict) -> float:
+    """Revu's Line Spacing, out of /DS's ``line-height`` or /RC's.
+
+    Revu writes the line height itself — 1.15 of the type size times the
+    spacing — so the spacing is that over the font's own. Nothing (0) when
+    it is Single or not said, which leaves a box as it always was."""
+    said = ""
+    for key in ("DS", "RC"):
+        text = annotation.get(key)
+        if not isinstance(text, str):
+            continue
+        if key == "RC":
+            body = re.search(r"<body\b[^>]*\bstyle\s*=\s*\"([^\"]*)\"", text)
+            text = body.group(1) if body else ""
+        found = re.search(r"line-height\s*:\s*([\d.]+)\s*(pt|px|%)?", text)
+        if found:
+            said = found
+            break
+    if not said:
+        return 0.0
+    size = _font_size(annotation)
+    try:
+        value = float(said.group(1))
+    except ValueError:
+        return 0.0
+    if size <= 0 or value <= 0:
+        return 0.0
+    unit = said.group(2) or ""
+    if unit == "%":
+        height = value / 100.0 * size
+    elif not unit and value <= 5.0:
+        height = value * size               # CSS's bare multiple of the size
+    else:
+        height = value
+    spacing = round(height / (SINGLE_LINE * size), 2)
+    if abs(spacing - 1.0) < 0.05:
+        return 0.0                         # Single, within Revu's rounding
+    return min(max(spacing, 0.1), 10.0)
 
 
 def _font_size(annotation: dict) -> float:

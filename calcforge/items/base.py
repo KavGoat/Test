@@ -242,6 +242,10 @@ class Style:
     # that is not the same all round: circled text sets its words in the
     # square inside the circle. Empty means the padding, all round.
     text_margins: tuple = ()
+    # Revu's Line Spacing for words in a box: how far apart the lines are, as
+    # a multiple of the font's own spacing — 1 is Single, 1.15, 1.5, 2 is
+    # Double, or any other multiple.
+    line_spacing: float = 1.0
 
     def dashes(self) -> list:
         """The dashes this line is drawn with, in points, spacing applied."""

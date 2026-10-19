@@ -1270,7 +1270,71 @@ def _free_text(annotation, item, rect, place: "Placement") -> None:
         annotation["Rotation"] = round(turn % 360.0, 3)
         return
     # Left, bottom, right, top, as for a square: see _add_the_geometry.
-    annotation["RD"] = _difference(place, rect, box)
+    annotation["RD"] = _difference(place, rect, _circled_words(item, box))
+
+
+def _circled_words(item, box):
+    """Where circled text's /RD points: the square its words are set in.
+
+    Bluebeam draws the circle round the whole of Rect and sets the words in
+    the rectangle /RD leaves, with /DS's margin inside that (io/btx
+    free_text_colours reads it so). Any other box's /RD is the box itself;
+    its margins are /DS's (_css_margin).
+    """
+    style = item.style
+    given = tuple(getattr(style, "text_margins", ()) or ())
+    if getattr(style, "text_shape", "") != "circle" or len(given) != 4:
+        return box
+    try:
+        pad = float(getattr(style, "padding", 4.0) or 0.0)
+        left, top, right, bottom = (max(float(value) - pad, 0.0) for value in given)
+    except (TypeError, ValueError):
+        return box
+    inner = box.adjusted(left, top, -right, -bottom)
+    return inner if inner.width() > 0 and inner.height() > 0 else box
+
+
+def _line_spacing_of(item) -> float:
+    """The box's Line Spacing, as a multiple: 1 is Single."""
+    factor = getattr(item, "line_height_factor", None)
+    if callable(factor):
+        return float(factor())
+    try:
+        value = float(getattr(item.style, "line_spacing", 1.0) or 1.0)
+    except (TypeError, ValueError):
+        return 1.0
+    return value if value > 0 else 1.0
+
+
+def _css_margin(item) -> str:
+    """The room between the box and its words, as /DS's ``margin``.
+
+    Bluebeam sets its words a point further in than the margin it states,
+    and the importer adds that point back, so it is taken off here. One
+    number when it is the same all round — which is all a box had before
+    it could differ, and is written exactly as it was — otherwise CSS's
+    four, top, right, bottom and left. The right is written as it is: the
+    importer keeps a point back on the right for the caret
+    (io/pdfmarkups._free_text), and the two cancel.
+
+    Circled text keeps its own margins in ``/RD`` (the square the words are
+    set in, inside the circle), as Bluebeam writes it; ``margin`` is then
+    only the padding.
+    """
+    style = item.style
+    pad = max(float(getattr(style, "padding", 4.0) or 0.0) - 1.0, 0.0)
+    given = tuple(getattr(style, "text_margins", ()) or ())
+    if len(given) != 4 or getattr(style, "text_shape", "") == "circle":
+        return f"{pad:g}pt"
+    try:
+        left, top, right, bottom = (float(value) for value in given)
+    except (TypeError, ValueError):
+        return f"{pad:g}pt"
+    sides = [max(top - 1.0, 0.0), max(right, 0.0), max(bottom - 1.0, 0.0),
+             max(left - 1.0, 0.0)]
+    if max(sides) - min(sides) <= 1e-6:
+        return f"{sides[0]:g}pt"
+    return " ".join(f"{round(side, 3):g}pt" for side in sides)
 
 
 def _css_family(family: str) -> str:
@@ -1295,14 +1359,15 @@ def _rich_text_of(item) -> tuple[str, str]:
     colour = getattr(style, "text_color", "") or "#000000"
     align = {"center": "center", "right": "right"}.get(getattr(style, "align", ""), "left")
     valign = {"middle": "middle", "bottom": "bottom"}.get(getattr(style, "valign", ""), "top")
-    # Bluebeam sets its words a point further in than the margin it states;
-    # the importer adds that point back, so it is taken off here.
-    margin = max(float(getattr(style, "padding", 4.0) or 0.0) - 1.0, 0.0)
+    margin = _css_margin(item)
+    # Revu's line height: the font's own spacing (1.15 of the size) times
+    # the box's Line Spacing
+    spacing = _line_spacing_of(item)
     weight = " bold" if getattr(style, "bold", False) else ""
     slant = " italic" if getattr(style, "italic", False) else ""
     settings = (f"font:{slant}{weight} {_css_family(style.font_family)} {size:g}pt; "
-                f"text-align:{align}; text-valign:{valign}; margin:{margin:g}pt; "
-                f"line-height:{size * 1.15:.1f}pt; color:{colour}")
+                f"text-align:{align}; text-valign:{valign}; margin:{margin}; "
+                f"line-height:{size * 1.15 * spacing:.1f}pt; color:{colour}")
     # Revu's Underline and Strikethrough are both text decorations
     decorations = [word for word, on in (("underline", getattr(style, "underline", False)),
                                          ("line-through",

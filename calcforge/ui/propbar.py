@@ -55,6 +55,16 @@ TOTALS = "totals"
 AUTO_FONT = "font_auto"      # Revu's "A": the words sized to fit the box
 END_FILL = "end_fill"        # Revu's line-end colour swatch, after End ▾ Auto ▾
 NOTE = "note"                # a note's Color, opacity and Icon ▾ (Revu's)
+LINE_SPACING = "line_spacing"  # words in a box: Revu's Line Spacing ▾
+
+#: Revu's Line Spacing list: Single, 1.15, 1.5 and Double; any other multiple
+#: can be typed in.
+LINE_SPACINGS = (1.0, 1.15, 1.5, 2.0)
+
+
+def spacing_words(value: float) -> str:
+    """A line spacing as the list shows it: 1.0, 1.15, 1.5, 2.0."""
+    return f"{value:.1f}" if abs(value * 10 - round(value * 10)) < 1e-9 else f"{value:g}"
 
 
 def _ink() -> str:
@@ -230,6 +240,82 @@ class CloudSizeCombo(ValueCombo):
                         size.width(), size.height())
 
 
+class LineSpacingCombo(ValueCombo):
+    """Revu's Line Spacing ▾ on the bar: closed, its picture; open, 1.0,
+    1.15, 1.5 and 2.0, a spacing set elsewhere (the Properties panel's) as
+    one more entry, and Other… for any multiple."""
+
+    OTHER = "Other…"
+
+    def __init__(self, parent=None):
+        super().__init__(LINE_SPACINGS, spacing_words, 0.1, 10.0, editable=False,
+                         width=46, parent=parent)
+        self.setIconSize(QSize(20, 20))
+        self.face = _line_spacing_icon()
+        self.addItem(self.OTHER, None)
+        self.view().setMinimumWidth(90)
+        self.setToolTip("Line spacing: how far apart the lines are, as a multiple of "
+                        "the font's own — 1.0 Single, 1.15, 1.5, 2.0 Double, or Other…")
+        self.dialog = None
+
+    def refresh_icons(self) -> None:
+        self.face = _line_spacing_icon()
+        self.update()
+
+    def _show(self, value: float) -> None:
+        # a spacing not on the list goes before Other…, not after it
+        other = self.findText(self.OTHER)
+        if other >= 0 and self._custom < 0 and not any(
+                abs(float(v) - value) < 1e-9 for v in LINE_SPACINGS):
+            self.insertItem(other, "", value)
+            self._custom = other
+        super()._show(value)
+
+    def _picked(self, index: int) -> None:
+        if self.itemText(index) == self.OTHER:
+            self._show(self.value())
+            self.ask()
+            return
+        super()._picked(index)
+
+    def ask(self):
+        """Other…: any multiple, from a small dialog."""
+        from PySide6.QtWidgets import QInputDialog
+        from .release import done_with
+        dialog = QInputDialog(self.window())
+        dialog.setObjectName("lineSpacingOther")
+        dialog.setWindowTitle("Line Spacing")
+        dialog.setLabelText("Line spacing, as a multiple of the font's own\n"
+                            "(1 is Single, 2 is Double):")
+        dialog.setInputMode(QInputDialog.DoubleInput)
+        dialog.setDoubleRange(self.minimum(), self.maximum())
+        dialog.setDoubleDecimals(2)
+        dialog.setDoubleStep(0.05)
+        dialog.setDoubleValue(self.value())
+        dialog.accepted.connect(lambda: self.setValue(dialog.doubleValue()))
+        dialog.finished.connect(lambda _result: done_with(dialog))
+        self.dialog = dialog
+        if getattr(self.window(), "interactive_prompts", True):
+            dialog.exec()
+        else:
+            dialog.open()                  # the tests answer it
+        return dialog
+
+    def paintEvent(self, _event) -> None:
+        painter = QStylePainter(self)
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        option.currentText = ""
+        option.currentIcon = QIcon()
+        painter.drawComplexControl(QStyle.CC_ComboBox, option)
+        field = self.style().subControlRect(QStyle.CC_ComboBox, option,
+                                            QStyle.SC_ComboBoxEditField, self)
+        size = QSize(20, 20).boundedTo(field.size())
+        self.face.paint(painter, field.x() + (field.width() - size.width()) // 2,
+                        field.y() + (field.height() - size.height()) // 2,
+                        size.width(), size.height())
+
+
 class PopupCombo(QComboBox):
     """Looks like a list box (Revu's "Units ▾", "Style ▾", "Totals: … ▾" and
     the markup's type ▾) and opens a menu or a small panel of its own."""
@@ -347,7 +433,7 @@ def fit_numbers(bar) -> None:
         spin.setFixedWidth(chrome + widest + 8)
     # and the number lists — the font size, the line-end sizes — the same way
     for combo in bar.findChildren(ValueCombo):
-        if isinstance(combo, CloudSizeCombo):
+        if isinstance(combo, (CloudSizeCombo, LineSpacingCombo)):
             continue                       # closed, it shows its picture only
         combo.ensurePolished()
         option = QStyleOptionComboBox()
@@ -419,6 +505,38 @@ def _auto_font_icon() -> QIcon:
         painter.setFont(font)
         painter.drawText(QRectF(0, 0, 20, 20), Qt.AlignCenter, "A")
     return drawn_icon(draw, 20, 20)
+
+
+def _line_spacing_icon() -> QIcon:
+    """Line spacing: three lines beside a two-headed arrow, as Revu's."""
+    def draw(painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(QColor(_ink()), 1.3))
+        for y in (4.5, 10.0, 15.5):
+            painter.drawLine(QPointF(9.0, y), QPointF(18.0, y))
+        painter.drawLine(QPointF(4.0, 3.0), QPointF(4.0, 17.0))
+        painter.drawPolyline(QPolygonF([QPointF(1.5, 5.5), QPointF(4.0, 3.0),
+                                        QPointF(6.5, 5.5)]))
+        painter.drawPolyline(QPolygonF([QPointF(1.5, 14.5), QPointF(4.0, 17.0),
+                                        QPointF(6.5, 14.5)]))
+    return drawn_icon(draw, 20, 20)
+
+
+def line_spacing_combo(value: float = 1.0, parent=None) -> "ValueCombo":
+    """The Properties panel's Line Spacing: 1.0, 1.15, 1.5, 2.0, or any
+    multiple typed in (the bar's is LineSpacingCombo)."""
+    combo = ValueCombo(LINE_SPACINGS, spacing_words, 0.1, 10.0, editable=True,
+                       width=86, parent=parent)
+    picture = _line_spacing_icon()
+    for index in range(combo.count()):
+        combo.setItemIcon(index, picture)
+    combo.setToolTip("Line spacing: how far apart the lines are, as a multiple "
+                     "of the font's own — 1.0 Single, 1.15, 1.5, 2.0 Double, "
+                     "or type any other")
+    combo.blockSignals(True)
+    combo.setValue(value)
+    combo.blockSignals(False)
+    return combo
 
 
 def _scallop_path(left: float, right: float, y: float, radius: float):
@@ -501,7 +619,7 @@ def build(window) -> QToolBar:
     w._style_widgets = {key: [] for key in (
         STROKE, OPACITY, DASH, CLOUD, WIDTH, CORNER, ARROW_SIZE, FILL, FILL_OPACITY,
         SHAPE, HATCH, HIGHLIGHT, CUTOUT, SYMBOL, UNITS, MEASURE, FONT, AUTO_FONT,
-        TOTALS, END_FILL, NOTE)}
+        TOTALS, END_FILL, NOTE, LINE_SPACING)}
 
     w._style_action = {}
 
@@ -808,6 +926,14 @@ def build(window) -> QToolBar:
                                    "alignment")
     w.font_style_button.popup_panel = _build_font_style_panel(w)
     put(FONT, w.font_style_button)
+    # Revu's Line Spacing ▾, for words in a box
+    w.line_spacing_combo = LineSpacingCombo()
+    w.line_spacing_combo.setObjectName("lineSpacing")
+    w.line_spacing_combo.blockSignals(True)
+    w.line_spacing_combo.setValue(style.line_spacing)
+    w.line_spacing_combo.blockSignals(False)
+    w.line_spacing_combo.valueChanged.connect(w._style_line_spacing)
+    put(LINE_SPACING, w.line_spacing_combo)
 
     # -- Totals: … ▾ ----------------------------------------------------------
     put(TOTALS, label("Totals:"))
@@ -1053,6 +1179,8 @@ def extras_shown(items: list, active, supported: set) -> set:
     if isinstance(active, (TextItem, CalloutItem)) and not isinstance(active, TypewriterItem) \
             and FONT in supported:
         shown.add(AUTO_FONT)              # Revu's "A": the words sized to the box
+    if isinstance(active, _TextBase) and FONT in supported:
+        shown.add(LINE_SPACING)           # Revu's Line Spacing ▾
     always_highlights = getattr(active, "kind", "") in ("highlight", "highlighter")
     if supported & {STROKE, FILL} and not isinstance(active, (_TextBase, CountItem)) \
             and not always_highlights \
@@ -1130,6 +1258,7 @@ def refresh_icons(window) -> None:
         return
     window.caption_button.set_face(picture=_caption_icon())
     window.fit_text_button.setIcon(_fit_icon())
+    window.line_spacing_combo.refresh_icons()
     for index, kind in enumerate(("box", "cloud")):
         window.callout_shape_combo.setItemIcon(index, _shape_icon(kind))
     window.highlight_button.setIcon(icon("highlighter", 20))

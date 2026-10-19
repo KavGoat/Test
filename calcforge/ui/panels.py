@@ -4565,12 +4565,72 @@ class PropertiesPanel(QScrollArea):
         down.currentIndexChanged.connect(lambda _i: self._apply(
             lambda i: setattr(i.style, "valign", down.currentData()), "Alignment"))
         form.addRow("Alignment:", _row(across, down))
-        margin = _spin(style.padding, 0, 100, 2, 0.5)
+        if isinstance(first, _TextBase):
+            # Revu's Line Spacing: Single, 1.15, 1.5, Double or any multiple
+            from .propbar import line_spacing_combo
+            spacing = line_spacing_combo(first.line_height_factor())
+            spacing.setObjectName("lineSpacingPanel")
+            spacing.setMinimumWidth(72)
+            spacing.setMaximumWidth(16777215)
+            spacing.valueChanged.connect(lambda value: self._apply(
+                lambda i: setattr(i.style, "line_spacing", float(value))
+                if isinstance(i, _TextBase) else None, "Line spacing"))
+            form.addRow("Line Spacing:", spacing)
+        self._add_margins(form, first)
+
+    def _add_margins(self, form, first: MarkupItem) -> None:
+        """The room between a box's border and its words: one value all round,
+        or each side of its own (left, top, right, bottom)."""
+        style = first.style
+        sides = (first.margins() if hasattr(first, "margins")
+                 else (style.padding,) * 4)
+        even = max(sides) - min(sides) <= 1e-6
+        margin = _spin(sides[0] if even else style.padding, 0, 100, 1, 0.5)
         margin.setObjectName("textMargin")
-        margin.setToolTip("The space between the box's edge and its words, in points")
-        margin.valueChanged.connect(lambda value: self._slide(
-            lambda i: setattr(i.style, "padding", value), "Text padding"))
+        margin.setToolTip("The space between the box's border and its words, in "
+                          "points, the same all round")
+        boxes = []
+        for name, value in zip(("Left", "Top", "Right", "Bottom"), sides):
+            box = _spin(value, 0, 100, 1, 0.5)
+            box.setObjectName(f"textMargin{name}")
+            box.setPrefix(f"{name[0]} ")
+            box.setToolTip(f"{name} margin: the space between the box's {name.lower()} "
+                           "border and its words, in points")
+            boxes.append(box)
+
+        def all_round(value: float) -> None:
+            for box in boxes:
+                box.blockSignals(True)
+                box.setValue(value)
+                box.blockSignals(False)
+
+            def change(item) -> None:
+                item.style.padding = value
+                item.style.text_margins = ()
+            self._slide(change, "Text margin")
+
+        def one_side(_value: float) -> None:
+            values = tuple(float(box.value()) for box in boxes)
+            if max(values) - min(values) <= 1e-6:
+                margin.blockSignals(True)
+                margin.setValue(values[0])
+                margin.blockSignals(False)
+            self._slide(lambda item: setattr(item.style, "text_margins", values),
+                        "Text margins")
+        margin.valueChanged.connect(all_round)
+        for box in boxes:
+            box.valueChanged.connect(one_side)
         form.addRow("Margin:", margin)
+        # two by two, so the panel need be no wider: left and top, right and bottom
+        from PySide6.QtWidgets import QGridLayout
+        sides_box = QWidget()
+        grid = QGridLayout(sides_box)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(4)
+        for index, box in enumerate(boxes):
+            grid.addWidget(box, index // 2, index % 2)
+        form.addRow("Margins:", sides_box)
 
     def _add_arrows(self, first: MarkupItem) -> None:
         """What the ends of a line carry: Bluebeam's Start and End, in

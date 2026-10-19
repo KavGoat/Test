@@ -226,8 +226,11 @@ its default (see *Markup styles and defaults*).
 #### Annotate
 
 - **Text Box** (`T`) — drag the box, then type. With Autosize text on
-  (Preferences) the box grows as you type; **Auto-Size** (`Alt+Z`) shrinks it back
-  round the words. Double-click to edit the words again.
+  (Preferences) the box grows as you type; **Auto-Size** (`Alt+Z`) brings it back
+  round the words, at their line spacing and margins (the font size stays as it
+  is). It works on text boxes, typewriter text, callouts and Cloud+ notes; the
+  callout's Properties toolbar also has it as **Fit to text**. Double-click to
+  edit the words again.
 - **Callout** (`Q`) — click what it points at, then click where the words go. Drag
   the orange diamonds to move the leader. Right-click for **Add Arrow Leader**,
   **Add Cloud Leader** and **Remove Leader**.
@@ -400,6 +403,8 @@ SMath's own and is not offered.
 - **Font**: family, size (or **Auto**: the largest that fits the box), colour,
   and **Style ▾** (bold, italic, underline, strikethrough, alignment); **Fit to
   text** for a callout.
+- **Line spacing ▾** (text boxes, typewriter text, callouts and Cloud+): 1.0
+  (Single), 1.15, 1.5 or 2.0 (Double), or type any other multiple.
 - For measurements: **Units ▾** (this measurement's own units, or the page's),
   **Caption ▾** (whether it is written on the drawing and which values: Label,
   Dimensions, Length, Area, Perimeter, Volume, Wall Area; Inline Text), **Add a
@@ -415,7 +420,9 @@ The **Properties panel** has the same and more, in sections:
   sizes, corner radius, and for markups that suit them **Show Segment Values**
   (each side's length along it, or level), **Show Caption** with **Edit…**, and
   **Show Centroid**; the font, size, colour, styles (bold, italic, underline,
-  strikethrough, superscript, subscript), alignment and margin.
+  strikethrough, superscript, subscript), alignment, **Line Spacing** and the
+  margins — **Margin** (the space between the border and the words, the same all
+  round) or **Margins** (L, T, R, B: each side of its own).
 - **Leader** (callouts) — the hinge and how many leaders.
 - **Layout** — X, Y, Document Width, Document Height and Rotation.
 - **Measurement**, **Count**, **Stamp**, **Note**, **Image**, **Snapshot**,
@@ -466,6 +473,16 @@ screen; `Esc` or right-click leaves it) and **More Colors**; the last eight
 colours you made are kept.
 
 ### Text in markups
+
+- **Line spacing and margins.** A text box, typewriter text, callout or Cloud+
+  has Revu's **Line Spacing** — Single (1.0), 1.15, 1.5, Double (2.0) or any
+  multiple — on the Properties toolbar and panel, and **Margins**, the space
+  between its border and its words: one value, or left, top, right and bottom
+  each of its own (Properties panel). Both show as you type, print and export
+  as drawn, and are kept in the PDF as Bluebeam keeps them (the `line-height`
+  and `margin` of the text's style), so a file from Revu with them opens with
+  them; a file without them opens exactly as before. Words set by Bluebeam keep
+  their own line heights, scaled when you change the spacing.
 
 - **Insert Field** (right-click a text box, callout, Cloud+ or Calculation text)
   puts in a field that shows its value on screen and in print: Title, Project,

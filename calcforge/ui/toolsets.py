@@ -39,6 +39,8 @@ CONTENT_KEYS = frozenset({
     "text", "html", "sheet", "asset", "asset_key", "created", "modified", "subject",
     "comment", "label", "named_cells", "table_name", "series", "index",
     "custom_label", "value", "background_key", "title",
+    # the spacing a box's own words were laid out at goes with those words
+    "html_spacing",
     # which of Revu's two kinds a rectangle or ellipse is — plain or Sketch
     # to Scale — comes from the tool that draws it, never from a look
     "to_scale",
