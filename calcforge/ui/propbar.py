@@ -839,6 +839,8 @@ def build(window) -> QToolBar:
     w._stamp_widgets = [bar.addWidget(w.stamp_label), bar.addWidget(w.stamp_combo)]
     count_button = QToolButton()
     count_button.setText("Count subject…")
+    count_button.setToolTip("What the Count tool counts and its symbol; markers "
+                            "count as Count until you set a subject, as in Revu")
     count_button.clicked.connect(w.choose_count_subject)
     w._count_widgets = [bar.addWidget(count_button)]
     return bar

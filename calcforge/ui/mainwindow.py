@@ -1384,7 +1384,8 @@ class MainWindow(QMainWindow):
                 ("if", "If", "if … else: a condition, in a program block"),
                 ("for", "For", "for: a loop over a range, in a program block"),
                 ("while", "While", "while: a loop while a condition holds"),
-                ("line", "Line", "Add a line to a program block (] in an equation)")):
+                ("line", "Line", "Add a line to the program block the cursor is in, "
+                                 "or start a block of two lines (] in an equation)")):
             self._act(f"prog_{name}", label,
                       lambda _checked=False, which=name: self.insert_program(which),
                       tip=tip)
@@ -1621,7 +1622,8 @@ class MainWindow(QMainWindow):
         self._act("recover_flattened", "Unflatten", self.recover_flattened, "Ctrl+Shift+U",
                   tip="Restore source items retained by recoverable flattening")
         self._act("preferences", "Preferences…", self.edit_preferences, "Ctrl+,",
-                  tip="How the wheel behaves, how blocks start, spell checking")
+                  tip="Your name, the mouse wheel, drawing snap, spelling, equation "
+                      "results and the other settings")
         self._act("forget_defaults", "Forget Defaults", self.forget_defaults,
                   tip="Put every kind of markup back to how it started")
         self._act("bookmark", "Add Bookmark", self.add_bookmark_here, "Ctrl+B",
@@ -4262,6 +4264,8 @@ class MainWindow(QMainWindow):
             self._new_undo_stack()
             self._opened_workbook = imported
             return
+        if self._open_recovery_copy(path):
+            return
         if project_io.carries_a_document(path):
             document = Document()
             project_io.load_document(document, path)
@@ -4777,6 +4781,72 @@ class MainWindow(QMainWindow):
                     os.remove(path)
             except OSError:
                 pass
+
+    def _open_recovery_copy(self, path: str) -> bool:
+        """Opening a document that has a recovery copy newer than itself
+        (CalcForge stopped before it was saved): offer the copy back, as
+        Office and Revu do. Open Recovered opens the copy in the document's
+        place (a save writes it over the document); Open Saved opens the
+        document and keeps the copy for another time; Discard Recovered
+        deletes the copy. True when the copy was opened."""
+        recovery = path + ".autosave"
+        try:
+            newer = os.path.getmtime(recovery) > os.path.getmtime(path)
+        except OSError:
+            return False
+        if not newer:
+            return False
+        choice = self.recovery_choice(path, recovery)
+        if choice == "discard":
+            try:
+                os.remove(recovery)
+            except OSError:
+                pass
+            return False
+        if choice != "recovered":
+            return False
+        document = Document()
+        try:
+            project_io.load_document(document, recovery)
+        except Exception as exc:  # noqa: BLE001 - the saved document still opens
+            QMessageBox.critical(self, "Recovered version", f"The recovered version could "
+                                 f"not be read, so the saved document opens:\n{exc}")
+            return False
+        document.path = path
+        document.modified = True
+        self.document = document
+        self._new_undo_stack()
+        self.status_hint.setText(f"Opened the recovered version of {os.path.basename(path)} "
+                                 "— save to keep it")
+        return True
+
+    def recovery_choice(self, path: str, recovery: str) -> str:
+        """Ask what to open when a document has a newer recovery copy:
+        "recovered", "saved" or "discard". Without prompts (or on Esc) the
+        saved document opens and the copy is kept."""
+        if not self.interactive_prompts:
+            self.status_hint.setText(f"A recovered version of {os.path.basename(path)} is "
+                                     f"kept beside it ({os.path.basename(recovery)})")
+            return "saved"
+        import datetime
+        when = datetime.datetime.fromtimestamp(os.path.getmtime(recovery))
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("Recovered version")
+        box.setText(f"A recovered version of {os.path.basename(path)} exists from "
+                    f"{when.day} {when:%B %Y at %H:%M}, newer than the saved document.")
+        box.setInformativeText("CalcForge stopped before it was saved. Open the "
+                               "recovered version, or the document as last saved?")
+        recovered = box.addButton("Open Recovered", QMessageBox.AcceptRole)
+        saved = box.addButton("Open Saved", QMessageBox.RejectRole)
+        discard = box.addButton("Discard Recovered", QMessageBox.DestructiveRole)
+        box.setDefaultButton(recovered)
+        box.setEscapeButton(saved)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked == recovered:
+            return "recovered"
+        return "discard" if clicked == discard else "saved"
 
     def offer_recovery(self) -> bool:
         """On start-up, offer to reopen whatever a previous session left behind."""

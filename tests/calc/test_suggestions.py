@@ -46,7 +46,10 @@ def test_suggestions_match_smath(group, prefix, smath_order):
 
     extra = SITE_HIDDEN_UNITS | set(ADDED)
     got = [x for x in got if x.split(" ")[0] not in EXTRA_FUNCTIONS]  # symbolic() is not an SMath function
-    assert [x for x in got if not x.startswith("'") or x[1:] not in extra] == DATA[group]["lists"][prefix]
+    # and leaves out what it evaluates but does not offer (description())
+    from calcforge.calc.engine.catalog import NOT_OFFERED
+    wanted = [x for x in DATA[group]["lists"][prefix] if x.split(" ")[0] not in NOT_OFFERED]
+    assert [x for x in got if not x.startswith("'") or x[1:] not in extra] == wanted
 
 
 @pytest.mark.parametrize("word,unit", [("kn", "'kN"), ("mn", "'mN"), ("mpa", "'MPa"), ("kpa", "'kPa"),

@@ -178,7 +178,9 @@ TOOLS: list[Tool] = [
          "Drag a round hole in the area measurement under it",
          factory=_rect("ellipse")),
     Tool("count", "Count", "count", CLICK, "Measure", "Shift+Alt+C",
-         "Drop counting markers", factory=lambda: CountItem()),
+         "Click to drop numbered markers; they count as the subject on the "
+         "Properties toolbar's Count subject… (Count to begin with)",
+         factory=lambda: CountItem()),
     Tool("viewport", "Viewport", "viewport", SNAPSHOT, "Measure", "",
          "Drag a region of the sheet drawn at its own scale — a detail at "
          "1:20 beside a plan at 1:100; measurements inside use it",

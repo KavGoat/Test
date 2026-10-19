@@ -300,6 +300,8 @@ class Worksheet:
 
         # importData / exportData: relative names are relative to the worksheet's folder
         files.base_dir = os.path.dirname(getattr(self, "filename", "") or "")
+        # wfile and dfile touch the disk only once the equation is left
+        files.writing_allowed = commit
         sym.defined_above = lambda r=r: self.names_defined_above(r)
         from .engine import evaluator as _evaluator
         _evaluator.EXTERNAL = self.external     # this document's tables
@@ -423,6 +425,8 @@ class Worksheet:
                 names.add(n.name)
                 if n.name in DYNAMIC_CALLS:
                     dynamic = True
+            elif t is A.UnitRef:
+                names.add(n.name)     # a custom unit ('kip) follows its definition
         if not r.editor.unit.is_empty():
             names |= _row_names(r.editor.unit)
         r.uses = frozenset(names)

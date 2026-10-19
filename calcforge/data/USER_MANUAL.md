@@ -301,7 +301,7 @@ measurement extras too: cut-outs, Units, Caption and Totals.
 | **Diameter** | Measure | `Shift+Alt+D` | Measure a diameter |
 | **Polygon Cut-Out** | Measure | — | Draw a hole in the area measurement under it — the hole comes off the area |
 | **Ellipse Cut-Out** | Measure | — | Drag a round hole in the area measurement under it |
-| **Count** | Measure | `Shift+Alt+C` | Drop counting markers |
+| **Count** | Measure | `Shift+Alt+C` | Click to drop numbered markers; they count as the subject on the Properties toolbar's Count subject… (Count to begin with) |
 | **Viewport** | Measure | — | Drag a region of the sheet drawn at its own scale — a detail at 1:20 beside a plan at 1:100; measurements inside use it |
 | **Calibrate** | Measure | — | Click each end of something you know the length of, then type that length — the page scale follows |
 | **Sketch to Scale Rectangle** | Sketch to Scale | — | A rectangle drawn to a real size: it uses the page scale, and its real width and height can be typed while drawing — 3 m × 1.5 m |
@@ -513,7 +513,8 @@ panel's Add, Edit and Delete. Measurements inside a viewport use its scale.
 - **Polygon Cut-Out** and **Ellipse Cut-Out** — draw a hole inside an area
   measurement and its area comes off (an opening out of a wall). **Add a cut-out**
   on the Properties toolbar does the same for the selected area.
-- **Count** — click to drop numbered markers. With the tool in hand, **Count
+- **Count** — click to drop numbered markers. As in Revu the tool does not ask
+  what it counts: markers count as *Count* until, with the tool in hand, **Count
   subject…** on the Properties toolbar says what you are counting (doors,
   sprinkler heads…) and its symbol (circle, square, triangle, diamond, cross,
   star); markers of one subject number on in order. **Tools ▸ Renumber Counts**
@@ -740,8 +741,9 @@ cells' own Find and Replace — see Part 3.)
 ### Viewing the drawing
 
 - **Zoom**: the plain **wheel zooms** at the pointer, as in Revu; `Ctrl`+wheel
-  scrolls; `Shift`+wheel scrolls sideways; a trackpad's two-finger scroll always
-  scrolls. Preferences ▸ Mouse wheel swaps zoom and scroll. **View ▸ Fit Page**
+  scrolls; `Shift`+wheel scrolls sideways; a trackpad's two-finger scroll scrolls
+  (and zooms with `Ctrl`). Preferences ▸ Mouse wheel swaps zoom and scroll: with
+  the wheel scrolling, `Ctrl`+wheel zooms. **View ▸ Fit Page**
   (`Ctrl+9`), **Fit Width** (`Ctrl+0`), **Actual Size** (`Ctrl+8`), **Zoom to
   Selection** (`Ctrl+2`), **Zoom In** and **Zoom Out** (no key by default), and the
   zoom box in the status bar.
@@ -798,8 +800,12 @@ cells' own Find and Replace — see Part 3.)
 - **Autosave.** Every two minutes an unsaved change is written to a recovery copy:
   beside the document as `name.pdf.autosave`, or for an untitled document in
   CalcForge's recovery folder. If CalcForge stops before an untitled document is
-  saved, it offers the copy back the next time it starts. A recovery copy of a
-  saved document can be opened with File ▸ Open (choose *All files*).
+  saved, it offers the copy back the next time it starts. Opening a saved
+  document whose recovery copy is newer than it asks first: "A recovered version
+  of *name* exists from *date and time*" — **Open Recovered** (the copy opens in
+  the document's place, and Save writes it over the document), **Open Saved**
+  (the document as last saved; the copy is kept for another time) or **Discard
+  Recovered** (the copy is deleted). Saving deletes the copy.
 
 ## Part 2 — Calculation (SMath-style)
 
@@ -823,9 +829,11 @@ Here** has Equation, Calc Text, Calculation Block and Plot.
 - **The unit box.** After `=`, the result has a small black box after it. Press →
   (or click the box) and type the unit you want the answer in — `kN·m`, `MPa`,
   `mm`, or a custom unit (below). Leave it empty for SMath's own choice.
-- **Custom units.** A quantity you define, such as `kip:4.448'kN`, is used in an
-  equation as a name (`3*kip`) and typed into a unit box as a unit (`kip`). In
-  cells it is a unit written with the apostrophe (`2'kip`).
+- **Custom units.** A quantity you define, such as `kips:1000'lbf`, is a unit
+  wherever it is written with the apostrophe, as in SMath: `2'kips` in an equation
+  below the definition (drawn blue like any unit), `kips` in a unit box, and
+  `2'kips` in cells. It can still be used as a name too (`3*kips`). A built-in
+  unit of the same name (CalcForge already has `kip`) wins over the definition.
 - `Enter` leaves the equation and puts the red cross below it; `Tab` and
   `Shift+Tab` go to the next or previous equation in reading order; the arrow keys
   move the red cross. `Esc` lets go of the equation.
@@ -834,7 +842,7 @@ Here** has Equation, Calc Text, Calculation Block and Plot.
 
 | Type | You get |
 |---|---|
-| `:` | `≔` (definition) |
+| `:` | `≔` (definition): once in an equation, and once in each line of a program block (local definitions: `f(x):`, `]`, `a:x+1`, `]`, `2*a`) |
 | `=` | evaluation (or a definition, as above) |
 | `/` | a fraction: what is left of the cursor goes on top, and you type the bottom |
 | `^` | a power: type the exponent, then → to come out |
@@ -842,7 +850,8 @@ Here** has Equation, Calc Text, Calculation Block and Plot.
 | `[` | an index (element): `v[2` is `v₂`; → comes out |
 | `\` | a square root |
 | `.` in a name | a subscript: `L.beam` is L with *beam* below |
-| `'` | a unit follows |
+| `'` | a unit follows (a built-in one, or a custom unit defined above) |
+| `]` | SMath's Add line: a program block of two lines; inside one, a new line after the one you are in. With part of the equation selected, that part becomes its first line |
 | `*` | multiply (`×` too); a number then a letter multiplies by itself: `2x` is 2·x |
 | `&` and `\|` | logical and (∧) and or (∨) |
 | a word and a space | turns a lone word into Calculation text |
@@ -868,6 +877,16 @@ toolbar**. The **Maths panel** has SMath's side panel: Arithmetic, Matrices,
 Boolean, Functions, Plot, Programming, Units and Constants, plus **All
 functions…**, **All units…** and **Table of all constants…**; each button types
 into the equation, or starts one at the red cross.
+
+**Data files.** `wfile(value, "name")` keeps a value — a number, quantity,
+matrix or text — in a file for another equation or document to read back with
+`rfile("name")`; `dfile("name")` deletes it. As in SMath, these files live in one
+folder of the application's own (`user` in CalcForge's data folder), whatever
+document calls them, and an equation can name only a file in it, never a folder or
+path, so a document from someone else cannot read, change or delete anything else
+on your computer. The file is written or deleted when you leave the equation, not
+while you type. (`importData` reads any text or CSV file, relative to the
+document.) Files SMath Studio wrote are in SMath's own format and are not read.
 
 **Calculation ▸ Selection** works on the part of the equation selected: **Solve**
 (solve for the variable under the cursor; the roots go below), **Calculate
@@ -1033,7 +1052,7 @@ Type a function's name and an opening bracket, or use **Calculation ▸
 Function…** (`Ctrl+E`). Every built-in function:
 
 <!-- generated:smath-functions -->
-The engine has **119** built-in functions.
+The engine has **122** built-in functions.
 
 #### Arithmetic and rounding
 
@@ -1048,7 +1067,7 @@ The engine has **119** built-in functions.
 | `nthroot(x, n)` | The n-th root of x. |
 | `perc(x, p)` | p per cent of x: perc(100, 5) is 5. |
 | `random(n)` | A random number from 0 up to n, evenly spread. |
-| `round(x, n) · round(x, n, mode)` | x rounded to n decimal places (0 to 15), halves away from zero; the third argument is accepted but has no effect. |
+| `round(x, n) · round(x, n, mode)` | x rounded to n decimal places (0 to 15), halves away from zero; the mode, as in SMath, is "te" (halves to the even neighbour: round(2.5, 0, "te") is 2) or "afz" (halves away from zero). |
 | `sign(x)` | 1 if x is positive, −1 if negative, 0 if zero. |
 | `sqrt(x)` | Square root (also typed with \\); units are rooted too. |
 | `trunc(x)` | The whole-number part of x, with the fraction cut off. |
@@ -1141,7 +1160,7 @@ The engine has **119** built-in functions.
 | `submatrix(M, r1, r2, c1, c2)` | The part of M from rows r1–r2 and columns c1–c2. |
 | `tr(M)` | The trace: the sum of the main diagonal. |
 | `transpose(M)` | The transpose (Mᵀ). |
-| `vectorize(expression)` | Accepted for SMath compatibility; CalcForge evaluates the expression as it stands (it does not yet apply operators element by element). |
+| `vectorize(expression)` | The expression worked element by element on the vectors and matrices in it: vectorize(v*v) is the column of squares (v*v alone is the dot product), vectorize(f(v)) calls f on each element. |
 | `vminor(M, i, j)` | M with row i and column j taken out. |
 
 #### Interpolation
@@ -1174,7 +1193,7 @@ The engine has **119** built-in functions.
 | Function | What it does |
 |---|---|
 | `concat(s1, s2, …)` | The strings joined together. |
-| `description(name)` | SMath's description text of a definition; CalcForge equations have none, so it gives empty text. |
+| `description(name)` | SMath's description text of a definition. CalcForge's equations have none, so it gives empty text; it is kept so SMath worksheets that use it calculate, and is not offered in Insert Function. |
 | `error(s)` | Stops with the red error message s. |
 | `findstr(s, find)` | The positions where find starts in s (−1 if it does not). |
 | `IsString(x)` | 1 if x is a string, otherwise 0. |
@@ -1193,7 +1212,7 @@ The engine has **119** built-in functions.
 | `continue` | Goes straight to the loop's next pass. |
 | `for(i, range, body) · for(start, condition, step, body)` | A loop over a range of values, or with a start, a condition and a step. |
 | `if(condition, then, else)` | then when the condition is true (1), else otherwise; also the If button and Calculation ▸ Program ▸ If. |
-| `line(…)` | Groups several lines into one program block (Calculation ▸ Program ▸ Line). |
+| `line(…)` | Groups several lines into one program block: `]` in an equation (or Calculation ▸ Program ▸ Line) starts one, and adds a line in one. |
 | `Sleep(ms)` | Waits the given milliseconds (at most 10 s). |
 | `time(x)` | Milliseconds since midnight, 1 January 1601 (for timing). |
 | `trace("text {0} {1}", a, b) · trace(a, …)` | The values as a string, placed into the text's {0}, {1}… when given. |
@@ -1212,7 +1231,10 @@ The engine has **119** built-in functions.
 
 | Function | What it does |
 |---|---|
+| `dfile(name)` | Deletes the file name from CalcForge's data folder when the equation is left; 1 if it was there, otherwise 0. |
 | `importData(file) · importData(file, …)` | A matrix read from a text or CSV file (relative to the document); further arguments set the decimal symbol, separators and the rows and columns to read. |
+| `rfile(name)` | The value wfile wrote to name (in CalcForge's data folder), as a number, quantity, matrix or text. |
+| `wfile(expression, name)` | Writes the value to the file name in CalcForge's data folder (a file name only, no folder) when the equation is left; 1 if it was written, 0 if not. A file of the same name is replaced. |
 <!-- /generated -->
 
 ## Part 3 — Spreadsheets and tables (Excel-style)
@@ -1280,6 +1302,13 @@ function's arguments with the current one in bold.
 - **Errors explained**: select or hover over a cell with an error and the status
   line says why, following it back to where it started — `#UNITS! — kN and m can't
   be added (A1 + A2)`.
+- **Links**: `=HYPERLINK("https://…", "Code clause")` shows the friendly text;
+  over the cell the pointer becomes a pointing hand, and `Ctrl`+click (or
+  right-click ▸ **Open Hyperlink**) follows it. A web or mail address opens in your
+  browser or mail program; `#Sheet2!A1` (or `#Name`) goes to that place in the
+  document; a file on the computer is opened only after you say yes, since a
+  document from someone else can name any file. A plain click selects the cell,
+  as on the rest of the page.
 - **Circular references** show 0 in the loop's cells and are reported.
 - **AutoSum** (`Alt+=`), today's date (`Ctrl+;`), the time (`Ctrl+Shift+:`).
 - Volatile functions (NOW, TODAY, RAND, OFFSET, INDIRECT…) recalculate at every
@@ -1794,7 +1823,7 @@ The engine has **471** spreadsheet functions.
 | `FORMULATEXT(value)` | A cell's formula as text. |
 | `HLOOKUP(lookup_value, table_array, row_index_num, [range_lookup])` | Looks along the top row and returns from a row below. |
 | `HSTACK(array1, [array2], …)` | Arrays placed side by side. |
-| `HYPERLINK(link, [friendly])` | Shows the friendly name (or the address); the cell is not a clickable link. |
+| `HYPERLINK(link, [friendly])` | Shows the friendly name (or the address); Ctrl+click the cell (or right-click ▸ Open Hyperlink) follows the link: a web or mail address, a file (asked first), or #Sheet2!A1 for a place in the document. |
 | `INDEX(array, row_num, [column_num])` | The value at a row and column of a range. |
 | `INDIRECT(ref_text, [a1])` | The reference named by a text, such as "B4" or "Loads!A1". |
 | `INTERP(x, known_x's, known_y's)` | CalcForge's own: straight-line interpolation, INTERP(x, A2:A10, B2:B10); outside the table is #N/A. |

@@ -12,7 +12,8 @@ which this script writes from the program itself: the markup tools
 (``sheet/functions.py``), every Preferences option (``ui/preferences.py``) and
 every keyboard shortcut a command has by default (the shortcut list a real
 window builds). The one-line descriptions come from ``tools/manual_data.py``
-(and the tools' own hints), so regenerating never loses them.
+(and the tools' own hints), so regenerating never loses them. README.md's
+keyboard tables (``<!-- generated:readme-keys -->``) are written the same way.
 
 The manual ships with the application as ``calcforge/data/USER_MANUAL.md``
 (Help ▸ User Manual reads it); this script keeps that copy identical.
@@ -33,6 +34,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANUAL = ROOT / "docs" / "USER_MANUAL.md"
 SHIPPED = ROOT / "calcforge" / "data" / "USER_MANUAL.md"
+README = ROOT / "README.md"
 
 SECTIONS = ("markup-tools", "smath-functions", "sheet-functions", "preferences", "shortcuts")
 _BLOCK = re.compile(r"(<!-- generated:(?P<name>[a-z-]+) -->\n)(?P<body>.*?)(<!-- /generated -->)",
@@ -243,9 +245,9 @@ def preferences_section(problems: list) -> str:
     return "\n".join(lines) + "\n"
 
 
-def shortcuts_section(problems: list, window=None) -> str:
+def shortcuts_section(problems: list, window=None, rows=None) -> str:
     data = _data()
-    rows = default_shortcuts(window)
+    rows = default_shortcuts(window) if rows is None else rows
     order = {group: k for k, group in enumerate(data.SHORTCUT_GROUP_ORDER)}
     by_group: dict[str, list] = {}
     for group, label, key, where in rows:
@@ -262,17 +264,40 @@ def shortcuts_section(problems: list, window=None) -> str:
     return "\n".join(out)
 
 
-def sections(problems: list, window=None) -> dict:
+def readme_keys_section(problems: list, rows: list) -> str:
+    """README's keyboard tables: every markup tool's key, and the keys of the
+    commands README_COMMANDS names, as the program has them now."""
+    data = _data()
+    lines = ["| Tool | Key |", "|---|---|"]
+    for tool in markup_tools():
+        if tool.shortcut:
+            lines.append(f"| {_cell(tool.label)} | {_code(tool.shortcut)} |")
+    lines += ["", "| Command | Key | Works |", "|---|---|---|"]
+    keys = {}
+    for _group, label, key, where in rows:
+        keys.setdefault(label, (key, where))
+    for label in data.README_COMMANDS:
+        if label not in keys:
+            problems.append(f"README_COMMANDS in tools/manual_data.py names {label!r}, which "
+                            "has no key out of the box")
+            continue
+        key, where = keys[label]
+        lines.append(f"| {_cell(label)} | {_code(key)} | {_cell(where)} |")
+    return "\n".join(lines) + "\n"
+
+
+def sections(problems: list, window=None, rows=None) -> dict:
+    rows = default_shortcuts(window) if rows is None else rows
     return {
         "markup-tools": markup_tools_section(problems),
         "smath-functions": smath_functions_section(problems),
         "sheet-functions": sheet_functions_section(problems),
         "preferences": preferences_section(problems),
-        "shortcuts": shortcuts_section(problems, window),
+        "shortcuts": shortcuts_section(problems, window, rows),
     }
 
 
-def render(text: str, made: dict, problems: list) -> str:
+def render(text: str, made: dict, problems: list, where: str = "docs/USER_MANUAL.md") -> str:
     """*text* with each generated section replaced by what *made* holds."""
     found = set()
 
@@ -280,37 +305,49 @@ def render(text: str, made: dict, problems: list) -> str:
         name = match.group("name")
         found.add(name)
         if name not in made:
-            problems.append(f"docs/USER_MANUAL.md has a generated section nobody makes: {name}")
+            problems.append(f"{where} has a generated section nobody makes: {name}")
             return match.group(0)
         return match.group(1) + made[name] + match.group(4)
 
     out = _BLOCK.sub(put, text)
     for name in made:
         if name not in found:
-            problems.append(f"docs/USER_MANUAL.md has no <!-- generated:{name} --> section")
+            problems.append(f"{where} has no <!-- generated:{name} --> section")
     return out
+
+
+def _both(problems: list, window=None) -> tuple:
+    """(manual, README) as they should read."""
+    rows = default_shortcuts(window)
+    manual = render(MANUAL.read_text(encoding="utf-8"), sections(problems, window, rows),
+                    problems)
+    readme = render(README.read_text(encoding="utf-8"),
+                    {"readme-keys": readme_keys_section(problems, rows)}, problems, "README.md")
+    return manual, readme
 
 
 def check(window=None) -> list[str]:
     """Everything that is out of date, in words; empty when the manual is true."""
     problems: list[str] = []
     text = MANUAL.read_text(encoding="utf-8")
-    wanted = render(text, sections(problems, window), problems)
+    wanted, readme = _both(problems, window)
     if wanted != text:
         problems.append("docs/USER_MANUAL.md's generated sections are out of date: run "
                         "python tools/manual.py")
     if not SHIPPED.exists() or SHIPPED.read_text(encoding="utf-8") != text:
         problems.append("calcforge/data/USER_MANUAL.md is not the same as docs/USER_MANUAL.md: "
                         "run python tools/manual.py")
+    if readme != README.read_text(encoding="utf-8"):
+        problems.append("README.md's keyboard tables are out of date: run python tools/manual.py")
     return problems
 
 
 def write(window=None) -> list[str]:
     problems: list[str] = []
-    text = MANUAL.read_text(encoding="utf-8")
-    text = render(text, sections(problems, window), problems)
+    text, readme = _both(problems, window)
     MANUAL.write_text(text, encoding="utf-8")
     SHIPPED.write_text(text, encoding="utf-8")
+    README.write_text(readme, encoding="utf-8")
     return problems
 
 
@@ -339,7 +376,8 @@ def main(argv=None) -> int:
     problems = write()
     for line in problems:
         print(line)
-    print(f"Wrote {MANUAL.relative_to(ROOT)} and {SHIPPED.relative_to(ROOT)}.")
+    print(f"Wrote {MANUAL.relative_to(ROOT)}, {SHIPPED.relative_to(ROOT)} and "
+          f"{README.relative_to(ROOT)}.")
     return 1 if problems else 0
 
 

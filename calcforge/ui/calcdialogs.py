@@ -44,8 +44,9 @@ def pick(parent, title: str, entries: list) -> Optional[str]:
 
 
 def function_to_insert(parent) -> Optional[str]:
-    from ..calc.engine.catalog import FUNCTIONS
-    entries = sorted({(n, d) for n, _, _, d in FUNCTIONS}, key=lambda x: x[0].lower())
+    from ..calc.engine.catalog import FUNCTIONS, NOT_OFFERED
+    entries = sorted({(n, d) for n, _, _, d in FUNCTIONS if n not in NOT_OFFERED},
+                     key=lambda x: x[0].lower())
     return pick(parent, "Insert function", entries)
 
 

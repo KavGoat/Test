@@ -249,9 +249,35 @@ def _round2(v, n):
     return Q(_round_half_away(q.real, k), q.dims)
 
 
+def _round_half_even(x: float, n: int) -> float:
+    """Banker's rounding of the decimal x as written (2.675 is 2.675, not
+    the binary 2.67499…): halves go to the even neighbour."""
+    from decimal import ROUND_HALF_EVEN, Decimal
+
+    return float(Decimal(repr(x)).quantize(Decimal(1).scaleb(-n), rounding=ROUND_HALF_EVEN))
+
+
+# round's third argument (read from SMath's own round: BaseEntry.Round in
+# SMath.Math.Numeric): "te" or "to even" rounds halves to the even
+# neighbour, "afz" or "away from zero" away from zero; anything else is an
+# error.
+_ROUND_MODES = {"te": _round_half_even, "to even": _round_half_even,
+                "afz": _round_half_away, "away from zero": _round_half_away}
+
+
 @fn("round", 3)
 def _round3(v, n, mode):
-    return _round2(v, n)
+    if not isinstance(mode, String):
+        raise err("must_be_string")
+    text = mode.text.strip()
+    how = _ROUND_MODES.get(text.lower())
+    if how is None:
+        raise SMathError('The rounding mode is "te" (halves to even) or "afz" (halves away from zero).')
+    k = need_int(n)
+    if not 0 <= k <= 15:
+        raise err("round_range")
+    q = need_scalar(v)
+    return Q(how(q.real, k), q.dims)
 
 
 @fn("sign")
@@ -821,7 +847,11 @@ def _app_version(v):
 
 @fn("description")
 def _description(v):
-    return String("")  # regions have no description text in the replica
+    """SMath's description("name"): the Description text of a definition.
+    CalcForge's equations have no description, so it is empty text; it is
+    kept so SMath worksheets that use it still calculate, and not offered by
+    Insert Function or the suggestions (catalog.NOT_OFFERED)."""
+    return String("")
 
 
 @fn("str2num")
@@ -1266,7 +1296,62 @@ def _eval_fn(ev, n: A.Call, ctx):
 
 
 def _vectorize(ev, n: A.Call, ctx):
-    return ev.eval(n.args[0], ctx)
+    """SMath's vectorize(expression): every operator and function in the
+    expression works element by element on the vectors and matrices it
+    meets, a scalar going with each element - vectorize(v*v) is the column
+    of squares, not the dot product; vectorize(f(v)) calls f on each element.
+    Matrices met together must be the same size.  Indexing (v[2]) and the
+    blocks that take their arguments unevaluated (if, sum, for…) work as
+    usual."""
+    if len(n.args) != 1:
+        raise err("args_count", node=n)
+    return _elementwise(ev, n.args[0], ctx)
+
+
+def _elementwise(ev, node, ctx):
+    if isinstance(node, A.Group):
+        return _elementwise(ev, node.inner, ctx)
+    if isinstance(node, A.BinOp) and node.op not in ("±",):
+        kids = [node.left, node.right]
+        build = lambda a: A.BinOp(node.op, a[0], a[1], node.implicit, src=node.src)  # noqa: E731
+    elif isinstance(node, A.Unary) and node.op != "±":
+        kids = [node.arg]
+        build = lambda a: A.Unary(node.op, a[0], src=node.src)  # noqa: E731
+    elif isinstance(node, A.Call) and node.args and (
+            ctx.function(node.name, len(node.args)) is not None or node.name not in SPECIAL):
+        kids = list(node.args)
+        build = lambda a: A.Call(node.name, a, src=node.src)  # noqa: E731
+    else:
+        return ev.eval(node, ctx)
+    values = [k if isinstance(k, A.UnitRef) else _elementwise(ev, k, ctx) for k in kids]
+    shapes = {(v.nrows, v.ncols) for v in values if isinstance(v, Matrix)}
+    if not shapes:
+        return _apply(ev, build, kids, values, ctx, None)
+    if len(shapes) > 1:
+        raise err("matrix_size", node=node)
+    (rows, cols), = shapes
+    items = [_apply(ev, build, kids, values, ctx, k) for k in range(rows * cols)]
+    return Matrix(rows, cols, items)
+
+
+def _apply(ev, build, kids, values, ctx, k):
+    """The operation on the values (element k of each matrix among them)."""
+    from .evaluator import Context
+
+    local = Context(ctx)
+    args = []
+    for j, (kid, v) in enumerate(zip(kids, values)):
+        if isinstance(kid, A.UnitRef):
+            args.append(kid)            # 20'°C keeps its offset
+            continue
+        name = f"\x00vectorize{j}"
+        local.vars[name] = v.items[k] if (k is not None and isinstance(v, Matrix)) else v
+        args.append(A.Var(name, src=kid.src))
+    reads, ev.reads = ev.reads, None    # the stand-ins are not dependencies
+    try:
+        return ev.eval(build(args), local)
+    finally:
+        ev.reads = reads
 
 
 def _clear(ev, n: A.Call, ctx):

@@ -1,10 +1,12 @@
-"""Data files: importData (SMath core, 1 to 9 arguments).  Relative file
-names are relative to the worksheet's folder, as in SMath; the worksheet
-sets ``base_dir``."""
+"""Data files: importData (SMath core, 1 to 9 arguments), whose relative file
+names are relative to the worksheet's folder, as in SMath (the worksheet sets
+``base_dir``); and SMath's wfile, rfile and dfile, which keep values in a data
+folder of the application's own (below)."""
 from __future__ import annotations
 
 import csv
 import io
+import math
 import os
 import re
 
@@ -102,3 +104,146 @@ def _import(*args):
     coldelim = _text_arg(a[3], "")
     return import_data(_path(a[0]), decimal, argsep, coldelim, _int_arg(a[4], None), _int_arg(a[5], None),
                        _int_arg(a[6], None), _int_arg(a[7], None))
+
+
+# ---------------------------------------------------------------------------
+# wfile / rfile / dfile: SMath's own data files
+# ---------------------------------------------------------------------------
+# SMath Studio keeps these in one folder of its own, "user" in its settings
+# folder, whatever worksheet calls them, so one worksheet can leave a result
+# for another (read from SMath's SpecialFunctions plugin).  CalcForge does the
+# same in its application data folder.  An equation can only name a file in
+# that folder - never a path - so a worksheet from someone else cannot read,
+# write or delete anything else on the computer.
+
+data_folder = ""     # tests and tools may point it elsewhere; "" = the usual place
+writing_allowed = True  # False while an equation is being typed (see Worksheet._evaluate)
+
+
+def user_data_folder() -> str:
+    """The folder wfile, rfile and dfile work in (made when first needed)."""
+    folder = data_folder
+    if not folder:
+        from PySide6.QtCore import QStandardPaths
+        base = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation) or \
+            os.path.join(os.path.expanduser("~"), ".calcforge")
+        folder = os.path.join(base, "user")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+def _data_file(name) -> str:
+    if not isinstance(name, String):
+        raise SMathError("Argument must be a string.", None)
+    text = name.text.strip()
+    if not text or text in (".", "..") or os.path.isabs(text) or any(c in text for c in "/\\:"):
+        raise SMathError("A file name only: rfile, wfile and dfile use CalcForge's data folder.", None)
+    return os.path.join(user_data_folder(), text)
+
+
+def _number_text(x: float) -> str:
+    if math.isinf(x):
+        return "∞" if x > 0 else "-∞"
+    if x != x:
+        raise SMathError("Cannot evaluate.", None)
+    s = repr(float(x))
+    if "e" in s:
+        mant, exp = s.split("e")
+        return f"{mant}*10^({int(exp)})"
+    return s[:-2] if s.endswith(".0") else s
+
+
+def _exp_text(p) -> str:
+    p = int(p) if float(p).is_integer() else p
+    return f"^{p}" if isinstance(p, int) and p > 0 else f"^({p})"
+
+
+def value_text(v) -> str:
+    """A value as linear maths text that rfile reads back exactly: numbers in
+    full precision, units in SI base units, matrices as mat(…), strings."""
+    from .unitdata import BASE
+    from .units import Quantity
+
+    if isinstance(v, String):
+        return '"' + v.text + '"'
+    if isinstance(v, Matrix):
+        return "mat(" + ",".join([value_text(x) for x in v.items] + [str(v.nrows), str(v.ncols)]) + ")"
+    if isinstance(v, Quantity):
+        z = v.value
+        if isinstance(z, complex):
+            re_, im = z.real, z.imag
+            num = f"({_number_text(re_)}{'-' if im < 0 else '+'}{_number_text(abs(im))}*i)"
+        else:
+            num = _number_text(z)
+        units = "".join(f"*'{name}" + ("" if p == 1 else _exp_text(p))
+                        for name, p in zip(BASE, v.dims) if p)
+        return num + units
+    raise SMathError("Cannot evaluate.", None)
+
+
+def read_value_text(text: str):
+    """What value_text wrote, as a value (rfile)."""
+    from .evaluator import Context, Evaluator
+    from .linear import parse_text
+    from .model import Row
+    from .parser import parse_row
+
+    # parse_text reads ":", brackets and spaces as maths: each string's text
+    # goes through as one stand-in character and is put back afterwards
+    parts = text.strip().split('"')
+    strings = parts[1::2]
+    for k in range(1, len(parts), 2):
+        parts[k] = chr(0xE000 + k // 2)
+    row = parse_text('"'.join(parts))
+
+    def restore(r):
+        for k in range(len(r.items) - 1, -1, -1):
+            it = r.items[k]
+            if isinstance(it, str) and 0xE000 <= ord(it[0]) < 0xE000 + len(strings):
+                r.items[k:k + 1] = list(strings[ord(it[0]) - 0xE000])
+            elif not isinstance(it, str):
+                for inner in it.rows:
+                    restore(inner)
+    restore(row)
+    if not isinstance(row, Row) or not row.items:
+        raise SMathError("File is empty.", None)
+    return Evaluator().eval(parse_row(row), Context())
+
+
+@fn("wfile", 2)
+def _wfile(value, name):
+    path = _data_file(name)
+    text = value_text(value)
+    if not writing_allowed:
+        return Q(1.0)       # written when the equation is left, not at every keystroke
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    except OSError:
+        return Q(0.0)
+    return Q(1.0)
+
+
+@fn("rfile", 1)
+def _rfile(name):
+    path = _data_file(name)
+    try:
+        with open(path, encoding="utf-8-sig") as fh:
+            text = fh.read()
+    except OSError:
+        raise SMathError(f"File not found: {os.path.basename(path)}", None) from None
+    return read_value_text(text)
+
+
+@fn("dfile", 1)
+def _dfile(name):
+    path = _data_file(name)
+    if not os.path.isfile(path):
+        return Q(0.0)
+    if not writing_allowed:
+        return Q(1.0)
+    try:
+        os.remove(path)
+    except OSError:
+        return Q(0.0)
+    return Q(1.0)

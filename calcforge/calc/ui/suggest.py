@@ -15,7 +15,7 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QLabel, QListWidget, QListWidgetItem
 
-from ..engine.catalog import FUNCTIONS, UNIT_CATALOG
+from ..engine.catalog import FUNCTIONS, NOT_OFFERED, UNIT_CATALOG
 from ..engine.evaluator import BUILTIN_CONSTANTS
 
 PACKAGE_ICONS = Path(__file__).with_name("icons")
@@ -262,9 +262,10 @@ def _sorted_catalog() -> list:
     global _CATALOG_SORTED
     if _CATALOG_SORTED is None:
         counts, entries = {}, {}
-        for name, nargs, _, _ in FUNCTIONS:
+        offered = [f for f in FUNCTIONS if f[0] not in NOT_OFFERED]
+        for name, nargs, _, _ in offered:
             counts[name] = counts.get(name, 0) + 1
-        for name, nargs, _, _ in FUNCTIONS:
+        for name, nargs, _, _ in offered:
             entries.setdefault(name if counts[name] == 1 else f"{name} ({nargs})", ("function", name.lower()))
         for c in list(BUILTIN_CONSTANTS) + KEYWORDS + ["lastError"]:
             entries.setdefault(c, ("constant", c.lower()))

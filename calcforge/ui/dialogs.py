@@ -1920,8 +1920,11 @@ class PreferencesDialog(QDialog):
         self.wheel.addItem("Zooms in and out", prefs_module.WHEEL_ZOOM)
         self.wheel.addItem("Scrolls up and down", prefs_module.WHEEL_SCROLL)
         self.wheel.setCurrentIndex(0 if prefs.wheel_zooms() else 1)
-        self.wheel.setToolTip("Ctrl and the wheel always zoom, whichever this is;\n"
-                              "a trackpad always scrolls")
+        self.wheel.setToolTip("What a plain turn of the wheel does; Ctrl and the wheel "
+                              "does the other one\n(with the wheel zooming, Ctrl+wheel "
+                              "scrolls; with it scrolling, Ctrl+wheel zooms).\n"
+                              "Shift and the wheel scroll sideways; a trackpad scrolls, "
+                              "and zooms with Ctrl")
         form.addRow("Mouse wheel", self.wheel)
         self.snapping = QCheckBox("Drawing snap")
         self.snapping.setToolTip("Catch on what is already drawn")
