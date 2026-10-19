@@ -164,6 +164,10 @@ def test_tab_drag_preview_and_return_to_existing_window(window):
     window.show()
     window.move(0, 0)
     first = window.document
+    # a second tab, so the window is not emptied by the drag (an emptied
+    # window closes: tests/test_tab_drag_windows.py)
+    window.open_in_new_tab()
+    window.switch_to_document(0)
     other = window.open_new_window()
     other.move(500, 300)
     try:
