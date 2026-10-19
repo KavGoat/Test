@@ -205,6 +205,21 @@ class DocumentBook:
         return self._within(area, (sheet.page or {}).get("global_cells") or [])
 
     def _reach(self, reader: Sheet, sheet: Sheet, area) -> bool:
+        wb = self.workbook
+        if wb._in_pass:
+            # while calculating, the sections and the sheets' places stand
+            # still: worked out once a pass, not for every cell read from
+            # another sheet (a page walk each: 5000 a pass, 2026-10-19)
+            cache = wb._pass_cache
+            starts = cache.get("starts")
+            if starts is None:
+                starts = cache["starts"] = tuple(self._calc().section_starts())
+            if not starts:
+                return True
+            key = cache.get(("key", reader.id))
+            if key is None:
+                key = cache[("key", reader.id)] = self._key(reader)
+            return self.readable(sheet, area, key)
         return self.readable(sheet, area, self._key(reader))
 
     def sections_changed(self) -> None:

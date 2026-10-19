@@ -266,6 +266,35 @@ here is new.
   by column buckets and looked at once per wave of changes, however many
   cells changed. Volatile functions (NOW, RAND, OFFSET, INDIRECT…)
   recalculate on every edit, as in Excel.
+* **Recalculating fast** (2026-10-19: an input of the user's seismic
+  workbook, read by 4,000 formulas, must feel instant). Three things, none
+  changing an answer (`tests/test_workbook_speed.py` checks every value
+  against a full recalculation, and each short cut against walking the
+  tree):
+    - *Only what can have changed is worked out.* Of the dirty formulas,
+      the roots — typed, volatile, reading a name or a document variable
+      that changed — are always worked out; any other only when something
+      it reads (its cells, blocks, the cells of its names) changed value in
+      this pass. A dependent whose inputs came out the same is left as it
+      is, so a volatile INDIRECT that gives what it gave stops there
+      (Excel itself works out everything below a volatile cell).
+    - *Each formula is compiled once* into Python closures
+      (`sheet/compiled.py`), kept on its shared parsed form: a cell read for
+      its value is fetched straight away, `+ - * / ^` and the comparisons of
+      two plain numbers are done on the spot, IF and IFERROR choose their
+      branch directly; everything else is `evaluate.ev`'s own code for that
+      node. A defined name's formula is parsed once while it stays the
+      same; a sheet named in formulas, and the calculation sections, are
+      looked up once a pass.
+    - *The order is kept.* Every formula's place in an order where each
+      comes after what it reads is kept until a formula, a sheet or a name
+      changes; an edit sorts its dirty formulas by it, and the same cells
+      typed into again reuse what they reached and its order. With spills
+      or circular references the dirty formulas are walked as before.
+  The screen follows: a sheet page's band of cells is drawn again only when
+  what conditional formatting makes of its own cells changed, the headings
+  draw only the columns in view (one mark for a run of hidden ones), and the
+  Variables panel is brought up to date when it is shown.
 * Undo: every change is recorded inside a transaction (one user action, one
   undo step); structural changes record each cell and formula they touched,
   so undo restores exactly what was there (including references that a delete

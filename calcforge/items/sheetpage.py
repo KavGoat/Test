@@ -37,6 +37,34 @@ PAGE_LABEL = QColor(150, 150, 150, 70)
 DEFAULT_ROWS = 52
 
 
+def _frozen(v):
+    if isinstance(v, dict):
+        return tuple(sorted((k, _frozen(x)) for k, x in v.items()))
+    if isinstance(v, (list, tuple)):
+        return tuple(_frozen(x) for x in v)
+    return v
+
+
+def _looks_in(sheet, a: int, b: int, last_col: int) -> tuple:
+    """What conditional formatting makes of the cells of rows a to b (only
+    those a rule covers), as something to compare."""
+    from ..sheet.condfmt import looks_for
+    looks = looks_for(sheet)
+    seen = set()
+    out = []
+    for rule in sheet.cond_rules:
+        for t, l, bottom, r in rule.get("ranges", []):
+            for row in range(max(t, a), min(bottom, b) + 1):
+                for col in range(l, min(r, last_col) + 1):
+                    if (row, col) in seen:
+                        continue
+                    seen.add((row, col))
+                    got = looks.look(row, col)
+                    if got:
+                        out.append((row, col, _frozen(got)))
+    return tuple(sorted(out))
+
+
 def run_frames_from(frame) -> list:
     """The frames of the run *frame* is in, first to last."""
     scene = frame.scene() if frame is not None else None
@@ -401,7 +429,10 @@ class SheetRunItem(TableItem):
             content.append((r, c, cell.style, type(cell.value), cell.value))
         paging = self.paging
         opts = options(sheet)
-        rules = (sheet.cond_rules, sheet.workbook.version) if sheet.cond_rules else None
+        # what conditional formatting makes of the band's cells — not every
+        # rule against every value change, which drew all the bands again
+        # for any edit (the user's seismic workbook, 2026-10-19)
+        rules = _looks_in(sheet, a, b, self.size[1] - 1) if sheet.cond_rules else None
         from .nametags import named_blocks, shown
         tags = (shown(self), tuple(named_blocks(sheet)))
         return (tuple(xs), tuple(ys[a:b + 2]), content, [tuple(m) for m in sheet.merges], tags,
@@ -611,10 +642,24 @@ class SheetRunItem(TableItem):
         grid.setCosmetic(True)
         painter.setBrush(Qt.NoBrush)
         marks = []          # hidden columns and rows: drawn over their neighbours
-        for c in range(cols):
+        # only the columns in view: a workbook with a thousand hidden columns
+        # past its last drew a thousand headings and marks a frame
+        # (the user's seismic workbook, 2026-10-19)
+        first, last = 0, cols - 1
+        inverse, ok = painter.worldTransform().inverted()
+        device = painter.device()
+        if ok and device is not None and device.width() > 0:
+            seen = inverse.mapRect(QRectF(0, 0, device.width(), device.height()))
+            import bisect
+            first = max(0, bisect.bisect_right(xs, seen.left()) - 2)
+            last = min(cols - 1, bisect.bisect_right(xs, seen.right()) + 1)
+        marked = set()
+        for c in range(first, last + 1):
             cell = QRectF(xs[c], -HEADING_H, xs[c + 1] - xs[c], HEADING_H)
             if cell.width() <= 0:
-                marks.append((cell, "col"))       # Excel's double line
+                if ("col", xs[c]) not in marked:          # one mark where several are hidden
+                    marked.add(("col", xs[c]))
+                    marks.append((cell, "col"))       # Excel's double line
                 continue
             on = sel is not None and sel[1] <= c <= sel[3]
             painter.fillRect(cell, HEADING_ON if on else HEADING_BG)
@@ -625,7 +670,9 @@ class SheetRunItem(TableItem):
         for r in range(r0, r1 + 1):
             cell = QRectF(-ROWNUM_W, ys[r], ROWNUM_W, ys[r + 1] - ys[r])
             if cell.height() <= 0:
-                marks.append((cell, "row"))
+                if ("row", ys[r]) not in marked:
+                    marked.add(("row", ys[r]))
+                    marks.append((cell, "row"))
                 continue
             on = sel is not None and sel[0] <= r <= sel[2]
             painter.fillRect(cell, HEADING_ON if on else HEADING_BG)
