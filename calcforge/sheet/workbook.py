@@ -366,6 +366,8 @@ class Workbook:
         self._needed: Optional[set] = None
         self._pass_changed: set = set()
         self._pass_cache: dict = {}
+        self._reach_memo = None             # (cells typed, kept order, dirty, roots, order)
+        self._held_order = None
         self._changed_rows: dict = {}       # (sheet id, col) -> sorted rows changed this pass
         self._changed_cols: dict = {}       # sheet id -> sorted columns changed this pass
         self._touched: list = []                     # cells changed since the last calculation
@@ -434,9 +436,17 @@ class Workbook:
         if name is None:
             return None
         lower = name.lower()
+        # the last found by this name, while it is still here and so called
+        # (formulas name other sheets thousands of times a calculation)
+        cache = self.__dict__.setdefault("_sheet_found", {})
+        s = cache.get(lower)
+        if s is not None and s.name.lower() == lower and any(x is s for x in self.sheets):
+            return s
         for s in self.sheets:
             if s.name.lower() == lower:
+                cache[lower] = s
                 return s
+        cache.pop(lower, None)
         return None
 
     def sheet_by_id(self, sheet_id: int) -> Optional[Sheet]:
@@ -1038,9 +1048,28 @@ class Workbook:
             return set()
         edited = bool(self._touched) or bool(self._dirty)
         touched = ()
+        memo = None
         if self._touched:
             touched, self._touched = self._touched, []
-            self._dirty_many(touched, include_self=False)
+            # the same cells typed into again (one input, value after
+            # value): what they reach, and its order, are as last time while
+            # no formula has changed (the kept order still stands)
+            if not self._dirty and not everything and self._rank is not None and \
+                    not any(x.spills or x.wanted for x in self.sheets):
+                memo = (frozenset(touched), self._rank)
+                held = self._reach_memo
+                if held is not None and held[0] == memo[0] and held[1] is memo[1]:
+                    self._dirty.update(held[2])
+                    self._roots.update(held[3])
+                    self._held_order = held[4]
+                    edited = False                     # (its volatile ones are in it)
+                    touched_known = True
+                else:
+                    touched_known = False
+            else:
+                touched_known = False
+            if not touched_known:
+                self._dirty_many(touched, include_self=False)
         if everything:
             for sheet in self.sheets:
                 for (row, col), cell in sheet.cells.items():
@@ -1067,7 +1096,14 @@ class Workbook:
         for key in touched:
             self._note_changed(key)
         try:
-            order, loops = self._order()
+            held_order, self._held_order = self._held_order, None
+            if held_order is not None:
+                order, loops = held_order, set()
+            else:
+                order, loops = self._order()
+                if memo is not None and not loops and self._rank is memo[1]:
+                    self._reach_memo = (memo[0], memo[1], frozenset(self._dirty),
+                                        frozenset(self._needed or ()), order)
             kept = {k for k in self.circular if k not in self._dirty}
             self.circular = sorted(kept | loops)
             for key in loops:

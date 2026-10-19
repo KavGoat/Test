@@ -642,10 +642,24 @@ class SheetRunItem(TableItem):
         grid.setCosmetic(True)
         painter.setBrush(Qt.NoBrush)
         marks = []          # hidden columns and rows: drawn over their neighbours
-        for c in range(cols):
+        # only the columns in view: a workbook with a thousand hidden columns
+        # past its last drew a thousand headings and marks a frame
+        # (the user's seismic workbook, 2026-10-19)
+        first, last = 0, cols - 1
+        inverse, ok = painter.worldTransform().inverted()
+        device = painter.device()
+        if ok and device is not None and device.width() > 0:
+            seen = inverse.mapRect(QRectF(0, 0, device.width(), device.height()))
+            import bisect
+            first = max(0, bisect.bisect_right(xs, seen.left()) - 2)
+            last = min(cols - 1, bisect.bisect_right(xs, seen.right()) + 1)
+        marked = set()
+        for c in range(first, last + 1):
             cell = QRectF(xs[c], -HEADING_H, xs[c + 1] - xs[c], HEADING_H)
             if cell.width() <= 0:
-                marks.append((cell, "col"))       # Excel's double line
+                if ("col", xs[c]) not in marked:          # one mark where several are hidden
+                    marked.add(("col", xs[c]))
+                    marks.append((cell, "col"))       # Excel's double line
                 continue
             on = sel is not None and sel[1] <= c <= sel[3]
             painter.fillRect(cell, HEADING_ON if on else HEADING_BG)
@@ -656,7 +670,9 @@ class SheetRunItem(TableItem):
         for r in range(r0, r1 + 1):
             cell = QRectF(-ROWNUM_W, ys[r], ROWNUM_W, ys[r + 1] - ys[r])
             if cell.height() <= 0:
-                marks.append((cell, "row"))
+                if ("row", ys[r]) not in marked:
+                    marked.add(("row", ys[r]))
+                    marks.append((cell, "row"))
                 continue
             on = sel is not None and sel[0] <= r <= sel[2]
             painter.fillRect(cell, HEADING_ON if on else HEADING_BG)

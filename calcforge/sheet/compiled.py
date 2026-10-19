@@ -17,6 +17,8 @@ column of filled formulas compiles once.
 """
 from __future__ import annotations
 
+import math
+
 from . import formula as F
 from .evaluate import (MISSING, RefValue, _binary, _broadcast, _intersect, _lift1, _located,
                        _name, _ref, _scalar_op, _sheet_of, deref, ev, reach)
@@ -31,7 +33,9 @@ def compiled(parsed):
     """The closure working out *parsed*'s formula: fn(ctx) -> what ev gives."""
     got = getattr(parsed, "fast", None)
     if got is None:
-        got = parsed.fast = _c(parsed.tree)
+        tree = parsed.tree
+        # =Tables!O60: the cell's value (what result() makes of its reference)
+        got = parsed.fast = _v(tree) if type(tree) is F.Ref else _c(tree)
     return got
 
 
@@ -133,6 +137,17 @@ def _binary_fn(n):
             if type(a) is float and type(b) is float and b != 0:
                 return a / b
             return slow(ctx, a, b)
+    elif op == "^":
+        def f(ctx):
+            a, b = left(ctx), right(ctx)
+            if type(a) is float and type(b) is float and a > 0.0:
+                try:
+                    r = a ** b
+                except OverflowError:
+                    return slow(ctx, a, b)
+                if r - r == 0.0:               # finite (values.power gives the same)
+                    return r
+            return slow(ctx, a, b)
     elif op in _COMPARE:
         test = {"=": lambda d: d == 0, "<>": lambda d: d != 0, "<": lambda d: d < 0,
                 ">": lambda d: d > 0, "<=": lambda d: d <= 0, ">=": lambda d: d >= 0}[op]
@@ -175,6 +190,9 @@ def _call_fn(n):
 
     spec = FUNCTIONS.get(n.name)
     count = len(n.args)
+    if n.name == "PI" and not count and spec is not None:
+        pi = math.pi
+        return lambda ctx: pi
     if spec is None or count < spec.least or count > _many(spec.most):
         return lambda ctx: call(n, ctx)           # a LAMBDA's name, a wrong count: as before
 

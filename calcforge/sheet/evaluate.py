@@ -238,6 +238,8 @@ class Function:
 def result(v):
     """What a cell shows for a formula's result: a reference shows what is
     in it (an empty cell as 0), a 1×1 array its one value."""
+    if type(v) is float and math.isfinite(v):
+        return v                           # (most results: a plain number)
     if isinstance(v, Function):
         # =LAMBDA(x, x) left uncalled (Excel)
         return CALC.because("a LAMBDA is a function: call it with its values, LAMBDA(x, x*2)(3)")
@@ -374,7 +376,18 @@ def _unit(text: str, custom: bool = True):
 def _sheet_of(name: Optional[str], ctx: Ctx):
     if name is None:
         return ctx.sheet
-    sheet = ctx.wb.sheet(name)
+    wb = ctx.wb
+    if wb._in_pass:
+        # sheets don't come, go or change their names while calculating:
+        # each looked up once a pass (Tables!B2 in thousands of formulas)
+        cache = wb._pass_cache
+        sheet = cache.get(("sheet", name))
+        if sheet is None:
+            sheet = wb.sheet(name)
+            if sheet is not None:
+                cache[("sheet", name)] = sheet
+    else:
+        sheet = wb.sheet(name)
     if sheet is None:
         raise failed(REF, f"there's no sheet or table called '{name}'")
     return sheet
