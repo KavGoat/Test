@@ -3716,6 +3716,10 @@ class PropertiesPanel(QScrollArea):
                 # open for its cells: the selected cells' look, as the
                 # Properties toolbar's table controls give it
                 self._add_cells(first)
+            if getattr(first, "TYPE", "") == "sheet_run":
+                # an imported workbook's sheet: its Workbook section too
+                # (Self-contained), now the open sheet is the panel's subject
+                self._add_workbook()
         if len(self._items) == 1 and getattr(first, "TYPE", "") == "chart":
             self._add_chart(first)
         appearance = common_capabilities(self._items)
