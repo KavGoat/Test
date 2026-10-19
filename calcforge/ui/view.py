@@ -766,6 +766,12 @@ class PageView(QGraphicsView):
                 frames.append(frame)
 
         remember(self.frame())
+        # the page pressed on, which need not be the page the chrome calls
+        # current: a rectangle drawn on the page above the one a page was
+        # just added after went on that page with no undo step, and the next
+        # Ctrl+Z took it away for good with the page (2026-10-19)
+        if self._pointer_down:
+            remember(self.frame_at(self._press_scene))
         remember(getattr(self._editing_item, "parentItem", lambda: None)())
         for item in scene.selectedItems():
             remember(item.parentItem())

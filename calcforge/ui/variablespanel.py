@@ -329,7 +329,8 @@ class VariablesPanel(QWidget):
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(0)
-        self._timer.timeout.connect(self.refresh)
+        self._timer.timeout.connect(self._refresh_if_shown)
+        self._stale = False
 
     # -- keeping up -----------------------------------------------------------------
     def watch(self, document) -> None:
@@ -365,6 +366,16 @@ class VariablesPanel(QWidget):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._soon()
+
+    def _refresh_if_shown(self) -> None:
+        """Brought up to date when it can be seen; hidden, when it is shown
+        (every value typed into a big workbook rebuilt it unseen, a fifth of
+        the time the edit took, 2026-10-19)."""
+        if self.isVisible():
+            self._stale = False
+            self.refresh()
+        else:
+            self._stale = True
 
     def refresh(self) -> None:
         document = self.window.document

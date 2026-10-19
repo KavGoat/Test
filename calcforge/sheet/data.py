@@ -157,7 +157,7 @@ def apply_filter(wb, sheet) -> None:
         for other in wb.sheets:
             for (r, c), cell in other.cells.items():
                 if cell.parsed is not None and cell.parsed.functions & {"SUBTOTAL", "AGGREGATE"}:
-                    wb._dirty.add((other.id, r, c))
+                    wb._mark((other.id, r, c))
                     wb._touched.append((other.id, r, c))
         wb._recalc_if_auto()
 

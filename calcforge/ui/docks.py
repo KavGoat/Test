@@ -11,7 +11,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon, QPainter, QPen, QColor, QPolygonF
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtWidgets import (QDockWidget, QHBoxLayout, QLabel, QSizePolicy,
-                               QToolButton, QWidget)
+                               QToolButton, QVBoxLayout, QWidget)
 
 from ..settings import app_settings
 
@@ -83,9 +83,22 @@ class DockTitleBar(QWidget):
         super().__init__(dock)
         self.dock = dock
         self.setObjectName("dockTitleBar")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(9, 3, 4, 3)
+        # The title and its buttons on one line; a panel with a header of its
+        # own (set_header) puts its buttons on a second line when the panel
+        # is too narrow for them beside the title.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(9, 3, 4, 3)
+        outer.setSpacing(2)
+        layout = self._row = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
+        outer.addLayout(layout)
+        self._under = QHBoxLayout()
+        self._under.setContentsMargins(0, 0, 0, 0)
+        self._under.setSpacing(2)
+        outer.addLayout(self._under)
+        self.header_title = None
+        self.header_tools = None
 
         self.label = _ElidedTitle(dock.windowTitle())
         self.label.setObjectName("dockTitle")
@@ -117,15 +130,74 @@ class DockTitleBar(QWidget):
         button.setToolTip(tip)
         button.setAutoRaise(True)
         button.setFocusPolicy(Qt.NoFocus)
+        # small and the same on every panel, as Revu's pin and close are
+        button.setIconSize(QSize(14, 14))
+        button.setFixedSize(QSize(20, 20))
         return button
 
     def minimumSizeHint(self) -> QSize:
         return QSize(0, 0)
 
+    # -- a panel's own header ------------------------------------------------
+    def set_header(self, title: QWidget, tools: QWidget) -> None:
+        """A panel's own header in place of its plain title, as Revu's
+        (the user, 2026-10-19): *title* is the panel's name as the menu of
+        its commands ("Thumbnails ▾"), *tools* its buttons straight after
+        it. Pin, float, roll up and close stay at the far right."""
+        self.label.hide()
+        self.header_title, self.header_tools = title, tools
+        self._row.insertWidget(0, title)
+        self._row.insertWidget(1, tools)
+        self._row.insertStretch(2, 1)
+        self._place_tools()
+
+    def header_needs(self) -> int:
+        """How wide the bar must be for the header's buttons to sit on the
+        title's line."""
+        margins = self.layout().contentsMargins()
+        spacing = self._row.spacing()
+        width = margins.left() + margins.right()
+        width += self.header_title.sizeHint().width() + spacing
+        width += self.header_tools.sizeHint().width() + spacing
+        for button in (self.collapse, self.pin, self.float_button, self.close_button):
+            if not button.isHidden():
+                width += min(button.sizeHint().width(), button.maximumWidth()) + spacing
+        return width
+
+    def tools_on_the_title_line(self) -> bool:
+        return self.header_tools is not None and self._row.indexOf(self.header_tools) >= 0
+
+    def _place_tools(self) -> None:
+        """The buttons beside the title when they fit, else on the line
+        under it: never cut off, never over the pin and close."""
+        tools = self.header_tools
+        if tools is None:
+            return
+        beside = self.width() >= self.header_needs()
+        if beside == self.tools_on_the_title_line():
+            return
+        if beside:
+            self._under.removeWidget(tools)
+            self._row.insertWidget(1, tools)
+        else:
+            self._row.removeWidget(tools)
+            self._under.insertWidget(0, tools)
+            if self._under.count() == 1:
+                self._under.addStretch(1)
+        tools.show()
+        self.updateGeometry()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._place_tools()
+
     def refresh_icons(self) -> None:
         """Redraw the buttons after a theme change."""
         self.float_button.setIcon(_icon("float"))
         self.close_button.setIcon(_icon("close"))
+        refresh = getattr(self.header_tools, "refresh_icons", None)
+        if refresh is not None:
+            refresh()
         self.refresh()
 
     def mouseDoubleClickEvent(self, event) -> None:
@@ -185,6 +257,10 @@ class PanelDock(QDockWidget):
         self._bar.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setTitleBarWidget(self._bar)
         self.set_pinned(False)
+
+    def set_header(self, title: QWidget, tools: QWidget) -> None:
+        """The panel's own header on its title bar (DockTitleBar.set_header)."""
+        self._bar.set_header(title, tools)
 
     def float_on_purpose(self, floating: bool) -> None:
         """The float button: out of its side as a window of its own, or back."""

@@ -20,7 +20,7 @@ Beyond Excel:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Callable, Optional
 
 from .refs import CellRef, parse_range, quote_sheet
@@ -444,6 +444,8 @@ class Parsed:
     names: frozenset            # bare names it reads (defined names or document variables)
     functions: frozenset
     tables: frozenset = frozenset()   # tables named in structured references
+    # the closures working it out (compiled.py), made the first time
+    fast: object = field(default=None, compare=False, repr=False)
 
 
 VOLATILE = {"NOW", "TODAY", "RAND", "RANDBETWEEN", "RANDARRAY", "OFFSET", "INDIRECT", "CELL", "INFO"}

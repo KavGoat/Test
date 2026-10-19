@@ -39,6 +39,11 @@ _LIGHT_TOKENS = {
     "tab_on": "#ffffff",
     "picked": "#cce4f7",
     "picked_ink": "#1e2022",
+    # Revu's thumbnails: a thin neutral edge round each page, the page
+    # picked out framed in Revu's blue, a softer frame under the pointer
+    "thumb_edge": "#a9abad",
+    "thumb_picked": "#1e77bf",
+    "thumb_hover": "#c2dbf1",
 }
 
 _DARK_TOKENS = {
@@ -72,6 +77,10 @@ _DARK_TOKENS = {
     "scroll_hover": "#a6a6a6",
     "menu": "#3e3e3e",
     "menubar": "#2e2e2e",
+    # the blue of the user's own Revu round a picked thumbnail (#0972b8)
+    "thumb_edge": "#5e5e5e",
+    "thumb_picked": "#0972b8",
+    "thumb_hover": "#4e4e4e",
 }
 
 TEMPLATE = """
@@ -98,9 +107,9 @@ QToolBar QToolButton:pressed {{ background: {accent_deep}; }}
 QToolBar QToolButton:checked {{ background: {picked}; color: {picked_ink}; }}
 QToolBar QToolButton::menu-indicator {{ width: 0; }}
 /* A button whose face is its arrow (the formula bar's ▾, the status bar's
-   ») draws no second one. A panel's split button (Thumbnails' Insert ▾, Add
-   to Tool Chest ▾) keeps the platform's own, which gives its arrow a part
-   of its own already. */
+   ») draws no second one. A panel's split button (Add to Tool Chest ▾)
+   keeps the platform's own, which gives its arrow a part of its own
+   already; Thumbnails' are styled below (#panelTools). */
 QToolButton[menuButton="plain"]::menu-indicator {{ image: none; width: 0; }}
 /* A button with a menu, as Revu's split buttons: the icon, then a narrow
    arrow part of its own beside it. Unstyled, Qt laid the arrow over the
@@ -179,6 +188,34 @@ QDockWidget > QWidget {{ background: {surface}; }}
 }}
 #dockButton:hover {{ background: {accent_soft}; }}
 #dockButton:checked {{ background: {picked}; }}
+/* A panel whose name is its menu, as Revu's "Thumbnails ▾": the title's
+   words with Revu's thin chevron after them, flat until pointed at */
+QToolButton#panelTitleMenu {{
+    color: {ink}; font-weight: 600; font-size: 14px; background: transparent;
+    border: 0; border-radius: 3px; padding: 1px 14px 1px 2px; margin: 0;
+}}
+QToolButton#panelTitleMenu:hover {{ background: {accent_soft}; }}
+QToolButton#panelTitleMenu::menu-indicator {{
+    image: url("{arrow_vee}"); width: 9px; height: 9px;
+    subcontrol-origin: padding; subcontrol-position: center right; right: 3px;
+}}
+/* the buttons after it: small flat icons, evenly spaced, no boxes; an
+   insert's arrow a narrow part of its own beside its icon */
+#panelTools QToolButton {{
+    background: transparent; border: 0; border-radius: 3px; padding: 2px; margin: 0;
+}}
+#panelTools QToolButton:hover {{ background: {accent_soft}; }}
+#panelTools QToolButton:pressed {{ background: {accent_deep}; }}
+#panelTools QToolButton[menuButton="split"] {{ padding-right: 12px; }}
+#panelTools QToolButton[menuButton="split"]::menu-button {{
+    subcontrol-origin: border; subcontrol-position: top right; width: 11px;
+    border: 0; border-top-right-radius: 3px; border-bottom-right-radius: 3px;
+}}
+#panelTools QToolButton::menu-arrow {{ image: url("{arrow_vee}"); width: 8px; height: 8px; }}
+/* Revu's thumbnails lie on the panel itself: no box round the strip */
+QListWidget#pageList {{
+    background: {chrome}; border: 0; border-radius: 0; padding: 0;
+}}
 
 /* The rails of panel icons down either edge of the canvas. */
 #panelRail {{
