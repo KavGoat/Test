@@ -466,10 +466,58 @@ def _draw_a_layer(output, document, leftovers: list, opened: list,
             made = calclayer.place_layer(output, index, overlay, offset, kind)
             if made is not None:
                 prints[page.uid] = made
+        if kind == calclayer.SHEET:
+            _multiply_what_multiplies(output, document, drawn, leftovers, opened, where)
     except Exception:                                  # noqa: BLE001
         # Never lose a save over its appearance elsewhere.
         engine.drain_messages()
     return prints
+
+
+def _multiply_what_multiplies(output, document, drawn: list, leftovers: list, opened: list,
+                              where: dict) -> None:
+    """Flattened markups that multiply onto the page — a highlighted shape's
+    inside, a highlighter's stroke — drawn on a sheet layer of their own
+    whose form multiplies (ExtGState /BM /Multiply): a PDF writer cannot,
+    and the sheet left that part out."""
+    from . import calclayer
+    wanted = [page for page in drawn
+              if any(item.flattened and item.printable and item.isVisible()
+                     and getattr(item, "multiplies", lambda: False)()
+                     for item in page.frame.markups())]
+    if not wanted:
+        return
+    overlay_path = _rendered_overlay(document, wanted, "sheet_multiply")
+    if overlay_path is None:
+        return
+    leftovers.append(overlay_path)
+    overlay = engine.open_path(overlay_path)
+    opened.append(overlay)
+    if overlay.page_count != len(wanted):
+        return
+    for offset, page in enumerate(wanted):
+        index = where.get(id(page))
+        if index is None or not 0 <= index < output.page_count:
+            continue
+        calclayer.place_multiplied(output, index, overlay, offset)
+    # and a highlighted shape's border over its inside, as it is drawn
+    bordered = [page for page in wanted
+                if any(item.flattened and item.printable and item.isVisible()
+                       and item.multiplies_inside_only() for item in page.frame.markups())]
+    if not bordered:
+        return
+    over_path = _rendered_overlay(document, bordered, "sheet_over")
+    if over_path is None:
+        return
+    leftovers.append(over_path)
+    over = engine.open_path(over_path)
+    opened.append(over)
+    if over.page_count != len(bordered):
+        return
+    for offset, page in enumerate(bordered):
+        index = where.get(id(page))
+        if index is not None and 0 <= index < output.page_count:
+            calclayer.place_layer(output, index, over, offset, calclayer.SHEET)
 
 
 def _rendered_overlay(document, drawn: list, kind: str) -> Optional[str]:
@@ -497,7 +545,8 @@ def _rendered_overlay(document, drawn: list, kind: str) -> Optional[str]:
     export.paint_pages(writer, document, drawn, resolution,
                        pdf_overlay_pages=over_the_source,
                        without_markups=True,
-                       layer="calc" if kind == calclayer.CALC else "sheet")
+                       layer="calc" if kind == calclayer.CALC
+                       else kind if kind in ("sheet_multiply", "sheet_over") else "sheet")
     del writer
     if os.path.getsize(overlay_path) < 1:
         _throw_away(overlay_path)

@@ -268,6 +268,8 @@ DIALOG_OPENERS = {
                                                        "click": "New…"}}]),
     "panels.rename()": ("bookmarked", ["panel", "Bookmarks", "Rename"]),
     "panels.rename_set()": ("toolchest", ["call", "rename_set"]),
+    # Revu's Edit beside Show Caption (the Properties panel)
+    "panels.edit_caption()": ("area", ["panel", "Properties", "Edit"]),
     "sheetlayout.sheet_page_setup()": ("sheet_open", ["menu", ["Calculation", "Page Layout",
                                                                 "Sheet Layout…"]]),
     "tableedit._ask_name()": ("table_open", ["context", "cell", ["Names", "Define Name…"]]),
@@ -555,7 +557,7 @@ def build_commands(path: str) -> list[dict]:
                 state = "rect" if "Calc mode" not in note else "rect"
                 if label == "Bookmark":
                     state = "textbox"
-                if rest == "Appearance" and label in ("Font", "Font Size", "Text Color", "B",
+                if rest == "Appearance" and label in ("Font", "Font Size", "Font Colour", "B",
                                                       "I", "U", "S", "x²", "x₂", "Auto",
                                                       "Alignment", "Margin"):
                     state = "textbox"

@@ -321,7 +321,11 @@ def _one(source, annotation: dict, kind: str, place, scale: float,
         style["fill_opacity"] = 0.5
         return [_shape("rect", "highlight", box, style, common)]
     if kind == "Text":
-        return [_text("note", box, style, common)]
+        made = _text("note", box, style, common)
+        icon = str(source.resolve(annotation.get("Name")) or "").lstrip("/")
+        if icon:
+            made["icon"] = icon                # Revu's Icon ▾: Comment, Key…
+        return [made]
     drawn = _appearance(source, annotation, scale)
     if drawn:
         return drawn
@@ -593,6 +597,23 @@ def _line_endings(source, annotation: dict, style: dict) -> None:
         style["arrow_start"] = INCOMING_ENDINGS.get(names[0], "none")
     if len(names) > 1:
         style["arrow_end"] = INCOMING_ENDINGS.get(names[1], "none")
+    _end_fill(source, annotation, style)
+
+
+def _end_fill(source, annotation: dict, style: dict) -> None:
+    """A line's /IC: what its filled ends are filled with (Revu's Fill Color
+    on a line). The same as the line's colour is kept as following it; none
+    at all leaves the ends hollow, as every other reader draws them."""
+    from ..items.base import FILLED_HEADS
+    if str(source.resolve(annotation.get("Subtype")) or "") not in ("Line", "PolyLine"):
+        return
+    if not {style.get("arrow_start"), style.get("arrow_end")} & FILLED_HEADS:
+        return
+    inside = style.get("fill") or ""
+    if not inside:
+        style["end_fill"] = "none"
+    elif inside.lower() != (style.get("stroke") or "").lower():
+        style["end_fill"] = inside
 
 
 def _dimension(source, annotation: dict, points: list, style: dict,

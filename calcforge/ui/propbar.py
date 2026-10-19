@@ -53,6 +53,8 @@ MEASURE = "measure"
 UNITS = "units"
 TOTALS = "totals"
 AUTO_FONT = "font_auto"      # Revu's "A": the words sized to fit the box
+END_FILL = "end_fill"        # Revu's line-end colour swatch, after End ▾ Auto ▾
+NOTE = "note"                # a note's Color, opacity and Icon ▾ (Revu's)
 
 
 def _ink() -> str:
@@ -90,6 +92,13 @@ class ValueCombo(QComboBox):
         if editable:
             self.lineEdit().editingFinished.connect(self._typed)
             self.setInsertPolicy(QComboBox.NoInsert)
+        from .widgets import checked_list
+        checked_list(self)                 # Revu's ✓ on the size picked
+
+    def showPopup(self) -> None:
+        from .widgets import fit_the_list
+        fit_the_list(self)
+        super().showPopup()
 
     def minimum(self) -> float:
         return self._minimum
@@ -157,6 +166,11 @@ class IconCombo(QComboBox):
         self.setFixedWidth(width)
         self.currentIndexChanged.connect(lambda _i: self.setToolTip(
             f"{self.property('what') or ''}{self.currentText()}"))
+
+    def showPopup(self) -> None:
+        from .widgets import fit_the_list
+        fit_the_list(self)                 # as wide as its rows, no wider
+        super().showPopup()
 
     def paintEvent(self, _event) -> None:
         painter = QStylePainter(self)
@@ -440,6 +454,17 @@ def _scallop_icon(size: float) -> QIcon:
     return drawn_icon(draw, 40, 14)
 
 
+def note_icon_picture(key: str) -> QIcon:
+    """A note's icon as its Icon ▾ list shows it: drawn as on the page."""
+    from ..items.text import paint_note_icon
+
+    def draw(painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        paint_note_icon(painter, QRectF(1, 1, 18, 18), key, QColor("#ffe066"),
+                        QColor("#b8860b"))
+    return drawn_icon(draw, 20, 20)
+
+
 def _shape_icon(kind: str) -> QIcon:
     def draw(painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -476,7 +501,7 @@ def build(window) -> QToolBar:
     w._style_widgets = {key: [] for key in (
         STROKE, OPACITY, DASH, CLOUD, WIDTH, CORNER, ARROW_SIZE, FILL, FILL_OPACITY,
         SHAPE, HATCH, HIGHLIGHT, CUTOUT, SYMBOL, UNITS, MEASURE, FONT, AUTO_FONT,
-        TOTALS)}
+        TOTALS, END_FILL, NOTE)}
 
     w._style_action = {}
 
@@ -499,9 +524,41 @@ def build(window) -> QToolBar:
     w.style_kind_menu.popup_panel = w.style_more_popup
     w.style_kind_menu.about_to_show = w._fill_style_more_popup
 
+    # -- a note's: Color, opacity, Icon ▾ (Revu's note has no line or fill) --
+    from ..items.text import NOTE_ICONS
+    put(NOTE, label("Colour:"))
+    w.note_colour_button = ColorButton("#ffe066", False, "Note colour")
+    w.note_colour_button.setObjectName("noteColour")
+    w.note_colour_button.setToolTip("Note colour")
+    w.note_colour_button.colorChanged.connect(w._style_note_colour)
+    _framed(w.note_colour_button)
+    put(NOTE, w.note_colour_button)
+    w.note_opacity_spin = _number(QSpinBox(), 60)
+    w.note_opacity_spin.setObjectName("noteOpacity")
+    w.note_opacity_spin.setRange(0, 100)
+    w.note_opacity_spin.setSuffix("%")
+    w.note_opacity_spin.setToolTip("Opacity of the note")
+    w.note_opacity_spin.setValue(100)
+    w.note_opacity_spin.valueChanged.connect(w._style_note_opacity)
+    put(NOTE, w.note_opacity_spin)
+    put(NOTE, label("Icon:"))
+    w.note_icon_combo = IconCombo(52)
+    w.note_icon_combo.setObjectName("noteIcon")
+    w.note_icon_combo.setProperty("what", "Icon: ")
+    w.note_icon_combo.setIconSize(QSize(20, 20))
+    for key, words in NOTE_ICONS:
+        w.note_icon_combo.addItem(note_icon_picture(key), words, key)
+    from .widgets import checked_list
+    checked_list(w.note_icon_combo)
+    w.note_icon_combo.setCurrentIndex(max(w.note_icon_combo.findData("Note"), 0))
+    w.note_icon_combo.currentIndexChanged.connect(
+        lambda _i: w._style_note_icon(w.note_icon_combo.currentData()))
+    put(NOTE, w.note_icon_combo)
+
     # -- Line: colour, %, style, (cloud intensity), width, (radius) ---------
     put(STROKE, label("Line:"))
     w.stroke_button = ColorButton(style.stroke, True, "Line colour")
+    w.stroke_button.setObjectName("lineColour")
     w.stroke_button.colorChanged.connect(w._style_stroke)
     _framed(w.stroke_button)
     put(STROKE, w.stroke_button)
@@ -578,10 +635,20 @@ def build(window) -> QToolBar:
             w.arrow_start_label_action = word_action
         put(ARROW_SIZE, control)
         put(ARROW_SIZE, size)
+    # Revu's line-end colour, after End ▾ Auto ▾: what a filled end is
+    # filled with (the Properties panel's Fill Color on a line)
+    w.end_fill_button = ColorButton(style.stroke, True, "Line-end colour")
+    w.end_fill_button.setObjectName("lineEndFill")
+    w.end_fill_button.setToolTip("Line-end colour: what a filled end — Closed, Round, "
+                                 "Square, Diamond — is filled with")
+    w.end_fill_button.colorChanged.connect(w._style_end_fill)
+    _framed(w.end_fill_button)
+    put(END_FILL, w.end_fill_button)
 
     # -- Fill: colour, % -----------------------------------------------------
     put(FILL, label("Fill:"))
     w.fill_button = ColorButton("", True, "Fill colour")
+    w.fill_button.setObjectName("fillColour")
     w.fill_button.colorChanged.connect(w._style_fill)
     _framed(w.fill_button)
     put(FILL, w.fill_button)
@@ -603,6 +670,8 @@ def build(window) -> QToolBar:
     w.callout_shape_combo.setIconSize(QSize(26, 20))
     w.callout_shape_combo.addItem(_shape_icon("box"), "Rectangle", "box")
     w.callout_shape_combo.addItem(_shape_icon("cloud"), "Cloud", "cloud")
+    from .widgets import checked_list
+    checked_list(w.callout_shape_combo)
     w.callout_shape_combo.currentIndexChanged.connect(
         lambda _i: w._style_callout_shape(w.callout_shape_combo.currentData()))
     put(SHAPE, w.callout_shape_combo)
@@ -707,7 +776,8 @@ def build(window) -> QToolBar:
     put(FONT, label("Font:"))
     w.font_family_combo = QFontComboBox()
     w.font_family_combo.setObjectName("fontFamily")
-    w.font_family_combo.setFixedWidth(128)
+    # narrow enough that a length's bar, line-end colour and all, still fits 1280
+    w.font_family_combo.setFixedWidth(104)
     w.font_family_combo.currentFontChanged.connect(lambda font: w._style_change(
         FONT, lambda s: setattr(s, "font_family", font.family()), "Font"))
     put(FONT, w.font_family_combo)
@@ -727,6 +797,7 @@ def build(window) -> QToolBar:
     w.font_auto_button.toggled.connect(w._style_font_auto)
     put(AUTO_FONT, w.font_auto_button)
     w.text_colour_button = ColorButton(style.text_color, label="Text colour")
+    w.text_colour_button.setObjectName("textColour")
     _framed(w.text_colour_button)
     w.text_colour_button.colorChanged.connect(lambda value: w._style_change(
         FONT, lambda s: setattr(s, "text_color", value), "Text colour"))
@@ -775,6 +846,7 @@ def build(window) -> QToolBar:
 
 def _end_combo(combo: QComboBox, what: str) -> QComboBox:
     """An arrow_combo shown closed as only its picture, as Revu's are."""
+    from .widgets import checked_list
     shown = IconCombo(60)
     shown.setProperty("what", what)
     shown.setObjectName(f"lineEnd{what.strip(': ')}")
@@ -784,8 +856,9 @@ def _end_combo(combo: QComboBox, what: str) -> QComboBox:
         if what.startswith("Start"):
             picture = _mirrored(picture)       # Revu's start ends point back: ◀—
         shown.addItem(picture, combo.itemText(index), combo.itemData(index))
-    view = shown.view()
-    view.setMinimumWidth(150)
+    # Revu's list (the user's shot of End ▾): the pictures alone, a ✓ on the
+    # one in use; each name is its tooltip
+    checked_list(shown, pictures=True, picture=QSize(42, 20))
     return shown
 
 
@@ -989,13 +1062,26 @@ def extras_shown(items: list, active, supported: set) -> set:
         shown.add(MEASURE)
         if active.kind != DIMENSION:
             shown.add(UNITS)
+    if sketched(active):
+        # Revu's Sketch to Scale shapes (the user's shot of one): Add a
+        # cut-out, Units ▾, Caption ▾ and Totals: Area = … ▾, as an area's
+        shown |= {CUTOUT, UNITS, MEASURE}
     # a dimension is a drawing's dimension, not a take-off: Revu gives it a
     # caption but no Units or Totals
     takeoff = [i for i in items if not (isinstance(i, MeasureItem) and i.kind == DIMENSION)]
-    if items and takeoff == items and all(isinstance(i, (MeasureItem, CountItem)) for i in items):
+    if items and takeoff == items and all(isinstance(i, (MeasureItem, CountItem)) or sketched(i)
+                                          for i in items):
         shown.add(TOTALS)
+    if not items and sketched(active):
+        shown.add(TOTALS)                 # Revu's: Area = 0 sq m, for the tool too
 
     return shown
+
+
+def sketched(item) -> bool:
+    """A Sketch to Scale rectangle or ellipse: drawn to a real size."""
+    from ..items.shapes import RectItem
+    return isinstance(item, RectItem) and bool(getattr(item, "to_scale", False))
 
 
 def totals(items: list) -> list:
@@ -1005,9 +1091,21 @@ def totals(items: list) -> list:
     from ..items.measure import ANGLE, AREA, VOLUME, CountItem, MeasureItem
     sums: dict = {}
     counts = 0
+    unscaled = False
     for item in items:
         if isinstance(item, CountItem):
             counts += 1
+            continue
+        if sketched(item):
+            # a Sketch to Scale shape's area, on a page with a scale
+            area = item.area_value()
+            if area is None:
+                unscaled = True
+                continue
+            try:
+                sums["Area"] = area if "Area" not in sums else sums["Area"] + area
+            except Exception:  # noqa: BLE001 - areas in units that do not add
+                pass
             continue
         if not isinstance(item, MeasureItem) or item.value is None:
             continue
@@ -1017,6 +1115,8 @@ def totals(items: list) -> list:
         except Exception:  # noqa: BLE001 - units that do not add (a page left unscaled)
             continue
     rows = [(name, format_quantity(total, 2, "fixed")) for name, total in sums.items()]
+    if unscaled and "Area" not in sums:
+        rows.append(("Area", "Scale Not Set"))
     if counts:
         rows.append(("Count", str(counts)))
     return rows

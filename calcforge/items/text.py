@@ -1702,6 +1702,83 @@ class CalloutItem(_TextBase):
         return self.comment or self.text().strip().replace("\n", " ")[:120]
 
 
+#: Revu's note icons (a PDF text annotation's /Name), in its Icon ▾ order:
+#: the key written to the file, and what the list calls it.
+NOTE_ICONS = (("Comment", "Comment"), ("Help", "Help"), ("Insert", "Insert"),
+              ("Key", "Key"), ("NewParagraph", "New Paragraph"), ("Note", "Note"),
+              ("Paragraph", "Paragraph"))
+NOTE_ICON_KEYS = {key for key, _words in NOTE_ICONS}
+
+
+def paint_note_icon(painter: QPainter, rect: QRectF, icon: str, body, ink,
+                    pen: QPen = None) -> None:
+    """A note's icon in *rect*: its body in *body* outlined with *pen* (or a
+    thin one in *ink*), and its mark — the lines of a note, a question mark,
+    a key… — in *ink*."""
+    outline = pen if pen is not None else QPen(QColor(ink), 0.8)
+    painter.save()
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setBrush(body if isinstance(body, QBrush) else QBrush(QColor(body)))
+    painter.setPen(outline)
+    left, top, wide, high = rect.left(), rect.top(), rect.width(), rect.height()
+
+    def at(x: float, y: float) -> QPointF:
+        return QPointF(left + x * wide, top + y * high)
+    mark = QPen(QColor(120, 90, 10) if ink is None else QColor(ink))
+    mark.setWidthF(max(wide / 20.0, 0.8))
+    mark.setCapStyle(Qt.RoundCap)
+    mark.setJoinStyle(Qt.RoundJoin)
+    if icon == "Comment":
+        # a speech bubble
+        bubble = QPainterPath()
+        bubble.addRoundedRect(QRectF(at(0.0, 0.0), at(1.0, 0.72)), wide * 0.15, high * 0.15)
+        tail = QPainterPath()
+        tail.addPolygon(QPolygonF([at(0.22, 0.6), at(0.22, 1.0), at(0.5, 0.66)]))
+        painter.drawPath(bubble.united(tail))
+        painter.setPen(mark)
+        for y in (0.24, 0.46):
+            painter.drawLine(at(0.2, y), at(0.8, y))
+    elif icon == "Help":
+        painter.drawEllipse(rect)
+        painter.setPen(mark)
+        font = QFont()
+        font.setBold(True)
+        font.setPixelSize(max(int(high * 0.7), 4))
+        painter.setFont(font)
+        painter.drawText(rect, Qt.AlignCenter, "?")
+    elif icon == "Insert":
+        # a caret
+        painter.drawPolygon(QPolygonF([at(0.5, 0.05), at(1.0, 0.95), at(0.72, 0.95),
+                                       at(0.5, 0.5), at(0.28, 0.95), at(0.0, 0.95)]))
+    elif icon == "Key":
+        ring = QPainterPath()
+        ring.addEllipse(QRectF(at(0.0, 0.0), at(0.5, 0.5)))
+        stem = QPainterPath()
+        stem.addPolygon(QPolygonF([at(0.36, 0.3), at(0.48, 0.24), at(1.0, 0.76),
+                                   at(0.9, 0.86), at(0.78, 0.74), at(0.7, 0.82),
+                                   at(0.62, 0.74), at(0.7, 0.66), at(0.3, 0.42)]))
+        painter.drawPath(ring.united(stem))
+        painter.setPen(mark)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(QRectF(at(0.12, 0.12), at(0.26, 0.26)))
+    elif icon in ("Paragraph", "NewParagraph"):
+        painter.drawRoundedRect(rect, wide * 0.12, high * 0.12)
+        painter.setPen(mark)
+        font = QFont()
+        font.setBold(True)
+        font.setPixelSize(max(int(high * (0.62 if icon == "Paragraph" else 0.5)), 4))
+        painter.setFont(font)
+        painter.drawText(rect, Qt.AlignCenter, "¶" if icon == "Paragraph" else "NP")
+    else:
+        # Note: a page with its lines
+        painter.drawRoundedRect(rect, wide * 0.15, high * 0.15)
+        painter.setPen(mark)
+        for index in range(3):
+            y = 0.3 + index * 0.225
+            painter.drawLine(at(0.2, y), at(0.8, y))
+    painter.restore()
+
+
 @register_item
 class NoteItem(MarkupItem):
     """A collapsed sticky note; its text lives in the markups list."""
@@ -1716,6 +1793,8 @@ class NoteItem(MarkupItem):
         super().__init__()
         self.comment = comment
         self.style = Style(stroke="#b8860b", fill="#ffe066", fill_opacity=1.0, width=0.8)
+        # Revu's Icon ▾: how the note is drawn (Comment, Help, Key…)
+        self.icon = "Note"
 
     def local_rect(self) -> QRectF:
         return QRectF(0, 0, self.SIZE, self.SIZE)
@@ -1723,21 +1802,23 @@ class NoteItem(MarkupItem):
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = self.local_rect()
-        painter.setBrush(self.style.brush())
-        painter.setPen(self.style.pen())
-        painter.drawRoundedRect(rect, 3, 3)
-        pen = QPen(QColor(120, 90, 10))
-        pen.setWidthF(0.9)
-        painter.setPen(pen)
-        for index in range(3):
-            y = rect.top() + 6 + index * 4.5
-            painter.drawLine(QPointF(rect.left() + 4, y), QPointF(rect.right() - 4, y))
+        pen = self.style.pen() if self.style.stroke else QPen(Qt.NoPen)
+        paint_note_icon(painter, rect, self.icon, self.style.brush(),
+                        QColor(120, 90, 10), pen)
 
     def summary(self) -> str:
         return self.comment.replace("\n", " ")[:160]
 
     def serialize(self) -> dict:
-        return self.base_dict()
+        data = self.base_dict()
+        if self.icon != "Note":
+            data["icon"] = self.icon
+        return data
+
+    def deserialize(self, data: dict) -> None:
+        icon = str(data.get("icon", "Note") or "Note")
+        self.icon = icon if icon in NOTE_ICON_KEYS else "Note"
+        self.load_base(data)
 
 
 @register_item

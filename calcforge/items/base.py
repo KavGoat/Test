@@ -207,6 +207,11 @@ class Style:
     # The start's own size, as Revu sizes each end on its own. 0 means the
     # same as the end's (arrow_size): how every markup was before.
     arrow_start_size: float = 0.0
+    # Revu's line-end colour (a line's Fill Color): what a filled end —
+    # Closed, Round, Square, Diamond — is filled with. Empty follows the
+    # line's colour, as every markup was before it had one; "none" leaves
+    # the ends hollow. Written to the PDF as a line's /IC.
+    end_fill: str = ""
     blend: str = "normal"              # 'multiply' for highlighter
     corner_radius: float = 0.0
     padding: float = 4.0
@@ -323,6 +328,21 @@ class Style:
         """The start's line-end size: its own, or the end's when it has none."""
         own = float(self.arrow_start_size or 0.0)
         return own if own > 0 else float(self.arrow_size or 1.0)
+
+    def end_fill_colour(self) -> str:
+        """The colour a filled line end is filled with: its own, or the
+        line's when it has none of its own; "" when the ends are hollow."""
+        if self.end_fill == "none":
+            return ""
+        return self.end_fill or self.stroke or ""
+
+    def end_brush(self) -> QBrush:
+        """The brush a filled line end is drawn with (the markup's opacity)."""
+        if self.end_fill == "none":
+            return QBrush(Qt.NoBrush)
+        made = QColor(self.end_fill_colour() or "#000000")
+        made.setAlphaF(max(0.0, min(1.0, self.opacity)))
+        return QBrush(made)
 
     def text_qcolor(self) -> QColor:
         colour = QColor(self.text_color or "#000000")
@@ -1218,16 +1238,105 @@ class MarkupItem(QGraphicsObject):
                 return
             painter.setCompositionMode(QPainter.CompositionMode_Multiply)
 
+    def multiplies_inside_only(self) -> bool:
+        """Revu's Highlight on a shape with a border: only its inside — the
+        fill and the hatch — multiplies onto the page; the border is drawn
+        as it is (the user, 2026-10-18). A markup with no border (a
+        highlight) or nothing inside (a line, the highlighter pen) still
+        multiplies as a whole."""
+        style = getattr(self, "style", None)
+        if style is None or style.blend != "multiply" or getattr(self, "kind", "") == "highlighter":
+            return False
+        if self.still_theirs or self.stamp_svg or self._their_picture is not None:
+            return False
+        if not style.stroke or float(style.width or 0.0) <= 0 or not style.paints_inside():
+            return False
+        region = self.inside_region()
+        return region is not None and not region.isEmpty()
+
+    def inside_region(self) -> Optional[QPainterPath]:
+        """What its fill covers, in item coordinates (its hatch's region)."""
+        return self.hatch_region()
+
+    def paint_inside(self, painter: QPainter) -> None:
+        """Its fill and its hatch, and nothing else."""
+        region = self.inside_region()
+        if region is None or region.isEmpty():
+            return
+        if self.style.fill:
+            painter.save()
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.fillPath(region, self.style.brush())
+            painter.restore()
+        paint_hatch(painter, region, self.style)
+
+    def without_inside(self):
+        """For the length of a ``with``: drawn with no fill and no hatch."""
+        from contextlib import contextmanager
+
+        @contextmanager
+        def bare():
+            style = self.style
+            kept = (style.fill, style.hatch, style.hatch_tile)
+            style.fill, style.hatch, style.hatch_tile = "", "", {}
+            try:
+                yield
+            finally:
+                style.fill, style.hatch, style.hatch_tile = kept
+        return bare()
+
+    def multiplies(self) -> bool:
+        """Whether any of it multiplies onto the page (Highlight, the
+        highlighter pen)."""
+        style = getattr(self, "style", None)
+        return style is not None and style.blend == "multiply"
+
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
               widget: Optional[QWidget] = None) -> None:
-        painter.save()
-        self.apply_blend(painter)
         frame = self.parentItem()
+        blend_pass = getattr(frame, "_blend_pass", "")
+        if blend_pass:
+            # a flattened markup going into a saved page, where a PDF writer
+            # cannot multiply: the part drawn as it is, and the part that
+            # multiplies on a layer of its own (io/pdfbase.py)
+            painter.save()
+            self._paint_blend_pass(painter, blend_pass)
+            painter.restore()
+            return
+        painter.save()
         if not (self.split_theirs and (not getattr(frame, "print_mode", True)
                                        or self.split_from in getattr(frame, "file_drew_split", ()))):
-            self.paint_visible(painter)      # nothing while it is still theirs
+            if self.multiplies_inside_only():
+                # the inside multiplied onto the page, the border over it as it is
+                painter.save()
+                self.apply_blend(painter)
+                self.paint_inside(painter)
+                painter.restore()
+                with self.without_inside():
+                    self.paint_visible(painter)
+            else:
+                self.apply_blend(painter)
+                self.paint_visible(painter)      # nothing while it is still theirs
         painter.restore()
         self.paint_handles(painter)
+
+    def _paint_blend_pass(self, painter: QPainter, blend_pass: str) -> None:
+        """"base": every markup that does not multiply; "multiply": what
+        multiplies — a highlighted shape's inside, a highlighter's stroke;
+        "over": a highlighted shape's border and the rest, over its inside."""
+        if not self.multiplies():
+            if blend_pass == "base":
+                self.paint_visible(painter)
+            return
+        inside_only = self.multiplies_inside_only()
+        if blend_pass == "multiply":
+            if inside_only:
+                self.paint_inside(painter)
+            else:
+                self.paint_visible(painter)
+        elif blend_pass == "over" and inside_only:
+            with self.without_inside():
+                self.paint_visible(painter)
 
     def release_split(self) -> None:
         """A stroke of a split annotation changed: all of its strokes are

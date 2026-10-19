@@ -145,6 +145,17 @@ class RectItem(MarkupItem):
         self.size_text = ""
         self.width_value = None
         self.height_value = None
+        # A Sketch to Scale shape's Units ▾ and Caption ▾, as a measurement's
+        # (Revu's): its own units by "length" and "area" — one not given is
+        # the page's — and which values its caption writes (empty: its size).
+        self.units: dict[str, str] = {}
+        self.caption_parts: list[str] = []
+        self.caption_text = ""
+        # Revu's Show Segment Values and Show Centroid (Sketch to Scale)
+        self.segment_values = False
+        self.segment_align = "segment"
+        self.show_centroid = False
+        self.segment_texts: list[str] = []
         if kind == "highlight":
             self.style = Style(stroke="", fill="#ffe066", fill_opacity=0.55,
                                blend="multiply", width=0.0)
@@ -253,8 +264,161 @@ class RectItem(MarkupItem):
         """The unit its size is typed and shown in."""
         if self.measures_real(page):
             scale = self.scale_on(page) if page is not None else self.page_scale()
-            return scale.display_unit
+            return self.units.get("length") or scale.display_unit
         return PAPER_UNITS[paper_unit()][1]
+
+    # -- Units ▾ and Caption ▾ of a Sketch to Scale shape (Revu's) ----------
+    def set_unit(self, key: str, unit: str) -> None:
+        if unit:
+            self.units[key] = unit
+        else:
+            self.units.pop(key, None)
+
+    def primary_part(self) -> str:
+        return "dimensions"
+
+    def caption_choices(self) -> tuple:
+        """What its Caption ▾ offers: its label, its size, area and perimeter."""
+        return ("label", "dimensions", "area", "perimeter") if self.to_scale else ()
+
+    def caption_available(self, part: str) -> bool:
+        return part in self.caption_choices()
+
+    def caption_shown(self) -> list:
+        if not self.caption_parts:
+            return [self.primary_part()]
+        order = list(self.caption_choices())
+        return sorted((p for p in self.caption_parts if p in order), key=order.index)
+
+    def set_caption_part(self, part: str, on: bool) -> None:
+        shown = set(self.caption_shown())
+        if on:
+            shown.add(part)
+        else:
+            shown.discard(part)
+        if not shown - {"label"}:
+            shown.add(self.primary_part())        # never a caption of nothing
+        order = list(self.caption_choices())
+        parts = sorted((p for p in shown if p in order), key=order.index)
+        self.caption_parts = [] if parts == [self.primary_part()] else parts
+
+    # -- Show Segment Values and Show Centroid (Revu's) ----------------------
+    def offers_segments(self) -> bool:
+        return bool(self.to_scale) and self.kind == "rect"
+
+    def offers_centroid(self) -> bool:
+        return bool(self.to_scale) and self.kind in SIZED_KINDS
+
+    def segment_runs(self) -> list:
+        corners = self.corner_points()
+        return [(corners[i], corners[(i + 1) % 4]) for i in range(4)]
+
+    def inside_region(self):
+        region = self.hatch_region()
+        if region is None and self.kind in SIZED_KINDS:
+            region = self.outline_path()
+        return region
+
+    def centroid_point(self):
+        from .segments import centroid_of
+        holes = self.clipped_holes_path() if self.cutouts else None
+        return centroid_of(self.outline_path(), self.corner_points(), holes)
+
+    def _work_out_segments(self, page=None) -> None:
+        """Each side's length: across, down, across, down."""
+        self.segment_texts = []
+        if not self.offers_segments():
+            return
+        if self.measures_real(page) and self.width_value is not None:
+            scale = self.scale_on(page) if page is not None else self.page_scale()
+            digits = max(scale.precision, 0)
+            wide = format_quantity(self.width_value, digits, "fixed")
+            high = format_quantity(self.height_value, digits, "fixed")
+        else:
+            rect = self._rect.normalized()
+            wide, high = paper_text(rect.width()), paper_text(rect.height())
+        self.segment_texts = [wide, high, wide, high]
+
+    def _paint_extras(self, painter: QPainter) -> None:
+        from .segments import paint_centroid, paint_values
+        if self.segment_values and self.offers_segments():
+            paint_values(painter, self.style, self.segment_runs(), self.segment_texts,
+                         self.segment_align, self._rect.normalized().center())
+        if self.show_centroid and self.offers_centroid():
+            paint_centroid(painter, self.style, self.centroid_point())
+
+    def _raw_area(self) -> float:
+        """What it covers, in square points, its cut-outs taken out."""
+        rect = self._rect.normalized()
+        path = QPainterPath()
+        if self.kind == "ellipse":
+            path.addEllipse(rect)
+        elif self.style.corner_radius > 0:
+            path.addRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
+        else:
+            path.addRect(rect)
+        from .segments import path_area
+        total = path_area(path)
+        if self.cutouts:
+            # less what its holes take out of it (each hole a ring of its own)
+            total -= path_area(path.intersected(self.clipped_holes_path()))
+        return max(total, 0.0)
+
+    def area_value(self, page=None):
+        """Its real area, in its own area unit or the page's — None when the
+        page has no scale (Revu's Scale Not Set)."""
+        if not self.measures_real(page):
+            return None
+        from ..core.units import convert
+        scale = self.scale_on(page) if page is not None else self.page_scale()
+        try:
+            return convert(scale.area(self._raw_area()),
+                           self.units.get("area") or scale.area_unit)
+        except Exception:  # noqa: BLE001 - a scale whose units do not convert
+            return None
+
+    def perimeter_value(self, page=None):
+        """Its real perimeter (an ellipse's by Ramanujan), or None unscaled."""
+        if not self.measures_real(page):
+            return None
+        from ..core.units import convert
+        scale = self.scale_on(page) if page is not None else self.page_scale()
+        rect = self._rect.normalized()
+        try:
+            wide = scale.length(rect.width())
+            high = scale.height(rect.height())
+            if self.kind == "ellipse":
+                a, b = wide / 2, high / 2
+                around = math.pi * (3 * (a + b) - ((3 * a + b) * (a + 3 * b)) ** 0.5)
+            else:
+                around = 2 * (wide + high)
+            return convert(around, self.units.get("length") or scale.display_unit)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _caption(self, page=None) -> str:
+        """The words Caption ▾ asks for: its size, or the values picked."""
+        shown = self.caption_shown()
+        if shown == ["dimensions"] or not self.to_scale:
+            return self.size_text
+        scale = self.scale_on(page) if page is not None else self.page_scale()
+        digits = max(getattr(scale, "precision", 2), 0)
+        several = len([p for p in shown if p != "label"]) > 1
+        lines = []
+        for part in shown:
+            if part == "label":
+                if self.label:
+                    lines.append(self.label)
+                continue
+            if part == "dimensions":
+                text = self.size_text
+            else:
+                value = self.area_value(page) if part == "area" else self.perimeter_value(page)
+                text = format_quantity(value, digits, "fixed") if value is not None else ""
+            if text:
+                short = {"dimensions": "", "area": "A = ", "perimeter": "P = "}[part]
+                lines.append(f"{short if several else ''}{text}")
+        return "  ".join(lines) or self.size_text
 
     def refresh(self, workspace=None, page=None) -> None:
         """Work out the size to write on the rectangle.
@@ -278,8 +442,9 @@ class RectItem(MarkupItem):
             if self.to_scale:
                 scale = self.scale_on(page) if page is not None else self.page_scale()
             if scale is not None and scale.is_calibrated():
-                self.width_value = convert(scale.length(rect.width()), scale.display_unit)
-                self.height_value = convert(scale.height(rect.height()), scale.display_unit)
+                unit = self.units.get("length") or scale.display_unit   # Units ▾
+                self.width_value = convert(scale.length(rect.width()), unit)
+                self.height_value = convert(scale.height(rect.height()), unit)
                 digits = max(scale.precision, 0)
                 if hasattr(scale, "format_length"):
                     # to the scale's Precision, a fraction or decimals (Set Scale)
@@ -295,6 +460,14 @@ class RectItem(MarkupItem):
         except Exception:
             self.size_text = ""
             self.width_value = self.height_value = None
+        try:
+            self.caption_text = self._caption(page)
+        except Exception:  # noqa: BLE001 - a caption is never worth a crash
+            self.caption_text = self.size_text
+        try:
+            self._work_out_segments(page)
+        except Exception:  # noqa: BLE001
+            self.segment_texts = []
         self.update()
 
     def size_texts(self, page=None) -> tuple[str, str]:
@@ -341,9 +514,28 @@ class RectItem(MarkupItem):
     def boundingRect(self) -> QRectF:
         """Room for the size written under the rectangle."""
         rect = super().boundingRect()
+        if self.segment_values and self.offers_segments():
+            from .segments import reach
+            more = reach(self.style, self.segment_texts)
+            rect = rect.adjusted(-more, -more, more, more)
         if self.show_size and self.size_text:
-            rect = rect.adjusted(0, 0, 0, self.style.font_size + 6)
+            under = self.style.font_size + 6
+            if self.segment_values and self.offers_segments():
+                under += self.style.font_size * 1.4 + 2      # below the bottom's length
+            rect = rect.adjusted(0, 0, 0, under)
+            words = self._shown_size()
+            if words != self.size_text:
+                # a longer caption (its area, its perimeter) reaches wider
+                from ..core.typography import set_size
+                font = set_size(self.style.font(), max(self.style.font_size * 0.82, 5.0))
+                spare = (QFontMetricsF(font).horizontalAdvance(words) - rect.width()) / 2
+                if spare > 0:
+                    rect = rect.adjusted(-spare, 0, spare, 0)
         return rect
+
+    def _shown_size(self) -> str:
+        """What is written under it: its caption, or its size."""
+        return self.caption_text or self.size_text
 
     @property
     def value_text(self) -> str:
@@ -444,6 +636,7 @@ class RectItem(MarkupItem):
         else:
             painter.drawRect(rect)
         self.paint_cutouts(painter)
+        self._paint_extras(painter)
         if self.show_size and self.size_text:
             self._paint_size(painter, rect)
 
@@ -489,12 +682,17 @@ class RectItem(MarkupItem):
         painter.setFont(font)
         metrics = QFontMetricsF(font)
         gap = max(self.style.width, 0.5) + 2.5
-        box = QRectF(rect.center().x() - metrics.horizontalAdvance(self.size_text) / 2,
+        if self.segment_values and self.offers_segments():
+            # below the bottom side's own length, not over it
+            from .segments import text_font
+            gap += QFontMetricsF(text_font(self.style)).height() + 1.0
+        words = self._shown_size()
+        box = QRectF(rect.center().x() - metrics.horizontalAdvance(words) / 2,
                      rect.bottom() + gap,
-                     metrics.horizontalAdvance(self.size_text), metrics.height())
+                     metrics.horizontalAdvance(words), metrics.height())
         painter.setPen(QPen(QColor(self.style.stroke or self.style.text_color)))
         painter.setBrush(Qt.NoBrush)
-        painter.drawText(box, Qt.AlignCenter, self.size_text)
+        painter.drawText(box, Qt.AlignCenter, words)
         painter.restore()
 
     def serialize(self) -> dict:
@@ -504,6 +702,12 @@ class RectItem(MarkupItem):
                      "show_size": self.show_size})
         if self.to_scale:
             data["to_scale"] = True
+            if self.units:
+                data["units"] = dict(self.units)
+            if self.caption_parts:
+                data["caption_parts"] = list(self.caption_parts)
+            from .measure import _extras_to
+            _extras_to(self, data)
         self.cloud_to_dict(data)
         if self.cutouts:
             data["cutouts"] = self.cutouts_as_data()
@@ -516,6 +720,10 @@ class RectItem(MarkupItem):
         self.show_size = bool(data.get("show_size", False))
         # written before Sketch to Scale existed: a plain shape
         self.to_scale = bool(data.get("to_scale", False)) and self.kind in SIZED_KINDS
+        self.units = {str(k): str(v) for k, v in (data.get("units") or {}).items() if v}
+        self.caption_parts = [str(p) for p in (data.get("caption_parts") or [])]
+        from .measure import _extras_from
+        _extras_from(self, data)
         self.cutouts_from_data(data)
         self.load_base(data)
         self.cloud_from_dict(data)
@@ -1176,7 +1384,9 @@ class PolyItem(MarkupItem):
         start_size = base * max(self.style.start_size(), 0.1)
         colour = QColor(self.style.stroke or "#000000")
         colour.setAlphaF(self.style.opacity)
-        painter.setBrush(QBrush(colour))
+        # a filled end in the line-end colour (Revu's Fill Color), the line's
+        # own unless it was given one
+        painter.setBrush(self.style.end_brush())
         pen = QPen(colour)
         pen.setWidthF(max(self.style.width * 0.9, 0.5))
         pen.setJoinStyle(Qt.MiterJoin)

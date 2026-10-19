@@ -221,6 +221,10 @@ class Appearances:
         # scratch file: it goes into the export as the markup's /Pattern.
         self.hatch_path: Optional[str] = None
         self.hatch_pages: dict = {}        # entry order -> page in hatch_path
+        # Highlight on a shape with a border: its inside alone, on a page of
+        # its own in a third scratch file, multiplied under the border.
+        self.inside_path: Optional[str] = None
+        self.inside_pages: dict = {}       # entry order -> page in inside_path
         # Per page, the annotations of the file being written that a markup is
         # still exactly — the ones to leave where they are rather than redraw.
         self.theirs: dict = {}
@@ -271,7 +275,11 @@ class Appearances:
                 down = max(painter.device().height(), 1) / max(rect.height(), 1e-6)
                 painter.scale(across, down)
                 frame = item.parentItem()
-                frame.paint_items(painter, [item], rect)
+                if _multiplies_inside(item):
+                    with item.without_inside():     # its inside goes on its own
+                        frame.paint_items(painter, [item], rect)
+                else:
+                    frame.paint_items(painter, [item], rect)
                 painter.restore()
         finally:
             if started:
@@ -279,7 +287,61 @@ class Appearances:
         del writer
         self.path = path
         self._draw_the_hatches()
+        self._draw_the_insides()
         return path
+
+    def _draw_the_insides(self) -> None:
+        """The fill and hatch of each markup whose inside alone multiplies
+        (Highlight on a shape with a border), over the markup's own box: put
+        under its border with a Multiply blend in its appearance."""
+        from PySide6.QtCore import QMarginsF, QSizeF
+        from PySide6.QtGui import QPageLayout, QPageSize, QPainter, QPdfWriter
+
+        wanted = [(order, item, rect) for order, (_i, item, rect) in enumerate(self.entries)
+                  if _multiplies_inside(item)]
+        if not wanted:
+            return
+        handle, path = tempfile.mkstemp(suffix=".pdf")
+        os.close(handle)
+        writer = QPdfWriter(path)
+        writer.setResolution(int(APPEARANCE_DPI))
+        painter = QPainter()
+        started = False
+        try:
+            for page, (order, item, rect) in enumerate(wanted):
+                layout = QPageLayout()
+                layout.setPageSize(QPageSize(QSizeF(rect.width(), rect.height()),
+                                             QPageSize.Point, "inside",
+                                             QPageSize.ExactMatch))
+                layout.setOrientation(QPageLayout.Portrait)
+                layout.setMode(QPageLayout.FullPageMode)
+                layout.setMargins(QMarginsF(0, 0, 0, 0))
+                writer.setPageLayout(layout)
+                if not started:
+                    if not painter.begin(writer):
+                        return
+                    started = True
+                else:
+                    writer.newPage()
+                painter.setRenderHint(QPainter.Antialiasing, True)
+                painter.save()
+                across = max(painter.device().width(), 1) / max(rect.width(), 1e-6)
+                down = max(painter.device().height(), 1) / max(rect.height(), 1e-6)
+                painter.scale(across, down)
+                painter.translate(-rect.left(), -rect.top())
+                frame = item.parentItem()
+                placed = item.sceneTransform()
+                if frame is not None:
+                    placed = placed * frame.sceneTransform().inverted()[0]
+                painter.setTransform(placed, True)
+                item.paint_inside(painter)
+                painter.restore()
+                self.inside_pages[order] = page
+        finally:
+            if started:
+                painter.end()
+        del writer
+        self.inside_path = path
 
     def _draw_the_hatches(self) -> None:
         """Each hatched markup's hatch alone, over the markup's own box.
@@ -350,7 +412,7 @@ class Appearances:
         work. Nothing here raises. What could not go now is tried again on the
         way out of the program.
         """
-        for attribute in ("path", "hatch_path"):
+        for attribute in ("path", "hatch_path", "inside_path"):
             path = getattr(self, attribute)
             setattr(self, attribute, None)
             if not path:
@@ -528,6 +590,7 @@ def place_markups(target, scratch, appearances: Appearances,
                                      rect.width(), rect.height())
         if form is None:
             continue
+        form = _with_its_inside_multiplied(target, appearances, order, form, rect)
         place = Placement.of_page(target[index])
         upright_note = subtype_for(item) == "Text" and place.turns()
         if not upright_note:
@@ -584,6 +647,41 @@ def _pin_the_note(annotation: dict, rect, place: "Placement") -> None:
     annotation["Rect"] = [corner[0], corner[1] - rect.height(),
                           corner[0] + rect.width(), corner[1]]
     annotation["F"] = 4 | 16                         # printed, does not rotate
+
+
+def _multiplies_inside(item) -> bool:
+    try:
+        return bool(item.multiplies_inside_only())
+    except Exception:                                  # noqa: BLE001
+        return False
+
+
+def _with_its_inside_multiplied(target, appearances, order: int, form: int, rect) -> int:
+    """The appearance of a shape whose inside alone multiplies: its inside
+    under an ExtGState with /BM /Multiply, its border over it in the normal
+    blend — rather than an annotation-level /BM, which multiplies the border
+    too. *form* (the border and the rest) on its own when there is no inside."""
+    page = appearances.inside_pages.get(order)
+    if page is None or not appearances.inside_path:
+        return form
+    try:
+        scratch = engine.open_path(appearances.inside_path)
+        try:
+            inside = engine.form_from_page(target, scratch, page, rect.width(), rect.height())
+        finally:
+            engine.close(scratch)
+        if not inside:
+            return form
+        dictionary = {
+            "Type": Name("XObject"), "Subtype": Name("Form"),
+            "BBox": [0, 0, rect.width(), rect.height()],
+            "Resources": {"ExtGState": {"Hm": {"Type": Name("ExtGState"),
+                                               "BM": Name("Multiply")}},
+                          "XObject": {"In": Ref(inside), "Out": Ref(form)}},
+        }
+        return engine.add_stream(target, dictionary, b"q /Hm gs /In Do Q /Out Do")
+    except Exception:                                  # noqa: BLE001
+        return form
 
 
 def _hatched_from_the_library(item) -> bool:
@@ -873,7 +971,10 @@ def _bluebeam_look(annotation, item) -> None:
         if ink is not None:
             annotation["PatternColor"] = ink
         annotation["PatternScale"] = float(style.hatch_scale or 1.0)
-    if getattr(style, "blend", "") == "multiply":
+    if getattr(style, "blend", "") == "multiply" and not (
+            hasattr(item, "multiplies_inside_only") and item.multiplies_inside_only()):
+        # the whole markup multiplies (a line, the highlighter); a shape with
+        # a border multiplies only its inside, said in its appearance
         annotation["BM"] = Name("Multiply")
 
 
@@ -919,6 +1020,10 @@ def _add_the_geometry(annotation, item, rect, place: "Placement") -> None:
         return
     if subtype == "FreeText":
         _free_text(annotation, item, rect, place)
+        return
+    if subtype == "Text":
+        # a note's icon, in the PDF's own names (Revu's Icon ▾)
+        annotation["Name"] = Name(getattr(item, "icon", "Note") or "Note")
         return
     points = _points_on_the_page(item, place)
     if not points:
@@ -987,12 +1092,18 @@ def _line_endings(annotation, item) -> None:
     if start == "None" and end == "None":
         return
     annotation["LE"] = [Name(start), Name(end)]
-    # Heads are drawn filled with the line's own colour here; /IC is what a
-    # reader fills them with, and left unsaid they are redrawn hollow.
+    # Filled heads are drawn in the line-end colour (Revu's Fill Color on a
+    # line: the line's own unless it was given one); /IC is what a reader
+    # fills them with, and left unsaid they are redrawn hollow — which is
+    # what "none" asks for.
     if str(annotation.get("Subtype")) in ("Line", "PolyLine"):
-        ink = _colour(getattr(item.style, "stroke", ""))
+        style = item.style
+        ink = _colour(style.end_fill_colour() if hasattr(style, "end_fill_colour")
+                      else getattr(style, "stroke", ""))
         if ink is not None:
             annotation["IC"] = ink
+        else:
+            annotation.pop("IC", None)
 
 
 def _dimension(annotation, item) -> None:

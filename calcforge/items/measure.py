@@ -5,7 +5,7 @@ import math
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (QBrush, QColor, QFontMetricsF, QPainter, QPainterPath,
+from PySide6.QtGui import (QColor, QFontMetricsF, QPainter, QPainterPath,
                            QPen, QPolygonF)
 
 from ..core.units import Q_, convert, format_quantity, parse_unit
@@ -50,7 +50,9 @@ VOLUME_UNITS = ("mm^3", "cm^3", "m^3", "in^3", "ft^3", "yd^3")
 #: Revu's Caption ▾ values, in its order, and what each is called there. An
 #: area can show its perimeter too, and with a depth its volume and wall
 #: area; a volume its area, perimeter and wall area; a perimeter its wall area.
-CAPTION_PARTS = (("label", "Label"), ("length", "Length"), ("area", "Area"),
+#: "dimensions" is a Sketch to Scale shape's own: its width × height.
+CAPTION_PARTS = (("label", "Label"), ("dimensions", "Dimensions"), ("length", "Length"),
+                 ("area", "Area"),
                  ("perimeter", "Perimeter"), ("volume", "Volume"),
                  ("wall_area", "Wall Area"))
 #: Their short names, written before each value when more than one is shown.
@@ -141,6 +143,12 @@ class MeasureItem(MarkupItem):
         # Revu's Caption ▾: which values are written, by CAPTION_PARTS name.
         # Empty is the measurement's own value alone, as it always was.
         self.caption_parts: list[str] = []
+        # Revu's Show Segment Values (along each side, or level) and Show
+        # Centroid, in the Properties panel's Appearance
+        self.segment_values = False
+        self.segment_align = "segment"
+        self.show_centroid = False
+        self.segment_texts: list[str] = []
 
     # -- units and caption (Revu's Units ▾ and Caption ▾) -------------------
     def set_unit(self, key: str, unit: str) -> None:
@@ -148,6 +156,53 @@ class MeasureItem(MarkupItem):
             self.units[key] = unit
         else:
             self.units.pop(key, None)
+
+    # -- Show Segment Values and Show Centroid (Revu's) ----------------------
+    def offers_segments(self) -> bool:
+        """Sides worth a length each: an outline, or a polyline's runs."""
+        return self.kind in (AREA, PERIMETER, VOLUME, POLYLENGTH)
+
+    def offers_centroid(self) -> bool:
+        return self.kind in (AREA, PERIMETER, VOLUME)
+
+    def segment_runs(self) -> list:
+        points = self.points
+        runs = list(zip(points, points[1:]))
+        if self.closed and len(points) >= 3:
+            runs.append((points[-1], points[0]))
+        return runs
+
+    def centroid_point(self):
+        from .segments import centroid_of
+        outline = QPainterPath()
+        if len(self.points) >= 3:
+            outline.addPolygon(QPolygonF(self.points))
+            outline.closeSubpath()
+        holes = self.clipped_holes_path() if self.cutouts else None
+        return centroid_of(outline, list(self.points), holes)
+
+    def _work_out_segments(self, scale, stretch: float, length_unit: str) -> None:
+        from .segments import written_length
+        self.segment_texts = []
+        if not self.offers_segments():
+            return
+        digits = max(scale.precision, 0)
+        for a, b in self.segment_runs():
+            raw = math.hypot(b.x() - a.x(), (b.y() - a.y()) * stretch)
+            try:
+                self.segment_texts.append(
+                    written_length(scale, convert(scale.length(raw), length_unit), digits))
+            except Exception:  # noqa: BLE001 - a scale that does not convert
+                self.segment_texts.append("")
+
+    def _paint_extras(self, painter: QPainter) -> None:
+        from .segments import paint_centroid, paint_values
+        if self.segment_values and self.offers_segments():
+            centre = self.centroid_point() if self.closed else None
+            paint_values(painter, self.style, self.segment_runs(), self.segment_texts,
+                         self.segment_align, centre)
+        if self.show_centroid and self.offers_centroid():
+            paint_centroid(painter, self.style, self.centroid_point())
 
     def primary_part(self) -> str:
         """The value this kind of measurement is about."""
@@ -220,6 +275,18 @@ class MeasureItem(MarkupItem):
             return list(self.points)
         return []
 
+    def inside_region(self) -> Optional[QPainterPath]:
+        """What its fill covers: any closed measurement's inside (a
+        perimeter is filled, though never hatched)."""
+        if not self.closed or len(self.points) < 3:
+            return None
+        path = QPainterPath()
+        path.addPolygon(QPolygonF(self.points))
+        path.closeSubpath()
+        if self.cutouts:
+            path = path.subtracted(self.clipped_holes_path())
+        return path
+
     def hatch_region(self) -> Optional[QPainterPath]:
         """An area or a volume is hatched as Revu's are: inside its outline,
         less its cut-outs."""
@@ -263,6 +330,9 @@ class MeasureItem(MarkupItem):
             rect = rect.united(QRectF(centre.x() - half_width, centre.y() - half_height,
                                       half_width * 2, half_height * 2))
         margin = self.style.width + HANDLE_SIZE + 12 + complexlines.reach(self.style)
+        if self.segment_values and self.offers_segments():
+            from .segments import reach
+            margin = max(margin, reach(self.style, self.segment_texts) + 4)
         return rect.adjusted(-margin, -margin, margin, margin)
 
     # -- the shape of a dimension -----------------------------------------
@@ -597,6 +667,7 @@ class MeasureItem(MarkupItem):
         # Revu's Units ▾: this measurement's own units, else the page's
         length_unit = self.units.get("length") or scale.display_unit
         area_unit = self.units.get("area") or scale.area_unit
+        self._work_out_segments(scale, stretch, length_unit)
         try:
             if kind == "length":
                 quantity = convert(scale.length(raw), length_unit)
@@ -758,6 +829,7 @@ class MeasureItem(MarkupItem):
             self._paint_extension_ticks(painter)
         self.paint_cutouts(painter)
         self._paint_arrows(painter)
+        self._paint_extras(painter)
         if self.show_label and self.value_text:
             self._paint_label(painter)
 
@@ -815,7 +887,7 @@ class MeasureItem(MarkupItem):
         start_size = base * max(self.style.start_size(), 0.1)
         colour = QColor(self.style.stroke)
         colour.setAlphaF(self.style.opacity)
-        painter.setBrush(QBrush(colour))
+        painter.setBrush(self.style.end_brush())      # Revu's line-end colour
         pen = QPen(colour, max(self.style.width * 0.8, 0.4))
         pen.setJoinStyle(Qt.MiterJoin)
         pen.setMiterLimit(8.0)
@@ -996,6 +1068,7 @@ class MeasureItem(MarkupItem):
             data["units"] = dict(self.units)
         if self.caption_parts:
             data["caption_parts"] = list(self.caption_parts)
+        _extras_to(self, data)
         return data
 
     def deserialize(self, data: dict) -> None:
@@ -1012,9 +1085,27 @@ class MeasureItem(MarkupItem):
         self.variable = str(data.get("variable", "") or "")
         self.units = {str(k): str(v) for k, v in (data.get("units") or {}).items() if v}
         self.caption_parts = [str(p) for p in data.get("caption_parts") or []]
+        _extras_from(self, data)
         self.cutouts_from_data(data)
         self.load_base(data)
         self.refresh()
+
+
+def _extras_to(item, data: dict) -> None:
+    """Show Segment Values, its alignment and Show Centroid, when set."""
+    if item.segment_values:
+        data["segment_values"] = True
+    if item.segment_align != "segment":
+        data["segment_align"] = item.segment_align
+    if item.show_centroid:
+        data["show_centroid"] = True
+
+
+def _extras_from(item, data: dict) -> None:
+    item.segment_values = bool(data.get("segment_values", False))
+    item.segment_align = "horizontal" if data.get("segment_align") == "horizontal" \
+        else "segment"
+    item.show_centroid = bool(data.get("show_centroid", False))
 
 
 @register_item

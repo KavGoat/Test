@@ -627,7 +627,9 @@ def test_every_label_the_user_reads_is_one_or_two_words(window, qapp):
                  # Print Area (novice 11)
                  "Mark for Redaction", "Single Page Mode", "Insert Page Break",
                  "Remove Page Break", "Reset All Page Breaks", "Set Print Area",
-                 "Clear Print Area")
+                 "Clear Print Area",
+                 # Revu's Sketch to Scale panel (the user's photo, 2026-10-18)
+                 "Show Segment Values")
     long = [entry for entry in long if not any(name in entry for name in bluebeams)]
     assert not long, "labels of more than two words:\n" + "\n".join(sorted(set(long)))
 
@@ -3936,7 +3938,7 @@ def test_a_raster_image_offers_its_frame_but_no_fill_style_controls(window, tmp_
                       window.properties_panel.findChildren(QGroupBox)
                       if group.title() == "Appearance")
     labels = [label.text() for label in appearance.findChildren(QLabel)]
-    assert "Color:" in labels and "Fill Color:" not in labels
+    assert "Colour:" in labels and "Fill Colour:" not in labels
 
     before = image.style.stroke
     window._style_stroke("#c92a2a")
@@ -6688,7 +6690,7 @@ def test_properties_only_offers_controls_the_selected_kind_can_use(window):
 
 
 def test_arrowhead_size_is_independent_in_properties_and_toolbar(window):
-    from PySide6.QtWidgets import QDoubleSpinBox
+    from PySide6.QtWidgets import QComboBox
 
     window.show()           # the toolbar's width is the window's only once shown
     window.select_tool("arrow")
@@ -6698,7 +6700,8 @@ def test_arrowhead_size_is_independent_in_properties_and_toolbar(window):
     arrow.setSelected(True)
     window.refresh_selection()
 
-    properties = window.properties_panel.findChild(QDoubleSpinBox, "arrowSize")
+    # the panel's End Size speaks the bar's values (Auto, 25% … 400%)
+    properties = window.properties_panel.findChild(QComboBox, "arrowSize")
     assert properties is not None
     line_width = arrow.style.width
     properties.setValue(2.0)
@@ -8187,12 +8190,18 @@ def test_the_style_toolbar_and_the_properties_panel_agree(window):
                          propbar.AUTO_FONT}           # Revu's "A" is part of the font
         on_the_toolbar = {field for field, actions in window._style_widgets.items()
                           if any(action.isVisible() for action in actions)} - markup_groups
+        # Revu's line-end colour is part of the line ends (End ▾ Auto ▾ ■)
+        on_the_toolbar -= {propbar.END_FILL}
         in_the_panel = capabilities(item)
-        if getattr(item, "kind", "") in ("area", "volume") and item.TYPE == "measure":
+        area = getattr(item, "kind", "") in ("area", "volume") and item.TYPE == "measure"
+        if area or getattr(item, "to_scale", False):
             # Revu's area bar has no Font: Line, Fill, Hatch, Units, Caption,
-            # Totals (the user's screenshot, 2026-10-16). Its caption's font is
-            # in the Properties panel.
+            # Totals (the user's screenshot, 2026-10-16), nor has its Sketch to
+            # Scale shapes' (2026-10-18). Their captions' font is in the
+            # Properties panel.
             in_the_panel = in_the_panel - {"font"}
+        if item.TYPE == "note" and on_the_toolbar == {propbar.NOTE}:
+            continue          # Revu's note bar: Colour, opacity, Icon ▾ (all in the panel)
         if on_the_toolbar != in_the_panel:
             disagreed.append(f"{tool.key}: toolbar {sorted(on_the_toolbar)} "
                              f"vs panel {sorted(in_the_panel)}")
