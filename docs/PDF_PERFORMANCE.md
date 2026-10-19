@@ -123,3 +123,70 @@ Latest full suite: **916 passed, no skips**. Both reference pages have exact
 serial/parallel comparisons at overview, normal and detail zooms. A native
 1,000-round Qt session also passed. The user's own problematic PDFs have not
 been supplied, so that specific acceptance check remains pending.
+
+## A big marked-up drawing set — 2026-10-19
+
+The user's 162-sheet, 24 MB steel set (80 A1 and 82 A3 sheets, 1,144 markups,
+the same review stamp on every sheet) was "very slow to zoom and scroll".
+Measured headless (offscreen raster; the graphics-card path under Xvfb with
+software OpenGL, so its wall-clock times are not a real card's) on a shared
+4-core machine under heavy load from other jobs. The robust figure is the
+window thread's own CPU time per painted frame; wall-clock figures are
+inflated by the load and only comparable within one run.
+
+| | Before (`29d95b1`) | After |
+| --- | ---: | ---: |
+| Open (the call), raster / GL | 17.8 s / 15.2 s | 6.4 s / 6.5 s |
+| Scroll at a person's pace: CPU per frame, median / p95 | 19.4 / 35.5 ms | 13.1 / 18.6 ms |
+| Fast flick at fit width | 20.0 / 29.3 ms | 9.5 / 11.9 ms |
+| Flick at fit page | 20.1 / 31.1 ms, 4 of 52 page paints blank | 8.5 / 16.5 ms, none blank |
+| Wheel zoom in, 10 % → 800 % | 21.5 / 28.4 ms | 4.4 / 12.7 ms |
+| Wheel zoom out | 23.1 / 36.4 ms | 8.6 / 15.7 ms |
+| Fast wheel spin in and out | 19.6 / 26.0 ms | 6.5 / 12.5 ms |
+| Frames painted while zooming in (same gesture) | 21 | 95 |
+| GL: scroll at pace / flick at fit page (CPU median) | 24.4 / 21.7 ms | 13.4 / 11.3 ms |
+| GL: zoom in / zoom out (CPU median) | 27.6 / 20.6 ms | 6.6 / 13.5 ms |
+
+What it was, and what changed:
+
+- **Every markup asked its size every frame.** With no item index, Qt went
+  down every page's markups on each frame of a scroll or zoom, page on screen
+  or not — a call into Python per markup (about 20 ms a frame here). A page
+  whose markups all lie inside it now says so (`ItemContainsChildrenInShape`,
+  set only when it changes and dropped the moment a markup moves), and Qt
+  passes it by. Inside the page's *shape*, so clicks and snaps find exactly
+  what they found before. (Toggling the flag around each paint was tried
+  first: Qt then revisits every child after each paint, a repaint loop.)
+- **The bottom rung of the ladder.** A 256-pixel preview of every page is
+  drawn in the background once the document is laid out, behind anything on
+  screen, nearest page first (a second, first-in-first-out queue in the render
+  coordinator); asked for on screen it jumps the queue. A page scrolled,
+  dragged or zoomed into view before anything sharper exists shows its
+  preview, scaled, never a blank sheet. Above it the existing rungs are
+  unchanged: the 1,100-pixel sheet, other zooms' squares standing in, and the
+  squares at exactly the zoom on screen — so a settled page is pixel for pixel
+  what it was.
+- **Ahead of the scroll.** Squares are asked for from the whole window (a
+  scroll's repaint is the uncovered strip, and the margin measured from it was
+  a few pixels, which also gave up what the last full repaint had asked for),
+  further ahead in the direction of travel; squares of pages left more than a
+  screen behind are given up.
+- **Stalls.** Each wheel notch of a zoom worked out stand-ins for every markup
+  it would land on (40 ms a notch; now it only asks for the squares). Every
+  page scrolled onto set the canvas's scroll-bar policy, which lays the view
+  out again (80 ms). The spreadsheet headings looked through every markup of
+  every page on each scroll step, and each whole-page picture arriving asked
+  all 162 pages whether they had one.
+- **Opening.** The same stamp on every sheet is a copy each, with its own
+  object numbers: its picture was drawn, PNG-encoded and decoded 162 times.
+  Annotations whose appearances fingerprint the same (`engine.
+  appearance_fingerprint`: the appearance stream and everything it reaches, by
+  content) now share one picture: 162 → 45 renders here, 17.8 s → 6.4 s.
+
+`tests/test_big_pdf_smooth.py` builds a synthetic set with the same traits
+(36 A1 sheets, 4,000 strokes and a picture each, 32 markups a sheet, the same
+stamp on every one) and drives the real wheel and scroll bar: the window's work
+per frame must stay under 16 ms median and 40 ms p95, no page on screen may
+show unpainted paper in any frame, and the settled window must match a fresh
+start pixel for pixel. Before these changes it fails the budget (25–27 ms
+median) and shows blank pages while the scroll bar is dragged.
