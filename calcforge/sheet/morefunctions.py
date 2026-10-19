@@ -1606,6 +1606,40 @@ def HYPERLINK(link, friendly=MISSING):
     return v
 
 
+def hyperlink_target(sheet, row: int, col: int):
+    """Where a cell's HYPERLINK goes: the link_location of the first
+    HYPERLINK(...) in its formula, worked out as the formula would (a URL, a
+    file, or "#Sheet2!A1" for a place in the document); None when the cell
+    has none (or its link cannot be worked out)."""
+    from . import formula as F
+    from .evaluate import Ctx
+
+    cell = sheet.cells.get((row, col)) if sheet is not None else None
+    if cell is None or not cell.is_formula or "HYPERLINK" not in cell.input.upper():
+        return None
+    try:
+        tree = cell.parsed.tree if cell.parsed is not None else F.parse(cell.formula, row, col).tree
+    except Exception:  # noqa: BLE001 - a formula that does not read has no link
+        return None
+    stack = [tree]
+    while stack:
+        n = stack.pop()
+        if isinstance(n, F.Call) and n.name == "HYPERLINK" and n.args:
+            try:
+                link = text(ev(n.args[0], Ctx(sheet.workbook, sheet, row, col)))
+            except Exception:  # noqa: BLE001
+                return None
+            return link.strip() or None
+        if isinstance(n, tuple):
+            stack.extend(reversed(n))
+            continue
+        for name in getattr(n, "__dataclass_fields__", ()):
+            v = getattr(n, name)
+            if isinstance(v, tuple) or hasattr(v, "__dataclass_fields__"):
+                stack.append(v)
+    return None
+
+
 def _value_text(v, strict: bool) -> str:
     if isinstance(v, ErrorValue):
         return v.code

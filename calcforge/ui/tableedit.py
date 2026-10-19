@@ -855,10 +855,76 @@ class TableEditing:
             return ("cell",) + hit
         return None
 
+    # -- HYPERLINK cells: Ctrl+click follows the link -----------------------------------------
+    def link_at(self, scene_pos: QPointF) -> Optional[tuple]:
+        """(table, cell, link) of a HYPERLINK cell under the pointer, or None."""
+        from ..sheet.morefunctions import hyperlink_target
+        table = self.table_at(scene_pos)
+        if table is None or table.sheet is None:
+            return None
+        cell = table.cell_at(table.mapFromScene(scene_pos))
+        if cell is None:
+            return None
+        link = hyperlink_target(table.sheet, *cell)
+        return (table, cell, link) if link else None
+
+    def follow_link(self, table: TableItem, cell: tuple, link: str) -> None:
+        """Where a HYPERLINK goes: "#Sheet2!A1" (or "#Name") is a place in the
+        document, which opens there; a web or mail address opens in the
+        browser or mail program; anything else (a file on the computer) is
+        asked about first, as Excel warns, since a document from someone else
+        can name any file."""
+        view = self.view
+        if link.startswith("#"):
+            self._go_to_link(table, cell, link[1:])
+            return
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        url = QUrl.fromUserInput(link)
+        if not url.isValid():
+            view.statusMessage.emit(f"The link can't be opened: {link}")
+            return
+        if url.scheme().lower() not in ("http", "https", "mailto"):
+            window = getattr(view, "window", None)
+            if window is None or not getattr(window, "interactive_prompts", True):
+                view.statusMessage.emit(f"Not opened (not a web address): {link}")
+                return
+            from PySide6.QtWidgets import QMessageBox
+            answer = QMessageBox.question(
+                window, "Open link", f"This link opens something on your computer:\n\n{link}"
+                "\n\nOpen it only if you trust the document. Open it?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer != QMessageBox.Yes:
+                return
+        QDesktopServices.openUrl(url)
+        view.statusMessage.emit(f"Opened {link}")
+
+    def _go_to_link(self, table: TableItem, cell: tuple, where: str) -> None:
+        from ..sheet.evaluate import Ctx, RefValue, ev
+        try:
+            got = ev(F.parse(where, *cell).tree, Ctx(table.sheet.workbook, table.sheet, *cell))
+        except Exception:  # noqa: BLE001
+            got = None
+        target = None if not isinstance(got, RefValue) else next(
+            (t for t in self._all_tables() if t.sheet is got.sheet), None)
+        if target is None:
+            self.view.statusMessage.emit(f"The link's place is not in this document: #{where}")
+            return
+        self.open(target, (got.top, got.left))
+        self.select((got.top, got.left), (got.bottom, got.right), (got.top, got.left))
+        self.view.ensureVisible(target.mapRectToScene(target.cell_rect(got.top, got.left)), 40, 40)
+        self.view.setFocus()
+
     def mouse_press(self, event, scene_pos: QPointF) -> bool:
         view = self.view
         if event.button() not in (Qt.LeftButton, Qt.RightButton):
             return False
+        if event.button() == Qt.LeftButton and event.modifiers() & Qt.ControlModifier \
+                and view.tool_key == "select":
+            got = self.link_at(scene_pos)
+            if got is not None:
+                self.follow_link(*got)
+                return True
         # a click anywhere else on the canvas leaves SMath's unit box (the
         # canvas never takes the focus from it, so it stayed, "=" and all,
         # over whatever came there next: the user, 2026-10-16)
@@ -1413,6 +1479,8 @@ class TableEditing:
                 QToolTip.hideText()
             self.hover_tip = why
         cursor = _cursor_for(zone)
+        if kind == "cell" and self.view.tool_key == "select" and self.link_at(scene_pos):
+            cursor = QCursor(Qt.PointingHandCursor)       # a HYPERLINK: Ctrl+click follows it
         if cursor is not None:
             self.view.viewport().setCursor(cursor)
 
@@ -1423,6 +1491,10 @@ class TableEditing:
         return _cursor_for(zone) if zone and zone[0] in ("area", "break", "vbreak") else None
 
     def hover_cursor(self, scene_pos: QPointF):
+        if self.view.tool_key == "select" and self.link_at(scene_pos) is not None:
+            # a HYPERLINK cell: the pointing hand, as Excel's
+            self.view.statusMessage.emit("Ctrl+click to follow the link")
+            return QCursor(Qt.PointingHandCursor)
         item = self.item
         if item is None:
             return None
@@ -2776,6 +2848,14 @@ class TableEditing:
         self._name_entries(menu)
         menu.addSeparator()
         self._clipboard_entries(menu)
+        # Excel's Open Hyperlink: greyed unless the cell holds a HYPERLINK
+        from ..sheet.morefunctions import hyperlink_target
+        link = hyperlink_target(item.sheet, *self.active)
+        follow = menu.addAction("Open Hyperlink",
+                                lambda: self.follow_link(item, self.active, link) if link else None)
+        follow.setEnabled(bool(link))
+        follow.setToolTip(f"Follow {link} (Ctrl+click the cell does too)" if link
+                          else "The cell holds no HYPERLINK")
         menu.addSeparator()
         # Insert ▸ and Delete ▸ use the names the Style bar's Rows & Columns
         # menu uses, so the two read alike

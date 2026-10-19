@@ -686,6 +686,7 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'styles.8': ('Markup Style 8', 'Markup', 'always'),
     'styles.9': ('Markup Style 9', 'Markup', 'always'),
     # -- cell ------------------------------------------------------------------
+    'cell.open_hyperlink': ('Open Hyperlink', 'Spreadsheet', 'table'),
     'cell.insert.insert_rows_below': ('Insert ▸ Insert Rows Below', 'Spreadsheet', 'table'),
     'cell.insert.insert_columns_right': ('Insert ▸ Insert Columns Right', 'Spreadsheet', 'table'),
     'cell.insert.chart.xy_scatter': ('Insert ▸ Chart ▸ XY Scatter', 'Spreadsheet', 'table'),

@@ -520,8 +520,9 @@ SHEET = {
     "FORMULATEXT": (_R, "A cell's formula as text."),
     "HLOOKUP": (_R, "Looks along the top row and returns from a row below."),
     "HSTACK": (_R, "Arrays placed side by side."),
-    "HYPERLINK": (_R, "Shows the friendly name (or the address); the cell is not a clickable "
-                     "link."),
+    "HYPERLINK": (_R, "Shows the friendly name (or the address); Ctrl+click the cell (or "
+                     "right-click ▸ Open Hyperlink) follows the link: a web or mail address, "
+                     "a file (asked first), or #Sheet2!A1 for a place in the document."),
     "INDEX": (_R, "The value at a row and column of a range."),
     "INDIRECT": (_R, "The reference named by a text, such as \"B4\" or \"Loads!A1\"."),
     "INTERP": (_R, "CalcForge's own: straight-line interpolation, INTERP(x, A2:A10, B2:B10); "

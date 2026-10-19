@@ -301,7 +301,7 @@ measurement extras too: cut-outs, Units, Caption and Totals.
 | **Diameter** | Measure | `Shift+Alt+D` | Measure a diameter |
 | **Polygon Cut-Out** | Measure | — | Draw a hole in the area measurement under it — the hole comes off the area |
 | **Ellipse Cut-Out** | Measure | — | Drag a round hole in the area measurement under it |
-| **Count** | Measure | `Shift+Alt+C` | Drop counting markers |
+| **Count** | Measure | `Shift+Alt+C` | Click to drop numbered markers; they count as the subject on the Properties toolbar's Count subject… (Count to begin with) |
 | **Viewport** | Measure | — | Drag a region of the sheet drawn at its own scale — a detail at 1:20 beside a plan at 1:100; measurements inside use it |
 | **Calibrate** | Measure | — | Click each end of something you know the length of, then type that length — the page scale follows |
 | **Sketch to Scale Rectangle** | Sketch to Scale | — | A rectangle drawn to a real size: it uses the page scale, and its real width and height can be typed while drawing — 3 m × 1.5 m |
@@ -498,7 +498,8 @@ panel's Add, Edit and Delete. Measurements inside a viewport use its scale.
 - **Polygon Cut-Out** and **Ellipse Cut-Out** — draw a hole inside an area
   measurement and its area comes off (an opening out of a wall). **Add a cut-out**
   on the Properties toolbar does the same for the selected area.
-- **Count** — click to drop numbered markers. With the tool in hand, **Count
+- **Count** — click to drop numbered markers. As in Revu the tool does not ask
+  what it counts: markers count as *Count* until, with the tool in hand, **Count
   subject…** on the Properties toolbar says what you are counting (doors,
   sprinkler heads…) and its symbol (circle, square, triangle, diamond, cross,
   star); markers of one subject number on in order. **Tools ▸ Renumber Counts**
@@ -716,8 +717,9 @@ cells' own Find and Replace — see Part 3.)
 ### Viewing the drawing
 
 - **Zoom**: the plain **wheel zooms** at the pointer, as in Revu; `Ctrl`+wheel
-  scrolls; `Shift`+wheel scrolls sideways; a trackpad's two-finger scroll always
-  scrolls. Preferences ▸ Mouse wheel swaps zoom and scroll. **View ▸ Fit Page**
+  scrolls; `Shift`+wheel scrolls sideways; a trackpad's two-finger scroll scrolls
+  (and zooms with `Ctrl`). Preferences ▸ Mouse wheel swaps zoom and scroll: with
+  the wheel scrolling, `Ctrl`+wheel zooms. **View ▸ Fit Page**
   (`Ctrl+9`), **Fit Width** (`Ctrl+0`), **Actual Size** (`Ctrl+8`), **Zoom to
   Selection** (`Ctrl+2`), **Zoom In** and **Zoom Out** (no key by default), and the
   zoom box in the status bar.
@@ -774,8 +776,12 @@ cells' own Find and Replace — see Part 3.)
 - **Autosave.** Every two minutes an unsaved change is written to a recovery copy:
   beside the document as `name.pdf.autosave`, or for an untitled document in
   CalcForge's recovery folder. If CalcForge stops before an untitled document is
-  saved, it offers the copy back the next time it starts. A recovery copy of a
-  saved document can be opened with File ▸ Open (choose *All files*).
+  saved, it offers the copy back the next time it starts. Opening a saved
+  document whose recovery copy is newer than it asks first: "A recovered version
+  of *name* exists from *date and time*" — **Open Recovered** (the copy opens in
+  the document's place, and Save writes it over the document), **Open Saved**
+  (the document as last saved; the copy is kept for another time) or **Discard
+  Recovered** (the copy is deleted). Saving deletes the copy.
 
 ## Part 2 — Calculation (SMath-style)
 
@@ -1258,6 +1264,13 @@ function's arguments with the current one in bold.
 - **Errors explained**: select or hover over a cell with an error and the status
   line says why, following it back to where it started — `#UNITS! — kN and m can't
   be added (A1 + A2)`.
+- **Links**: `=HYPERLINK("https://…", "Code clause")` shows the friendly text;
+  over the cell the pointer becomes a pointing hand, and `Ctrl`+click (or
+  right-click ▸ **Open Hyperlink**) follows it. A web or mail address opens in your
+  browser or mail program; `#Sheet2!A1` (or `#Name`) goes to that place in the
+  document; a file on the computer is opened only after you say yes, since a
+  document from someone else can name any file. A plain click selects the cell,
+  as on the rest of the page.
 - **Circular references** show 0 in the loop's cells and are reported.
 - **AutoSum** (`Alt+=`), today's date (`Ctrl+;`), the time (`Ctrl+Shift+:`).
 - Volatile functions (NOW, TODAY, RAND, OFFSET, INDIRECT…) recalculate at every
@@ -1718,7 +1731,7 @@ The engine has **471** spreadsheet functions.
 | `FORMULATEXT(value)` | A cell's formula as text. |
 | `HLOOKUP(lookup_value, table_array, row_index_num, [range_lookup])` | Looks along the top row and returns from a row below. |
 | `HSTACK(array1, [array2], …)` | Arrays placed side by side. |
-| `HYPERLINK(link, [friendly])` | Shows the friendly name (or the address); the cell is not a clickable link. |
+| `HYPERLINK(link, [friendly])` | Shows the friendly name (or the address); Ctrl+click the cell (or right-click ▸ Open Hyperlink) follows the link: a web or mail address, a file (asked first), or #Sheet2!A1 for a place in the document. |
 | `INDEX(array, row_num, [column_num])` | The value at a row and column of a range. |
 | `INDIRECT(ref_text, [a1])` | The reference named by a text, such as "B4" or "Loads!A1". |
 | `INTERP(x, known_x's, known_y's)` | CalcForge's own: straight-line interpolation, INTERP(x, A2:A10, B2:B10); outside the table is #N/A. |

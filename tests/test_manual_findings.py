@@ -218,3 +218,177 @@ def test_close_bracket_typed_in_the_window_adds_a_line(win):
     QTest.keyClicks(win.view.viewport(), "3")
     assert win.view.calc.item.region.editor.root.text() == "g(x)≔line{x+1;2;3}"
     assert "] in an equation" in win.act_prog_line.toolTip()
+
+
+# -- 6. the tooltips say what happens ------------------------------------------------------------
+def test_the_wheel_and_preferences_tooltips_say_what_happens(win):
+    from calcforge.ui import dialogs, preferences
+    dialog = dialogs.PreferencesDialog(preferences.current(), win)
+    tip = dialog.wheel.toolTip()
+    assert "Ctrl+wheel scrolls" in tip and "Ctrl+wheel zooms" in tip
+    assert "always zoom" not in tip
+    dialog.deleteLater()
+    assert "blocks" not in win.act_preferences.toolTip()
+
+
+def test_ctrl_wheel_does_the_other_thing_from_the_setting(win, monkeypatch):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QWheelEvent
+    from calcforge.ui import preferences
+
+    def turn(mods):
+        before = (win.view.zoom(), win.view.verticalScrollBar().value())
+        centre = QPointF(win.view.viewport().rect().center())
+        event = QWheelEvent(centre, QPointF(win.view.viewport().mapToGlobal(centre.toPoint())),
+                            QPoint(0, 0), QPoint(0, -120), Qt.NoButton, mods, Qt.NoScrollPhase,
+                            False)
+        QApplication.sendEvent(win.view.viewport(), event)
+        win.view.finish_scrolling()
+        QApplication.processEvents()
+        return before != (win.view.zoom(), win.view.verticalScrollBar().value()), \
+            abs(win.view.zoom() - before[0]) > 1e-9
+
+    win.view.set_zoom(2.0)
+    current = preferences.current()
+    monkeypatch.setattr(current, "wheel", preferences.WHEEL_SCROLL)
+    moved, zoomed = turn(Qt.ControlModifier)
+    assert zoomed                              # wheel scrolls: Ctrl+wheel zooms
+    win.view.set_zoom(2.0)
+    monkeypatch.setattr(current, "wheel", preferences.WHEEL_ZOOM)
+    moved, zoomed = turn(Qt.ControlModifier)
+    assert moved and not zoomed                # wheel zooms: Ctrl+wheel scrolls
+
+
+# -- 7. the Count tool, as Revu's: it does not ask --------------------------------------------
+def test_the_count_tool_counts_as_count_until_a_subject_is_set(win):
+    from calcforge.items.measure import CountItem
+    from calcforge.ui.tools import TOOLS
+    from tests.test_usability import click
+    (tool,) = [t for t in TOOLS if t.key == "count"]
+    assert "Count subject" in tool.hint
+    win.select_tool("count")
+    p = win.document.pages[0].frame.mapToScene(QPointF(200, 200))
+    win.view.centerOn(p)
+    click(win.view, p.x(), p.y())
+    assert QApplication.activeModalWidget() is None          # nothing asked
+    counts = [i for i in win.view.scene().items() if isinstance(i, CountItem)]
+    assert len(counts) == 1 and counts[0].subject == "Count"
+
+
+# -- 8. a saved document's recovery copy is offered back --------------------------------------
+def _press_in_message_box(text, seen):
+    def press():
+        box = QApplication.activeModalWidget()
+        if not isinstance(box, QMessageBox):
+            QTimer.singleShot(20, press)
+            return
+        seen.append(box.text())
+        (button,) = [b for b in box.buttons() if b.text() == text]
+        QTest.mouseClick(button, Qt.LeftButton)
+    QTimer.singleShot(0, press)
+
+
+def _saved_with_newer_recovery(win, tmp_path):
+    from tests.test_calc_panels import an_equation
+    path = str(tmp_path / "beam.pdf")
+    win.document.path = path
+    assert win.save_document()
+    an_equation(win, "x:5", 100, 100)            # changed after the save
+    recovery = win.write_autosave()
+    assert recovery == path + ".autosave"
+    later = os.path.getmtime(path) + 60
+    os.utime(recovery, (later, later))
+    win.document.modified = False
+    win.undo_stack.setClean()
+    win.new_document(confirm=False)
+    return path, recovery
+
+
+def _equation_texts(win):
+    from calcforge.items.calc import CalcItem
+    return [i.region.editor.root.text() for i in win.view.scene().items()
+            if isinstance(i, CalcItem)]
+
+
+def test_opening_a_document_with_a_newer_recovery_copy_offers_it(win, tmp_path):
+    path, recovery = _saved_with_newer_recovery(win, tmp_path)
+    win.interactive_prompts = True
+    seen = []
+    _press_in_message_box("Open Recovered", seen)
+    win._open_chosen(path)
+    assert seen and "A recovered version of beam.pdf exists from" in seen[0]
+    assert "x≔5" in _equation_texts(win)
+    assert win.document.path == path and win.document.modified
+    assert win.save_document()
+    assert not os.path.exists(recovery)          # saved: the copy has done its work
+
+
+def test_open_saved_keeps_the_copy_and_discard_deletes_it(win, tmp_path):
+    path, recovery = _saved_with_newer_recovery(win, tmp_path)
+    win.interactive_prompts = True
+    _press_in_message_box("Open Saved", [])
+    win._open_chosen(path)
+    assert "x≔5" not in _equation_texts(win) and os.path.exists(recovery)
+    win.new_document(confirm=False)
+    _press_in_message_box("Discard Recovered", [])
+    win._open_chosen(path)
+    assert "x≔5" not in _equation_texts(win) and not os.path.exists(recovery)
+
+
+def test_an_older_recovery_copy_is_not_offered(win, tmp_path):
+    path, recovery = _saved_with_newer_recovery(win, tmp_path)
+    earlier = os.path.getmtime(path) - 60
+    os.utime(recovery, (earlier, earlier))
+    win.interactive_prompts = True
+    win._open_chosen(path)                       # a question would block here
+    assert "x≔5" not in _equation_texts(win)
+
+
+# -- 9. HYPERLINK cells are links -----------------------------------------------------------------
+def test_ctrl_click_on_a_hyperlink_cell_opens_it(win, monkeypatch):
+    from tests.test_tables import cell_scene, click, enter, make_table, pump, type_text
+    from tests.test_usability import hover
+    opened = []
+    monkeypatch.setattr(QDesktopServices, "openUrl",
+                        staticmethod(lambda url: opened.append(url.toString()) or True))
+    win.view.set_zoom(1.0)
+    table = make_table(win)
+    type_text(win, '=HYPERLINK("https://example.com/eurocode","EN 1990")')
+    enter(win)
+    type_text(win, f'=HYPERLINK("#{table.name}!C3","go")')
+    enter(win)
+    assert table.sheet.value(0, 0) == "EN 1990"
+    a1 = cell_scene(table, "A1")
+    hover(win.view, a1.x(), a1.y())
+    pump()
+    assert win.view.viewport().cursor().shape() == Qt.PointingHandCursor
+    click(win, a1)                               # a plain click selects the cell
+    assert opened == [] and win.view.tables.active == (0, 0)
+    click(win, a1, Qt.ControlModifier)
+    assert opened == ["https://example.com/eurocode"]
+    click(win, cell_scene(table, "A2"), Qt.ControlModifier)
+    assert win.view.tables.active == (2, 2) and opened == ["https://example.com/eurocode"]
+    # right-click ▸ Open Hyperlink, greyed on a cell without one
+    win.view.tables.select((0, 0))
+    menu = win.view.tables.cell_menu()
+    (follow,) = [a for a in menu.actions() if a.text() == "Open Hyperlink"]
+    assert follow.isEnabled()
+    follow.trigger()
+    assert opened == ["https://example.com/eurocode"] * 2
+    win.view.tables.select((3, 2))
+    menu = win.view.tables.cell_menu()
+    (follow,) = [a for a in menu.actions() if a.text() == "Open Hyperlink"]
+    assert not follow.isEnabled()
+
+
+def test_a_link_to_a_file_is_not_opened_without_asking(win, monkeypatch):
+    from tests.test_tables import cell_scene, click, enter, make_table, type_text
+    opened = []
+    monkeypatch.setattr(QDesktopServices, "openUrl",
+                        staticmethod(lambda url: opened.append(url.toString()) or True))
+    table = make_table(win)
+    type_text(win, '=HYPERLINK("C:/tools/run.exe","run")')
+    enter(win)
+    win.interactive_prompts = False              # nobody there to say yes
+    click(win, cell_scene(table, "A1"), Qt.ControlModifier)
+    assert opened == []
