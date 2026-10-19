@@ -46,6 +46,12 @@ class SheetHeadings(QWidget):
         from ..items.sheetpage import SheetRunItem
         out = []
         for frame in getattr(scene, "frames", []) or []:
+            # a run's cells live on the first of its spreadsheet pages: a
+            # drawing set's sheets have none, and looking through every
+            # markup of all of them was a few milliseconds of every step of
+            # a scroll (2026-10-19)
+            if getattr(frame.page, "sheet", None) is None:
+                continue
             for item in frame.markups():
                 if isinstance(item, SheetRunItem) and item.sheet is not None and item.paging:
                     out.append(item)

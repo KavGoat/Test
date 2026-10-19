@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import uuid
+import weakref
 from dataclasses import dataclass, field
 from copy import deepcopy
 from datetime import datetime
@@ -477,6 +478,7 @@ def note_view_zoom(scene) -> None:
     _CHROME_ZOOM[0] = zoom
     for item in scene.selectedItems():
         if isinstance(item, MarkupItem):
+            item._may_leave_its_page()
             QGraphicsObject.prepareGeometryChange(item)
 
 
@@ -657,6 +659,10 @@ def cursor_for_handle(key: str):
 # Base item
 # ---------------------------------------------------------------------------
 
+#: The pictures of their files' markups read so far, by document and asset:
+#: (the asset's bytes, the picture) — see MarkupItem.load_from_document.
+_PICTURES_READ: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
 #: What changes how a markup looks on its page, before it happens.
 _CHANGES_THAT_SHOW = (QGraphicsItem.ItemPositionChange, QGraphicsItem.ItemTransformChange,
                       QGraphicsItem.ItemRotationChange, QGraphicsItem.ItemScaleChange,
@@ -762,6 +768,16 @@ class MarkupItem(QGraphicsObject):
         layer = self._layer()
         if layer is not None:
             layer.touched(self)
+        self._may_leave_its_page()
+
+    def _may_leave_its_page(self) -> None:
+        """Its page stops telling Qt its markups all stay inside it, until
+        this one has been still a moment (PageFrame.markups_may_have_moved)."""
+        holder = self.parentItem()
+        while holder is not None and not hasattr(holder, "markups_may_have_moved"):
+            holder = holder.parentItem()
+        if holder is not None:
+            holder.markups_may_have_moved()
 
     def update(self, *args):                 # (no annotation: a Qt slot)
         self._changing()
@@ -1553,12 +1569,21 @@ class MarkupItem(QGraphicsObject):
         data = document.asset(self.their_picture_asset)
         if not data:
             return
+        # One picture for every markup showing the same asset: the same stamp
+        # on each sheet of a set is one asset (pdfmarkups._the_file_draws_it),
+        # and reading it once per sheet was two seconds of opening one.
+        held = _PICTURES_READ.setdefault(document, {})
+        known = held.get(self.their_picture_asset)
+        if known is not None and known[0] is data:
+            self._their_picture = known[1]
+            return
         from PySide6.QtCore import QByteArray
         from PySide6.QtGui import QPixmap
 
         picture = QPixmap()
         if picture.loadFromData(QByteArray(data)) and not picture.isNull():
             self._their_picture = picture
+            held[self.their_picture_asset] = (data, picture)
 
     # -- somebody else's markup --------------------------------------------
     #
@@ -1637,6 +1662,7 @@ class MarkupItem(QGraphicsObject):
         elif change == QGraphicsItem.ItemSelectedChange:
             # picked out or let go: its handles' room comes or goes (not a
             # change to its drawing, so the page's squares keep it)
+            self._may_leave_its_page()
             QGraphicsObject.prepareGeometryChange(self)
         elif change == QGraphicsItem.ItemSelectedHasChanged:
             # Picking a markup out changes nothing about its drawing, only

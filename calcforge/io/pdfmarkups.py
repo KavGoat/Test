@@ -159,12 +159,23 @@ def _the_file_draws_it(source, index: int, annotation: dict, made: list,
     number = annotation.get("__xref__")
     if not isinstance(number, int) or number <= 0:
         return
-    raster = engine.annotation_raster(source.doc, index, number, PICTURE_SCALE)
-    if raster is None or raster.is_empty:
-        return
-    kept = picture_of(_as_png(raster))
+    # The same stamp on every sheet of a set is one picture, drawn and kept
+    # once (engine.appearance_fingerprint).
+    drawn = getattr(source, "_pictures_drawn", None)
+    if drawn is None or drawn[0] is not picture_of:
+        drawn = (picture_of, {})
+        source._pictures_drawn = drawn
+    fingerprint = engine.appearance_fingerprint(source.doc, index, number)
+    kept = drawn[1].get(fingerprint) if fingerprint else None
     if not kept:
-        return
+        raster = engine.annotation_raster(source.doc, index, number, PICTURE_SCALE)
+        if raster is None or raster.is_empty:
+            return
+        kept = picture_of(_as_png(raster))
+        if not kept:
+            return
+        if fingerprint:
+            drawn[1][fingerprint] = kept
     payload["their_picture_asset"] = kept
     payload["their_picture_box"] = [0.0, 0.0,
                                     float(payload["rect"][2]),

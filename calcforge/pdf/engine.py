@@ -32,6 +32,7 @@ from __future__ import annotations
 import math
 
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -429,6 +430,71 @@ def annotation_raster(document: "pymupdf.Document", index: int, xref: int,
     except Exception:                                  # noqa: BLE001
         drain_messages()
     return None
+
+
+#: How much of a file an appearance's fingerprint may read before giving up
+#: (and the appearance is simply drawn, as any other).
+FINGERPRINT_OBJECTS = 512
+FINGERPRINT_BYTES = 64 * 1024 * 1024
+
+_REFERENCE = re.compile(r"(\d+) (\d+) R\b")
+
+
+def appearance_fingerprint(document: "pymupdf.Document", index: int,
+                           xref: int) -> Optional[str]:
+    """A fingerprint of everything an annotation's picture is drawn from:
+    its appearance stream and every object that reaches — fonts, images,
+    forms — by their contents rather than their numbers, with the size of its
+    box, its opacity, its flags and its turn. Two annotations with the same
+    fingerprint draw the same picture.
+
+    A drawing set stamped on every sheet carries the stamp once per sheet,
+    each a copy with its own object numbers: drawing and storing the same
+    picture 162 times was sixteen seconds of opening one (2026-10-19).
+    None when it cannot be told: no single appearance stream, or more of the
+    file behind it than is worth reading."""
+    import hashlib
+
+    try:
+        kind, value = document.xref_get_key(xref, "AP/N")
+        found = _REFERENCE.fullmatch(value.strip()) if kind == "xref" else None
+        if found is None:
+            return None
+        known: dict = {}
+        budget = [FINGERPRINT_OBJECTS, FINGERPRINT_BYTES]
+
+        def digest(number: int, path: frozenset) -> str:
+            if number in known:
+                return known[number]
+            if number in path or budget[0] <= 0:
+                raise LookupError                  # a loop, or too much: no fingerprint
+            budget[0] -= 1
+            text = document.xref_object(number, compressed=True)
+            inner = path | {number}
+            text = _REFERENCE.sub(lambda m: "<" + digest(int(m.group(1)), inner) + ">", text)
+            hashed = hashlib.sha1(text.encode("utf-8", "surrogatepass"))
+            if document.xref_is_stream(number):
+                raw = document.xref_stream_raw(number) or b""
+                budget[1] -= len(raw)
+                if budget[1] < 0:
+                    raise LookupError
+                hashed.update(raw)
+            known[number] = hashed.hexdigest()
+            return known[number]
+
+        drawn = digest(int(found.group(1)), frozenset())
+        facts = [drawn, str(document[index].rotation)]
+        for key in ("Rect", "CA", "F", "Rotate", "AS", "BM"):
+            kind, value = document.xref_get_key(xref, key)
+            if key == "Rect" and kind == "array":
+                numbers = [float(n) for n in value.strip("[] ").split()]
+                value = (f"{abs(numbers[2] - numbers[0]):.3f}"
+                         f" {abs(numbers[3] - numbers[1]):.3f}")
+            facts.append(f"{key}={kind}:{value}")
+        return hashlib.sha1("|".join(facts).encode()).hexdigest()
+    except Exception:                                  # noqa: BLE001
+        drain_messages()
+        return None
 
 
 def leave_out(page, without: "tuple") -> None:
