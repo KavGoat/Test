@@ -117,11 +117,16 @@ def test_the_scale_box_scales_in_proportion_and_shift_frees_it(window):
     assert set(corners) == {"scale_nw", "scale_ne", "scale_se", "scale_sw"}
     assert box.handle_at(corners["scale_se"]) == "scale_se"
     outer = box.scale_box()
-    # dragged out to twice the scale box's width: twice the size, both ways
-    box.drag_handle("scale_se", QPointF(outer.left() + outer.width() * 2, outer.bottom()))
+    # the scale box's corner dragged to where it stands for a box twice as
+    # wide: twice the size, both ways, about the shape's opposite corner,
+    # which stays put (2026-10-19: scaled about the scale box's own corner,
+    # a few points off the shape, the shape crept with every step)
+    pad = outer.right() - box.local_rect().right()
+    box.drag_handle("scale_se", QPointF(box.local_rect().left() + 200 + pad, outer.bottom()))
     rect = box.local_rect()
     assert rect.width() == pytest.approx(200, abs=0.5)
     assert rect.height() == pytest.approx(100, abs=0.5)
+    assert rect.topLeft() == QPointF(0, 0)
     # Shift: width only
     outer = box.scale_box()
     box.drag_handle("scale_se", QPointF(outer.right() + 50, outer.bottom()), keep_ratio=True)
