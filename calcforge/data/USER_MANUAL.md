@@ -403,10 +403,17 @@ The **Properties panel** has the same and more, in sections:
 - **Leader** (callouts) — the hinge and how many leaders.
 - **Layout** — X, Y, Document Width, Document Height and Rotation.
 - **Measurement**, **Count**, **Stamp**, **Note**, **Image**, **Snapshot**,
-  **Contents**, **Table**, **Chart**, **Calculation block**, and for equations
-  **Result**, **Equation** and **Plot**, each described in its own section.
+  **Contents**, **Table** (or **Sheet**) and **Cells**, **Chart**, **Calculation
+  block**, and for equations **Result**, **Equation** and **Plot**, each described
+  in its own section.
 - **Options** — **Add to Tool Chest** and **Set as Default** (and **Forget
   Default** when the kind has one).
+
+The panel shows what is selected or, with nothing selected, what you are working
+in: the equation or text being typed in, or the table or spreadsheet page open
+for its cells — in Markup and Calc mode alike. A change made in the panel to an
+equation being typed in finishes the typing first (its own undo step), then makes
+the change (another).
 
 With several markups selected, a change applies to all of them in one undo step.
 Text inside a text box can be styled a word at a time: select the words while
@@ -881,7 +888,8 @@ it. Click the frame to select it; double-click to go inside.
 Right-click a block: **Self-Contained** keeps what its equations define to itself
 — nothing after the block sees those names, and a small *Self-contained* label
 above it says so on screen;
-**Select Its Equations**; **Remove Block, Keep Equations**. Blocks can sit inside
+**Select Its Equations**; **Remove Block, Keep Equations** — the Properties
+panel's Calculation block section offers the same three. Blocks can sit inside
 blocks; an equation belongs to the innermost self-contained one.
 
 ### Calc section breaks and Global
@@ -932,10 +940,14 @@ Right-click an equation:
   Numbers), Rounding (Half to Even, Away from Zero), Font size, **Colour…**,
   **Background…**, **Border** and **Conditional Formatting…**.
 
-The Properties panel shows the same as **Result** (Decimals, Threshold,
-Fractions, Rounding, **Document default**) and **Equation** (Size, Colour,
-Background, Disable Evaluation). A setting changes every selected equation in
-one undo step. The document's defaults — and the size and colour of new equations
+The Properties panel shows the same, in the menu's words and order, as
+**Result** (Variable — what the equation defines — Decimal Places, Significant
+Figures, Global, Trailing Zeros, Exponential Threshold, Fractions, Rounding,
+**Result Unit** — the unit typed into the placeholder after the result — and
+**Document default**) and **Equation** (Size, Colour, Background, Bold, Italic,
+Underline, Border, Display Input Data, Ignore Units, Disable Evaluation and
+**Conditional Formatting…**). It shows while the equation is being typed in, too.
+A setting changes every selected equation in one undo step. The document's defaults — and the size and colour of new equations
 — are in Preferences ▸ Calculations.
 
 ### Conditional formatting of equations
@@ -1315,6 +1327,21 @@ neither is `#NAME?`.
   number format (General, Number, Currency, Percent, Scientific, Fraction, Date,
   Time, Text, More…), fewer and more decimals, **Rows & Columns**, **Format
   Painter** and **Format…**.
+- **Right-click the cells**: at the top, as an equation's menu, **Variable**
+  (a name for the cells), **Decimal Places ▸** (General, 0–15: the selected cells
+  show that many places, the format's kind kept — `#,##0.00`, `0.0%`,
+  `0.00E+00` — as Excel's Increase and Decrease Decimal would leave it),
+  **Significant Figures** (the places count significant figures instead, as
+  SMath's: with three, 12345.678 shows 12300 and 0.0012345 shows 0.00123; a
+  quantity keeps its unit; a General cell takes the equations' default places)
+  and **Global**. Each is one undo step and is saved with the document; the
+  formula bar still shows what was typed. **Properties**, at the end of the menu,
+  opens the Properties panel.
+- **The Properties panel's Cells section**, while a table or sheet is open:
+  Selection, Number Format, Decimal Places, Significant Figures, Unit, Font, Size,
+  Colour, Fill, Horizontal and Vertical alignment, Bold, Italic, Underline, Wrap
+  Text, Borders and Format Cells…, following the active cell. A table also shows
+  its name, Layout and Options; a spreadsheet page its name and size.
 - Keys: `Ctrl+B`, `Ctrl+I`, `Ctrl+U`, `Ctrl+5` (strikethrough), and Excel's number
   formats `Ctrl+Shift+~` General, `Ctrl+Shift+!` Number, `Ctrl+Shift+$` Currency,
   `Ctrl+Shift+%` Percent, `Ctrl+Shift+^` Scientific, `Ctrl+Shift+#` Date,
@@ -1380,7 +1407,7 @@ column is x (or the categories), each other column a series, and headings in the
 first row name the series. A chart goes anywhere — over a sheet's cells (moving
 with them) or on any page — and follows its cells as they change.
 
-Double-click a chart (or Properties ▸ **Edit chart…**) for the **Chart** dialog:
+Double-click a chart (or Properties ▸ **Edit Chart…**) for the **Chart** dialog:
 **Type** (XY scatter, Scatter with lines, Scatter with lines only, Line, Line with
 markers, Column), the title, **Legend** (Bottom, Right, Top, None), each axis's
 title, minimum, maximum, major unit, **Logarithmic scale (base 10)** and **Major

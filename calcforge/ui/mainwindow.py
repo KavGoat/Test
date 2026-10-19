@@ -7322,7 +7322,9 @@ class MainWindow(QMainWindow):
             return
         if hasattr(self, "table_controls"):
             self.table_controls.show(False)
-        items = self.selected_items()
+        # what Properties shows: the equation being typed in counts, as a
+        # picked one does (it read "Nothing selected", 2026-10-19)
+        items = self.panel_subjects()
         active = items[0] if items else None
         self._style_own_look = False
         if items:
@@ -8020,7 +8022,7 @@ class MainWindow(QMainWindow):
             item.touch()
             item.update()
         self.view.commit_snapshot("Note icon")
-        self.properties_panel.show_items(self.selected_items())
+        self.properties_panel.show_items(self.panel_subjects())
 
     def _style_line_ending(self, attribute: str, value: str) -> None:
         if self._edit_markup_style(lambda item: setattr(item.style, attribute, value)):
@@ -8171,7 +8173,7 @@ class MainWindow(QMainWindow):
             one.subject = text
             one.touch()
         self.view.commit_snapshot("Subject")
-        self.properties_panel.show_items(self.selected_items())
+        self.properties_panel.show_items(self.panel_subjects())
 
     def _style_highlight(self, on: bool) -> None:
         """Revu's highlight button: the markup multiplies onto the page."""
@@ -8213,7 +8215,7 @@ class MainWindow(QMainWindow):
                 item.apply_style()
             item.update()
         self.view.commit_snapshot("Callout shape")
-        self.properties_panel.show_items(self.selected_items())
+        self.properties_panel.show_items(self.panel_subjects())
 
     def _measure_setting(self, attr: str, value, description: str) -> None:
         """Caption ▾: something of the selected measurements, as one undo step."""
@@ -8234,7 +8236,7 @@ class MainWindow(QMainWindow):
             item.touch()
             item.update()
         self.view.commit_snapshot(description)
-        self.properties_panel.show_items(self.selected_items())
+        self.properties_panel.show_items(self.panel_subjects())
 
     def _fill_caption_menu(self) -> None:
         from .propbar import sketched
@@ -8283,7 +8285,7 @@ class MainWindow(QMainWindow):
             item.touch()
             item.update()
         self.view.commit_snapshot("Caption")
-        self.properties_panel.show_items(self.selected_items())
+        self.properties_panel.show_items(self.panel_subjects())
 
     def _measure_page_index(self) -> int:
         """The page of the selected measurement (the current page otherwise)."""
@@ -8417,7 +8419,7 @@ class MainWindow(QMainWindow):
             item.touch()
             item.update()
         self.view.commit_snapshot(description)
-        self.properties_panel.show_items(self.selected_items())
+        self.properties_panel.show_items(self.panel_subjects())
 
     def _style_cloud(self, value: float) -> None:
         if self._edit_markup_style(lambda item: setattr(item, "cloud_size", float(value))):
@@ -8715,6 +8717,23 @@ class MainWindow(QMainWindow):
             return []
         return [item for item in scene.selectedItems() if isinstance(item, MarkupItem)]
 
+    def panel_subjects(self) -> list[MarkupItem]:
+        """What the Properties panel shows: the selection or, with nothing
+        picked, what is being worked in — the equation or text being typed
+        into, or the table or spreadsheet open for its cells. In either mode:
+        the panel showed nothing for those, as a click opens them rather
+        than picking them (the user, 2026-10-19)."""
+        items = self.selected_items()
+        if items:
+            return items
+        view = self.view
+        calc = view.calc
+        for working in (calc.item if calc.editing() else None, view.editing_item(),
+                        view.tables.item):
+            if isinstance(working, MarkupItem) and working.scene() is not None:
+                return [working]
+        return []
+
     def _selection_changed_on_the_canvas(self) -> None:
         """While the mouse button is down, the panels wait for it to come up:
         rebuilding Properties for a markup somebody has just grabbed held up
@@ -8740,13 +8759,20 @@ class MainWindow(QMainWindow):
                 return
             self.view.tables.refresh_bar()          # a table picked out shows the formula bar
             shown = self.properties_panel._items
-            picked = [i for i in self.selected_items() if isinstance(i, MarkupItem)]
+            picked = self.selected_items()
             if picked:
                 # something picked: SMath's red cross goes, as SMath's does when
                 # a region is selected (it stayed behind a pasted picture or a
                 # snapshot being recoloured, 2026-10-14)
                 self.view.calc.clear_cross()
-            if len(shown) != len(picked) or any(a is not b for a, b in zip(shown, picked)):
+            wanted = self.panel_subjects()
+            # a table picked, then opened for its cells, is the same table:
+            # its Cells section comes (or goes) all the same
+            opened = self.view.tables.item
+            cells = (opened is not None and opened in wanted) != \
+                (self.properties_panel._cells is not None)
+            if len(shown) != len(wanted) or any(a is not b for a, b in zip(shown, wanted)) \
+                    or cells:
                 self._selection_changed_on_the_canvas()
         QTimer.singleShot(0, check)
 
@@ -8755,7 +8781,7 @@ class MainWindow(QMainWindow):
         if scene is not None and hasattr(scene, "selection_reshaped"):
             scene.selection_reshaped()        # grouped or ungrouped, perhaps
         items = self.selected_items()
-        self.properties_panel.show_items(items)
+        self.properties_panel.show_items(self.panel_subjects())
         self.default_button.setEnabled(len(items) == 1)
         self._refresh_style_controls()
         if len(items) == 1:

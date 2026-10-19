@@ -294,6 +294,9 @@ class CalcEditing:
             item.relayout()
             self.note_overflow(item)
         view.commit_snapshot("Edit equation")
+        follow = getattr(view.window, "_scene_selection_changed", None)
+        if follow is not None:
+            follow()                       # the Properties panel lets it go
         if cross_below and item.scene() is not None:
             # under the equation, wherever it ended up (it may have gone on
             # to the next page)

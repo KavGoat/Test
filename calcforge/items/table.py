@@ -692,7 +692,7 @@ class TableItem(MarkupItem):
     def _paint_text(self, painter, r, c, cell, rows, cols, covered) -> None:
         sheet = self.sheet
         st = self._shown_style(r, c)
-        shown = format_value(cell.value, st.number_format, st.unit)
+        shown = format_value(cell.value, st.number_format, st.unit, significant=st.significant)
         text = shown.text
         if not text:
             return
@@ -851,7 +851,7 @@ class TableItem(MarkupItem):
         st = self._shown_style(r, c)
         if st.wrap or st.rotation or st.shrink:
             return None
-        shown = format_value(cell.value, st.number_format, st.unit)
+        shown = format_value(cell.value, st.number_format, st.unit, significant=st.significant)
         text = shown.text
         if not text:
             return None
@@ -906,7 +906,7 @@ class TableItem(MarkupItem):
                     bool(st.italic), bool(st.underline), bool(st.strike))
         key = None
         if _METRICS.get(font_key) is metrics:          # (measured with the cell's own font)
-            key = (repr(value), st.number_format, st.unit, font_key, room)
+            key = (repr(value), st.number_format, st.unit, st.significant, font_key, room)
             got = _FITTED.get(key)
             if got is not None:
                 return got
@@ -917,7 +917,7 @@ class TableItem(MarkupItem):
             return sum(max(metrics.horizontalAdvance(ch), digit) for ch in number) + \
                 (metrics.horizontalAdvance(space + unit) if space else 0.0)
         got = format_value(value, st.number_format, st.unit,
-                           fit=lambda t: width(t) <= room).text
+                           fit=lambda t: width(t) <= room, significant=st.significant).text
         if key is not None:
             if len(_FITTED) > 20000:
                 _FITTED.clear()

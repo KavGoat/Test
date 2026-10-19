@@ -490,9 +490,15 @@ class TableEditing:
     held_format = None          # Format Painter: the looks being carried
 
     def _refresh_controls(self) -> None:
-        refresh = getattr(self.view.window, "_refresh_style_controls", None)
+        window = self.view.window
+        refresh = getattr(window, "_refresh_style_controls", None)
         if refresh is not None:
             refresh()
+        # the Properties panel shows the table open for its cells, or what it
+        # showed before (mainwindow.panel_subjects)
+        follow = getattr(window, "_scene_selection_changed", None)
+        if follow is not None:
+            follow()
 
     def is_open(self) -> bool:
         return self.item is not None
@@ -716,6 +722,9 @@ class TableEditing:
         controls = getattr(self.view.window, "table_controls", None)
         if controls is not None:
             controls.sync()
+        panel = getattr(self.view.window, "properties_panel", None)
+        if panel is not None:
+            panel.sync_cells()             # its Cells section, as the bar
         from ..sheet import validation
         rule = validation.at(item.sheet, *self.active) if item.sheet is not None else None
         if rule is not None and rule.get("input"):
@@ -1800,7 +1809,8 @@ class TableEditing:
         if st.wrap or st.shrink or st.rotation:
             return
         # as drawn: a unit's raised powers are narrower than "^2"
-        need = shown_width(format_value(value, st.number_format, st.unit), st) + 2 * 2.0 + 2
+        need = shown_width(format_value(value, st.number_format, st.unit,
+                                        significant=st.significant), st) + 2 * 2.0 + 2
         if need > sheet.width(col):
             wb.set_widths(sheet, [col], need)
 
@@ -2343,6 +2353,55 @@ class TableEditing:
         t, l, b, r = self.selection()
         self._change("Format", lambda wb, sheet: wb.format_block(sheet, t, l, b, r, **fields))
 
+    # -- Decimal Places and Significant Figures, as an equation's (2026-10-19) --
+    def active_style(self):
+        item = self.item
+        if item is None or item.sheet is None:
+            return None
+        return item.sheet.workbook.style_of(item.sheet, *self.active)
+
+    def places(self):
+        """The decimal places the active cell's format shows, or None (General)."""
+        from ..sheet.numfmt import places_of
+        st = self.active_style()
+        return None if st is None else places_of(st.number_format)
+
+    def set_places(self, places) -> None:
+        """Decimal Places ▸ n: the selected cells show *n* places, the active
+        cell's format kept in kind (#,##0.00, 0.0%, 0.00E+00) as Excel's
+        Increase and Decrease Decimal would leave it; General, a date or a
+        fraction becomes Number. None goes back to General. One undo step."""
+        from ..sheet.numfmt import with_places
+        st = self.active_style()
+        if st is None:
+            return
+        code = None if places is None else with_places(st.number_format, places)
+        fields = {"number_format": code}
+        if code is None:
+            fields["significant"] = False     # General has no places to count
+        t, l, b, r = self.selection()
+        self._change(f"Decimal places: {places}" if code is not None
+                     else "Decimal places: General",
+                     lambda wb, sheet: wb.format_block(sheet, t, l, b, r, **fields))
+
+    def set_significant(self, on: bool) -> None:
+        """Significant Figures: the selected cells' decimal places count
+        significant figures, as an equation's do (SMath's). A cell in
+        General is given the document's equation places first, so the tick
+        always shows. One undo step."""
+        from ..sheet.numfmt import places_of, with_places
+        st = self.active_style()
+        if st is None:
+            return
+        fields = {"significant": bool(on)}
+        if on and places_of(st.number_format) is None:
+            from ..calc.docsheet import sheet_for
+            places = sheet_for(self.view.window.document).worksheet.format.decimals
+            fields["number_format"] = with_places(st.number_format, places)
+        t, l, b, r = self.selection()
+        self._change("Significant figures",
+                     lambda wb, sheet: wb.format_block(sheet, t, l, b, r, **fields))
+
     def borders(self, which: str, border: Optional[Border] = None) -> None:
         t, l, b, r = self.selection()
         border = border or THIN
@@ -2524,7 +2583,8 @@ class TableEditing:
                 if sheet.merge_at(r, c):
                     continue
                 st = wb.styles.get(cell.style)
-                shown = format_value(cell.value, st.number_format, st.unit)
+                shown = format_value(cell.value, st.number_format, st.unit,
+                                     significant=st.significant)
                 text = shown.text
                 metrics = _metrics(st)
                 if axis == "col":
@@ -2858,6 +2918,9 @@ class TableEditing:
         # CalcForge's own, after Excel's (Global is at the top, by the name)
         menu.addSeparator()
         menu.addAction("Rename Sheet…" if _is_run(item) else "Rename Table…", self.rename)
+        # last, as on every markup's menu: the Properties panel, which shows
+        # the selected cells (2026-10-19)
+        menu.addAction("Properties", window.show_properties_panel)
         return menutidy.tidy(menu)
 
     def selection_name(self):
@@ -2949,6 +3012,10 @@ class TableEditing:
         # the box takes the keys as soon as the menu opens, as the measurement's
         menu.aboutToShow.connect(lambda: field.setFocus(Qt.PopupFocusReason))
         self.name_field = field
+        # then, as at the top of an equation's menu (the user, 2026-10-19):
+        # how many decimal places the cells show, whether those count
+        # significant figures, and Global
+        self.number_entries(menu)
         # calculation sections (2026-10-11): cells read by every later section
         area = list(self.selection())
         on = calcsections.cells_global(item.sheet, area)
@@ -2957,6 +3024,33 @@ class TableEditing:
         made.setCheckable(True)
         made.setChecked(on)
         made.setToolTip("Global cells are read by every later calc section (past its breaks)")
+
+    def number_entries(self, menu) -> None:
+        """Decimal Places ▸ (General, 0–15) and Significant Figures, worded
+        and placed as an equation's (ui/calcmenu.fill), for the selected
+        cells: Excel's Increase/Decrease Decimal, set to a value."""
+        st = self.active_style()
+        if st is None:
+            return
+        places = self.places()
+        sub = menu.addMenu("Decimal Places")
+        sub.setObjectName("menuCellDecimalPlaces")
+        general = sub.addAction("General", lambda: self.set_places(None))
+        general.setCheckable(True)
+        general.setChecked(places is None)
+        general.setToolTip("Excel's General: as many places as fit")
+        sub.addSeparator()
+        for n in range(16):
+            action = sub.addAction(str(n), lambda n=n: self.set_places(n))
+            action.setCheckable(True)
+            action.setChecked(places == n)
+        significant = menu.addAction("Significant Figures")
+        significant.setCheckable(True)
+        significant.setChecked(bool(st.significant))
+        significant.setToolTip("Decimal Places counts significant figures, not places "
+                               "after the point")
+        significant.triggered.connect(
+            lambda _=False, on=not st.significant: self.set_significant(on))
 
     def heading_menu(self, axis: str, index: int) -> QMenu:
         """Excel's row (or column) heading menu: the short one (QA round 4).
