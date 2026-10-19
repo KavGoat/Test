@@ -1041,6 +1041,23 @@ The other way round, a cell reads an equation's variable by its name (see Part 3
 *Equation variables in cells*). Tables and equations take up each other's changes
 until nothing changes; a true loop is reported as circular.
 
+**Equations follow the cells, as Excel's formulas do.** What you do to a table or
+sheet is made in the equations that read it, in the same undo step:
+
+- **rename a table or sheet** — renamed `Beam loads`, `Loads.D12` becomes
+  `Beam_loads.D12`; renamed `Beams`, the lookup `Loads(d)` becomes `Beams(d)` too (a
+  lookup needs a name with no spaces);
+- **insert or delete rows, columns or cells, or move cells** (drag the selection's
+  border, or cut and paste) — `T.A3` becomes `T.A4` when a row goes in above it,
+  and follows a cell moved to another sheet;
+- **delete the cell an equation reads** — the reference becomes `T.#REF` and the
+  equation shows a red error, *T.#REF: the cell it read was deleted (#REF!)*, until
+  you change it (undo puts the cell and the reference back);
+- **rename a name** in the Name Manager — `W_total` becomes `W_sum` (an equation
+  defining a variable of the same spelling keeps its own);
+- **retype a column's heading** — `Loads.Load` becomes `Loads.Load_kN`. Text in
+  quotes, such as a lookup's `"Load"`, is left alone, as Excel leaves text.
+
 ### Errors
 
 An error is shown in red under the equation, and prints and exports with it.
@@ -1304,7 +1321,14 @@ function's arguments with the current one in bold.
 - **Structured references** to a table (its first row being the headings):
   `Loads[Load]`, `Loads[@Load]`, `Loads[[#Headers],[Load]]`, `Loads[#All]`,
   `Loads[#Data]`, `Loads[[Load]:[Span]]`. They follow renames and grow with the
-  table.
+  table, and follow a retyped heading (`Loads[Load]` becomes `Loads[Load kN]`) —
+  unless the old heading heads another column too.
+- **References follow the cells, Excel's way**: inserted and deleted rows, columns
+  and cells, and cells moved by dragging the selection's border or by cut and
+  paste, are followed by every formula, name and chart that reads them; a
+  reference to a deleted cell becomes `#REF!`, and so does one to a cell that
+  moved cells were dropped onto. The equations follow the same way (Part 2,
+  *Tables and sheets in equations*).
 - **Dynamic arrays** spill: `=SORT(A2:A9)`, `=FILTER(…)`, `=UNIQUE(…)`,
   `=SEQUENCE(5)`. A spill that would run out of a table is `#SPILL!`.
 - **Errors explained**: select or hover over a cell with an error and the status
@@ -1336,6 +1360,9 @@ A **name** stands for a cell, a block or a constant (`W_total`,
   variable.
 - A name is kept with the sheet whose cells it names, so it is saved, undone and
   copied with it.
+- **Renaming a name** in the Name Manager renames it in every formula, name and
+  equation that uses it, as Excel does; a sheet's own name of the same spelling is
+  another name and is left alone.
 - The cell's right-click menu starts with its **Variable** name box (typed as
   SMath writes a name: `.` makes a subscript) and the **Global** tick.
 

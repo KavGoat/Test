@@ -254,9 +254,15 @@ def define(tables, name: str, refers_to: str, scope=None, comment: str = "",
     item = tables.item
 
     def change(wb):
-        if replacing is not None:
-            old_scope = wb.sheet_by_id(replacing.sheet) if replacing.sheet else None
-            wb.remove_name(replacing.name, old_scope, replacing.book)
+        old = replacing
+        if old is not None:
+            if old.name != name:
+                # renamed: every formula and equation using it follows, as
+                # in Excel's Name Manager
+                wb.rename_name(old, name)
+                old = wb.names.get((name.lower(), old.key[1]), old)
+            old_scope = wb.sheet_by_id(old.sheet) if old.sheet else None
+            wb.remove_name(old.name, old_scope, old.book)
         wb.define_name(name, refers_to, scope, comment, home=scope or item.sheet)
     return change_names(tables, "Define name", change)
 

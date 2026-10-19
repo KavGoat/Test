@@ -741,6 +741,20 @@ class PageView(QGraphicsView):
         self._snapshot = [(frame, frame.serialize_items()) for frame in frames]
         self._snapshot_selection = self._selected_uids()
 
+    def snapshot_also(self, frames) -> bool:
+        """Pages a gesture under way turns out to change as well — the
+        equations that read a table renamed or rows deleted (docbook.py):
+        what they look like now joins the before of the open snapshot, so
+        undo puts them back with the rest. False when no snapshot is open."""
+        if not self._snapshot:
+            return False
+        held = {id(frame) for frame, _items in self._snapshot}
+        for frame in frames:
+            if id(frame) not in held:
+                self._snapshot.append((frame, frame.serialize_items()))
+                held.add(id(frame))
+        return True
+
     def _selected_uids(self) -> set:
         """The markups picked now, by id (what an undo picks again)."""
         scene = self.scene()

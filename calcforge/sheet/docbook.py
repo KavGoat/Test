@@ -76,6 +76,7 @@ class DocumentBook:
         self.later: Optional[Callable[[Callable[[], None]], None]] = None
         self._queued: set = set()
         self.workbook.on_names_changed = self._names_changed
+        self.workbook.on_references = self._references_changed
 
     def _names_changed(self) -> None:
         """A table came, went or was renamed, or a name was defined: the
@@ -296,6 +297,8 @@ class DocumentBook:
             table, _, rest = name.partition(".")
             sheet = sheet_named(wb, table)
             if sheet is not None:
+                if rest.upper() == DELETED_CELL:
+                    return sheet, DELETED
                 ref = parse_cell(rest)
                 if ref is not None and not ref.row_abs and not ref.col_abs:
                     return sheet, RefValue(sheet, ref.row, ref.col, ref.row, ref.col)
@@ -455,6 +458,10 @@ class DocumentBook:
             raise SMathError(f"{name} is in an earlier calculation section and not global.")
         sheet, value = got
         self._asked[name] = sheet.id
+        if value is DELETED:
+            from calcforge.calc.engine.errors import SMathError
+
+            raise SMathError(f"{name}: the cell it read was deleted (#REF!).")
         if isinstance(value, RefValue):
             value = value.value_at(0, 0) if value.single else value.to_array()
         elif not isinstance(value, Array):
@@ -505,6 +512,143 @@ class DocumentBook:
                 if row == 0 and isinstance(cell.value, str) and _ident(cell.value):
                     out.add(f"{sheet.name}.{_ident(cell.value)}")
         return out
+
+    # -- the equations' references follow the cells, as formulas do (2026-10-19) ---------------------
+    def _references_changed(self, event: tuple) -> None:
+        """What was done to the cells (Workbook.on_references), made in the
+        equations too: a sheet renamed, cells moved, inserted or deleted, a
+        defined name renamed, a column's heading retyped — Excel's way, as
+        the cells' own formulas follow (the user, 2026-10-19)."""
+        if self._loading:
+            return
+        follow = getattr(self, "_follow_" + event[0], None)
+        if follow is not None:
+            self.rewrite_equations(follow(*event[1:]))
+
+    def _follow_sheet(self, sheet: Sheet, old: str, new: str):
+        olds = {old.lower(), sheet_ident(old).lower()}
+        written = sheet_ident(new)
+
+        def follow(ident: str, call: bool, defines: bool) -> Optional[str]:
+            if call:
+                # the table as a lookup, bolts(d, "A"): only by a name an
+                # equation can call
+                return new if ident.lower() == old.lower() and _ident_ok(new) else None
+            table, dot, rest = ident.partition(".")
+            if dot and table.lower() in olds:
+                return f"{written}.{rest}"
+            return None
+        return follow
+
+    def _follow_cells(self, change: Callable):
+        wb = self.workbook
+
+        def follow(ident: str, call: bool, defines: bool) -> Optional[str]:
+            table, dot, rest = ident.partition(".")
+            if call or not dot:
+                return None
+            sheet = sheet_named(wb, table)
+            ref = parse_cell(rest) if sheet is not None else None
+            if ref is None or ref.row_abs or ref.col_abs:
+                return None
+            moved = change(ref, sheet)
+            if moved is ref:
+                return None
+            if moved is None:
+                return f"{table}.{DELETED_CELL}"
+            there = wb.sheet(moved.sheet) if moved.sheet else sheet
+            prefix = table if there is sheet or there is None else sheet_ident(there.name)
+            return f"{prefix}.{moved.a1(False)}"
+        return follow
+
+    def _follow_name(self, old, new):
+        was, now = self.written_as(old), self.written_as(new)
+        if not was or not now or was == now:
+            return None
+
+        def follow(ident: str, call: bool, defines: bool) -> Optional[str]:
+            # (an equation defining a variable of the same spelling defines
+            # its own, not the table's)
+            return now if ident.lower() == was.lower() and not defines else None
+        return follow
+
+    def _follow_heading(self, sheet: Sheet, old: str, new: str):
+        was, now = _ident(old), _ident(new)
+        if not was or not now or was == now:
+            return None
+        wb = self.workbook
+
+        def follow(ident: str, call: bool, defines: bool) -> Optional[str]:
+            table, dot, rest = ident.partition(".")
+            if call or not dot or rest != was or sheet_named(wb, table) is not sheet:
+                return None
+            # Sheet.Name is the sheet's own defined name before its column
+            if wb.names.get((rest.lower(), sheet.id)) is not None or (
+                    sheet.book is not None and wb.names.get((rest.lower(), sheet.book)) is not None):
+                return None
+            return f"{table}.{now}"
+        return follow
+
+    def rewrite_equations(self, follow) -> int:
+        """Pass every name in every equation through follow(name, called,
+        defined here) — the new name, or None to leave it — as one change
+        with the edit to the cells that caused it: the pages of the
+        equations that change join its undo step. How many equations
+        changed."""
+        if follow is None or self._sheet is None:
+            return 0
+        from calcforge.calc.engine.model import Paren, walk_rows
+        from calcforge.calc.engine.parser import lex
+
+        calc = self._calc()
+        changes = []
+        for region in list(calc.worksheet.regions):
+            editor = region.editor
+            if editor is None or region.special or editor.kind != "math":
+                continue
+            edits = []
+            for row in walk_rows(editor.root):
+                toks = lex(row)
+                for k, tok in enumerate(toks):
+                    if tok.kind != "ident":
+                        continue
+                    after = toks[k + 1] if k + 1 < len(toks) else None
+                    call = after is not None and after.kind == "box" and isinstance(after.value, Paren)
+                    defines = after is not None and after.kind == "op" and after.value == "≔"
+                    new = follow(tok.value, call, defines)
+                    if new and new != tok.value:
+                        edits.append((row, tok.start, tok.end, new))
+            if edits:
+                changes.append((region, edits))
+        if not changes:
+            return 0
+        items = getattr(calc, "items", {}) or {}
+        frames = []
+        for region, _edits in changes:
+            item = items.get(region.id)
+            frame = item.parentItem() if item is not None else None
+            if frame is not None and frame not in frames:
+                frames.append(frame)
+        for frame in frames:
+            scene = frame.scene()
+            for view in (scene.views() if scene is not None else ()):
+                also = getattr(view, "snapshot_also", None)
+                if also is not None and also(frames):
+                    break
+        for region, edits in changes:
+            for row, start, end, new in sorted(edits, key=lambda e: -e[1]):
+                row.items[start:end] = list(new)
+            editor = region.editor
+            cursor_row, pos = editor.cursor.row, editor.cursor.pos
+            if pos > len(cursor_row):
+                editor.cursor = type(editor.cursor)(cursor_row, len(cursor_row))
+            item = items.get(region.id)
+            if item is not None:
+                item.relayout()
+        # calculated once the edit to the cells is over (it may still be in
+        # the middle of its own transaction)
+        self._soon("references", lambda: calc.recalculate())
+        return len(changes)
 
     # -- keeping both up to date ----------------------------------------------------------------------
     def _changed(self, keys: set) -> None:
@@ -584,6 +728,12 @@ class DocumentBook:
         sheets = {k[0] for k in changed if isinstance(k[0], int)}
         if sheets:
             self.equations_may_have_changed(sheets)
+
+
+#: An equation's reference to a cell that was deleted, as Excel's #REF!:
+#: Loads.#REF (the user's answer, 2026-10-19).
+DELETED_CELL = "#REF"
+DELETED = object()
 
 
 def sheet_ident(name: str) -> str:

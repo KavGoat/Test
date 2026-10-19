@@ -825,6 +825,95 @@ def rename_sheet_in(text: str, old: str, new: str) -> str:
     return join(tokens)
 
 
+def rename_name_in(text: str, old: str, new: str, uses: Callable[[Optional[str]], bool]) -> str:
+    """The defined name *old* written *new* wherever the formula means it:
+    *uses(sheet as written or None)* says whether ``old`` (bare, or
+    ``Sheet!old``) is the name being renamed where the formula is (a sheet's
+    own name of the same spelling is another name)."""
+    lower = old.lower()
+    tokens = tokenize(text)
+    changed = False
+    for t in tokens:
+        if t.kind in ("name", "func") and "!" not in t.text:
+            if t.text.lower() == lower and uses(None):
+                t.text = new
+                changed = True
+        elif t.kind == "name":
+            sheet, _, rest = t.text.partition("!")
+            if rest.lower() == lower and uses(sheet):
+                t.text = sheet + "!" + new
+                changed = True
+    return join(tokens) if changed else text
+
+
+def _escape_heading(heading: str) -> str:
+    """A heading written inside a structured reference's brackets: [ ] # '
+    are escaped with ', as Excel writes them."""
+    return re.sub(r"([\[\]#'])", r"'\1", heading)
+
+
+def rename_column_in(text: str, table: str, in_table: bool, old: str, new: str) -> str:
+    """Structured references to the column headed *old* of *table* name the
+    new heading (Loads[Load] -> Loads[Load_kN], [@Load] in the table itself
+    -> [@Load_kN]), as Excel's do when a table's heading is retyped."""
+    lower = old.lower()
+    tokens = tokenize(text)
+    changed = False
+    for t in tokens:
+        if t.kind != "struct":
+            continue
+        spec = t.ref
+        if spec.table is None and not in_table:
+            continue
+        if spec.table is not None and spec.table.lower() != table.lower():
+            continue
+        if lower not in {(spec.first or "").lower(), (spec.last or "").lower()}:
+            continue
+        start = t.text.index("[")
+        head, body = t.text[:start], t.text[start:]
+        t.text = head + _renamed_columns(body, lower, _escape_heading(new))
+        t.ref = replace(spec, first=new if (spec.first or "").lower() == lower else spec.first,
+                        last=new if (spec.last or "").lower() == lower else spec.last)
+        changed = True
+    return join(tokens) if changed else text
+
+
+def _renamed_columns(body: str, lower: str, new: str) -> str:
+    """The brackets of a structured reference with each innermost [...]
+    naming the column *lower* (any case, ' escapes undone) naming *new*."""
+    out, k, n = [], 0, len(body)
+    while k < n:
+        ch = body[k]
+        if ch == "'" and k + 1 < n:
+            out.append(body[k:k + 2])
+            k += 2
+            continue
+        if ch == "[":
+            # an innermost bracket: no [ before its ]
+            j, plain = k + 1, True
+            while j < n:
+                if body[j] == "'" and j + 1 < n:
+                    j += 2
+                    continue
+                if body[j] == "[":
+                    plain = False
+                    break
+                if body[j] == "]":
+                    break
+                j += 1
+            if plain and j < n:
+                inner = body[k + 1:j]
+                at = inner.startswith("@")
+                name = re.sub(r"'(.)", r"\1", inner[1:] if at else inner).strip()
+                if name.lower() == lower:
+                    out.append("[" + ("@" if at else "") + new + "]")
+                    k = j + 1
+                    continue
+        out.append(ch)
+        k += 1
+    return "".join(out)
+
+
 def moved_formula(text: str, drow: int, dcol: int) -> str:
     """The formula copied by (drow, dcol): relative references follow."""
     if drow == 0 and dcol == 0:

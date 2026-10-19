@@ -391,6 +391,16 @@ class Workbook:
         # ranges kept outside the cells (a chart's series): they follow renames
         # and moved rows and columns like formulas (formula_texts / set_formula_texts)
         self.outside_formulas: list = []
+        # told how references change with what is done to the cells, so that
+        # what reads them from outside the cells — the document's equations
+        # (sheet/docbook.py) — follows as the formulas here do, Excel's way:
+        #   ("sheet", sheet, old name, new name)        a sheet or table renamed
+        #   ("cells", change)                           cells moved, inserted or
+        #       deleted: change(CellRef, sheet) is the cell's new reference,
+        #       the same one when it stays, None when it was deleted (#REF!)
+        #   ("name", old DefinedName, new DefinedName)  a defined name renamed
+        #   ("heading", sheet, old text, new text)      a column's heading retyped
+        self.on_references: Optional[Callable[[tuple], None]] = None
         # formulas naming a sheet or table that isn't there (yet): learnt again
         # when one comes, so they follow it from then on
         self._unresolved: set = set()
@@ -510,6 +520,59 @@ class Workbook:
 
             apply(new)
             self._record(lambda: apply(old), lambda: apply(new))
+            self._tell_references(("sheet", sheet, old, new))
+
+    def _tell_references(self, event: tuple) -> None:
+        if self.on_references is not None:
+            self.on_references(event)
+
+    def rename_name(self, dn: "DefinedName", new: str) -> None:
+        """A defined name called something else: every formula that uses it
+        uses the new name, as Excel's Name Manager does (and the equations,
+        on_references). *dn* keeps its scope, what it refers to and its
+        comment; use define_name afterwards to change those."""
+        new = new.strip()
+        if new == dn.name:
+            return
+        problem = defined_name_problem(new)
+        if problem:
+            raise ValueError(problem)
+        clash = self.names.get((new.lower(), dn.key[1]))
+        if clash is not None and clash is not dn:
+            raise ValueError(f"There is already a name {new} with that scope.")
+        home = self.sheet_by_id(dn.sheet) if dn.sheet else None
+        fresh = replace(dn, name=new)
+
+        def uses(reader: Optional["Sheet"], written_sheet: Optional[str]) -> bool:
+            """Whether a name written in a formula on *reader* (Sheet!Name:
+            *written_sheet*) is *dn*."""
+            if written_sheet is not None:
+                from .refs import unquote_sheet
+
+                there = self.sheet(unquote_sheet(written_sheet))
+                return there is not None and self.find_name(dn.name, there) is dn
+            return self.find_name(dn.name, reader) is dn
+
+        with self.transaction("Rename name"):
+            for other in self.sheets:
+                for (row, col), cell in list(other.cells.items()):
+                    if cell.is_formula and dn.name.lower() in cell.input.lower():
+                        text = F.rename_name_in(cell.input[1:], dn.name, new,
+                                                lambda written, o=other: uses(o, written))
+                        if "=" + text != cell.input:
+                            self._set_state(other, row, col, ("=" + text, cell.style, cell.comment))
+            for key, other_dn in list(self.names.items()):
+                if other_dn is dn or dn.name.lower() not in other_dn.refers_to.lower():
+                    continue
+                reader = self.sheet_by_id(other_dn.sheet) if other_dn.sheet else \
+                    (self.sheet_by_id(other_dn.home) if other_dn.home is not None else home)
+                text = F.rename_name_in(other_dn.refers_to, dn.name, new,
+                                        lambda written, r=reader: uses(r, written))
+                if text != other_dn.refers_to:
+                    self._set_name(key, replace(other_dn, refers_to=text))
+            self._set_name(dn.key, None)
+            self._set_name(fresh.key, fresh)
+            self._tell_references(("name", dn, fresh))
 
     #: told when sheets or defined names come, go or are renamed (the
     #: document's equations read them by name)
@@ -763,7 +826,50 @@ class Workbook:
                 if fmt:
                     style = self.styles.add(replace(self.styles.get(style), number_format=fmt))
         with self.transaction("Typing"):
+            before = self._heading_text(sheet, row, col)
             self._set_state(sheet, row, col, (text, style, comment))
+            if before:
+                self._heading_retyped(sheet, col, before, self._heading_text(sheet, row, col))
+
+    # -- a column's heading retyped: what reads the column by it follows ----------------
+    def _heading_text(self, sheet: Sheet, row: int, col: int) -> str:
+        """The heading of a column as structured references and the
+        equations match it: the first row's text ("" for anything else)."""
+        if row != 0:
+            return ""
+        cell = sheet.cells.get((0, col))
+        text = cell.input if cell is not None else ""
+        if not text or text.startswith("="):
+            return ""
+        if text.startswith("'"):
+            return text[1:].strip()
+        value, _fmt = read_value(text, self.day_first)
+        return text.strip() if isinstance(value, str) else ""
+
+    def _heading_retyped(self, sheet: Sheet, col: int, old: str, new: str) -> None:
+        """Excel's table: Loads[Load] becomes Loads[Load_kN] when the heading
+        is retyped — and an equation's Loads.Load, Loads.Load_kN. Not when
+        the old heading heads another column too (which one was meant?), nor
+        when the heading is cleared (that is a missing column, as in Excel
+        a deleted one)."""
+        if not new or new == old:
+            return
+        lower = old.lower()
+        if any(c != col and self._heading_text(sheet, 0, c).lower() == lower
+               for _r, c in sheet.positions_in(0, 0, 0, MAX_COLS - 1)):
+            return
+        for other in self.sheets:
+            for (row, c), cell in list(other.cells.items()):
+                if cell.is_formula and "[" in cell.input and lower in cell.input.lower():
+                    text = F.rename_column_in(cell.input[1:], sheet.name, other is sheet, old, new)
+                    if "=" + text != cell.input:
+                        self._set_state(other, row, c, ("=" + text, cell.style, cell.comment))
+        for key, dn in list(self.names.items()):
+            if "[" in dn.refers_to and lower in dn.refers_to.lower():
+                text = F.rename_column_in(dn.refers_to, sheet.name, False, old, new)
+                if text != dn.refers_to:
+                    self._set_name(key, replace(dn, refers_to=text))
+        self._tell_references(("heading", sheet, old, new))
 
     def reread_units(self) -> None:
         """Cells typed with a custom unit read again (its equation calculated)."""
@@ -1506,6 +1612,7 @@ class Workbook:
                     moved.append(t)
             if moved != texts:
                 holder.set_formula_texts(moved)
+        self._tell_references(("cells", change))
 
     def _clear_spills(self, sheet: Sheet) -> None:
         """Before cells move about: every spill on the sheet is taken back and
@@ -2008,23 +2115,41 @@ class Workbook:
                    dst: Sheet, row: int, col: int) -> None:
         """Cut and paste, or drag the selection's border: the cells move and
         every formula that read them reads them where they are now; the
-        moved formulas themselves are unchanged."""
+        moved formulas themselves are unchanged. A formula that read a cell
+        the block lands on gives #REF!, as in Excel: that cell was replaced."""
         drow, dcol = row - top, col - left
         if dst is sheet and drow == 0 and dcol == 0:
             return
         block = {}
         for r, c in list(sheet.positions_in(top, left, bottom, right)):
             block[(r, c)] = sheet.cells[(r, c)].state()
+        d_top, d_left = row, col
+        d_bottom, d_right = row + bottom - top, col + right - left
+
+        def in_source(r, c):
+            return top <= r <= bottom and left <= c <= right
+
+        def landed_on(r, c):
+            return d_top <= r <= d_bottom and d_left <= c <= d_right
+
         with self.transaction("Move"):
             def change(ref, s):
-                if s is not sheet:
+                if s is not sheet and s is not dst:
                     return ref
                 if isinstance(ref, CellRef):
-                    if top <= ref.row <= bottom and left <= ref.col <= right:
+                    if s is sheet and in_source(ref.row, ref.col):
                         moved = replace(ref, row=ref.row + drow, col=ref.col + dcol)
                         return replace(moved, sheet=dst.name) if dst is not sheet else moved
+                    if s is dst and landed_on(ref.row, ref.col):
+                        return None
                     return ref
                 if ref.whole:
+                    return ref
+                if s is dst and not (s is sheet and in_source(ref.top, ref.left)
+                                     and in_source(ref.bottom, ref.right)) \
+                        and landed_on(ref.top, ref.left) and landed_on(ref.bottom, ref.right):
+                    return None
+                if s is not sheet:
                     return ref
                 if top <= ref.top and ref.bottom <= bottom and left <= ref.left and ref.right <= right:
                     moved = RangeRef(replace(ref.first, row=ref.first.row + drow, col=ref.first.col + dcol),
