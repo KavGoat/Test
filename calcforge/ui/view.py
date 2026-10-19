@@ -29,6 +29,7 @@ from ..items.measure import (CALIBRATE, DIMENSION, CountItem,
                              MeasureItem)
 from ..items.media import ImageItem
 from ..items.shapes import PolyItem, RectItem
+from ..items.checkbox import CheckboxItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
 from . import preferences
 from .commands import PageEditCommand, on_the_canvas
@@ -207,7 +208,7 @@ def subject_for(tool) -> str:
 
 
 #: The tools whose markups are typed into the moment they are put down.
-WORD_TOOLS = frozenset({"text", "callout", "cloud_callout", "typewriter"})
+WORD_TOOLS = frozenset({"text", "callout", "cloud_callout", "typewriter", "checkbox"})
 
 
 #: The tools that ask for a page scale when the page has none: Revu's
@@ -2226,6 +2227,10 @@ class PageView(QGraphicsView):
             grabbed = (item.handle_at(item.mapFromScene(scene_pos))
                        if self.editable(item) else None)
             rect = self.editing_rect()
+            if grabbed is None and isinstance(item, CheckboxItem) \
+                    and self.tick_at(item, scene_pos):
+                event.accept()                # a box ticked while typing
+                return
             if grabbed is None and rect is not None and rect.contains(scene_pos):
                 super().mousePressEvent(event)
                 return
@@ -2462,6 +2467,15 @@ class PageView(QGraphicsView):
         self.selectionChanged.emit()
 
         if not self.editable(item):
+            self._mode = "idle"
+            event.accept()
+            return
+
+        if isinstance(item, CheckboxItem) and not (
+                event.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier)) \
+                and self.tick_at(item, scene_pos):
+            # A click on a box ticks it (one undo step); anywhere else on
+            # the Checkbox picks it up, as on any markup.
             self._mode = "idle"
             event.accept()
             return
@@ -3288,6 +3302,10 @@ class PageView(QGraphicsView):
         if editing is not None and editing.scene() is not None:
             if editing.handle_at(editing.mapFromScene(scene_pos)) is None:
                 rect = self.editing_rect()
+                if isinstance(editing, CheckboxItem) and \
+                        editing.box_at(editing.mapFromScene(scene_pos)) is not None:
+                    self.setCursor(Qt.PointingHandCursor)
+                    return
                 if rect is not None and rect.contains(scene_pos):
                     self.setCursor(Qt.IBeamCursor)
                     return
@@ -3319,6 +3337,9 @@ class PageView(QGraphicsView):
             self.setCursor(edge or (excel_cursor("cell") if run is not None else Qt.ArrowCursor))
         elif not self.editable(item):
             self.setCursor(Qt.ForbiddenCursor)     # locked, or part of the page
+        elif isinstance(item, CheckboxItem) and \
+                item.box_at(item.mapFromScene(scene_pos)) is not None:
+            self.setCursor(Qt.PointingHandCursor)  # a box: a click ticks it
         else:
             self.setCursor(Qt.SizeAllCursor)
 
@@ -3530,6 +3551,17 @@ class PageView(QGraphicsView):
             return
 
         if self._mode == "draw_drag" and self._is_a_click(scene_pos) \
+                and isinstance(self._draft, CheckboxItem):
+            # A Checkbox is put down by a click as well as dragged: three
+            # options at the size that holds them, ready to type over —
+            # and widening to hold what is typed.
+            self._draft.auto_width = True
+            self._mode = "idle"
+            self.finish_draft(scene_pos)
+            event.accept()
+            return
+
+        if self._mode == "draw_drag" and self._is_a_click(scene_pos) \
                 and isinstance(self._draft, TextItem):
             # Revu's text box is dragged out: a click alone places nothing,
             # and the tool stays in hand for the drag (the user, 2026-10-16).
@@ -3649,6 +3681,10 @@ class PageView(QGraphicsView):
                 self.window.go_to_bookmark(*row)
                 event.accept()
                 return
+        if isinstance(item, CheckboxItem) and self.editable(item) \
+                and self.tick_at(item, scene_pos):
+            event.accept()                    # a second click on a box
+            return
         if isinstance(item, _TextBase) and not item.locked:
             self.begin_item_edit(item)
             self.place_caret(item, scene_pos)
@@ -4155,6 +4191,8 @@ class PageView(QGraphicsView):
             self.open_label_editor(draft)
         elif isinstance(draft, (TextItem, CalloutItem)):
             self.begin_item_edit(draft, placed=True)
+            if isinstance(draft, CheckboxItem):
+                draft.select_all_words()      # typed over: the options are yours
         self.finish_tool()
         # Last word, so returning to the select tool does not wipe the notice.
         if note_scale:
@@ -4164,6 +4202,8 @@ class PageView(QGraphicsView):
     def _default_size(item: MarkupItem) -> tuple[float, float]:
         if isinstance(item, StampItem):
             return 190.0, 58.0
+        if isinstance(item, CheckboxItem):
+            return item.natural_size()        # every option on a line of its own
         if isinstance(item, (TextItem, CalloutItem)):
             return 170.0, 44.0
         if isinstance(item, ImageItem):
@@ -4610,6 +4650,28 @@ class PageView(QGraphicsView):
                 or self._label_editor is not None
                 or self.calc.editing())
 
+
+    def tick_at(self, item, scene_pos: QPointF) -> bool:
+        """Tick or untick the Checkbox box under *scene_pos*, as one undo
+        step. False when there is no box there, or the Checkbox (or the
+        group it is in) is locked."""
+        if not isinstance(item, CheckboxItem) or not self.editable(item):
+            return False
+        if any(member.locked for member in self.group_of(item)):
+            return False
+        index = item.box_at(item.mapFromScene(scene_pos))
+        if index is None:
+            return False
+        typing = self._editing_item is item
+        if not typing:
+            self.begin_snapshot(self.involved_frames(item))
+        item.toggle(index)
+        if not typing:
+            words = item.options()[index].strip() or f"option {index + 1}"
+            self.commit_snapshot(("Tick " if item.is_checked(index) else "Untick ")
+                                 + words)
+        self.selectionChanged.emit()
+        return True
 
     def begin_item_edit(self, item, placed: bool = False) -> None:
         """Open *item*'s words for typing. *placed*: it was put down a moment

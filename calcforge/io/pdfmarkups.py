@@ -275,6 +275,10 @@ def _one(source, annotation: dict, kind: str, place, scale: float,
     common = _common(source, annotation)
 
     intent = str(source.resolve(annotation.get("IT")) or "")
+    if kind == "Stamp" and annotation.get("CalcForgeCheckbox") is not None:
+        made = _checkbox(source, annotation, box, scale)
+        if made is not None:
+            return [made]
     if kind in ("Square", "Circle"):
         inside = _inset(source, annotation, box, scale,
                         float(style.get("width", 0.0)) / max(scale, 1e-6))
@@ -737,6 +741,64 @@ def _free_text(source, annotation: dict, box: list, style: dict, common: dict,
         # the box, the way every call-out here works out its hinge.
         from .btx import leader_entry
         payload["leaders"] = [leader_entry(leader, box, (box[0], box[1]))]
+    return payload
+
+
+def _checkbox(source, annotation: dict, box: list, scale: float):
+    """A Checkbox CalcForge wrote as a stamp, read back as the Checkbox.
+
+    Its options, ticks, look and margins are in CalcForge's own key
+    (io/annotate.py); only where it is and how big is taken from the
+    annotation's Rect, which another reader may have changed by moving or
+    resizing it there — its contents it could not change."""
+    import json
+
+    kept = source.resolve(annotation.get("CalcForgeCheckbox"))
+    if not isinstance(kept, dict):
+        return None
+    try:
+        payload = json.loads(_readable(source.resolve(kept.get("Markup"))))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("type") != "checkbox":
+        return None
+    written = [value * scale for value in _numbers(source, kept.get("Written"))]
+    shape = [value * scale for value in _numbers(source, kept.get("Box"))]
+    origin = [value * scale for value in _numbers(source, kept.get("Origin"))]
+    if len(written) != 4 or len(shape) != 4 or len(origin) != 2:
+        return None
+    payload = dict(payload)
+    payload["uid"] = _readable(source.resolve(annotation.get("NM"))) or os.urandom(8).hex()
+    rect = payload.get("rect") or [0.0, 0.0, shape[2], shape[3]]
+    rect = [float(value) * scale for value in rect]
+    if scale != 1.0:
+        style = dict(payload.get("style") or {})
+        for key in ("font_size", "width", "padding"):
+            if isinstance(style.get(key), (int, float)):
+                style[key] = float(style[key]) * scale
+        if style.get("text_margins"):
+            style["text_margins"] = [float(v) * scale for v in style["text_margins"]]
+        payload["style"] = style
+    turned = abs(float(payload.get("rotation", 0.0) or 0.0)) > 0.01
+    moved = any(abs(a - b) > 0.01 for a, b in zip(box, written))
+    if moved and not turned and written[2] > 0 and written[3] > 0:
+        # moved or resized elsewhere: the box keeps its place inside the
+        # Rect, in proportion, and the words wrap to its new width
+        across, down = box[2] / written[2], box[3] / written[3]
+        left = box[0] + (shape[0] - written[0]) * across
+        top = box[1] + (shape[1] - written[1]) * down
+        width, height = shape[2] * across, shape[3] * down
+        payload["x"], payload["y"] = left - rect[0], top - rect[1]
+        payload["rect"] = [rect[0], rect[1], max(width, 8.0), max(height, 8.0)]
+        payload["transform"] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+    else:
+        # where it was written, less any move of its Rect as a whole
+        payload["x"] = origin[0] + (box[0] - written[0])
+        payload["y"] = origin[1] + (box[1] - written[1])
+        payload["rect"] = rect
+    author = _readable(source.resolve(annotation.get("T")))
+    if author.strip():
+        payload["author"] = author.strip()
     return payload
 
 

@@ -42,6 +42,8 @@ CONTENT_KEYS = frozenset({
     # which of Revu's two kinds a rectangle or ellipse is — plain or Sketch
     # to Scale — comes from the tool that draws it, never from a look
     "to_scale",
+    # which of a Checkbox's options are ticked: what it says, not its look
+    "checked",
 })
 
 
@@ -191,7 +193,7 @@ def _kept_from(item) -> float:
 # Only a single markup can be kept "as properties": an image or a snapshot has
 # nothing worth drawing again without its contents, and a group is several
 # things at once.
-PROPERTIES_TYPES = {"rect", "poly", "text", "callout", "note", "stamp",
+PROPERTIES_TYPES = {"rect", "poly", "text", "callout", "checkbox", "note", "stamp",
                     "measure", "count"}
 
 

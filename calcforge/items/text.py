@@ -1356,6 +1356,10 @@ class TextItem(_TextBase):
     TYPE = "text"
     NAME = "Text box"
 
+    def line_height_factor(self) -> float:
+        """The line spacing, as a multiple of single spacing."""
+        return getattr(self.style, "line_spacing", 1.0) or 1.0
+
     def paint_content(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
         self.paint_leader(painter)

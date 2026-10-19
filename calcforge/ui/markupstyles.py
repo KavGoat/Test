@@ -153,7 +153,7 @@ def preview_pixmap(payload: dict, size: QSize = ICON_SIZE, ratio: float = 2.0) -
     painter.setBrush(QColor("#ffffff"))
     painter.drawRoundedRect(QRectF(1, 1, width - 2, height - 2), 3 * ratio, 3 * ratio)
     example = dict(payload)
-    if example.get("type") in ("rect", "callout", "text", "note"):
+    if example.get("type") in ("rect", "callout", "text", "note", "checkbox"):
         example.setdefault("rect", list(_EXAMPLE_BOX))
     elif example.get("type") in ("poly", "measure"):
         closed = str(example.get("kind", "")) in _CLOSED_KINDS
