@@ -30,7 +30,7 @@ import time
 import weakref
 from collections import OrderedDict
 
-from PySide6.QtCore import QRectF, QTimer
+from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QImage, QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem
 
@@ -187,6 +187,17 @@ def align_with_squares(painter: QPainter, item) -> None:
     ratio = inverse * painter.deviceTransform()
     painter.setWorldTransform(world * QTransform.fromTranslate(dx / (ratio.m11() or 1.0),
                                                               dy / (ratio.m22() or 1.0)))
+
+
+def _square_picture(image: QImage) -> QPixmap:
+    """A square's drawing as a picture that keeps its transparency.
+
+    Qt drops the alpha channel of a picture whose pixels all happen to be
+    opaque — a square wholly inside a photo — and the square then had no
+    clear left in it: when the photo was made smaller, the part of the square
+    it left was cleared to opaque black, and that stood behind the photo as a
+    dark box until the page was drawn again (the user, 2026-10-19)."""
+    return QPixmap.fromImage(image, Qt.NoOpaqueDetection)
 
 
 class _Square:
@@ -760,7 +771,8 @@ class MarkupLayer:
         part = QRectF(area.left() + left / step, area.top() + top / step,
                       (right - left) / step, (bottom - top) / step)
         if square.pixmap is not None:
-            image = square.pixmap.toImage()
+            # with its transparency: a part cleared below must come out clear
+            image = square.pixmap.toImage().convertToFormat(QImage.Format_ARGB32_Premultiplied)
         else:
             image = QImage(TILE, TILE, QImage.Format_ARGB32_Premultiplied)
             image.fill(0)
@@ -782,7 +794,7 @@ class MarkupLayer:
         finally:
             _drawing[0] = _into_square[0] = False
             painter.end()
-        square.pixmap = QPixmap.fromImage(image)
+        square.pixmap = _square_picture(image)
         square.redo = square.redo or pdftiles.TILES.short != before
 
     def _draw(self, step: float, col: int, row: int, held: bool) -> _Square:
@@ -812,7 +824,7 @@ class MarkupLayer:
                 _drawing[0] = _into_square[0] = False
                 painter.end()
             short = pdftiles.TILES.short != before
-            pixmap = QPixmap.fromImage(image)
+            pixmap = _square_picture(image)
         square = _Square(pixmap, redo=short)
         self.tiles.setdefault(step, {})[(col, row)] = square
         _remember(self, (step, col, row), pixmap)

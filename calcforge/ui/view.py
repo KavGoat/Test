@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QApplication, QGraphicsProxyWidget,
 
 from ..core.document import MM_TO_PT
 from ..items.calc import CalcBlockItem, CalcItem, CalcTextItem
-from ..items.base import (HANDLE_SCREEN_PX, HANDLE_SIZE,
+from ..items.base import (CORNER_HANDLES, HANDLE_SCREEN_PX, HANDLE_SIZE,
                           MarkupItem, build_item, cursor_for_handle, rename_groups)
 from ..items.contents import ContentsItem
 from .scene import DocumentScene, PageFrame, detach
@@ -222,6 +222,11 @@ SCALE_PROMPT_TOOLS = frozenset({
     # Revu's Sketch to Scale shapes, drawn to a real size (the user,
     # 2026-10-16); the plain Rectangle and Ellipse never ask
     "sketch_rect", "sketch_ellipse"})
+
+
+#: The handles that resize a picture or a snapshot: its box's corners and
+#: edges and its scale box's corners (not its rotation handle).
+_PICTURE_RESIZE_HANDLES = CORNER_HANDLES + ("scale_nw", "scale_ne", "scale_se", "scale_sw")
 
 
 class _SizeEdit(QLineEdit):
@@ -2747,10 +2752,18 @@ class PageView(QGraphicsView):
                 # changes what the drag is doing, which is not something
                 # anybody asks for.
                 keep_ratio = self._handle_shift
-            if getattr(self._handle_item, "keep_aspect", False):
+            if getattr(self._handle_item, "keep_aspect", False) \
+                    and self._handle_key in _PICTURE_RESIZE_HANDLES:
                 # Images and snapshots protect their proportions by default;
-                # Shift is the deliberate exception that releases the lock.
-                keep_ratio = not keep_ratio
+                # Shift is the deliberate exception that releases the lock
+                # (the user, 2026-10-19). A scale-box corner is already in
+                # proportion unless Shift is held, so it is told Shift as it
+                # is; only the picture's own corners turn it round. An edge
+                # stretches the one way, as in Revu.
+                if not self._handle_key.startswith("scale_"):
+                    keep_ratio = not keep_ratio
+                self.statusMessage.emit(self._picture_resize_hint(
+                    self._handle_key, bool(event.modifiers() & Qt.ShiftModifier)))
             self._handle_item.drag_handle(self._handle_key, local, keep_ratio)
             if isinstance(self._handle_item, MeasureItem):
                 self._handle_item.refresh(page=self.page_of(self._handle_item))
@@ -4783,6 +4796,16 @@ class PageView(QGraphicsView):
         if key == "lbl" and isinstance(item, MeasureItem) and item.is_dimensioned():
             return bool(event.modifiers() & Qt.ShiftModifier)
         return None
+
+    @staticmethod
+    def _picture_resize_hint(key: str, shift: bool) -> str:
+        """What the status bar says while a picture or snapshot is resized."""
+        corner = key.startswith("scale_") or len(key) == 2
+        if not corner:
+            return "Resize: the edge stretches one way · a corner keeps the proportions"
+        if shift:
+            return "Free resize · let go of Shift to keep the proportions"
+        return "Resize in proportion · Shift: free resize"
 
     _opened_block = None
     _moved_yet = False
