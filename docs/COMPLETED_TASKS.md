@@ -3,6 +3,16 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-18/19 — Revu's Properties per markup, line styles and hatches; Windows fixes; the crash and leaks under the test runs (pushed at f1843e7)
+
+- Full test runs passed at 24d9d61, e01d705 and f1843e7 (`-n 3`, every-command tests included); 14/14 planted bugs caught each time.
+- Windows (2026-10-18): the title bar's minimise, maximise and close answer and act; panel edges go blue on hover and hide in one click; buttons with a menu leave room for their arrow; zooming leaves nothing at the page edges. No zoom keys by default — the wheel zooms (the user's answer); Zoom In/Out stay bindable.
+- Properties toolbar and panel per markup kind, as the user's Revu shots (docs/qa/revu_shots/propbar/): line-end colour; ends only where a markup has ends; end sizes as Auto/%; Sketch to Scale Units, Caption, Totals and cut-out; Note icon; picture lists with ticks; Highlight multiplies only the inside; Show Segment Values, Show Caption + Edit, Show Centroid.
+- Revu's line styles (Dashed 1–6 and nine complex styles, drawn, printed and written to the PDF) and hatches first, every older style kept.
+- Undo: a step that changed only a markup's Modified time is no step (a box opened and closed untouched used the next Ctrl+Z up when a second ticked over).
+- Crash: a throwaway line-end list on each theme change and Set Scale's unplaced boxes were Python-owned windows freed at random — a segmentation fault while the window list was read. Answered dialogs (Set Scale, Page Setup, Document Properties, Flatten, Colour Processing, About) are let go with their document; the every-command harness delivers deferred deletes between jobs.
+- Waiting on the user: a retest on Windows of the caption buttons, panel edges, arrow overlap and zoom edges.
+
 ## 2026-10-17 (later) — Print as the user's Revu photo; the Markups List filter dims the page (pushed at e2f4212)
 
 - Full test runs passed at 7ae6cd0 and e2f4212; 14/14 planted bugs caught.
