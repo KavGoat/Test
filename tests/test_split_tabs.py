@@ -178,10 +178,14 @@ def test_dragging_a_views_last_tab_across_ends_the_split_without_copies(window, 
     left, right = _split(window)
     # b.pdf is in both views: the right view's only tab, dragged onto the left
     assert window._active_pane is right
+    document = window.document
     _drag_tab(right.tabs, 0, left.tabs, left.tabs.rect().center())
     assert not window.is_split and not window.act_split_view.isChecked()
-    assert _names(window, window._active_pane) == ["a.pdf", "b.pdf"]
-    assert window.document.path.endswith("b.pdf")
+    # the tab dragged stays a tab of its own, not merged into the other tab
+    # of b.pdf (the user, 2026-10-19): two views of the one document, no copy
+    assert _names(window, window._active_pane) == ["a.pdf", "b.pdf", "b.pdf"]
+    assert window.document is document
+    assert [window._state_for_tab(i)["document"] for i in (1, 2)] == [document, document]
     assert window.isWindow()
 
 
