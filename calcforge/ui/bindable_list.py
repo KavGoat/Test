@@ -69,6 +69,8 @@ ALIASES: dict[str, str] = {
     "properties.select_its_equations": "canvas.select_its_equations",
     "properties.format_cells": "sheet.format_cells",
     "cell.properties": "canvas.properties",
+    # Equation ▸ Edit Equation is Edit ▸ Edit Selected (F2) for an equation
+    "canvas.equation.edit_equation": "command.edit_selected",
     "properties.conditional_formatting": "canvas.equation.conditional_formatting",
     "properties.remove_block_keep_equations": "canvas.remove_block_keep_equations",
     "properties.bold": "command.bold",

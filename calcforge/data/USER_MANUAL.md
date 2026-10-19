@@ -348,7 +348,12 @@ measurement extras too: cut-outs, Units, Caption and Totals.
   **Show Hidden** brings every hidden one back.
 - **Flatten** makes the markup part of the page drawing; it can then no longer be
   moved. **Unflatten** (`Ctrl+Shift+U`) brings flattened markups back when they
-  were flattened with recovery allowed (see *Files* below).
+  were flattened with recovery allowed (see *Files* below). Equations,
+  Calculation text, calculation blocks, tables and charts are never hidden or
+  flattened, so neither is offered for them.
+- **Edit ▸ Edit Selected** (`F2`) opens the one selected text box, callout,
+  Calculation text, equation or table for typing, as a double-click does (a
+  table at A1). In an open table `F2` edits the cell, as in Excel.
 - **Format Painter** (`Ctrl+Shift+C`) — takes the selected markup's look; click
   another markup (or drag over several) to paint it on. It stays armed until
   `Esc`.
@@ -365,7 +370,10 @@ markup's right-click menu.
 ### Properties toolbar and panel
 
 The **Properties toolbar** reads left to right as Revu's, showing only what
-applies to what is selected (or to the tool in hand):
+applies to what is selected (or to the tool in hand). For selected equations (or
+the one being typed in) it shows their font size, colour and **Style ▾** (bold,
+italic, underline): one undo step for all of them; an equation's font family is
+SMath's own and is not offered.
 
 - **Type ▾** — the markup's kind; its menu holds the Subject, how many markups are
   selected, the dash spacing, the hatch's colour, scale and opacity, and **Set as
@@ -685,8 +693,9 @@ bookmarks; saved, the bookmarks become the PDF's outline.
 
 ### Colour Processing
 
-**Document ▸ Colour Processing…** (also a page's right-click menu, and **Change
-Colours** on a snapshot or image) changes the colours of the page's own drawing —
+**Document ▸ Colour Processing…** (also a page's right-click menu, and
+**Colour Processing…** on a snapshot's or an image's) changes the colours of the
+page's own drawing —
 never the markups. **Process Type**: **Modify Colours** (one exact colour on the
 current page to another; it lists only the colours used there), **Colourise**,
 **Greyscale**, **Black and White**, **Luminosity, Saturation, and Hue** and **Mask
@@ -884,7 +893,8 @@ and lists any difference.
 Words among the equations, on their grid: `"` in Calc mode (or **Calculation ▸
 Calc Text**, or a lone word and a space). `Enter` starts a new line;
 `Shift+Enter` leaves it. Calculation text takes fields too (right-click ▸ Insert
-Field), including **Variable**, which shows an equation's current value.
+Field), including **Variable**, which shows an equation's current value. Like an
+equation it is never flattened or hidden.
 
 ### Calculation blocks
 
@@ -942,7 +952,8 @@ Right-click an equation:
   **Trailing Zeros**.
 - **Significant Figures** — Decimal Places counts significant figures instead.
 - **Global** (above).
-- **Equation ▸** Display Input Data, Go to Definition, Show Description, Disable
+- **Equation ▸** **Edit Equation** (`F2`, puts the cursor in it), Display Input
+  Data, Go to Definition, Show Description, Disable
   Evaluation, Ignore Units, Optimization (Symbolic, Numeric, None), Exponential
   Threshold (0–15), Fractions (Decimal, Fraction, Auto, Default, Use Mixed
   Numbers), Rounding (Half to Even, Away from Zero), Font size, **Colour…**,
@@ -1344,7 +1355,10 @@ neither is `#NAME?`.
   quantity keeps its unit; a General cell takes the equations' default places)
   and **Global**. Each is one undo step and is saved with the document; the
   formula bar still shows what was typed. **Properties**, at the end of the menu,
-  opens the Properties panel.
+  opens the Properties panel. **Format Cells ▸ Number** has **Significant
+  Figures** too. Excel has no significant figures, so a workbook exported to
+  .xlsx keeps the decimal places only. Cells have no Trailing Zeros entry:
+  Excel's fixed places always show them.
 - **The Properties panel's Cells section**, while a table or sheet is open:
   Selection, Number Format, Decimal Places, Significant Figures, Unit, Font, Size,
   Colour, Fill, Horizontal and Vertical alignment, Bold, Italic, Underline, Wrap
@@ -2158,7 +2172,7 @@ command — with a key or not — is in **CalcForge ▸ Keyboard Shortcuts**, wh
 key can be changed.
 
 <!-- generated:shortcuts -->
-**196** commands have a key out of the box. Every other command can be given one in Keyboard Shortcuts.
+**197** commands have a key out of the box. Every other command can be given one in Keyboard Shortcuts.
 
 #### File
 
@@ -2183,6 +2197,7 @@ key can be changed.
 | Copy | `Ctrl+C` | Always |
 | Cut | `Ctrl+X` | Always |
 | Duplicate | `Ctrl+J` | Always |
+| Edit Selected | `F2` | Always |
 | Lock | `Ctrl+L` | Always |
 | Lock (Revu's key) | `Ctrl+Shift+L` | Always |
 | Multiply | `Ctrl+M` | Markup mode |

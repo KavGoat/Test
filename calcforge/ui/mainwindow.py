@@ -687,7 +687,7 @@ _SHORTCUT_GROUPS = {
     "preview": "File", "print": "File", "quit": "File",
     "undo": "Edit", "redo": "Edit", "cut": "Edit", "copy": "Edit",
     "paste": "Edit", "paste_in_place": "Edit", "paste_here": "Edit",
-    "duplicate": "Edit", "delete": "Edit", "select_all": "Edit",
+    "duplicate": "Edit", "delete": "Edit", "select_all": "Edit", "edit_selected": "Edit",
     "lock": "Edit", "array": "Edit", "preferences": "Edit",
     "front": "Order", "back": "Order", "forward": "Order", "backward": "Order",
     "align_left": "Order", "align_right": "Order", "align_top": "Order",
@@ -783,6 +783,44 @@ def _moves_documents(method):
         self._let_go()
         return result
     return run
+
+
+
+def stays_live(item) -> bool:
+    """Never flattened or hidden: an equation, a block, a table or chart
+    (decision 17) and Calculation text (the user, 2026-10-19)."""
+    from ..items.calc import CalcTextItem
+    return bool(getattr(item, "IS_CALC", False)) or isinstance(item, CalcTextItem)
+
+
+class EquationLook:
+    """An equation's region as the Properties toolbar's font controls see a
+    markup's style: size, colour and bold, italic, underline are the
+    region's own; what an equation has not got (a font family, Auto size,
+    strikethrough) is left alone."""
+
+    _FIELDS = {"font_size": "font_size", "text_color": "color", "bold": "bold",
+               "italic": "italic", "underline": "underline"}
+
+    def __init__(self, region):
+        object.__setattr__(self, "_region", region)
+
+    def __setattr__(self, name, value) -> None:
+        target = self._FIELDS.get(name)
+        if target == "font_size":
+            self._region.font_size = float(value)
+        elif target == "color":
+            self._region.color = value or "#000000"
+        elif target is not None:
+            setattr(self._region, target, bool(value))
+
+    def __getattr__(self, name):
+        target = EquationLook._FIELDS.get(name)
+        return getattr(self._region, target) if target else None
+
+    def set_font_style(self, which: str, on: bool) -> None:
+        if which in ("bold", "italic", "underline"):
+            setattr(self._region, which, bool(on))
 
 
 class MainWindow(QMainWindow):
@@ -1288,6 +1326,12 @@ class MainWindow(QMainWindow):
                   tip="A copy of the selection, a little down and to the right")
         self._act("delete", "Delete", self.delete_selection, "", "delete")
         self._act("select_all", "Select All", self.select_all, "Ctrl+A")
+        # F2 (the user, 2026-10-19): the picked text, equation or table opened
+        # for typing, as a double-click opens it; in an open table F2 is still
+        # Excel's Edit the cell
+        self._act("edit_selected", "Edit Selected", self.edit_selected, "F2",
+                  tip="Type into the selected text box, callout, equation, Calculation "
+                      "text or table, as a double-click does")
         # SMath (decisions 5, 6 and 18): the mode switch and the calculation
         # commands the document has whatever is going on. SMath's keys inside
         # an equation are in the shortcut manager's SMath section.
@@ -2567,7 +2611,8 @@ class MainWindow(QMainWindow):
         # changing it — grouped as on a markup's right-click menu (E16, E17)
         fill(edit_menu, (None, self.act_cut, self.act_copy, self.act_paste,
                          self.act_paste_in_place, self.act_paste_here, self.act_duplicate,
-                         self.act_offset, self.act_array, self.act_delete, None))
+                         self.act_offset, self.act_array, self.act_delete, None,
+                         self.act_edit_selected, None))
         order_menu = edit_menu.addMenu("Order")
         order_menu.setObjectName("menuOrder")
         fill(order_menu, (self.act_front, self.act_forward, self.act_backward, self.act_back))
@@ -7341,7 +7386,10 @@ class MainWindow(QMainWindow):
         items = self.panel_subjects()
         active = items[0] if items else None
         self._style_own_look = False
-        if items:
+        equations = self._bar_equations() if items else []
+        if equations:
+            supported = {FONT}      # its size, colour and B/I/U (not a markup's pen)
+        elif items:
             supported = common_capabilities(items)
         else:
             active = self._style_default_item()
@@ -7394,7 +7442,8 @@ class MainWindow(QMainWindow):
         # what the field groups say, less the parts a markup does not have:
         # a contents list's font is its own, a callout has no start
         hidden = set()
-        if isinstance(active, ContentsItem):
+        if isinstance(active, ContentsItem) or equations:
+            # (an equation is set in SMath's own maths fonts)
             hidden.add(self.font_family_combo)
         if isinstance(active, CalloutItem):
             hidden |= {self.arrow_start_combo, self.arrow_start_label_action,
@@ -7494,6 +7543,20 @@ class MainWindow(QMainWindow):
             button.blockSignals(True)
             button.setChecked(getattr(active.style, name))
             button.blockSignals(False)
+            button.setVisible(not (equations and name == "strikethrough"))
+        if equations:
+            region = active.region
+            for control, value, method in (
+                    (self.font_spin, region.font_size, "setValue"),
+                    (self.text_colour_button, region.color, "set_color")):
+                control.blockSignals(True)
+                getattr(control, method)(value)
+                control.blockSignals(False)
+            for name in ("bold", "italic", "underline"):
+                button = self.font_buttons[name]
+                button.blockSignals(True)
+                button.setChecked(bool(getattr(region, name)))
+                button.blockSignals(False)
         # the lists were set quietly: their tooltips (the shown pattern's
         # name) follow, or they would name what the last markup had
         from .propbar import hatch_tip
@@ -8483,6 +8546,15 @@ class MainWindow(QMainWindow):
         toolbar edits that remembered look instead, which is what makes a line
         type settable for them at all.
         """
+        equations = self._bar_equations()
+        if equations:
+            # an equation's own size, colour and B/I/U, as its settings have
+            # them (the user, 2026-10-19): one undo step for all picked
+            if field == FONT:
+                from . import calcmenu
+                calcmenu.change(self, equations, description,
+                                lambda region: mutate(EquationLook(region)))
+            return
         if self._edit_markup_style(lambda item: mutate(item.style)):
             return
         if self._remember_style_default(mutate):
@@ -8495,6 +8567,15 @@ class MainWindow(QMainWindow):
             return
         self._push_style(mutate, description,
                          predicate=lambda item: field in capabilities(item))
+
+    def _bar_equations(self) -> list:
+        """The equations the Properties toolbar is showing, when that is all
+        it shows (picked, or the one being typed in); else []."""
+        items = self.panel_subjects()
+        if items and all(getattr(i, "TYPE", "") == "calc" and getattr(i, "region", None)
+                         is not None and i.region.plot is None for i in items):
+            return [i for i in items if not i.locked]
+        return []
 
     def _edit_markup_style(self, mutate) -> bool:
         """With a numbered markup style picked and nothing selected, the
@@ -9964,6 +10045,35 @@ class MainWindow(QMainWindow):
         self.view.commit_snapshot("Paste")
         self.refresh_selection()
 
+    def edit_selected(self) -> None:
+        """F2: the one picked markup opened for typing, as a double-click
+        opens it — a text box, callout or Calculation text at its words, an
+        equation at its cursor, a table at A1. Nothing while something is
+        already being typed into."""
+        view = self.view
+        if view.is_editing() or view.tables.is_open():
+            return
+        items = self.selected_items()
+        if len(items) != 1:
+            if items:
+                self.status_hint.setText("Edit Selected (F2): pick one markup to type into")
+            return
+        item = items[0]
+        if not view.editable(item) or getattr(item, "group", ""):
+            self.status_hint.setText("Locked or grouped: unlock or ungroup it to edit it")
+            return
+        if getattr(item, "IS_CALC", False) and getattr(item, "region", None) is not None:
+            view.calc.focus(item)
+        elif getattr(item, "TYPE", "") == "table":
+            view.tables.open(item, (0, 0))
+        elif isinstance(item, _TextBase):
+            view.begin_item_edit(item)
+        else:
+            self.status_hint.setText("Edit Selected (F2) types into text, an equation or a "
+                                     "table")
+            return
+        view.setFocus()
+
     def duplicate_selection(self) -> None:
         from ..items.calc import with_block_members
         items = with_block_members(self.selected_items())
@@ -10787,7 +10897,7 @@ class MainWindow(QMainWindow):
         # not equations: hiding one would quietly take its values out of the
         # calculation (decision 17)
         items = [i for i in self.selected_items() if isinstance(i, MarkupItem)
-                 and not getattr(i, "IS_CALC", False)]
+                 and not stays_live(i)]
         if not items:
             return
         self.view.begin_snapshot(self.view.involved_frames(*items))
@@ -10820,7 +10930,7 @@ class MainWindow(QMainWindow):
         # Equations are already written into the page on every save
         # (decision 3); flattening one would only stop it calculating.
         items = [i for i in self.selected_items() if isinstance(i, MarkupItem)
-                 and not getattr(i, "IS_CALC", False)]
+                 and not stays_live(i)]
         if not items:
             return
         self._flatten_items(items, True)
@@ -10847,14 +10957,14 @@ class MainWindow(QMainWindow):
                 for item in page.frame.markups()
                 if not item.flattened
                 and not item.from_drawing
-                and not getattr(item, "IS_CALC", False)]
+                and not stays_live(item)]
 
     def flatten_dialog(self) -> "dialogs.FlattenDialog":
         """Revu's Flatten Markups, filled from this document; not yet shown."""
         from . import preferences
 
         selected = [i for i in self.selected_items() if isinstance(i, MarkupItem)
-                    and not getattr(i, "IS_CALC", False) and not i.flattened]
+                    and not stays_live(i) and not i.flattened]
         types = sorted({self._flatten_type(item) for _index, item in self._flattenable()},
                        key=str.lower)
         picked = self.selected_pages()
@@ -11964,8 +12074,10 @@ class MainWindow(QMainWindow):
                                lambda i=item: self.show_variable_of(i))
             menu.addSeparator()
         # equations and blocks are not drawn with a markup's pen, never
-        # hidden or flattened (decision 17): only what applies to them
+        # hidden or flattened (decision 17): only what applies to them —
+        # and Calculation text is never flattened or hidden either (2026-10-19)
         calc_like = bool(getattr(item, "IS_CALC", False))
+        live = stays_live(item)
         # -- Revu: the clipboard -------------------------------------------------
         for action in (self.act_cut, self.act_copy, self.act_paste,
                        self.act_paste_in_place, self.act_paste_here, self.act_duplicate,
@@ -11990,11 +12102,11 @@ class MainWindow(QMainWindow):
         align.setEnabled(len(self.selected_items()) > 1)
         for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
             align.addAction(getattr(self, f"act_align_{key}"))
-        if not calc_like:
+        if not live:
             menu.addAction(self.act_flatten)
             menu.addAction(self.act_recover_flattened)
         menu.addAction(self.act_lock)
-        if not calc_like:
+        if not live:
             menu.addAction(self.act_hide)
             menu.addAction(self.act_show_hidden)
         if len([i for i in self.selected_items() if isinstance(i, MarkupItem)]) > 1:
@@ -12033,7 +12145,8 @@ class MainWindow(QMainWindow):
             # becomes another
             menu.addAction("Change Colours…", lambda: self.change_multiple_colors(several))
         elif isinstance(item, SnapshotItem):
-            menu.addAction("Change Colours…", lambda: self.change_colors(item))
+            # as a picture's: one name for the one dialog (2026-10-19)
+            menu.addAction("Colour Processing…", lambda: self.change_colors(item))
         elif isinstance(item, ImageItem):
             menu.addAction("Colour Processing…", lambda: self.change_colors(item))
         menu.addSeparator()
