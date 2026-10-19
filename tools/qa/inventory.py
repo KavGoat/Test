@@ -808,13 +808,25 @@ def markup_scenarios(ident_for, sources):
             rows_from_flat(where, walk_flat(menu, where, ident, sources), sources)
     except Exception as error:  # noqa: BLE001
         GAPS.append(f"tool chest menus: {error!r}")
+    try:
+        where = "Thumbnails ▸ Thumbnails ▾ (its title)"
+        rows_from_flat(where, walk_flat(window.pages_panel.build_options_menu(), where,
+                                        ident, sources), sources)
+    except Exception as error:  # noqa: BLE001
+        GAPS.append(f"thumbnails menu: {error!r}")
 
     # panels, header buttons
     for dock in window.panels:
         title = dock.windowTitle()
         bar = dock.titleBarWidget()
+        # a panel's own header on its title bar (Thumbnails ▾ and its
+        # buttons) is the panel's, walked with its controls below
+        own = [getattr(bar, "header_title", None), getattr(bar, "header_tools", None)]
+        own = [widget for widget in own if widget is not None]
         if bar is not None:
             for button in bar.findChildren(QToolButton):
+                if any(button is widget or widget.isAncestorOf(button) for widget in own):
+                    continue
                 tip = clean(button.toolTip())
                 method = {"collapse": "set_collapsed", "pin": "set_pinned",
                           "float": "setFloating", "close": "close"}
@@ -829,6 +841,9 @@ def markup_scenarios(ident_for, sources):
         if dock.widget() is window.properties_panel:
             continue
         walk_controls("Panels", title, dock.widget(), ident, sources)
+        tools = getattr(bar, "header_tools", None)
+        if tools is not None:
+            walk_controls("Panels", title, tools, ident, sources)
 
     # status bar, menu-bar corner
     walk_controls("Toolbars", "Status bar", window.statusBar(), ident, sources)

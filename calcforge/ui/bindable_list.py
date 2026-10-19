@@ -44,6 +44,7 @@ ALIASES: dict[str, str] = {
     "page.insert_excel_workbook.before": "insert.insert_workbook.before",
     "page.insert_excel_workbook.after": "command.insert_workbook",
     # the Thumbnails panel's buttons
+    "thumbnails.insert_pages": "command.insert_pdf",
     "thumbnails.insert_blank_page": "command.add_page",
     "thumbnails.insert_spreadsheet_page": "command.add_sheet_page",
     "thumbnails.duplicate_page": "command.duplicate_page",

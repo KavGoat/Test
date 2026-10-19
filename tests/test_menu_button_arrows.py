@@ -36,11 +36,13 @@ def test_every_menu_buttons_arrow_is_clear_of_its_face(scale, theme):
     names = [line.split(":")[0][3:] for line in lines if line.startswith("ok ")]
     # Insert Pages (split: icon, then its arrow part), the page layout and
     # Snap on the status bar; a table's Merge, Borders and Rows & Columns
-    # (only a menu, its ▾ beside it); Thumbnails' Insert ▾ buttons; the
-    # Properties panel's Add to Tool Chest ▾; the formula bar's ▾ and the
-    # status bar's », whose face is their arrow
+    # (only a menu, its ▾ beside it); Thumbnails' Insert ▾ buttons and its
+    # title, "Thumbnails ▾"; the Properties panel's Add to Tool Chest ▾; the
+    # formula bar's ▾ and the status bar's », whose face is their arrow
     for wanted in ("Pages", "Continuous", "Snap", "Merge", "Borders", "Rows && Columns",
-                   "+", "▦", "addToToolChest", "▾", "statusMore"):
+                   "thumbnails_insert_pdf", "thumbnails_add_page",
+                   "thumbnails_add_sheet_page", "panelTitleMenu",
+                   "addToToolChest", "▾", "statusMore"):
         assert wanted in names, said
     assert not any(line.startswith(("OVERLAP", "UNCHECKED")) for line in lines), said
 

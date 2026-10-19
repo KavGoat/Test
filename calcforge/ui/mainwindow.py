@@ -702,6 +702,7 @@ _SHORTCUT_GROUPS = {
     "panel_pages": "Window", "panel_bookmarks": "Window", "panel_toolsets": "Window",
     "panel_properties": "Window", "panel_search": "Window", "panel_page": "Window",
     "panel_maths": "Window", "panel_variables": "Window",
+    "thumbnails_larger": "Window", "thumbnails_smaller": "Window",
     "renumber_counts": "Markup", "check_spelling": "Markup",
     "shortcuts": "Help", "sample": "Help",
     "find_tool": "Help", "find_text": "Edit",
@@ -1434,6 +1435,13 @@ class MainWindow(QMainWindow):
         self._act("sheet_page_setup", "Sheet Layout…", lambda: self.sheet_page_setup(),
                   tip="Print area, titles, fit to page width, centring, gridlines and headings")
         self._act("duplicate_page", "Duplicate Page", lambda: self.duplicate_page())
+        # Ctrl+wheel over the thumbnails, on the "Thumbnails ▾" menu too
+        self._act("thumbnails_larger", "Larger Thumbnails",
+                  lambda: self.pages_panel.zoom_thumbnails(1),
+                  tip="Draw the pages in the Thumbnails panel bigger (Ctrl+wheel there)")
+        self._act("thumbnails_smaller", "Smaller Thumbnails",
+                  lambda: self.pages_panel.zoom_thumbnails(-1),
+                  tip="Draw the pages in the Thumbnails panel smaller (Ctrl+wheel there)")
         # Revu's Ctrl+Shift+D (audit L2)
         self._act("delete_page", "Delete Pages…", lambda: self.delete_page(), "Ctrl+Shift+D",
                   tip="Delete Pages: choose which pages to take out")
@@ -1741,6 +1749,9 @@ class MainWindow(QMainWindow):
     def _dock(self, title: str, widget: QWidget, area: Qt.DockWidgetArea,
               name: str) -> PanelDock:
         dock = PanelDock(title, widget, name, self)
+        header = getattr(widget, "dock_header", None)
+        if header is not None:
+            dock.set_header(*header())       # Revu's "Thumbnails ▾" and its buttons
         dock.hide()                 # closed until its rail opens it (_build_rails)
         self.addDockWidget(area, dock)
         self.panels.append(dock)
@@ -2700,7 +2711,10 @@ class MainWindow(QMainWindow):
         panels_menu = window_menu.addMenu("Panels")
         panels_menu.setObjectName("menuPanels")
         fill(panels_menu, self._build_panel_actions())
-        fill(window_menu, (self.act_show_panels, None, self.act_full_screen,
+        # the Thumbnails panel's sizes beside the panels, as on its own
+        # "Thumbnails ▾"
+        fill(window_menu, (self.act_show_panels, self.act_thumbnails_larger,
+                           self.act_thumbnails_smaller, None, self.act_full_screen,
                            self.act_presentation, None, self.act_pin_panels,
                            self.act_reset_layout))
 

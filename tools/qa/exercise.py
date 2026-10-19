@@ -173,6 +173,7 @@ CONTEXT_TARGETS = [
     ("Document tab", "fresh", "doc_tab"),
     ("Ruler", "rulers", "ruler"),
     ("Tool Chest ▸ Tool Sets button", "toolchest", "chest_button"),
+    ("Thumbnails ▸ Thumbnails ▾ (its title)", "two_pages", "thumbnails_menu"),
     ("Tool Chest ▸ a set's gear button", "toolchest", "chest_gear"),
     ("Tool Chest ▸ a tool (right-click)", "toolchest", "chest_tool"),
     ("Table cell (open table)", "table_open", "cell"),
@@ -3412,6 +3413,11 @@ def via_context(win, entry, outcome, ctx, each_index=None):
         if button is None:
             raise NotReached(f"no {target.replace('_', ' ')}")
         return menu_button(button, outcome, entry["path"], each_index)
+    if target == "thumbnails_menu":
+        # the panel's title is its menu, as Revu's "Thumbnails ▾"
+        if show_dock(win, "Thumbnails") is None:
+            raise NotReached("no Thumbnails panel")
+        return menu_button(win.pages_panel.title_button, outcome, entry["path"], each_index)
     widget, local = context_spot(win, target, ctx, entry)
     deepest = widget.childAt(local)
     if deepest is not None and target not in ("item", "paper", "cell", "row_heading",
@@ -3528,17 +3534,27 @@ def panel_root(win, title):
     return win.properties_panel if title == "Properties" else dock.widget()
 
 
+def panel_control(win, title, label):
+    """The control *label* in panel *title*: in the panel, or on its title
+    bar after its own menu (Thumbnails' buttons, after "Thumbnails ▾")."""
+    widget = labelled(panel_root(win, title), label)
+    if widget is None:
+        dock = next((d for d in win.panels if d.windowTitle() == title), None)
+        tools = getattr(dock.titleBarWidget(), "header_tools", None) if dock else None
+        if tools is not None:
+            widget = labelled(tools, label)
+    return widget
+
+
 def via_panel(win, entry, outcome):
-    root = panel_root(win, entry["panel"])
-    widget = labelled(root, entry["label"])
+    widget = panel_control(win, entry["panel"], entry["label"])
     if widget is None:
         raise NotReached(f"no '{entry['label']}' in {entry['panel']}")
     return press_widget(win, widget, outcome)
 
 
 def via_panel_menu(win, entry, outcome, each_index=None):
-    root = panel_root(win, entry["panel"])
-    widget = labelled(root, entry["button"])
+    widget = panel_control(win, entry["panel"], entry["button"])
     if widget is None:
         raise NotReached(f"no '{entry['button']}' in {entry['panel']}")
     return menu_button(widget, outcome, entry["path"], each_index)
