@@ -3491,7 +3491,7 @@ class PropertiesPanel(QScrollArea):
                     lambda i: setattr(i, "keep_aspect", on), "Snapshot ratio"))
                 form.addRow("", keep)
                 form.addRow("Source Page:", QLabel(str(first.source_page)))
-                colours = QPushButton("Change Colours…")
+                colours = QPushButton("Colour Processing…")
                 colours.clicked.connect(lambda: self.window.change_colors(first))
                 form.addRow("", colours)
             elif isinstance(first, RectItem) and first.kind in ("rect", "ellipse"):

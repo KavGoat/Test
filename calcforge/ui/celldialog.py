@@ -127,6 +127,12 @@ class FormatCellsDialog(QDialog):
         self.decimals = QSpinBox()
         self.decimals.setRange(0, 30)
         self.decimals.setValue(2)
+        # as the cells' right-click menu and an equation's (2026-10-19)
+        self.significant = QCheckBox("Significant Figures")
+        self.significant.setObjectName("formatCellsSignificant")
+        self.significant.setToolTip("Decimal places counts significant figures, not places "
+                                    "after the point (SMath's). An .xlsx keeps only the places")
+        self.significant.setChecked(bool(self.start.significant))
         self.thousands = QCheckBox("Use 1000 separator (,)")
         self.negative = QComboBox()
         self.negative.addItems(["-1234.10", "[Red]1234.10", "(1234.10)", "[Red](1234.10)"])
@@ -142,6 +148,7 @@ class FormatCellsDialog(QDialog):
                              "MPa, or a custom unit the equations define — blank: as typed")
         self.unit.setAccessibleName("Show quantities in")
         form.addRow("Decimal places:", self.decimals)
+        form.addRow("", self.significant)
         form.addRow("", self.thousands)
         form.addRow("Symbol:", self.symbol)
         form.addRow("Negative numbers:", self.negative)
@@ -156,6 +163,7 @@ class FormatCellsDialog(QDialog):
             signal.connect(self._rebuild_code)
         self.types.currentTextChanged.connect(self._type_chosen)
         self.custom.textEdited.connect(lambda _t: self._update_sample())
+        self.significant.toggled.connect(lambda _on: self._update_sample())
         self.unit.textEdited.connect(lambda _t: self._update_sample())
         # flagged only once finished (Enter or leaving it), never while typed
         self.unit.editingFinished.connect(self._unit_finished)
@@ -185,6 +193,7 @@ class FormatCellsDialog(QDialog):
         self.types.blockSignals(False)
         numeric = name in ("Number", "Currency", "Accounting", "Percentage", "Scientific")
         self.decimals.setEnabled(numeric)
+        self.significant.setEnabled(numeric or name == "Custom")
         self.thousands.setEnabled(name == "Number")
         self.negative.setEnabled(name in ("Number", "Currency"))
         self.symbol.setEnabled(name in ("Currency", "Accounting"))
@@ -254,7 +263,8 @@ class FormatCellsDialog(QDialog):
             unit = None                # not (yet) a unit: the sample as typed
         code = self.custom.text() or None
         try:
-            shown = format_value(self.value, None if code == "General" else code, unit)
+            shown = format_value(self.value, None if code == "General" else code, unit,
+                                 significant=self._significant(code))
             self.sample.setText(shown.text or " ")
             self.sample.setStyleSheet(f"color:{shown.color}" if shown.color else "")
         except Exception:
@@ -383,6 +393,12 @@ class FormatCellsDialog(QDialog):
         return w
 
     # -- applying --------------------------------------------------------------------------------
+    def _significant(self, code) -> bool:
+        """Significant Figures, where the format has places to count."""
+        from ..sheet.numfmt import places_of
+        return (self.significant.isChecked() and self.significant.isEnabled()
+                and places_of(None if code == "General" else code) is not None)
+
     def changes(self) -> dict:
         """The style fields that differ from what the active cell has."""
         st = self.start
@@ -394,6 +410,7 @@ class FormatCellsDialog(QDialog):
         code = self.custom.text().strip() or "General"
         wanted = {
             "number_format": None if code == "General" else code,
+            "significant": self._significant(code),
             "unit": unit,
             "h_align": self._h[self.h_align.currentIndex()],
             "indent": self.indent.value(),

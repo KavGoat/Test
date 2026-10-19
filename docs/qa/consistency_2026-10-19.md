@@ -79,3 +79,22 @@ spreadsheet open for its cells. The same rule applies in both modes.
 6. **Colour Processing vs Change Colours.** Pick one name for a picture's and
    a snapshot's colour command. Recommended: Revu's own for each, if they
    differ in Revu; otherwise "Colour Processing…" for both.
+
+## Answers (the user, 2026-10-19) and what was done
+
+1. F2 — **Done**: Edit ▸ Edit Selected (`F2`) opens the one picked text box,
+   callout, Calculation text, equation or table (at A1), as a double-click
+   does; nothing while something is being typed into; in an open table F2 is
+   still Edit the cell.
+2. Edit Equation — **Done**: first under Equation ▸ (shows F2).
+3. Calculation text — **Done**: no Flatten, Unflatten, Hide or Show Hidden on
+   its menu; Flatten, Hide and Flatten Markups leave it alone.
+4. The toolbar for equations — **Done**: font size, colour and Style ▾ (B, I,
+   U) for the picked equations, or the one being typed in; one undo step for
+   all of them. No font family (equations use SMath's maths fonts) and no
+   strikethrough.
+5. (Recommendation taken) — **Done**: Significant Figures in Format Cells ▸
+   Number; no Trailing Zeros for cells; the manual says an .xlsx keeps the
+   places only.
+6. **Done**: a picture's and a snapshot's menu and panel say Colour
+   Processing….

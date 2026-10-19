@@ -128,6 +128,11 @@ def fill(window, menu: QMenu, item) -> None:
     made_global.setToolTip("Its variables carry on past calc section breaks")
     menu.addSeparator()
     equation = menu.addMenu("Equation")
+    # first (the user, 2026-10-19): as Edit Text, Edit Table and Edit Chart…
+    # are on theirs; F2 does it too (Edit ▸ Edit Selected)
+    edit = equation.addAction("Edit Equation", lambda: window.view.calc.focus(item))
+    edit.setEnabled(not getattr(item, "locked", False))
+    equation.addSeparator()
     check(equation, "Display Input Data", region.show_input,
           lambda r: setattr(r, "show_input", not r.show_input))
     equation.addSeparator()

@@ -473,3 +473,159 @@ def test_significant_figures_survive_saving(win, tmp_path):
     save_to(win, path)
     reopen(win, path)
     assert shown(the_table(win), "B2") == "12300"
+
+
+# -- 5. the lead's answers (2026-10-19) ------------------------------------------------------
+
+def picked(win, item):
+    put_down(win)
+    item.setSelected(True)
+    win.refresh_selection()
+    win.view.setFocus()
+    pump()
+
+
+def test_f2_opens_the_picked_text_equation_calculation_text_and_table(win):
+    from tests.test_every_command_is_bindable import _draw
+    equation = an_equation(win, "h1:=4")
+    into_calc_mode(win, 100, 300)
+    typed(win, '"some words')
+    press_key(win.view, Qt.Key_Escape)
+    put_down(win)
+    (text,) = [i for i in win.view.scene().items() if isinstance(i, CalcTextItem)]
+    win.toggle_calc_mode(False)
+    _draw(win, "text", 300, 400, 380, 440)
+    from calcforge.items.text import TextItem
+    box = next(i for i in markups(win) if type(i) is TextItem)
+    table = make_table(win, x=300, y=100)
+    for item, opened in ((equation, lambda: win.view.calc.item is equation),
+                         (text, lambda: win.view.editing_item() is text),
+                         (box, lambda: win.view.editing_item() is box),
+                         (table, lambda: win.view.tables.item is table)):
+        picked(win, item)
+        keys(win, Qt.Key_F2)
+        pump()
+        assert opened(), f"F2 opens the {type(item).__name__}"
+        put_down(win)
+
+
+def test_f2_in_an_open_table_still_edits_the_cell(win):
+    table = a_number_in_b2(win)
+    keys(win, Qt.Key_F2)
+    pump()
+    assert win.view.tables.editor is not None and win.view.tables.item is table
+
+
+def test_f2_is_on_the_edit_menu_and_bindable(win):
+    assert win.act_edit_selected.shortcut().toString() == "F2"
+    edit = next(a.menu() for a in win.menuBar().actions() if a.text().replace("&", "") == "Edit")
+    assert win.act_edit_selected in edit.actions()
+
+
+def test_edit_equation_is_first_under_equation(win):
+    item = an_equation(win, "j1:=7")
+    picked(win, item)
+    menu = win.build_context_menu(item, centre(item))
+    sub = next(a.menu() for a in menu.actions() if a.text() == "Equation")
+    first = sub.actions()[0]
+    assert first.text() == "Edit Equation"
+    first.trigger()
+    assert win.view.calc.item is item
+
+
+def test_calculation_text_is_never_flattened_or_hidden(win):
+    into_calc_mode(win, 100, 300)
+    typed(win, '"some words')
+    press_key(win.view, Qt.Key_Escape)
+    put_down(win)
+    win.toggle_calc_mode(False)
+    (text,) = [i for i in win.view.scene().items() if isinstance(i, CalcTextItem)]
+    picked(win, text)
+    words = [a.text() for a in win.build_context_menu(text, centre(text)).actions()]
+    for gone in ("Flatten", "Unflatten", "Hide", "Show Hidden"):
+        assert gone not in words
+    # nor by the Edit menu's commands, nor in Flatten Markups' list
+    win.act_hide.trigger()
+    win.act_flatten.trigger()
+    pump()
+    (text,) = [i for i in win.view.scene().items() if isinstance(i, CalcTextItem)]
+    assert text.isVisible() and not text.flattened
+    assert all(not isinstance(item, CalcTextItem) for _i, item in win._flattenable())
+
+
+def test_the_toolbar_sets_the_picked_equations_size_colour_and_bold(win):
+    from tests.test_exercise_round1_undo import type_into as bar_type
+    a = an_equation(win, "k1:=1", y=120)
+    b = an_equation(win, "k2:=2", y=170)
+    put_down(win)
+    a.setSelected(True)
+    b.setSelected(True)
+    win.refresh_selection()
+    pump()
+    assert win.font_spin.isVisibleTo(win.style_bar)
+    assert win.text_colour_button.isVisibleTo(win.style_bar)
+    assert not win.font_family_combo.isVisibleTo(win.style_bar)
+    assert win.font_spin.value() == pytest.approx(10)
+    before = steps(win)
+    bar_type(win.font_spin.lineEdit(), "14")
+    pump()
+    assert a.region.font_size == 14 and b.region.font_size == 14
+    assert steps(win) == before + 1, "one step for both"
+    win.text_colour_button.colorChanged.emit("#2f9e44")
+    assert a.region.color == b.region.color == "#2f9e44"
+    QTest.mouseClick(win.font_buttons["bold"], Qt.LeftButton)
+    pump()
+    assert a.region.bold and b.region.bold
+    assert not win.font_buttons["strikethrough"].isVisibleTo(win.font_style_popup)
+    assert steps(win) == before + 3
+    win.undo_something()
+    pump()
+    assert not any(i.region.bold for i in win.view.scene().items() if isinstance(i, CalcItem))
+
+
+def test_the_toolbar_on_the_equation_being_typed_in(win):
+    from tests.test_exercise_round1_undo import type_into as bar_type
+    item = an_equation(win, "m1:=3")
+    put_down(win)
+    click_on(win, item)
+    assert win.view.calc.item is item
+    pump()
+    bar_type(win.font_spin.lineEdit(), "12")
+    pump()
+    (now,) = [i for i in win.view.scene().items() if isinstance(i, CalcItem)]
+    assert now.region.font_size == 12
+
+
+def test_significant_figures_in_format_cells(win):
+    from calcforge.ui.celldialog import FormatCellsDialog
+    a_number_in_b2(win, "12345.678")
+    dialog = FormatCellsDialog(win.view.tables, win)
+    dialog.category.setCurrentRow(dialog.category.row(
+        dialog.category.findItems("Number", Qt.MatchExactly)[0]))
+    type_into(dialog.decimals, "3")
+    box = dialog.findChild(QCheckBox, "formatCellsSignificant")
+    assert box.isEnabled() and not box.isChecked()
+    tick(box)
+    assert dialog.sample.text() == "12300"
+    dialog.accept()
+    pump()
+    st = the_table(win).sheet.workbook.style_of(the_table(win).sheet, 1, 1)
+    assert st.significant and st.number_format == "0.000"
+    assert shown(the_table(win), "B2") == "12300"
+    again = FormatCellsDialog(win.view.tables, win)
+    assert again.findChild(QCheckBox, "formatCellsSignificant").isChecked()
+
+
+def test_a_picture_and_a_snapshot_say_colour_processing(win):
+    from calcforge.items.snapshot import SnapshotItem
+    from tests.test_crop_image import _image
+    picture = _image(win)
+    snap = SnapshotItem()
+    snap.setParentItem(win.scene.frames[0])
+    snap.setPos(300, 300)
+    for item in (picture, snap):
+        picked(win, item)
+        words = [a.text() for a in win.build_context_menu(item, centre(item)).actions()]
+        assert "Colour Processing…" in words and "Change Colours…" not in words
+        buttons = {b.text() for b in win.properties_panel.body.findChildren(QPushButton)}
+        assert "Colour Processing…" in buttons and "Change Colours…" not in buttons
