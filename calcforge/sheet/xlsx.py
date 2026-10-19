@@ -59,6 +59,7 @@ class ImportedSheet:
 class Imported:
     sheets: list
     left_out: list = field(default_factory=list)       # what could not come across, in words
+    renamed: dict = field(default_factory=dict)        # workbook names given a prefix: old -> new
 
 
 # -- colours --------------------------------------------------------------------------------------
@@ -851,13 +852,16 @@ def _names(wb, sheets: list, renames: dict, renamed, left_out: list) -> None:
         except F.FormulaError:
             left_out.append(f"the name “{name}”")
             continue
+        # a sheet's own name is kept with that sheet, whichever cells it names
         first = next((t for t in tokens if t.kind == "ref" and t.ref.sheet), None)
-        home = by_name.get(first.ref.sheet.lower()) if first is not None else None
+        home = by_name.get(local.lower()) if local else None
+        if home is None and first is not None:
+            home = by_name.get(first.ref.sheet.lower())
         if home is None:
-            home = by_name.get(local.lower()) if local else (sheets[0] if sheets else None)
+            home = sheets[0] if sheets and not local else None
         if home is None:
             continue
-        home.data["names"].append([name, text, local is not None and local.lower() == home.name.lower(), ""])
+        home.data["names"].append([name, text, local is not None, ""])
 
 
 _ERRORS = ("#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A", "#SPILL!", "#CALC!")
@@ -955,3 +959,114 @@ def sheet_links(imported: Imported) -> dict:
                 reads |= hits - {sheet.name}
         out[sheet.name] = reads
     return out
+
+
+# -- the workbook as one: its names its own, or the document's ------------------------------------
+def workbook_ident(path: str, taken=()) -> str:
+    """How equations name an imported workbook: its file name without the
+    extension, as an identifier (each run of other characters one _), made
+    unique among *taken* (the document's sheet names as equations write
+    them, and other workbooks') with _2, _3…
+    Seismic_Actions_NZS1170.5.xlsm: Seismic_Actions_NZS1170_5."""
+    import os
+    stem = os.path.splitext(os.path.basename(str(path)))[0]
+    text = re.sub(r"[^\w]+", "_", stem).strip("_") or "Workbook"
+    if text[0].isdigit():
+        text = "_" + text
+    taken = {t.lower() for t in taken}
+    name, k = text, 2
+    while name.lower() in taken:
+        name = f"{text}_{k}"
+        k += 1
+    return name
+
+
+def make_book(imported: Imported, name: str, file: str = "", self_contained: bool = True) -> dict:
+    """Marks every sheet of *imported* as one workbook (named *name* for the
+    equations), self-contained or not; its workbook names are kept with it."""
+    import uuid
+    book = {"id": "book-" + uuid.uuid4().hex[:12], "name": name, "file": file,
+            "self_contained": bool(self_contained)}
+    for sheet in imported.sheets:
+        sheet.data["book"] = dict(book)
+    return book
+
+
+def workbook_names(imported: Imported) -> list:
+    """The workbook-wide names of *imported* (not those local to a sheet)."""
+    return [entry[0] for sheet in imported.sheets for entry in sheet.data.get("names", [])
+            if not entry[2]]
+
+
+def name_clashes(imported: Imported, taken: dict) -> list:
+    """(name, what it clashes with) for each of the workbook's own names
+    already used in the document: *taken* maps a lower-case name to what
+    has it ("an equation variable", "a name of Table1"...)."""
+    out = []
+    for name in workbook_names(imported):
+        why = taken.get(name.lower())
+        if why:
+            out.append((name, why))
+    return sorted(out, key=lambda e: e[0].lower())
+
+
+def suggested_prefix(book_name: str) -> str:
+    """A prefix to tell the workbook's names apart: its name's first part
+    (Seismic_Actions_NZS1170_5: Seismic_)."""
+    first = re.split(r"_+", book_name.strip("_"))[0] or "Wb"
+    return first + "_"
+
+
+def prefix_names(imported: Imported, names, prefix: str) -> dict:
+    """Renames the workbook names *names* to *prefix* + name, and every
+    formula, name, rule and validation of the workbook that reads them
+    (a sheet's own name of the same spelling, which wins on its sheet, is
+    left alone). Returns {old: new}."""
+    wanted = {n.lower(): prefix + n for n in names}
+    if not wanted:
+        return {}
+    local = {s.name.lower(): {e[0].lower() for e in s.data.get("names", []) if e[2]}
+             for s in imported.sheets}
+
+    def renamed(text: str, sheet: str) -> str:
+        if not text or not any(n in text.lower() for n in wanted):
+            return text
+        try:
+            tokens = F.tokenize(text)
+        except F.FormulaError:
+            return text
+        changed = False
+        for t in tokens:
+            if t.kind != "name":
+                continue
+            where, bang, name = t.text.rpartition("!")
+            on = where.strip("'").replace("''", "'").lower() if bang else sheet.lower()
+            new = wanted.get(name.lower())
+            if new is None or name.lower() in local.get(on, ()):
+                continue
+            t.text = where + bang + new
+            changed = True
+        return F.join(tokens) if changed else text
+
+    def formula(text, sheet):
+        if isinstance(text, str) and text.startswith("="):
+            return "=" + renamed(text[1:], sheet)
+        return text
+
+    for sheet in imported.sheets:
+        data = sheet.data
+        for entry in data.get("cells", []):
+            entry[2] = formula(entry[2], sheet.name)
+        for entry in data.get("names", []):
+            entry[1] = renamed(entry[1], sheet.name)
+            if not entry[2] and entry[0].lower() in wanted:
+                entry[0] = wanted[entry[0].lower()]
+        for rule in data.get("cond_rules", []):
+            for key in ("formula", "a", "b"):
+                if key in rule:
+                    rule[key] = formula(rule[key], sheet.name)
+        for rule in data.get("validations", []):
+            for key in ("source", "formula", "a", "b"):
+                if key in rule:
+                    rule[key] = formula(rule[key], sheet.name)
+    return {n: wanted[n.lower()] for n in names}

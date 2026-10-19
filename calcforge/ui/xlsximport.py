@@ -5,6 +5,15 @@ spreadsheet pages (sheet/xlsx.py) — cells only, nothing written back.
 What could not come across (charts, pictures, a print scale…) and any cell
 whose formula here gives another answer than Excel last showed are said
 when it opens.
+
+A workbook comes in as one (docs/SPREADSHEET_DESIGN.md, the user's answers
+of 2026-10-19): its sheets share its names. Self-contained (the default, a
+tick in the chooser) its names are its own — its cells read them first, the
+equations only qualified (Book.Name, Sheet.Name) — while any of its cells is
+still read by sheet and cell (Sheet.H44). Unticked, its names are document
+variables; names already used in the document are listed, to keep it
+self-contained, rename them with a prefix, or go ahead (reading order then
+decides).
 """
 from __future__ import annotations
 
@@ -90,6 +99,48 @@ def _taken(document) -> set:
     return {s.name for s in book_for(document).workbook.sheets}
 
 
+def taken_names(document, leave_out: Optional[str] = None) -> dict:
+    """Names a workbook that isn't self-contained would clash with: lower
+    case -> what has it (equation variables, the document's defined names,
+    other workbooks' names that are document names, SMath's constants);
+    *leave_out*: a workbook's own id, when asking about it."""
+    from ..calc.engine.evaluator import BUILTIN_CONSTANTS
+    from ..sheet.docbook import book_for
+
+    out = {name.lower(): "an SMath constant" for name in BUILTIN_CONSTANTS}
+    if document is None:
+        return out
+    book = book_for(document)
+    try:
+        variables = book._calc().worksheet.index.vars
+    except Exception:  # noqa: BLE001  (no equations to read)
+        variables = {}
+    for name in variables:
+        out[name.lower()] = "an equation variable"
+    wb = book.workbook
+    for (lower, scope), dn in wb.names.items():
+        if scope is None:
+            home = wb.sheet_by_id(dn.home) if dn.home is not None else None
+            out.setdefault(lower, f"a name on {home.name}" if home else "a defined name")
+        elif isinstance(scope, str) and scope != leave_out and scope in wb.books \
+                and not wb.books[scope].self_contained:
+            out.setdefault(lower, f"a name of the workbook {wb.books[scope].name}")
+    return out
+
+
+def book_name_for(document, path: str, imported) -> str:
+    """The workbook's name for the equations, unique in the document."""
+    from ..sheet.docbook import book_for, sheet_ident
+    from ..sheet.xlsx import workbook_ident
+
+    taken = {sheet_ident(s.name) for s in imported.sheets}
+    if document is not None:
+        wb = book_for(document).workbook
+        taken |= {sheet_ident(s.name) for s in wb.sheets}
+        taken |= {b.name for b in wb.books.values()}
+    return workbook_ident(path, taken)
+
+
 def report(window, imported) -> str:
     """What to tell the reader once the workbook is in: what was left out, and
     the cells whose formulas give another answer here than Excel showed."""
@@ -137,6 +188,16 @@ def report(window, imported) -> str:
     hidden = [s.name for s in imported.sheets if s.hidden]
     if hidden:
         lines.append("Hidden in Excel (shown here): " + ", ".join(hidden) + ".")
+    book = (imported.sheets[0].data.get("book") if imported.sheets else None) or {}
+    if book.get("name"):
+        if book.get("self_contained", True):
+            lines.append(f"Self-contained: equations below read its cells as Sheet.H44 and its "
+                         f"names as {book['name']}.Name.")
+        else:
+            lines.append("Its names are document variables, each defined where its sheet is.")
+    renamed = imported.renamed
+    if renamed:
+        lines.append("Renamed: " + ", ".join(f"{a} → {b}" for a, b in sorted(renamed.items())) + ".")
     if imported.left_out:
         lines.append("Left out: " + "; ".join(imported.left_out) + ".")
     if differ:
@@ -153,19 +214,26 @@ def report(window, imported) -> str:
 def _say(window, imported) -> None:
     text = report(window, imported)
     window.status_hint.setText(text.splitlines()[0] if text else "")
-    if getattr(window, "interactive_prompts", True) and len(text.splitlines()) > 1:
+    # (how its names are read is said; on its own it needs no message box)
+    worth = [line for line in text.splitlines()[1:] if not line.startswith(("Self-contained:", "Its names"))]
+    if getattr(window, "interactive_prompts", True) and worth:
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.information(window, "Excel workbook", text)
 
 
 class SheetChooser:
-    """The worksheets of a workbook with more than one, each with a tick —
-    all ticked to start — to bring in only some."""
+    """The worksheets of a workbook, each with a tick — all ticked to start —
+    to bring in only some; and whether the workbook is self-contained (its
+    names its own; ticked to start), with the names that would clash when
+    it isn't."""
 
-    def __init__(self, parent, imported):
+    KEEP, RENAME, AHEAD = "self-contained", "rename", "go ahead"
+
+    def __init__(self, parent, imported, taken: Optional[dict] = None, book_name: str = "Workbook"):
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
                                        QListWidget, QListWidgetItem, QPushButton, QVBoxLayout)
+        self.imported = imported
         self.dialog = dialog = QDialog(parent)
         dialog.setWindowTitle("Import Excel workbook")
         layout = QVBoxLayout(dialog)
@@ -200,6 +268,77 @@ class SheetChooser:
         self.warning.hide()
         layout.insertWidget(layout.count() - 1, self.warning)
         self.list.itemChanged.connect(lambda _i: self._enable())
+        self._scope_part(layout, taken or {}, book_name)
+
+    def _scope_part(self, layout, taken: dict, book_name: str) -> None:
+        """The Self-contained tick box, and under it (when unticked and some
+        of the workbook's names are already used here) those names with
+        what to do about them."""
+        from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QGroupBox, QHBoxLayout, QLabel,
+                                       QLineEdit, QPushButton, QRadioButton, QVBoxLayout)
+
+        from ..sheet.xlsx import name_clashes, suggested_prefix, workbook_names
+        self.book_name = book_name
+        self.clashes = name_clashes(self.imported, taken)
+        count = len(workbook_names(self.imported))
+        self.self_contained = QCheckBox("Self-contained")
+        self.self_contained.setChecked(True)
+        self.self_contained.setToolTip(
+            f"Its {count} name{'s' * (count != 1)} stay its own: its cells read them, and "
+            f"equations below read them as {book_name}.Name or Sheet.Name. Any cell can still "
+            f"be read as Sheet.H44. Untick to make its names document variables.")
+        at = layout.count() - 1
+        layout.insertWidget(at, self.self_contained)
+        self.scope_note = QLabel("")
+        self.scope_note.setWordWrap(True)
+        layout.insertWidget(at + 1, self.scope_note)
+        self.clash_box = box = QGroupBox("Names already used in this document")
+        inner = QVBoxLayout(box)
+        shown = self.clashes[:12]
+        lines = [f"{name} — {why}" for name, why in shown]
+        if len(self.clashes) > len(shown):
+            lines.append(f"and {len(self.clashes) - len(shown)} more")
+        self.clash_list = QLabel("\n".join(lines))
+        self.clash_list.setWordWrap(True)
+        inner.addWidget(self.clash_list)
+        self.keep_button = QPushButton("Keep self-contained")
+        self.keep_button.clicked.connect(lambda: self.self_contained.setChecked(True))
+        inner.addWidget(self.keep_button)
+        self.rename_radio = QRadioButton("Rename them with the prefix")
+        self.prefix = QLineEdit(suggested_prefix(book_name))
+        self.prefix.setMaximumWidth(160)
+        row = QHBoxLayout()
+        row.addWidget(self.rename_radio)
+        row.addWidget(self.prefix)
+        row.addStretch(1)
+        inner.addLayout(row)
+        self.ahead_radio = QRadioButton("Go ahead (reading order decides which is read)")
+        inner.addWidget(self.ahead_radio)
+        self._how = QButtonGroup(box)
+        self._how.addButton(self.rename_radio)
+        self._how.addButton(self.ahead_radio)
+        self.rename_radio.setChecked(True)
+        self.prefix.textEdited.connect(lambda _t: self.rename_radio.setChecked(True))
+        layout.insertWidget(at + 2, box)
+        box.hide()
+        self.self_contained.toggled.connect(lambda _on: self._scope_shown())
+        self._scope_shown()
+
+    def _scope_shown(self) -> None:
+        on = self.self_contained.isChecked()
+        self.clash_box.setVisible(not on and bool(self.clashes))
+        self.scope_note.setText(
+            f"Equations below read its cells as Sheet.H44 and its names as {self.book_name}.Name."
+            if on else "Its names are document variables, each defined where its sheet is.")
+        self.dialog.adjustSize()
+
+    def scope(self) -> tuple:
+        """(KEEP, RENAME or AHEAD, the prefix): what the reader chose."""
+        if self.self_contained.isChecked():
+            return self.KEEP, ""
+        if self.clashes and self.rename_radio.isChecked() and self.prefix.text().strip():
+            return self.RENAME, self.prefix.text().strip()
+        return self.AHEAD, ""
 
     def _tick_all(self, state) -> None:
         for i in range(self.list.count()):
@@ -251,27 +390,43 @@ class SheetChooser:
                 if self.list.item(i).checkState() == Qt.Checked]
 
 
-def choose_sheets(window, imported) -> bool:
-    """Which worksheets of a workbook with more than one to bring in; the
-    rest are left out (``keep_only``). False when the reader cancels."""
-    from ..sheet.xlsx import keep_only
+def choose_sheets(window, imported, path: str = "", document=None) -> bool:
+    """Which worksheets of a workbook to bring in (the rest are left out,
+    ``keep_only``) and whether it is self-contained: asked when it has more
+    than one worksheet or any names. The workbook is then marked as one
+    (``make_book``). False when the reader cancels."""
+    import os
+
+    from ..sheet.xlsx import keep_only, make_book, prefix_names, workbook_names
 
     names = [s.name for s in imported.sheets]
-    if len(names) < 2:
-        return True
+    book_name = book_name_for(document, path or "Workbook", imported)
+    how, prefix = SheetChooser.KEEP, ""
     pick = getattr(window, "choose_workbook_sheets", None)    # a test's stand-in for the dialog
+    drive = getattr(window, "drive_workbook_chooser", None)   # a test's hand on the dialog
+    chooser = None
     if pick is not None:
-        chosen = pick(names)
-    elif not getattr(window, "interactive_prompts", True):
+        chosen = pick(names) if len(names) > 1 else names
+    elif drive is None and (not getattr(window, "interactive_prompts", True) or
+                            (len(names) < 2 and not workbook_names(imported))):
         chosen = names
     else:
-        chooser = SheetChooser(window, imported)
-        if not chooser.dialog.exec():
+        chooser = SheetChooser(window, imported, taken_names(document), book_name)
+        if drive is not None:
+            drive(chooser)
+            accepted = chooser.dialog.result()
+        else:
+            accepted = chooser.dialog.exec()
+        if not accepted:
             return False
         chosen = chooser.chosen()
+        how, prefix = chooser.scope()
     if not chosen:
         return False
     keep_only(imported, chosen)
+    if how == SheetChooser.RENAME:
+        imported.renamed = prefix_names(imported, [n for n, _why in chooser.clashes], prefix)
+    make_book(imported, book_name, os.path.basename(path or ""), how == SheetChooser.KEEP)
     return True
 
 
@@ -296,7 +451,7 @@ def insert_workbook(window, path: Optional[str] = None, index: Optional[int] = N
             QMessageBox.critical(window, "Excel workbook", f"Could not read the workbook:\n{exc}")
         window.status_hint.setText(f"Could not read the workbook: {exc}")
         return False
-    if not choose_sheets(window, imported):
+    if not choose_sheets(window, imported, path, window.document):
         return False
     document = window.document
     which = window.page_index(index)
@@ -329,7 +484,7 @@ def open_workbook(window, path: str):
     from ..sheet.xlsx import read_workbook
 
     imported = read_workbook(path)
-    if not choose_sheets(window, imported):
+    if not choose_sheets(window, imported, path, None):
         return None, None
     document = Document()
     import os

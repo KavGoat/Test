@@ -256,15 +256,27 @@ def define(tables, name: str, refers_to: str, scope=None, comment: str = "",
     def change(wb):
         if replacing is not None:
             old_scope = wb.sheet_by_id(replacing.sheet) if replacing.sheet else None
-            wb.remove_name(replacing.name, old_scope)
+            wb.remove_name(replacing.name, old_scope, replacing.book)
         wb.define_name(name, refers_to, scope, comment, home=scope or item.sheet)
     return change_names(tables, "Define name", change)
 
 
 def delete(tables, dn) -> Optional[str]:
     def change(wb):
-        wb.remove_name(dn.name, wb.sheet_by_id(dn.sheet) if dn.sheet else None)
+        wb.remove_name(dn.name, wb.sheet_by_id(dn.sheet) if dn.sheet else None, dn.book)
     return change_names(tables, "Delete name", change)
+
+
+def scope_text(wb, dn) -> str:
+    """The Name Manager's Scope: a sheet's own name says the sheet; an
+    imported workbook's says the workbook (and whether its names are its
+    own); any other is the document's, Excel's Workbook."""
+    if dn.sheet is not None and wb.sheet_by_id(dn.sheet) is not None:
+        return wb.sheet_by_id(dn.sheet).name
+    book = wb.books.get(dn.book) if dn.book else None
+    if book is not None:
+        return f"{book.name} ({'self-contained' if book.self_contained else 'document variables'})"
+    return "Workbook"
 
 
 # -- the Name Manager -----------------------------------------------------------------------------
@@ -317,8 +329,7 @@ class NameManagerDialog(QDialog):
         names = self.names()
         self.table.setRowCount(len(names))
         for i, dn in enumerate(names):
-            scope = self.wb.sheet_by_id(dn.sheet).name if dn.sheet and self.wb.sheet_by_id(dn.sheet) \
-                else "Workbook"
+            scope = scope_text(self.wb, dn)
             for j, text in enumerate((dn.name, name_value(self.wb, dn), "=" + dn.refers_to,
                                       scope, dn.comment)):
                 self.table.setItem(i, j, QTableWidgetItem(text))

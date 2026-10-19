@@ -3419,6 +3419,7 @@ class PropertiesPanel(QScrollArea):
             hint.setWordWrap(True)
             hint.setStyleSheet("color:#6b7280;")
             self.layout.addWidget(hint)
+            self._add_workbook()
             self.layout.addStretch(1)
             self._settle()
             self._building = False
@@ -4731,6 +4732,17 @@ class PropertiesPanel(QScrollArea):
         open_button.setToolTip("Open the table for its cells (or double-click it)")
         open_button.clicked.connect(lambda: self.window.view.tables.open(first))
         form.addRow("", open_button)
+
+    def _add_workbook(self) -> None:
+        """An imported Excel workbook's sheet open or in view: its Workbook
+        section (workbookscope.py), Self-contained among it."""
+        from .workbookscope import add_panel_section, open_sheet
+        try:
+            sheet = open_sheet(self.window)
+        except AttributeError:
+            sheet = None                     # the window still being built
+        if sheet is not None:
+            add_panel_section(self, sheet)
 
     def _add_chart(self, first) -> None:
         """A chart: what it is, and its dialog (or double-click it)."""

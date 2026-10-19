@@ -524,6 +524,7 @@ class TableEditing:
         self._show_selection()
         self.refresh_bar()
         self._refresh_controls()
+        self._properties_follow(item)
         view.setFocus()
         view.statusMessage.emit(f"{item.name}: type into the cells · click outside it or Esc to close it")
 
@@ -609,6 +610,18 @@ class TableEditing:
         self.held_format = None
         self.refresh_bar()
         self._refresh_controls()
+        self._properties_follow(item)
+
+    def _properties_follow(self, item) -> None:
+        """A sheet of an imported workbook opened or closed: the Properties
+        panel shows (or drops) its Workbook section."""
+        window = getattr(self.view, "window", None)
+        sheet = getattr(item, "sheet", None)
+        panel = getattr(window, "properties_panel", None)
+        if panel is None or sheet is None or getattr(sheet, "book", None) is None \
+                or window.selected_items():
+            return
+        panel.show_items([])
 
     # -- the selection ---------------------------------------------------------------------
     def selection(self) -> tuple:

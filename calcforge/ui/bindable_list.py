@@ -69,6 +69,7 @@ ALIASES: dict[str, str] = {
     "properties.italic": "command.italic",
     "properties.underline": "command.underline",
     "properties.change_colours": "canvas.change_colours",
+    "properties.self_contained": "sheettab.self_contained",
     "propbar.bold": "command.bold",
     "propbar.italic": "command.italic",
     "propbar.underline": "command.underline",
@@ -787,6 +788,8 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'sheettab.insert_sheet': ('Sheet tab: Insert Sheet', 'Spreadsheet', 'table'),
     'sheettab.delete': ('Sheet tab: Delete', 'Spreadsheet', 'table'),
     'sheettab.go_to': ('Sheet tab: Go To', 'Spreadsheet', 'table'),
+    # an imported Excel workbook's names its own, or document variables
+    'sheettab.self_contained': ('Sheet tab: Self-contained', 'Spreadsheet', 'table'),
     # -- properties ------------------------------------------------------------
     'properties.document_default': ('Properties: Document default', 'Markup', 'always'),
     # Revu's Edit beside Show Caption: the caption's values and label
