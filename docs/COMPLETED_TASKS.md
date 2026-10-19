@@ -638,6 +638,41 @@ path with the content left where it is, so the file's page gets the paper
 too and the panel and dialog always agree. Disabled radio buttons and tick
 boxes now still show which is chosen (theme). `tests/test_revu_page_setup.py`.
 
+## 2026-10-19 — a tab dragged into another window, with the same file in both
+
+**The user:** "Had an issue where having two windows with the same PDF then
+dragging it over to one window, but only [the] tab stayed." A window made
+by a tab's New Window kept the blank document it was born with as its one
+tab's record, so a tab of the same document dragged onto it was not
+recognised and was opened a second time beside itself; the window dragged
+from was left as an empty shell; a tab dropped on the other window's canvas
+made a third window over it; and the undo history went over with steps that
+still called back into the window that recorded them — once that window had
+closed, Ctrl+Z crashed, and a page step put pages back into whatever that
+window showed next.
+
+What happens now, as in Revu (one file is not open twice in a window, and a
+window emptied by a drag closes):
+- the same document in both windows (New Window): the tab there comes
+  forward, and the window dragged from closes if that was its last tab;
+- two copies of one file opened apart: the one with unsaved changes is kept
+  (the clean one gives way); both clean, one tab; both with changes, both
+  are kept, the one brought in marked "a.pdf (2)", and the status bar says to
+  Save As one of them;
+- another file: it moves with its canvas, page, zoom, undo history and
+  selection; a window keeping other tabs stays;
+- dropped anywhere on another window (its tab bar, canvas or empty
+  workspace) it goes into that window; dropped on no window it still makes a
+  window of its own;
+- File ▸ Open of a file another window has open brings that window's tab
+  forward ("already open in another window") instead of a second copy; a
+  document shown in two windows is one document, one canvas and one history,
+  so an edit in either shows in both, and closing one of the windows asks
+  nothing (the other still has it).
+Undo steps now find their pages through the canvas and their window as the
+one holding the document when they are applied (ui/commands.py
+`on_the_canvas`, MainWindow._on_its_window). `tests/test_tab_drag_windows.py`.
+
 ## 2026-10-19 — the Thumbnails panel as Revu's
 
 The user's photo showed page 3 on a second row with room for it on the
