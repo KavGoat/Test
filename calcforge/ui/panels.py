@@ -3347,6 +3347,7 @@ class PropertiesPanel(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._items: list[MarkupItem] = []
         self._building = False
+        self._cells = None          # the Cells section's controls, while a table is open
         # A markup style being edited (markupstyles.py): its sample markup is
         # shown, and each change is handed back instead of being an undo step.
         self._style_edit = None
@@ -3401,6 +3402,7 @@ class PropertiesPanel(QScrollArea):
                 return
         self._style_edit = style_edit
         self._building = True
+        self._cells = None
         while self.layout.count():
             child = self.layout.takeAt(0)
             widget = child.widget()
@@ -3446,8 +3448,12 @@ class PropertiesPanel(QScrollArea):
             self._add_equation(first)
         if all(getattr(i, "TYPE", "") == "calc_block" for i in self._items):
             self._add_block(first)
-        if len(self._items) == 1 and getattr(first, "TYPE", "") == "table":
+        if len(self._items) == 1 and getattr(first, "TYPE", "") in ("table", "sheet_run"):
             self._add_table(first)
+            if self.window.view.tables.item is first:
+                # open for its cells: the selected cells' look, as the
+                # Properties toolbar's table controls give it
+                self._add_cells(first)
         if len(self._items) == 1 and getattr(first, "TYPE", "") == "chart":
             self._add_chart(first)
         appearance = common_capabilities(self._items)
@@ -3497,7 +3503,8 @@ class PropertiesPanel(QScrollArea):
             colours.setToolTip("Change one colour the selected markups use to another")
             colours.clicked.connect(lambda: self.window.change_multiple_colors(list(self._items)))
             self._group("Appearance").addRow("", colours)
-        if len(self._items) == 1:
+        if len(self._items) == 1 and not getattr(first, "SHEET_RUN", False):
+            # (a spreadsheet's cells are the page's: not placed, nor kept as a tool)
             self._add_geometry(first)
             if isinstance(first, PolyItem) and first.broken:
                 self._add_breaks(first)
@@ -3593,6 +3600,7 @@ class PropertiesPanel(QScrollArea):
         """
         if self._building:
             return
+        self._finish_typing()
         if self._style_edit is not None:
             # a markup style is settings, not part of the document's undo
             for item in self._items:
@@ -3612,6 +3620,17 @@ class PropertiesPanel(QScrollArea):
             item.update()
         self.window.view.commit_snapshot(description, coalesce=coalesce)
         self.changed.emit(description)
+
+    def _finish_typing(self) -> None:
+        """An equation shown while it is typed in (mainwindow.panel_subjects)
+        is left first, so its typing is a step of its own and the panel's
+        change another; it stays picked, and shown."""
+        calc = self.window.view.calc
+        if self._style_edit is None and calc.editing() and calc.item in self._items:
+            calc.leave()
+            self._items = [i for i in self._items if i.scene() is not None]
+            for item in self._items:
+                item.setSelected(True)
 
     @staticmethod
     def _typing_run(field):
@@ -3666,14 +3685,46 @@ class PropertiesPanel(QScrollArea):
                 r.fmt = None if made == worksheet.format else made
             return apply
 
+        # the variable's own settings first, as on its right-click menu (the
+        # user, 2026-10-16): Decimal Places, Significant Figures and Global
         form = self._group("Result")
+        names = sorted(getattr(region, "defined_vars", ()) or ())
+        if names:
+            defines = QLabel(", ".join(names))
+            defines.setObjectName("equationDefines")
+            defines.setToolTip("The variables this equation defines (typed in the equation)")
+            defines.setWordWrap(True)
+            form.addRow("Variable:", defines)
         decimals = QSpinBox()
         decimals.setObjectName("equationDecimals")
         decimals.setRange(0, 15)
         decimals.setValue(fmt.decimals)
         decimals.valueChanged.connect(lambda n: change(
             f"Decimal places: {n}", set_fmt(decimals=n)))
-        form.addRow("Decimals:", decimals)
+        form.addRow("Decimal Places:", decimals)
+        significant = QCheckBox("Significant Figures")
+        significant.setObjectName("equationSignificant")
+        significant.setToolTip("Decimal Places counts significant figures, not places "
+                               "after the point")
+        significant.setChecked(fmt.significant)
+        significant.toggled.connect(lambda on: change(
+            "Significant figures", set_fmt(significant=on)))
+        form.addRow("", significant)
+        # the menu's Global (Read by Later Calc Sections), its words in the tip
+        # so the panel keeps its width
+        made_global = QCheckBox("Global")
+        made_global.setObjectName("equationGlobal")
+        made_global.setToolTip("Global: read by later calc sections. Its variables carry "
+                               "on past calc section breaks")
+        made_global.setChecked(region.is_global)
+        made_global.toggled.connect(lambda on: change(
+            "Make global" if on else "Make local", lambda r: setattr(r, "is_global", on)))
+        form.addRow("", made_global)
+        zeros = QCheckBox("Trailing Zeros")
+        zeros.setObjectName("equationTrailingZeros")
+        zeros.setChecked(fmt.trailing_zeros)
+        zeros.toggled.connect(lambda on: change("Trailing Zeros", set_fmt(trailing_zeros=on)))
+        form.addRow("", zeros)
         threshold = QSpinBox()
         threshold.setObjectName("equationThreshold")
         threshold.setRange(0, 15)
@@ -3682,7 +3733,13 @@ class PropertiesPanel(QScrollArea):
                              "power of ten")
         threshold.valueChanged.connect(lambda n: change(
             f"Exponential threshold: {n}", set_fmt(threshold=n)))
-        form.addRow("Threshold:", threshold)
+        # the menu's words, on two lines if need be (the panel keeps its width)
+        named = QLabel("Exponential Threshold:")
+        named.setWordWrap(True)
+        named.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        named.setMaximumWidth(QFontMetrics(named.font()).horizontalAdvance("Decimal Places:")
+                              + 4)
+        form.addRow(named, threshold)
         fractions = QComboBox()
         fractions.setObjectName("equationFractions")
         for key, title in (("decimal", "Decimal"), ("fraction", "Fraction"), ("auto", "Auto")):
@@ -3691,19 +3748,23 @@ class PropertiesPanel(QScrollArea):
         fractions.currentIndexChanged.connect(lambda _i: change(
             "Fractions", set_fmt(fractions=fractions.currentData())))
         form.addRow("Fractions:", fractions)
-        for title, attr in (("Trailing Zeros", "trailing_zeros"),
-                            ("Significant figures", "significant")):
-            box = QCheckBox(title)
-            box.setChecked(getattr(fmt, attr))
-            box.toggled.connect(lambda on, a=attr, t=title: change(t, set_fmt(**{a: on})))
-            form.addRow("", box)
         rounding = QComboBox()
+        rounding.setObjectName("equationRounding")
         rounding.addItem("Half to Even", True)
         rounding.addItem("Away from Zero", False)
         rounding.setCurrentIndex(0 if fmt.half_even else 1)
         rounding.currentIndexChanged.connect(lambda _i: change(
             "Rounding", set_fmt(half_even=rounding.currentData())))
         form.addRow("Rounding:", rounding)
+        if region.editor.evaluate:
+            # SMath's unit placeholder after the result, typed here too
+            from .unitbox import UnitField
+            unit = UnitField(self._unit_words(region.editor.unit))
+            unit.setObjectName("equationUnit")
+            unit.setToolTip("Result Unit: the result is shown in it (kN, kN*m, MPa), as "
+                            "typed into the placeholder after the result. Blank: as worked out")
+            unit.editingFinished.connect(lambda: self._equation_unit(items, unit))
+            form.addRow("Result Unit:", unit)
         default = QPushButton("Document default")
         default.setToolTip("Show the result as Preferences says, like the rest")
         default.clicked.connect(lambda: change("Result format: default",
@@ -3743,6 +3804,48 @@ class PropertiesPanel(QScrollArea):
         disabled.toggled.connect(lambda value: change(
             "Disable Evaluation", lambda r: setattr(r, "enabled", not value)))
         form.addRow("", disabled)
+        from .condformat import open_equation_rules
+        rules = QPushButton("Conditional Formatting…")
+        rules.setObjectName("equationConditionalFormatting")
+        rules.setToolTip("Colour the result by its value, as the right-click menu's")
+        rules.clicked.connect(lambda: open_equation_rules(self.window, items))
+        form.addRow("", rules)
+
+    @staticmethod
+    def _unit_words(row) -> str:
+        """The result unit as typed in the panel: kN*m, without SMath's marks."""
+        return "" if row.is_empty() else row.text().replace("'", "")
+
+    def _equation_unit(self, items, box) -> None:
+        """Result Unit typed in the panel: the unit placeholder after the
+        result, as if typed there (SMath's), one undo step."""
+        from ..calc.editor import Cursor
+        from ..calc.engine.model import Row
+        from . import calcmenu
+        import re
+
+        from ..calc.engine.units import is_unit
+        text = box.text().strip()
+        if self._building or self._unit_words(items[0].region.editor.unit) == text:
+            return
+        # as a unit comes into SMath's box from its list: 'kN, a unit's name
+        # marked; a document's own unit (kip_s := 5'kN) stays a name
+        typed = re.sub(r"(?<![\w'])([^\W\d][\w°]*)",
+                       lambda m: ("'" if is_unit(m.group(1)) else "") + m.group(1), text)
+
+        def apply(region):
+            editor = region.editor
+            history = (list(editor._undo), list(editor._redo))
+            editor.unit = Row()
+            editor._fix_parents(editor.unit)
+            if typed:
+                editor.set_cursor(editor.unit, 0)
+                editor.type(typed)
+            editor.cursor = Cursor(editor.root, len(editor.root))
+            editor.in_unit = False
+            editor._undo, editor._redo = history
+            editor.version += 1
+        calcmenu.change(self.window, items, "Result unit", apply, refresh=False)
 
     def _add_geometry(self, item) -> None:
         """Bluebeam's Layout: where it is, how big and which way it is
@@ -4693,7 +4796,7 @@ class PropertiesPanel(QScrollArea):
                          else ""))
         held.setObjectName("blockHolds")
         form.addRow("Holds:", held)
-        contained = QCheckBox("Self-contained")
+        contained = QCheckBox("Self-Contained")
         contained.setObjectName("blockSelfContained")
         contained.setToolTip("What the equations in the block define stays inside it; "
                              "the block still reads everything defined above it")
@@ -4702,18 +4805,27 @@ class PropertiesPanel(QScrollArea):
             lambda on: self._apply(lambda i: i.set_self_contained(on), "Self-contained"))
         form.addRow("", contained)
         if len(self._items) == 1:
-            remove = QPushButton("Remove block, keep equations")
+            # the right-click menu's commands, in its words (Title Case)
+            members_button = QPushButton("Select Its Equations")
+            members_button.setObjectName("blockSelect")
+            members_button.setToolTip("Pick the equations the block holds")
+            members_button.clicked.connect(lambda: self.window._select_block_members(first))
+            form.addRow("", members_button)
+            remove = QPushButton("Remove Block, Keep Equations")
             remove.setObjectName("blockRemove")
             remove.setToolTip("Take the frame away; its equations stay on the page as they are")
             remove.clicked.connect(lambda: self.window.remove_block_keep_equations(first))
             form.addRow("", remove)
 
     def _add_table(self, first) -> None:
-        """A table: its name (formulas and equations use it), its size."""
-        form = self._group("Table")
+        """A table or a spreadsheet: its name (formulas and equations use
+        it), its size."""
+        sheet = getattr(first, "SHEET_RUN", False)
+        form = self._group("Sheet" if sheet else "Table")
         name = QLineEdit(first.name)
         name.setObjectName("tableName")
-        name.setToolTip("The table's name: formulas read it as Name!B4, equations as Name.B4; "
+        name.setToolTip(("The sheet's" if sheet else "The table's") +
+                        " name: formulas read it as Name!B4, equations as Name.B4; "
                         "renaming it updates them")
 
         def renamed():
@@ -4727,10 +4839,178 @@ class PropertiesPanel(QScrollArea):
         size = QLabel(f"{rows} rows × {cols} columns")
         size.setObjectName("tableSize")
         form.addRow("Size:", size)
-        open_button = QPushButton("Edit cells")
-        open_button.setToolTip("Open the table for its cells (or double-click it)")
-        open_button.clicked.connect(lambda: self.window.view.tables.open(first))
-        form.addRow("", open_button)
+        if self.window.view.tables.item is not first:
+            open_button = QPushButton("Edit Table")
+            open_button.setToolTip("Open the table for its cells (or double-click it)")
+            open_button.clicked.connect(lambda: self.window.view.tables.open(first))
+            form.addRow("", open_button)
+
+    def _add_cells(self, table) -> None:
+        """The selected cells, as the Properties toolbar's table controls
+        and the cells' right-click menu offer them: number format, Decimal
+        Places, Significant Figures, unit, font, fill, alignment, borders.
+        Each change is one undo step (TableEditing._change)."""
+        from .tablebar import NUMBER_FORMATS
+        from .unitbox import UnitField
+        tables = self.window.view.tables
+        controls = getattr(self.window, "table_controls", None)
+        if tables.active_style() is None or controls is None:
+            return
+        form = self._group("Cells")
+        where = QLabel()
+        where.setObjectName("cellsSelection")
+        form.addRow("Selection:", where)
+        number = QComboBox()
+        number.setObjectName("cellsNumberFormat")
+        for label, _code in NUMBER_FORMATS:
+            number.addItem(label)
+        number.addItem("More…")
+        number.activated.connect(lambda i: (controls._number_chosen(i), self.sync_cells()))
+        form.addRow("Number Format:", number)
+        places = QSpinBox()
+        places.setObjectName("cellsDecimalPlaces")
+        places.setRange(-1, 15)
+        places.setSpecialValueText("General")
+        places.setToolTip("Decimal Places: how many the selected cells show (General: as "
+                          "many as fit), as Excel's Increase and Decrease Decimal")
+        places.valueChanged.connect(lambda n: self._cells_do(
+            lambda: tables.set_places(None if n < 0 else n)))
+        form.addRow("Decimal Places:", places)
+        significant = QCheckBox("Significant Figures")
+        significant.setObjectName("cellsSignificant")
+        significant.setToolTip("Decimal Places counts significant figures, not places "
+                               "after the point")
+        significant.toggled.connect(lambda on: self._cells_do(
+            lambda: tables.set_significant(on)))
+        form.addRow("", significant)
+        unit = UnitField()
+        unit.setObjectName("cellsUnit")
+        unit.setToolTip("Unit (SMath's unit box): the selected cells' quantities are shown "
+                        "in it. Blank: as typed")
+        unit.editingFinished.connect(lambda: self._cells_do(
+            lambda: controls.set_unit(unit.text().strip(), unit)))
+        form.addRow("Unit:", unit)
+        font = QFontComboBox()
+        font.setObjectName("cellsFont")
+        font.currentFontChanged.connect(lambda f: self._cells_format(
+            font=f.family() if f.family() != "Calibri" else None))
+        form.addRow("Font:", font)
+        size = QDoubleSpinBox()
+        size.setObjectName("cellsFontSize")
+        size.setRange(1, 409)
+        size.setDecimals(1)
+        size.setSuffix(" pt")
+        size.valueChanged.connect(lambda v: self._cells_format(size=None if v == 11 else v))
+        form.addRow("Size:", size)
+        styles = {}
+        for key, title in (("bold", "Bold"), ("italic", "Italic"), ("underline", "Underline")):
+            box = QCheckBox(title)
+            box.setObjectName(f"cells{title}")
+            box.toggled.connect(lambda on, k=key: self._cells_format(
+                **{k: ("single" if on else "") if k == "underline" else on}))
+            styles[key] = box
+        colour = ColorButton("#000000", label="Font colour")
+        colour.setObjectName("cellsColour")
+        colour.colorChanged.connect(lambda c: self._cells_format(color=c or None))
+        form.addRow("Colour:", colour)
+        fill = ColorButton("", True, label="Fill colour")
+        fill.setObjectName("cellsFill")
+        fill.colorChanged.connect(lambda c: self._cells_format(fill=c or None))
+        form.addRow("Fill:", fill)
+        horizontal = QComboBox()
+        horizontal.setObjectName("cellsHorizontal")
+        for key, title in (("general", "General"), ("left", "Left"), ("center", "Centre"),
+                           ("right", "Right")):
+            horizontal.addItem(title, key)
+        horizontal.activated.connect(lambda _i: self._cells_format(
+            h_align=horizontal.currentData()))
+        form.addRow("Horizontal:", horizontal)
+        vertical = QComboBox()
+        vertical.setObjectName("cellsVertical")
+        for key, title in (("top", "Top"), ("center", "Middle"), ("bottom", "Bottom")):
+            vertical.addItem(title, key)
+        vertical.activated.connect(lambda _i: self._cells_format(
+            v_align=vertical.currentData()))
+        form.addRow("Vertical:", vertical)
+        wrap = QCheckBox("Wrap Text")
+        wrap.setObjectName("cellsWrap")
+        wrap.toggled.connect(lambda on: self._cells_format(wrap=on))
+        # two to a row, to keep within the panel's width
+        form.addRow("", _row(styles["bold"], styles["italic"]))
+        form.addRow("", _row(styles["underline"], wrap))
+        borders = QToolButton()
+        borders.setObjectName("cellsBorders")
+        borders.setText("Borders")
+        borders.setToolTip("The selected cells' borders, as the Properties toolbar's")
+        borders.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(borders)
+        menu.setProperty("cf_context", "tablebar.borders")
+        for label, which in (("All Borders", "all"), ("Outside Borders", "outside"),
+                             ("Inside Borders", "inside"), ("Thick Box Border", "thick_box"),
+                             ("Top Border", "top"), ("Bottom Border", "bottom"),
+                             ("Left Border", "left"), ("Right Border", "right"),
+                             ("No Border", "none")):
+            menu.addAction(label, lambda w=which: self._cells_do(lambda: tables.borders(w)))
+        borders.setMenu(menu)
+        more = QPushButton("Format Cells…")
+        more.setToolTip("Every setting of the selected cells (Ctrl+1)")
+        more.clicked.connect(self.window.format_cells_dialog)
+        form.addRow("", borders)
+        form.addRow("", more)
+        self._cells = dict(where=where, number=number, places=places, significant=significant,
+                           unit=unit, font=font, size=size, styles=styles, colour=colour,
+                           fill=fill, horizontal=horizontal, vertical=vertical, wrap=wrap)
+        self.sync_cells()
+
+    def _cells_do(self, change) -> None:
+        if self._building or self._cells is None:
+            return
+        if not self.window.view.tables.is_open():
+            return
+        change()
+
+    def _cells_format(self, **fields) -> None:
+        self._cells_do(lambda: self.window.view.tables.format(**fields))
+
+    def sync_cells(self) -> None:
+        """The Cells section shows the active cell's look (after a change, or
+        when the selection moves): cheap, nothing rebuilt."""
+        from shiboken6 import isValid
+        from ..sheet.refs import col_letters
+        from .tablebar import format_index
+        cells = self._cells
+        tables = self.window.view.tables
+        if cells is None or not isValid(cells["places"]) or tables.item not in self._items:
+            return
+        st = tables.active_style()
+        if st is None:
+            return
+        building, self._building = self._building, True
+        try:
+            t, l, b, r = tables.selection()
+            text = f"{col_letters(l)}{t + 1}"
+            if (t, l) != (b, r):
+                text += f":{col_letters(r)}{b + 1}"
+            cells["where"].setText(text)
+            cells["number"].setCurrentIndex(format_index(st.number_format))
+            places = tables.places()
+            cells["places"].setValue(-1 if places is None else places)
+            cells["significant"].setChecked(bool(st.significant))
+            if not cells["unit"].hasFocus():
+                cells["unit"].setText(st.unit or "")
+            cells["font"].setCurrentFont(QFont(st.font or "Calibri"))
+            cells["size"].setValue(st.size or 11)
+            cells["styles"]["bold"].setChecked(bool(st.bold))
+            cells["styles"]["italic"].setChecked(bool(st.italic))
+            cells["styles"]["underline"].setChecked(bool(st.underline))
+            cells["colour"].set_color(st.color or "#000000")
+            cells["fill"].set_color(st.fill or "")
+            cells["horizontal"].setCurrentIndex(max(cells["horizontal"].findData(
+                st.h_align if st.h_align in ("left", "center", "right") else "general"), 0))
+            cells["vertical"].setCurrentIndex(max(cells["vertical"].findData(st.v_align), 0))
+            cells["wrap"].setChecked(bool(st.wrap))
+        finally:
+            self._building = building
 
     def _add_chart(self, first) -> None:
         """A chart: what it is, and its dialog (or double-click it)."""
@@ -4739,7 +5019,7 @@ class PropertiesPanel(QScrollArea):
             first.spec.get("kind"), "")
         form.addRow("Type:", QLabel(kind))
         form.addRow("Series:", QLabel(str(len(first.spec.get("series", [])))))
-        edit = QPushButton("Edit chart…")
+        edit = QPushButton("Edit Chart…")
         edit.setToolTip("Type, titles, axes, series, error bars and trendlines (or double-click it)")
         edit.setEnabled(not first.locked)
         edit.clicked.connect(lambda: self.window._edit_chart(first))

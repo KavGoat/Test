@@ -59,7 +59,7 @@ def shown_text(sheet, row: int, col: int) -> str:
     if cell is None:
         return ""
     st = sheet.workbook.styles.get(cell.style)
-    return format_value(cell.value, st.number_format, st.unit).text
+    return format_value(cell.value, st.number_format, st.unit, significant=st.significant).text
 
 
 def as_text(sheet, top, left, bottom, right) -> str:

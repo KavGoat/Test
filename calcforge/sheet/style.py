@@ -20,6 +20,7 @@ class Border:
 class Style:
     number_format: Optional[str] = None      # Excel format code; None is General
     unit: Optional[str] = None               # show quantities in this unit ("kN")
+    significant: bool = False                # the format's places count significant figures
     font: Optional[str] = None               # family; None is the sheet's
     size: Optional[float] = None             # points
     bold: bool = False
