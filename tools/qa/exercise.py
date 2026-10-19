@@ -561,7 +561,8 @@ def build_commands(path: str) -> list[dict]:
                     state = "textbox"
                 if rest == "Appearance" and label in ("Font", "Font Size", "Font Colour", "B",
                                                       "I", "U", "S", "x²", "x₂", "Auto",
-                                                      "Alignment", "Margin"):
+                                                      "Alignment", "Margin", "Margins",
+                                                      "Line Spacing"):
                     state = "textbox"
             elif panel == "Maths":
                 state = "equation_editing" if values else "calc_mode"
