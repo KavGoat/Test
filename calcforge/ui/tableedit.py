@@ -103,7 +103,8 @@ class CellEditor(UnitText):
         self.setFrame(False)
         self.on_white = True
         self.setStyleSheet("QLineEdit { background: white; color: black; "
-                           "border: 2px solid #217346; padding: 0px 1px; }")
+                           "border: 2px solid #217346; border-radius: 0px; padding: 0px 1px; }")
+        self.setAttribute(Qt.WA_OpaquePaintEvent)
         self.textEdited.connect(tables._typed)
         self.cursorPositionChanged.connect(lambda *_: tables._caret_moved())
 
@@ -115,7 +116,14 @@ class CellEditor(UnitText):
             # every key belongs to the text being typed, not to the window's shortcuts
             event.accept()
             return True
-        return super().event(event)
+        done = super().event(event)
+        if event.type() in (QEvent.Polish, QEvent.StyleChange):
+            # Its white fills all of it, so what is under it is not drawn
+            # again for each key typed (the sheet's page under the box was,
+            # its headings and the window too). Said again after each style
+            # sheet, which takes it away.
+            self.setAttribute(Qt.WA_OpaquePaintEvent)
+        return done
 
     def keyPressEvent(self, event) -> None:
         if self.tables._editor_key(event):
@@ -1497,6 +1505,7 @@ class TableEditing:
             return
         if not self.view.editable(item):
             return
+        had_copied = self.copied is not None
         self.copied = None
         cell = self.active
         current = item.sheet.input(*cell)
@@ -1506,7 +1515,18 @@ class TableEditing:
             self.editor = editor
         self.editing_cell = cell
         self.enter_mode = enter_mode
-        self._drawn_refs = False            # drawn afresh: the copied block's edge has gone
+        if had_copied or item.selection is None or item.active is None:
+            self._drawn_refs = False        # drawn afresh: the copied block's edge has gone
+        else:
+            # Nothing is drawn again but SMath's unit box after the cell's
+            # value, which goes while it is typed in (the whole sheet was
+            # drawn again for the first key of every entry; with OpenGL,
+            # the whole canvas)
+            self._drawn_refs = None
+            self._drawn_refs_area = QRectF()
+            got = item.unit_box_rect(*cell) if not self._result_unit_open() else None
+            if got is not None and got[0] == "box":
+                item.update(self._selection_area(item, item.selection, item.active))
         editor.setText(current if text is None else text)
         editor.setCursorPosition(len(editor.text()))
         self._place_editor()
@@ -1532,7 +1552,7 @@ class TableEditing:
         # (the window's style sheet sets every text box's font size: this
         # one's follows the zoom)
         sheet_text = (
-            "QLineEdit { background: white; color: black; border: 2px solid #217346; "
+            "QLineEdit { background: white; color: black; border: 2px solid #217346; border-radius: 0px; "
             f"padding: 0px 1px; font-size: {font.pixelSize()}px; "
             f"font-family: '{font.family()}'; font-weight: {700 if st.bold else 400}; "
             f"font-style: {'italic' if st.italic else 'normal'}; }}")
@@ -1576,11 +1596,44 @@ class TableEditing:
             if text.startswith("="):
                 refs = tuple(repr(ref) for _s, _e, ref in F.reference_spans(text[1:]))
             if refs != self._drawn_refs:
+                if self._drawn_refs is False:
+                    item.update()           # the edit's start: drawn afresh
+                else:
+                    # only the cells outlined before and now (every cell of
+                    # the sheet was drawn again for each reference typed)
+                    area = self._refs_area(item, text).united(self._drawn_refs_area)
+                    if not area.isEmpty():
+                        item.update(area)
                 self._drawn_refs = refs
-                item.update()
+            self._drawn_refs_area = self._refs_area(item, text)
         widget = self._typing_widget()
         if widget is not None:
             self.help.update(widget)
+
+    #: where those references were outlined, in the table's coordinates
+    _drawn_refs_area = QRectF()
+
+    def _refs_area(self, item, text: str) -> QRectF:
+        """Where the references of formula *text* are outlined on *item*
+        (_paint_overlay draws them), with room for their pens."""
+        area = QRectF()
+        if not text.startswith("=") or item.sheet is None:
+            return area
+        scale = max(abs(self.view.transform().m11()) + abs(self.view.transform().m12()), 0.05)
+        pad = 4.0 / scale
+        rows, cols = item.size
+        for _s, _e, ref in F.reference_spans(text[1:]):
+            if ref.sheet is not None and ref.sheet.lower() != item.name.lower():
+                continue
+            if isinstance(ref, CellRef):
+                t, l, b, r = ref.row, ref.col, ref.row, ref.col
+            else:
+                t, l, b, r = ref.top, ref.left, ref.bottom, ref.right
+            if t >= rows or l >= cols:
+                continue
+            box = item.block_rect(t, l, min(b, rows - 1), min(r, cols - 1))
+            area = area.united(box.adjusted(-pad, -pad, pad, pad))
+        return area
 
     def _typed_in_bar(self, text: str) -> None:
         if self.editor is None:

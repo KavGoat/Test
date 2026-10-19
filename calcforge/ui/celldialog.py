@@ -134,8 +134,13 @@ class FormatCellsDialog(QDialog):
         self.symbol.addItems(["$", "€", "£", "¥", "None"])
         self.types = QListWidget()
         self.custom = QLineEdit()
-        self.unit = QLineEdit(self.start.unit or "")
-        self.unit.setPlaceholderText("e.g. kN, kN/m, MPa — blank: as typed")
+        # SMath's unit box: its black placeholder while empty or unfinished
+        # (ui/unitbox.py); what it takes, in its tip
+        from .unitbox import UnitField
+        self.unit = UnitField(self.start.unit or "")
+        self.unit.setToolTip("The unit quantities in the cell are shown in: e.g. kN, kN/m, "
+                             "MPa, or a custom unit the equations define — blank: as typed")
+        self.unit.setAccessibleName("Show quantities in")
         form.addRow("Decimal places:", self.decimals)
         form.addRow("", self.thousands)
         form.addRow("Symbol:", self.symbol)
@@ -152,6 +157,8 @@ class FormatCellsDialog(QDialog):
         self.types.currentTextChanged.connect(self._type_chosen)
         self.custom.textEdited.connect(lambda _t: self._update_sample())
         self.unit.textEdited.connect(lambda _t: self._update_sample())
+        # flagged only once finished (Enter or leaving it), never while typed
+        self.unit.editingFinished.connect(self._unit_finished)
         self.category.currentTextChanged.connect(self._category_chosen)
         code = self.start.number_format or "General"
         self.custom.setText(code)
@@ -224,19 +231,27 @@ class FormatCellsDialog(QDialog):
         self.custom.setText(code)
         self._update_sample()
 
+    def _unit_refusal(self):
+        """Why the unit typed can't be the cell's (a non-unit, or one of
+        another kind than its value), or None."""
+        unit = self.unit.text().strip()
+        if not unit:
+            return None
+        from .cellunits import output_unit_refusal
+        return output_unit_refusal(unit, self.value)
+
+    def _unit_finished(self) -> None:
+        """Red, with why, for a finished unit the cell can't take, as the
+        unit boxes refuse them (the user, 2026-10-15) — only once it is
+        finished, as SMath: nothing is said while it is typed (2026-10-19)."""
+        why = self._unit_refusal()
+        if why is not None:
+            self.unit.flag(why)
+
     def _update_sample(self) -> None:
         unit = self.unit.text().strip() or None
-        self.unit.setStyleSheet("")
-        self.unit.setToolTip("")
-        if unit:
-            # red, with why, for a non-unit or one of another kind than the
-            # cell's value, as the unit boxes refuse them (the user, 2026-10-15)
-            from .cellunits import output_unit_refusal
-            why = output_unit_refusal(unit, self.value)
-            if why is not None:
-                self.unit.setStyleSheet("color:#c92a2a")
-                self.unit.setToolTip(why)
-                unit = None
+        if unit and self._unit_refusal() is not None:
+            unit = None                # not (yet) a unit: the sample as typed
         code = self.custom.text() or None
         try:
             shown = format_value(self.value, None if code == "General" else code, unit)
