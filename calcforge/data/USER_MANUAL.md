@@ -213,8 +213,10 @@ its default (see *Markup styles and defaults*).
   New Paragraph, Note, Paragraph) is on the Properties toolbar.
 - **Stamp** (`S`) — drag a status stamp (see *Stamps*).
 - **Flag** (`Shift+F`) — click to pin a flag to come back to.
-- **Image** — drag a box and choose a picture from disk. **Crop Image**: select an
-  image, then drag the part of it to keep.
+- **Image** — drag a box and choose a picture from disk (or paste one). Dragging a
+  picture's corner keeps its proportions; hold `Shift` to stretch it freely. An
+  edge handle stretches it one way. The opposite corner or edge stays where it is.
+  **Crop Image**: select an image, then drag the part of it to keep.
 - **Table** — drag out a spreadsheet table; its rows and columns follow the size
   you drag (see Part 3).
 - **Contents** — a table of contents built from the document's bookmarks; click a
@@ -715,8 +717,17 @@ cells' own Find and Replace — see Part 3.)
   The page itself is not changed.
 - **Split View** — this document beside another pane (drag a document tab onto the
   other pane); **Separate Views** turns the panes back into windows. The status
-  bar's **Sync** (Page sync, Document sync) links windows showing the same
-  document.
+  bar's **Sync** links the two views (or two windows):
+  - **Off** — each view moves on its own; zooming, scrolling or turning pages in
+    one never moves the other.
+  - **Page sync** — the same zoom and the same spot, each on its own page: zoom
+    or scroll in one view and the other shows the same place (in points from
+    the page's top-left corner) on whichever page it is on; going to a page in
+    one view leaves the other on its page. Scrolling past a page's end carries
+    the other view onto its next page too.
+  - **Document sync** — scrolling, zooming and page changes in one view are
+    repeated in the other, keeping the difference between them that there was
+    when it was turned on.
 - **Rulers** along the top and left, from the page's corner; right-click one for
   inches, centimetres, millimetres, points or picas. **Full-Screen Crosshair**:
   two lines across the drawing that meet at the pointer.
