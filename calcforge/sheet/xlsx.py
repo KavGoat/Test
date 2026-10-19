@@ -382,6 +382,10 @@ def _read_workbook(path: str, taken: Optional[set] = None) -> Imported:
     for cs in getattr(wb, "chartsheets", []):
         left_out.append(f"chart sheet “{cs.title}”")
     tables = _tables_of(wb)
+    # formulas stored plainly are Excel's before dynamic arrays: a block where
+    # one value is wanted is the cell of it in the formula's row or column
+    from .legacy import names_of_blocks, with_intersections
+    block_name = names_of_blocks(_defined_names(wb), {})
 
     def renamed(text: str) -> str:
         for old, new in renames.items():
@@ -427,6 +431,9 @@ def _read_workbook(path: str, taken: Optional[set] = None) -> Imported:
                 elif c.data_type == "f" or (isinstance(value, str) and value.startswith("=")
                                             and c.data_type != "s"):
                     text = "=" + _plain_formula(str(value)[1:])
+                    text = "=" + with_intersections(
+                        _structured_to_a1(text[1:], ws.title, r, k, tables),
+                        lambda written, title=ws.title: block_name(written, title))
                 else:
                     text = _value_input(value, c.data_type)
                 if (r, k) in spilled:
@@ -801,6 +808,23 @@ def _validations(ws, renamed, extra=()) -> list:
     return out
 
 
+def _defined_names(wb) -> list:
+    """(name, what it refers to, the worksheet it is local to or None) of
+    each of the workbook's defined names, as Excel stores them."""
+    out = []
+    try:
+        for name, dn in wb.defined_names.items():
+            if not name.startswith("_xlnm."):
+                out.append((name, _plain_formula(str(dn.attr_text or "")), None))
+    except AttributeError:
+        pass
+    for ws in wb.worksheets:
+        for name, dn in getattr(ws, "defined_names", {}).items():
+            if not name.startswith("_xlnm."):
+                out.append((name, _plain_formula(str(dn.attr_text or "")), ws.title))
+    return out
+
+
 def _names(wb, sheets: list, renames: dict, renamed, left_out: list) -> None:
     """The workbook's defined names, each kept with the sheet whose cells it
     names (or the first sheet, for a constant)."""
@@ -818,9 +842,9 @@ def _names(wb, sheets: list, renames: dict, renamed, left_out: list) -> None:
         if name.startswith("_xlnm.") or getattr(dn, "hidden", False):
             continue
         text = str(dn.attr_text or "")
-        if "#REF!" in text:
-            left_out.append(f"the name “{name}” (it refers to cells that are gone)")
-            continue
+        if re.fullmatch(r"(?:'(?:[^']|'')+'|[^'!]+)!#REF!|#REF!", text.strip()):
+            # cells deleted in Excel: the name stays, giving #REF! as in Excel
+            text = "#REF!"
         text = renamed(_plain_formula(text))
         try:
             tokens = F.tokenize(text)
