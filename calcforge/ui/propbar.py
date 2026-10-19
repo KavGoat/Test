@@ -1135,6 +1135,7 @@ def refresh_icons(window) -> None:
     window.font_auto_button.setIcon(_auto_font_icon())
     fit_numbers(window.style_bar)          # the theme's frames, and its font
     window.cloud_spin.refresh_icons()
+    import shiboken6
     from .widgets import arrow_combo
     fresh = arrow_combo()
     for combo in (window.arrow_start_combo, window.arrow_end_combo):
@@ -1142,3 +1143,8 @@ def refresh_icons(window) -> None:
             picture = fresh.itemIcon(index)
             combo.setItemIcon(index, _mirrored(picture) if combo is window.arrow_start_combo
                               else picture)
+    # Only its pictures were wanted (drawn there and then). Left to the
+    # collector, a list with no parent is a window of the application's,
+    # freed whenever Python next collects — once while PySide was listing
+    # the application's windows, a segmentation fault (every-command runs).
+    shiboken6.delete(fresh)

@@ -479,7 +479,11 @@ class ScaleDialog(QDialog):
         layout.addLayout(grid)
         row = 0
         # A viewport is named and given a scale; it has no pages to choose.
-        self.name = QLineEdit(name or "")
+        # Both are the dialog's even when hidden: a widget with no parent is
+        # a window of its own, owned by Python, and freed whenever the
+        # collector next runs — once in the middle of PySide listing the
+        # application's windows, a segmentation fault (every-command runs).
+        self.name = QLineEdit(name or "", self)
         self.name.setToolTip("What this region of the sheet is, e.g. Detail A")
         if viewport:
             grid.addWidget(QLabel("Name:"), row, 0)
@@ -487,7 +491,7 @@ class ScaleDialog(QDialog):
             row += 1
         else:
             self.name.hide()
-        self.pages = PagesRange(count, current, selected)
+        self.pages = PagesRange(count, current, selected, parent=self)
         if not viewport:
             grid.addWidget(QLabel("Pages:"), row, 0)
             grid.addWidget(self.pages, row, 1)
@@ -1850,7 +1854,8 @@ class FlattenDialog(QDialog):
 
         pages = QHBoxLayout()
         pages.addWidget(QLabel("Pages:"))
-        self.pages = PagesRange(count, current, selected_pages, default=PagesRange.ALL)
+        self.pages = PagesRange(count, current, selected_pages, default=PagesRange.ALL,
+                                parent=self)
         pages.addWidget(self.pages, 1)
         layout.addLayout(pages)
 
