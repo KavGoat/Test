@@ -55,6 +55,7 @@ TOTALS = "totals"
 AUTO_FONT = "font_auto"      # Revu's "A": the words sized to fit the box
 END_FILL = "end_fill"        # Revu's line-end colour swatch, after End ▾ Auto ▾
 NOTE = "note"                # a note's Color, opacity and Icon ▾ (Revu's)
+CHECKBOX = "checkbox"        # a Checkbox's Box ▾, Mark ▾ and Multiple (checkboxes.py)
 
 
 def _ink() -> str:
@@ -501,7 +502,7 @@ def build(window) -> QToolBar:
     w._style_widgets = {key: [] for key in (
         STROKE, OPACITY, DASH, CLOUD, WIDTH, CORNER, ARROW_SIZE, FILL, FILL_OPACITY,
         SHAPE, HATCH, HIGHLIGHT, CUTOUT, SYMBOL, UNITS, MEASURE, FONT, AUTO_FONT,
-        TOTALS, END_FILL, NOTE)}
+        TOTALS, END_FILL, NOTE, CHECKBOX)}
 
     w._style_action = {}
 
@@ -681,6 +682,10 @@ def build(window) -> QToolBar:
     w.fit_text_button.setToolTip("Fit to text: the box shrinks or grows to its words (Alt+Z)")
     w.fit_text_button.clicked.connect(lambda: w.act_autosize.trigger())
     put(SHAPE, w.fit_text_button)
+
+    # -- a Checkbox's Box ▾, Mark ▾ and Multiple ------------------------------
+    from .checkboxes import build_bar as _checkbox_bar
+    _checkbox_bar(w, put, label)
 
     # -- Hatch ▾ ---------------------------------------------------------------
     put(HATCH, label("Hatch:"))
@@ -1050,7 +1055,10 @@ def extras_shown(items: list, active, supported: set) -> set:
         return shown
     if isinstance(active, CalloutItem):
         shown.add(SHAPE)
-    if isinstance(active, (TextItem, CalloutItem)) and not isinstance(active, TypewriterItem) \
+    if getattr(active, "TYPE", "") == "checkbox":
+        from .checkboxes import GROUP
+        shown.add(GROUP)                  # Box ▾, Mark ▾ and Multiple
+    elif isinstance(active, (TextItem, CalloutItem)) and not isinstance(active, TypewriterItem) \
             and FONT in supported:
         shown.add(AUTO_FONT)              # Revu's "A": the words sized to the box
     always_highlights = getattr(active, "kind", "") in ("highlight", "highlighter")
@@ -1135,6 +1143,8 @@ def refresh_icons(window) -> None:
     window.highlight_button.setIcon(icon("highlighter", 20))
     window.cutout_button.setIcon(icon("cutout_polygon", 20))
     window.font_auto_button.setIcon(_auto_font_icon())
+    from .checkboxes import refresh_bar_icons
+    refresh_bar_icons(window)              # a Checkbox's Box ▾ and Mark ▾
     fit_numbers(window.style_bar)          # the theme's frames, and its font
     window.cloud_spin.refresh_icons()
     import shiboken6

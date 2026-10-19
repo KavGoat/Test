@@ -242,6 +242,8 @@ class Style:
     # that is not the same all round: circled text sets its words in the
     # square inside the circle. Empty means the padding, all round.
     text_margins: tuple = ()
+    # How far apart the lines of words are, as a multiple of single spacing.
+    line_spacing: float = 1.0
 
     def dashes(self) -> list:
         """The dashes this line is drawn with, in points, spacing applied."""

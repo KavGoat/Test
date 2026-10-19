@@ -208,6 +208,7 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'canvas.add_flag': ('Add Flag', 'Markup', 'always'),
     'canvas.insert_here.text_box': ('Insert Here ▸ Text Box', 'Markup', 'always'),
     'canvas.insert_here.callout': ('Insert Here ▸ Callout', 'Markup', 'always'),
+    'canvas.insert_here.checkbox': ('Insert Here ▸ Checkbox', 'Markup', 'always'),
     'canvas.insert_here.note': ('Insert Here ▸ Note', 'Markup', 'always'),
     'canvas.insert_here.stamp': ('Insert Here ▸ Stamp', 'Markup', 'always'),
     'canvas.insert_here.image': ('Insert Here ▸ Image', 'Markup', 'always'),
@@ -676,6 +677,8 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'propbar.count_subject': ('Properties toolbar: Count subject…', 'Markup', 'always'),
     # Revu's "A" beside the font size: the words sized to fit the box
     'propbar.auto': ('Properties toolbar: Auto font size', 'Markup', 'always'),
+    # a Checkbox's Multiple selection (its Box ▾ and Mark ▾ are lists)
+    'propbar.multiple': ('Properties toolbar: Checkbox Multiple selection', 'Markup', 'always'),
     # -- styles ----------------------------------------------------------------
     'styles.default': ('Markup style: Default', 'Markup', 'always'),
     'styles.add': ('Markup style: Save Current Look as New Style', 'Markup', 'always'),
@@ -822,6 +825,11 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'properties.document_default': ('Properties: Document default', 'Markup', 'always'),
     # Revu's Edit beside Show Caption: the caption's values and label
     'properties.edit': ('Properties: Edit caption…', 'Markup', 'always'),
+    # a Checkbox's Options (items/checkbox.py, ui/checkboxes.py)
+    'properties.add_option': ('Properties: Checkbox Add Option', 'Markup', 'always'),
+    'properties.remove_option': ('Properties: Checkbox Remove Option', 'Markup', 'always'),
+    'properties.move_up': ('Properties: Checkbox Move Option Up', 'Markup', 'always'),
+    'properties.move_down': ('Properties: Checkbox Move Option Down', 'Markup', 'always'),
     # -- variables -------------------------------------------------------------
     'variables.go_to': ('Variables: Go to', 'Panels', 'always'),
     'variables.make_global': ('Variables: Make Global / Local', 'Panels', 'always'),

@@ -7822,6 +7822,8 @@ class MainWindow(QMainWindow):
                 button.blockSignals(True)
                 button.setChecked(bool(getattr(region, name)))
                 button.blockSignals(False)
+        from .checkboxes import sync_bar
+        sync_bar(self, active)
         # the lists were set quietly: their tooltips (the shown pattern's
         # name) follow, or they would name what the last markup had
         from .propbar import hatch_tip
@@ -8935,6 +8937,13 @@ class MainWindow(QMainWindow):
             # applied straight after this; giving them the pen as well is how
             # a pasted image used to arrive wearing whatever colour the last
             # rectangle was drawn in.
+            return
+        if getattr(item, "TYPE", "") == "checkbox":
+            # As drawn on a stamp: black words and boxes, no frame, no fill —
+            # the toolbar's pen is not its look; its font is (its own colours,
+            # frame and fill are set on it, or kept as a default or a style).
+            item.style.font_size = style.font_size
+            item.style.font_family = style.font_family
             return
         if isinstance(item, TypewriterItem):
             # Words with no box round them is the whole of what a typewriter
@@ -12049,6 +12058,9 @@ class MainWindow(QMainWindow):
                 if name in self.PANEL_ICONS:
                     button.setIcon(icon(self.PANEL_ICONS[name][1]))
         self.markups_panel.rebuild(self.document)
+        if getattr(self.properties_panel, "_items", None):
+            # its drawn lists (a Checkbox's Box and Mark) in the new ink
+            self.properties_panel.show_items(self.panel_subjects())
 
     def toggle_theme(self, dark: bool) -> None:
         from ..app import apply_theme
@@ -12473,7 +12485,7 @@ class MainWindow(QMainWindow):
         if self.view.calc.calc_mode() and frame is not None:
             self._fill_calc_here(insert, frame, scene_pos)
             insert.addSeparator()
-        for key in ("text", "callout", "note", "stamp", "image"):
+        for key in ("text", "callout", "checkbox", "note", "stamp", "image"):
             tool = TOOL_MAP[key]
             insert.addAction(icon(tool.icon), menutidy.title_case(tool.label),
                              lambda _c=False, k=key, p=scene_pos: self._insert_at(k, p))
@@ -12540,13 +12552,20 @@ class MainWindow(QMainWindow):
         width, height = self.view._default_size(item)
         if hasattr(item, "set_local_rect"):
             item.set_local_rect(QRectF(0, 0, width, height))
+        if getattr(item, "TYPE", "") == "checkbox":
+            item.auto_width = True          # widens to what is typed into it
         if isinstance(item, ImageItem) and not self.load_image_into(item):
             return
         frame.add_markup(item, point)
         self.view.scene().clearSelection()
         item.setSelected(True)
         self.view.commit_snapshot(f"Add {tool.label.lower()}")
-        if isinstance(item, _TextBase):
+        if getattr(item, "TYPE", "") == "checkbox":
+            # its three options picked to type over, the typing part of the
+            # step that put it down (as the Checkbox tool's click)
+            self.view.begin_item_edit(item, placed=True)
+            item.select_all_words()
+        elif isinstance(item, _TextBase):
             self.view.begin_item_edit(item)
         self.refresh_selection()
 

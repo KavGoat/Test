@@ -944,9 +944,54 @@ def annotation_for(item, rect, place, appearance=None) -> dict:
             annotation["BS"] = {"W": width, "S": Name("D"), "D": dashes}
     _bluebeam_look(annotation, item)
     _add_the_geometry(annotation, item, rect, place)
+    if item.TYPE == "checkbox":
+        _checkbox(annotation, item, rect)
     if appearance is not None:
         annotation["AP"] = {"N": appearance}
     return annotation
+
+
+#: The key a Checkbox keeps itself under in its annotation: everything
+#: CalcForge needs to read it back as the Checkbox it is (the user,
+#: 2026-10-19). Other readers pass over it.
+CHECKBOX_KEY = "CalcForgeCheckbox"
+#: Print, and LockedContents: another reader may move and resize it, but
+#: its options and ticks are changed only in CalcForge.
+CHECKBOX_FLAGS = 4 | 512
+
+
+def _checkbox(annotation, item, rect) -> None:
+    """A Checkbox goes out as a stamp: drawn by its own appearance, boxes,
+    marks and words, which every reader shows as drawn and none re-draws
+    from its words (a FreeText would be, and lose its boxes). It can be
+    moved and resized there; its contents are locked. /Contents reads it
+    as plain words, one option a line, for search and screen readers."""
+    import json
+
+    annotation["F"] = CHECKBOX_FLAGS
+    annotation["Subj"] = item.subject or "Checkbox"
+    annotation["Contents"] = item.pdf_reading()
+    for key in ("C", "IC", "BS"):
+        annotation.pop(key, None)
+    try:
+        box = item.mapRectToParent(item.local_rect()).normalized()
+    except Exception:                                  # noqa: BLE001
+        box = rect
+    payload = item.serialize()
+    for key in ("x", "y", "z", "uid", "from_annotation", "still_theirs",
+                "their_box", "their_picture_asset", "their_picture_box",
+                "stamp_picture", "stamp_svg", "written_print", "annotation_print"):
+        payload.pop(key, None)
+    annotation[CHECKBOX_KEY] = {
+        "Version": 1,
+        # where it was written, in display points: a Rect changed in another
+        # reader is a move or a resize, taken on reading back
+        "Written": [float(rect.x()), float(rect.y()),
+                    float(rect.width()), float(rect.height())],
+        "Box": [float(box.x()), float(box.y()), float(box.width()), float(box.height())],
+        "Origin": [float(item.pos().x()), float(item.pos().y())],
+        "Markup": json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
+    }
 
 
 def _bluebeam_look(annotation, item) -> None:

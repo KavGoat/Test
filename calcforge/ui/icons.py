@@ -374,6 +374,20 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         painter.drawPolyline(QPolygonF([QPointF(12.5, 6), QPointF(9.5, 6),
                                         QPointF(8.5, 13)]))
         _cloud(painter, INK, QRectF(1.5, 13, 12, 8.5))
+    elif name == "checkbox":
+        # Two options, each a box and its line of words; the first ticked in
+        # the accent, the tick running out past its box's corner.
+        _pen(painter, INK, 1.2)
+        painter.drawRect(QRectF(3.5, 5.5, 6, 6))
+        painter.drawRect(QRectF(3.5, 14.5, 6, 6))
+        painter.drawLine(QPointF(13, 9), QPointF(21, 9))
+        painter.drawLine(QPointF(13, 18), QPointF(20, 18))
+        tick = QPen(QColor(WARM), 1.9)
+        tick.setCapStyle(Qt.RoundCap)
+        tick.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(tick)
+        painter.drawPolyline(QPolygonF([QPointF(4.8, 8.4), QPointF(6.4, 10.3),
+                                        QPointF(11, 3.6)]))
     elif name == "note":
         _pen(painter, NOTE_EDGE, 1.2)
         painter.setBrush(QBrush(QColor(NOTE)))

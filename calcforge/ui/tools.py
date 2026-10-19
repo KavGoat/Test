@@ -55,6 +55,11 @@ def _link():
     return LinkItem()
 
 
+def _checkbox():
+    from ..items.checkbox import CheckboxItem
+    return CheckboxItem()
+
+
 def _measure(kind: str):
     return lambda: MeasureItem(kind)
 
@@ -127,6 +132,10 @@ TOOLS: list[Tool] = [
          "Drag a rectangular Cloud or click the corners of a custom Cloud+, "
          "then click where the words go — the cloud and note are one thing",
          factory=lambda: CalloutItem("")),
+    Tool("checkbox", "Checkbox", "checkbox", DRAG, "Annotate", "",
+         "Options with boxes to tick — click to place three, or drag a box; "
+         "type one option a line, and click a box to tick it",
+         factory=lambda: _checkbox()),
     Tool("note", "Note", "note", CLICK, "Annotate", "",
          "Sticky note with a comment", factory=lambda: NoteItem("")),
     Tool("stamp", "Stamp", "stamp", DRAG, "Annotate", "S",

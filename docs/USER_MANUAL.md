@@ -233,6 +233,36 @@ its default (see *Markup styles and defaults*).
   **Add Cloud Leader** and **Remove Leader**.
 - **Cloud+** (`Shift+Q`) — a cloud and its note as one markup: drag a rectangular
   cloud or click a free-form one, then click where the words go.
+- **Checkbox** — options with a box to tick beside each, as on a review stamp, all
+  in one markup typed like a text box. Click to put one down with three options
+  (Option 1, Option 2, Option 3) picked ready to type over, or drag a box. Each line
+  you type is one option: `Enter` adds the next, `Backspace` at the start of a line
+  joins it to the one above, and a tick stays with its option as lines are added,
+  joined or taken away. With Select, a click **on a box** ticks or unticks it (one
+  undo step) — also inside a group, unless it is locked; a click anywhere else
+  picks the markup up as usual, and a double-click on the words edits them. It is
+  only the options: no heading or caption of its own (group it with a text box or
+  other markups to build a stamp). Making it narrower wraps an option's words onto
+  the next line, hanging under the words rather than the box; only the font size
+  makes the boxes, and the whole Checkbox, bigger; `Alt+Z` fits it round its
+  options. Its settings are in the Properties panel's **Checkbox** section:
+  **Options** (tick, or double-click to rename, each option; **Add Option**,
+  **Remove Option**, **Move Up**, **Move Down**), **Box** (Square, Rounded square,
+  Circle, Diamond), **Mark** (Tick, Cross, Filled, Dot), **Multiple Selection** (on:
+  several may be ticked; off: ticking one unticks the others), **Box Colour** and
+  **Mark Colour** (the words' colour to begin with), **Option Spacing** (the space
+  between options, as a share of the font size) and **Line Spacing**; Box ▾, Mark ▾
+  and Multiple are on the Properties toolbar too. Everything a text box has also
+  applies: border colour, width and line style (none to begin with), fill,
+  opacity, font, size, colour, bold, italic and underline, alignment and margin.
+  The ticked options are its **Checked** property, shown in the Markups List's
+  Checked column ("Satisfactory", or "A; C" for several); the Subject is Checkbox.
+  A Checkbox style (Markup Styles, Tool Chest) keeps its box, mark and Multiple
+  Selection. Saved to PDF it is a stamp annotation drawn exactly as here: in other
+  PDF readers it shows as drawn and can be moved or resized, but its options and
+  ticks are changed only in CalcForge (its contents read "☑ Satisfactory",
+  "☐ Rejected" … for searching); moved or resized there, it opens here where it
+  was put.
 - **Note** — click to drop a sticky note; double-click it (or use the Properties
   panel) to read and write what it says. Its **Icon** (Comment, Help, Insert, Key,
   New Paragraph, Note, Paragraph) is on the Properties toolbar.
@@ -291,6 +321,7 @@ measurement extras too: cut-outs, Units, Caption and Totals.
 | **Text Box** | Annotate | `T` | A box of words on the page — drag the box, then type in it |
 | **Callout** | Annotate | `Q` | Click what it points at, then click where the words go |
 | **Cloud+** | Annotate | `Shift+Q` | Drag a rectangular Cloud or click the corners of a custom Cloud+, then click where the words go — the cloud and note are one thing |
+| **Checkbox** | Annotate | — | Options with boxes to tick — click to place three, or drag a box; type one option a line, and click a box to tick it |
 | **Note** | Annotate | — | Sticky note with a comment |
 | **Stamp** | Annotate | `S` | Approval or status stamp |
 | **Flag** | Annotate | `Shift+F` | Pin a flag somewhere to come back to |
@@ -550,7 +581,8 @@ views of one thing: pick a row and the markup is picked on the page, and the
 other way round.
 
 - **Columns**: Page, Type, Subject, Label, Colour, Fill, Line, Width, Opacity,
-  Font, Size, Value, Author, Date and Comment. Drag a heading to reorder the
+  Font, Size, Value, Checked (a Checkbox's ticked options), Author, Date and
+  Comment. Drag a heading to reorder the
   columns or its edge to resize.
 - **Sorting**: click a heading; click again to reverse. Page 2 sorts before
   page 10.

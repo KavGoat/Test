@@ -1759,7 +1759,7 @@ class MarkupsPanel(QWidget):
     markupsPicked = Signal(list)          # [(page index, uid), ...]
 
     COLUMNS = ["Page", "Type", "Subject", "Label", "Colour", "Fill", "Line", "Width",
-               "Opacity", "Font", "Size", "Value", "Author", "Date", "Comment"]
+               "Opacity", "Font", "Size", "Value", "Checked", "Author", "Date", "Comment"]
     #: the columns edited in place, as Revu's, and what each one changes
     EDITABLE = {"Subject": "subject", "Label": "label", "Author": "author",
                 "Comment": "comment"}
@@ -1893,8 +1893,10 @@ class MarkupsPanel(QWidget):
                 f"{round(style.opacity * 100):d}%",
                 style.font_family if text_like else "",
                 f"{style.font_size:g}" if text_like else "",
-                getattr(item, "value_text", ""), item.author,
-                item.modified[:10], _comment_of(item)]
+                getattr(item, "value_text", ""),
+                # a Checkbox's ticked options: "Satisfactory", or "A; C"
+                item.checked_text() if hasattr(item, "checked_text") else "",
+                item.author, item.modified[:10], _comment_of(item)]
 
     def filter_list_on(self) -> bool:
         """Whether Filter List is on: the column filters shown and used."""
@@ -3515,6 +3517,7 @@ def _fill_example(item) -> None:
 def _icon_for_type(type_name: str) -> str:
     """The tool icon that goes with a serialised markup's type."""
     return {"rect": "rect", "poly": "line", "text": "text", "callout": "callout",
+            "checkbox": "checkbox",
             "note": "note", "stamp": "stamp", "image": "image",
             "measure": "measure_length",
             "count": "count", "contents": "page"}.get(type_name, "select")
@@ -3744,6 +3747,9 @@ class PropertiesPanel(QScrollArea):
                 self._add_stamp(first)
             elif isinstance(first, ContentsItem):
                 self._add_contents(first)
+            elif getattr(first, "TYPE", "") == "checkbox":
+                from . import checkboxes
+                checkboxes.add_section(self, first)
             elif isinstance(first, NoteItem):
                 self._add_note(first)
             elif isinstance(first, ImageItem):
@@ -3793,6 +3799,10 @@ class PropertiesPanel(QScrollArea):
             self._add_captions(self._group("Appearance"))
             if texts:
                 self._add_text(first, compact=not getattr(first, "HAS_TEXT", False))
+        if getattr(first, "TYPE", "") == "checkbox":
+            # a Checkbox style keeps its box, mark and Multiple Selection
+            from . import checkboxes
+            checkboxes.add_section(self, first, look_only=True)
         self._fit_width()
         self.layout.addStretch(1)
         self._settle()
@@ -4502,7 +4512,8 @@ class PropertiesPanel(QScrollArea):
         size.valueChanged.connect(lambda value: self._slide(
             lambda i: (setattr(i.style, "font_size", value),
                        setattr(i.style, "font_auto", False)), "Font size"))
-        if isinstance(first, (TextItem, CalloutItem)) and not isinstance(first, TypewriterItem):
+        if isinstance(first, (TextItem, CalloutItem)) and not isinstance(first, TypewriterItem) \
+                and getattr(first, "TYPE", "") != "checkbox":
             # Revu's Auto: the largest size that fits the box
             auto = QCheckBox("Auto")
             auto.setObjectName("fontAutoPanel")

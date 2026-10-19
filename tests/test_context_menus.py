@@ -281,7 +281,7 @@ def test_calc_modes_page_menu_has_smaths_inserts(w):
     # Calculation menu (bug hunt E5)
     insert = top_level(find(menu, "Insert Here").menu())
     assert insert[:4] == ["Equation", "Calc Text", "Calculation Block", "Plot"]
-    assert insert[4:] == ["Text Box", "Callout", "Note", "Stamp", "Image"]
+    assert insert[4:] == ["Text Box", "Callout", "Checkbox", "Note", "Stamp", "Image"]
     assert "Insert Equation Here" not in top_level(menu)
     find(menu, "Insert Here", "Equation").trigger()
     # an equation there, waiting to be typed into (exercise round 1, F-35:
