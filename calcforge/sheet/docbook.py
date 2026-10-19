@@ -45,6 +45,7 @@ class DocumentBook:
         self.workbook.journal = False           # the window's undo stack records pages
         self.workbook.outside = self._outside
         self.workbook.reach = self._reach
+        self.workbook.order_key = self._key
         # SMath's custom units: a quantity the equations define is a unit in the cells
         import weakref
 
@@ -113,9 +114,9 @@ class DocumentBook:
         if sheet is None:
             return
         self._parked[uid] = sheet
-        from .store import names_homed_on
+        from .store import name_key, names_homed_on
         for name, _refers, local, _comment in names_homed_on(sheet):
-            self.workbook.names.pop((name.lower(), sheet.id if local else None), None)
+            self.workbook.names.pop(name_key(sheet, name, local), None)
             self.workbook._name_dirty(name.lower())
         if sheet in self.workbook.sheets:
             self.workbook.sheets.remove(sheet)
@@ -256,36 +257,79 @@ class DocumentBook:
             if self._after_calculation not in calc.listeners:
                 calc.listeners.append(self._after_calculation)
 
-    def _named(self, name: str):
-        """(sheet, RefValue or value) for a name the equations use, or None."""
-        wb = self.workbook
-        dn = wb.find_name(name, None)
-        if dn is not None:
-            from . import formula as F
-            from .evaluate import Ctx, ev
+    def _named(self, name: str, at_key=None):
+        """(sheet, RefValue or value) for a name the equations use, or None.
 
-            try:
-                tree = F.parse(dn.refers_to).tree
-            except F.FormulaError:
-                return None
-            home = wb.sheet_by_id(dn.sheet) if dn.sheet else (wb.sheets[0] if wb.sheets else None)
-            if home is None:
-                return None
-            got = ev(tree, Ctx(wb, home, 0, 0))
-            sheet = got.sheet if isinstance(got, RefValue) else home
-            return sheet, got
+        A bare name is a document name, or a name of an imported workbook
+        that isn't self-contained (the latest before *at_key* in reading
+        order); a self-contained workbook's names are read only qualified:
+        ``Sheet.Name`` (the name as that sheet's cells read it: the sheet's
+        own, then its workbook's) or ``Book.Name`` (the workbook's). A
+        sheet's cell is ``Sheet.H44``; a table's column ``Table.Heading``.
+        Sheets are written as their names, or with each run of spaces and
+        other characters an equation can't hold as one _ (Seismic Actions:
+        Seismic_Actions)."""
+        wb = self.workbook
+        lower = name.lower()
+        dn = wb.names.get((lower, None))
+        other = wb.open_book_name(lower, None, at_key) if wb.books else None
+        if other is not None and (dn is None or self._later(other, dn, at_key)):
+            dn = other                   # (both: the latest before the equation)
+        if dn is not None:
+            return self._name_value(dn)
         if "." in name:
             table, _, rest = name.partition(".")
-            sheet = wb.sheet(table)
-            if sheet is None:
-                return None
-            ref = parse_cell(rest)
-            if ref is not None and not ref.row_abs and not ref.col_abs:
-                return sheet, RefValue(sheet, ref.row, ref.col, ref.row, ref.col)
-            column = self._column(sheet, rest)
-            if column is not None:
-                return sheet, column
+            sheet = sheet_named(wb, table)
+            if sheet is not None:
+                ref = parse_cell(rest)
+                if ref is not None and not ref.row_abs and not ref.col_abs:
+                    return sheet, RefValue(sheet, ref.row, ref.col, ref.row, ref.col)
+                local = wb.names.get((rest.lower(), sheet.id))
+                if local is None and sheet.book is not None:
+                    local = wb.names.get((rest.lower(), sheet.book))
+                if local is not None:
+                    return self._name_value(local)
+                column = self._column(sheet, rest)
+                if column is not None:
+                    return sheet, column
+            book = book_named(wb, table)
+            if book is not None:
+                own = wb.names.get((rest.lower(), book.id))
+                if own is not None:
+                    return self._name_value(own)
         return None
+
+    def _later(self, a, b, at_key) -> bool:
+        """Whether defined name *a* is defined after *b* (where their sheets
+        are) and still before *at_key*: the one an equation there reads."""
+        wb = self.workbook
+
+        def key(dn):
+            home = wb.sheet_by_id(dn.home) if dn.home is not None else None
+            return self._key(home) if home is not None else (float("inf"),)
+        ka, kb = key(a), key(b)
+        if at_key is not None and not kb < tuple(at_key):
+            return True
+        return kb < ka and (at_key is None or ka < tuple(at_key))
+
+    def _name_value(self, dn):
+        """(sheet, RefValue or value) of a defined name, as the equations read it."""
+        from . import formula as F
+        from .evaluate import Ctx, ev
+
+        wb = self.workbook
+        try:
+            tree = F.parse(dn.refers_to).tree
+        except F.FormulaError:
+            return None
+        home = wb.sheet_by_id(dn.sheet) if dn.sheet else \
+            (wb.sheet_by_id(dn.home) if dn.home is not None else None) or \
+            (wb.sheets[0] if wb.sheets else None)
+        if home is None:
+            return None
+        got = ev(tree, Ctx(wb, home, 0, 0))
+        sheet = got.sheet if isinstance(got, RefValue) else home
+        return sheet, got
 
     @staticmethod
     def _column(sheet: Sheet, heading: str) -> Optional[RefValue]:
@@ -304,9 +348,11 @@ class DocumentBook:
         only those defined before *at_key* (an equation there), as SMath
         lists only the names defined above."""
         out = {}
-        for (lower, scope), dn in self.workbook.names.items():
-            if scope is None and (at_key is None or self.defined_at(dn.name, at_key) is not None):
-                out[dn.name] = f"named cells: ={dn.refers_to}"
+        wb = self.workbook
+        for (lower, scope), dn in wb.names.items():
+            written = self.written_as(dn)
+            if written and (at_key is None or self.defined_at(written, at_key) is not None):
+                out[written] = f"named cells: ={dn.refers_to}"
         for sheet in self.workbook.sheets:
             if sheet.kind != "table":
                 continue
@@ -348,7 +394,7 @@ class DocumentBook:
     def defined_at(self, name: str, at_key) -> Optional[tuple]:
         """Where the tables define *name*, when that is before *at_key* and
         can be read there; else None."""
-        got = self._named(name)
+        got = self._named(name, at_key)
         if got is None:
             return None
         at = self._before(got[0], at_key)
@@ -378,14 +424,14 @@ class DocumentBook:
         """Whether a table before *at_key* defines *name* — known from an
         earlier section too: its value then says why it can't be read."""
         at_key = self.reading_at if at_key is None else at_key
-        got = self._named(name)
+        got = self._named(name, at_key)
         return got is not None and self._before(got[0], at_key) is not None
 
     def value(self, name: str, at_key=None):
         """The value of a table's *name* for the equation at *at_key*: None
         when no table before it defines the name (it is "not defined" there)."""
         at_key = self.reading_at if at_key is None else at_key
-        got = self._named(name)
+        got = self._named(name, at_key)
         if got is None or self._before(got[0], at_key) is None:
             return None
         if self._seen(got, at_key) is None:
@@ -423,8 +469,22 @@ class DocumentBook:
             return lookup(sheet, args)
         return look
 
+    def written_as(self, dn) -> str:
+        """How an equation writes a defined name: bare (a document name, or
+        a name of a workbook that isn't self-contained), Book.Name (a
+        self-contained workbook's), Sheet.Name (a sheet's own); "" for a
+        sheet's own name on a sheet or table made here (Excel's scope only)."""
+        wb = self.workbook
+        if dn.sheet is not None:
+            home = wb.sheet_by_id(dn.sheet)
+            return f"{sheet_ident(home.name)}.{dn.name}" if home is not None and home.book else ""
+        book = wb.books.get(dn.book) if dn.book else None
+        if book is not None and book.self_contained:
+            return f"{book.name}.{dn.name}"
+        return dn.name
+
     def names(self) -> set:
-        out = {dn.name for dn in self.workbook.names.values()}
+        out = {self.written_as(dn) for dn in self.workbook.names.values()} - {""}
         for sheet in self.workbook.sheets:
             for (row, col), cell in sheet.cells.items():
                 if row == 0 and isinstance(cell.value, str) and _ident(cell.value):
@@ -509,6 +569,32 @@ class DocumentBook:
         sheets = {k[0] for k in changed if isinstance(k[0], int)}
         if sheets:
             self.equations_may_have_changed(sheets)
+
+
+def sheet_ident(name: str) -> str:
+    """How an equation writes a sheet's name: as it is when it can, else with
+    each run of spaces and other characters an identifier can't hold as one
+    _ (Seismic Actions: Seismic_Actions; Loads (2): Loads_2)."""
+    text = re.sub(r"[^\w]+", "_", name.strip()).strip("_")
+    if not text:
+        return "Sheet"
+    return "_" + text if text[0].isdigit() else text
+
+
+def sheet_named(wb, written: str):
+    """The sheet or table an equation names: by its name, else by
+    sheet_ident (any case)."""
+    sheet = wb.sheet(written)
+    if sheet is not None:
+        return sheet
+    lower = written.lower()
+    return next((s for s in wb.sheets if sheet_ident(s.name).lower() == lower), None)
+
+
+def book_named(wb, written: str):
+    """The imported workbook an equation names by Book.name (any case)."""
+    lower = written.lower()
+    return next((b for b in wb.books.values() if b.name.lower() == lower), None)
 
 
 def _ident(text: str) -> str:

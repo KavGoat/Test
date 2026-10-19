@@ -50,7 +50,8 @@ def draw_tag(painter: QPainter, at: QPointF, text: str, points: float,
 
 
 def _signature(wb) -> tuple:
-    return tuple(sorted((key, dn.refers_to) for key, dn in wb.names.items())), \
+    # (a scope is a sheet id, an imported workbook's id or None: sorted as text)
+    return tuple(sorted(((key[0], str(key[1])), dn.refers_to) for key, dn in wb.names.items())), \
         tuple((s.id, s.name) for s in wb.sheets)
 
 

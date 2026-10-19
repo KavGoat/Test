@@ -5,7 +5,8 @@
      "styles": [style as dict, ...],          # this sheet's own list
      "widths": {col: pt}, "heights": {row: pt},
      "hidden_rows": [...], "hidden_cols": [...], "merges": [[t, l, b, r], ...],
-     "default_width": pt, "default_height": pt, "gridlines": bool, "headings": bool}
+     "default_width": pt, "default_height": pt, "gridlines": bool, "headings": bool,
+     "book": {"id", "name", "file", "self_contained"}}   # an imported Excel workbook's sheet
 """
 from __future__ import annotations
 
@@ -69,6 +70,7 @@ def sheet_to_dict(sheet) -> dict:
         "cond_rules": sheet.cond_rules, "validations": sheet.validations,
         "filter": sheet.filter, "filtered_rows": sorted(sheet.filtered_rows),
         "page": sheet.page,
+        **({"book": wb.books[sheet.book].to_dict()} if sheet.book in wb.books else {}),
     }
 
 
@@ -85,13 +87,48 @@ def names_homed_on(sheet) -> list:
         except F.FormulaError:
             continue
         first = next((t for t in tokens if t.kind == "ref" and t.ref.sheet is not None), None)
-        if first is not None:
-            homed = first.ref.sheet.lower() == sheet.name.lower()
+        if dn.sheet is not None:            # a sheet's own name: kept with that sheet
+            homed = dn.sheet == sheet.id
+        elif first is not None:
+            target = sheet.workbook.sheet(first.ref.sheet)
+            if target is not None and target.book != dn.book and dn.home is not None:
+                # a document name of an imported workbook's cells (or the
+                # other way about): kept with the sheet it was made on, so it
+                # comes back in the same scope
+                homed = dn.home == sheet.id
+            else:
+                homed = first.ref.sheet.lower() == sheet.name.lower()
         else:
             homed = (dn.home if dn.home is not None else dn.sheet) == sheet.id
         if homed:
             out.append([dn.name, dn.refers_to, dn.sheet == sheet.id, dn.comment])
     return out
+
+
+def name_key(sheet, name: str, local: bool) -> tuple:
+    """The key in Workbook.names of a name recorded with *sheet*: local to
+    it, its imported workbook's, or the document's."""
+    return (name.lower(), sheet.id if local else sheet.book)
+
+
+def put_book(sheet, data: dict) -> None:
+    """The imported workbook a recorded sheet is part of (none for a sheet
+    or table made here): the workbook takes the recorded state."""
+    from .workbook import Book
+    wb = sheet.workbook
+    book = data.get("book")
+    if not book or not book.get("id"):
+        sheet.book = None
+        return
+    sheet.book = book["id"]
+    known = wb.books.get(book["id"])
+    if known is None:
+        wb.books[book["id"]] = Book(book["id"], book.get("name") or "Workbook",
+                                    book.get("file") or "", bool(book.get("self_contained", True)))
+    else:
+        known.name = book.get("name") or known.name
+        known.file = book.get("file") or known.file
+        wb.book_state(known.id, bool(book.get("self_contained", True)))
 
 
 def load_sheet(sheet, data: dict) -> None:
@@ -103,6 +140,7 @@ def load_sheet(sheet, data: dict) -> None:
         with wb.transaction("Load"):
             for (row, col) in list(sheet.cells):
                 wb._set_state(sheet, row, col, ("", 0, None))
+            put_book(sheet, data)            # (its formulas read its workbook's names)
             styles = [wb.styles.add(style_from_dict(s)) for s in data.get("styles", [{}])] or [0]
             for entry in data.get("cells", []):
                 row, col, text, index = entry[:4]
@@ -114,11 +152,12 @@ def load_sheet(sheet, data: dict) -> None:
                 name, refers_to = entry[0], entry[1]
                 local = bool(entry[2]) if len(entry) > 2 else False
                 comment = entry[3] if len(entry) > 3 else ""
-                key = (name.lower(), sheet.id if local else None)
+                key = name_key(sheet, name, local)
                 if key not in wb.names:
                     from .workbook import DefinedName
                     wb.names[key] = DefinedName(name, refers_to, sheet.id if local else None,
-                                                comment or "", sheet.id)
+                                                comment or "", sheet.id,
+                                                None if local else sheet.book)
                     wb._name_dirty(key[0])
     finally:
         wb.journal = journal
@@ -156,6 +195,8 @@ def restore_sheet(sheet, data: dict, now: dict) -> bool:
                     wb._set_state(sheet, row, col, state)
             if other:
                 _put_layout(sheet, data)
+            if data.get("book") != now.get("book"):
+                put_book(sheet, data)
     finally:
         wb.journal = journal
     return other

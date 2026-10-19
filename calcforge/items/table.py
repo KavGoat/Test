@@ -595,12 +595,16 @@ class TableItem(MarkupItem):
         # formatting colours it or it is part of a merged cell. (Walking
         # every place of the grid in view was a thousand style look-ups for
         # a screenful of a mostly empty sheet.) Row by row, as before.
-        if sheet.cond_rules:
-            grid = [(r, c) for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)]
-        else:
-            held = set(sheet.positions_in(r0, c0, r1, c1))
-            held.update(p for p in covered if r0 <= p[0] <= r1 and c0 <= p[1] <= c1)
-            grid = sorted(held)
+        held = set(sheet.positions_in(r0, c0, r1, c1))
+        held.update(p for p in covered if r0 <= p[0] <= r1 and c0 <= p[1] <= c1)
+        # an empty cell is coloured by a rule only inside the rule's ranges
+        # (walking every place in view for the rules took a second a screen
+        # on the user's seismic workbook)
+        for rule in sheet.cond_rules:
+            for t, l, b, r in rule.get("ranges", []):
+                t, l, b, r = max(t, r0), max(l, c0), min(b, r1), min(r, c1)
+                held.update((y, x) for y in range(t, b + 1) for x in range(l, r + 1))
+        grid = sorted(held)
         # fills
         for r, c in grid:
             m = covered.get((r, c))
