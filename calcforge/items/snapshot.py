@@ -176,7 +176,7 @@ class SnapshotItem(MarkupItem):
             taken = self.natural_size()
             painter.save()
             painter.setOpacity(self.style.opacity)
-            painter.setClipRect(rect)
+            painter.setClipRect(rect, Qt.IntersectClip)
             painter.translate(rect.topLeft())
             if taken.width() > 0 and taken.height() > 0:
                 painter.scale(rect.width() / taken.width(),
@@ -197,7 +197,7 @@ class SnapshotItem(MarkupItem):
             taken = self.natural_size()
             painter.save()
             painter.setOpacity(self.style.opacity)
-            painter.setClipRect(rect)
+            painter.setClipRect(rect, Qt.IntersectClip)
             painter.translate(rect.topLeft())
             if taken.width() > 0 and taken.height() > 0:
                 painter.scale(rect.width() / taken.width(),

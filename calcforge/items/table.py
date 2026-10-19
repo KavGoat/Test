@@ -725,7 +725,7 @@ class TableItem(MarkupItem):
             h = {"left": Qt.AlignLeft, "center": Qt.AlignHCenter, "right": Qt.AlignRight,
                  "justify": Qt.AlignJustify}.get(align, Qt.AlignLeft)
             painter.save()
-            painter.setClipRect(rect)
+            painter.setClipRect(rect, Qt.IntersectClip)
             if line.plain:
                 painter.drawText(inner, h | v | Qt.TextWordWrap, text)
             else:
@@ -792,7 +792,7 @@ class TableItem(MarkupItem):
             line.draw(painter, x, y, colour)       # well inside its cell: no clip needed
             return
         painter.save()
-        painter.setClipRect(clip)
+        painter.setClipRect(clip, Qt.IntersectClip)
         line.draw(painter, x, y, colour)
         painter.restore()
 
@@ -922,7 +922,7 @@ class TableItem(MarkupItem):
 
     def _paint_turned(self, painter, rect, line: "Drawn", st, v, colour) -> None:
         painter.save()
-        painter.setClipRect(rect)
+        painter.setClipRect(rect, Qt.IntersectClip)
         painter.translate(rect.center())
         angle = 90 if st.rotation == 255 else st.rotation
         painter.rotate(-angle)
@@ -971,8 +971,13 @@ class TableItem(MarkupItem):
             # is picked or open its tab says it instead
             from . import nametags
             if nametags.shown(self):
+                # on the same pixels live as in the page's squares
+                from ..ui.markuplayer import align_with_squares
+                painter.save()
+                align_with_squares(painter, self)
                 nametags.draw_tag(painter, QPointF(0, -0.8), self.name, nametags.OUTER_PT,
                                   above=True)
+                painter.restore()
         if printing or self.sheet is None:
             return
         painter.save()

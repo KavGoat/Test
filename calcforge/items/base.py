@@ -1304,6 +1304,8 @@ class MarkupItem(QGraphicsObject):
             painter.restore()
             return
         painter.save()
+        from ..ui.markuplayer import align_with_squares
+        align_with_squares(painter, self)
         if not (self.split_theirs and (not getattr(frame, "print_mode", True)
                                        or self.split_from in getattr(frame, "file_drew_split", ()))):
             if self.multiplies_inside_only():

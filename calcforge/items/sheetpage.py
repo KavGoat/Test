@@ -694,7 +694,8 @@ class SheetRunItem(TableItem):
                 painter.translate(left_at, at)
                 painter.scale(scale, scale)
                 painter.translate(-xs[ca], -ys[ra])
-                painter.setClipRect(QRectF(xs[ca], ys[ra], xs[cb + 1] - xs[ca], ys[rb + 1] - ys[ra]))
+                painter.setClipRect(QRectF(xs[ca], ys[ra], xs[cb + 1] - xs[ca], ys[rb + 1] - ys[ra]),
+                                    Qt.IntersectClip)
                 self._range = (ra, rb, ca, cb)
                 self._on_paper = True
                 try:

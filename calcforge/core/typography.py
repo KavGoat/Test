@@ -19,6 +19,17 @@ MONO = ["Cascadia Mono", "Consolas", "Menlo", "DejaVu Sans Mono", "monospace"]
 
 MIN_PIXELS = 1
 
+#: How words on the page are smoothed: in grey, never in the screen's colour
+#: fringes (ClearType's subpixel smoothing). A markup nobody is touching is
+#: drawn into the page's squares (ui/markuplayer.py), pictures with a clear
+#: background, where text can only be smoothed in grey; drawn live — picked
+#: out, just changed, a markup placed beside it — it went onto the opaque
+#: window, where it was smoothed in colour: heavier and a touch wider, and
+#: then back a moment later (the user, 2026-10-19: "text inside markups
+#: flicker a little bit and have a slight size change"). Grey both ways, it
+#: is the same picture either way, as in Revu.
+PAGE_TEXT = QFont.StyleStrategy(QFont.PreferAntialias | QFont.NoSubpixelAntialias)
+
 # Helvetica is what Bluebeam sets nearly every markup in, and few machines
 # have it. Qt's own fallback can land on DejaVu Sans, which is a size wider
 # and draws a foot on its "1". These three share Helvetica's metrics.
@@ -68,7 +79,7 @@ def page_font(family: str, size: float, bold: bool = False, italic: bool = False
     font.setBold(bold)
     font.setItalic(italic)
     font.setUnderline(underline)
-    font.setStyleStrategy(QFont.PreferAntialias)
+    font.setStyleStrategy(PAGE_TEXT)
     # Text on a PDF page is set at each glyph's own width, with no pair
     # kerning; Bluebeam's is. Kerned, a title came out a point narrower
     # here than the same title in Bluebeam.
