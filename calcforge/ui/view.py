@@ -30,7 +30,7 @@ from ..items.media import ImageItem
 from ..items.shapes import PolyItem, RectItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
 from . import preferences
-from .commands import PageEditCommand
+from .commands import PageEditCommand, on_the_canvas
 from .shortcuts import TOOL
 from .tools import (ANCHOR, CLICK, CLOUD, CLOUDY, ERASE, FREE, NONE, POLY,
                     SNAPSHOT,
@@ -858,10 +858,11 @@ class PageView(QGraphicsView):
             stack.beginMacro(text)
         picked_before = getattr(self, "_snapshot_selection", None)
         picked_after = self._selected_uids()
+        on_apply, find_frame = on_the_canvas(self.scene())
         for frame, before, after in changed:
             self.push_command(PageEditCommand(frame, before, after,
-                                              text, on_apply=self.after_undo,
-                                              coalesce=coalesce, find_frame=self.frame_for_page,
+                                              text, on_apply=on_apply,
+                                              coalesce=coalesce, find_frame=find_frame,
                                               selected_before=picked_before,
                                               selected_after=picked_after))
         if len(changed) > 1:
