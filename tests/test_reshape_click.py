@@ -1,21 +1,21 @@
-"""Shift and Ctrl over a selected outline: a drag moves, a click reshapes.
+"""Shift, Ctrl and Alt over a selected outline, as Revu.
 
 The user, 2026-10-20: "I run into issues when I'm trying to move a markup or
 copy a markup by holding Ctrl or Shift but instead it adds a control point or
 deletes or curves things or rounds things… Bluebeam doesn't, so it must be
-possible." Asked how, they chose "drag moves and click adds, the cursors for
-curves and control points are confusing since it's not clear where the point
-is added or removed, confusing with the + or −".
+possible." And then, with photos of Revu 21's pointers: "Shift then click is
+add/subtract point unless I start dragging, and Ctrl click/drag is copy, and
+Alt click is curve things."
 
-So, over a selected outline with Shift or Ctrl held, a press does nothing yet.
-Past the system's drag distance it is a move — Ctrl copies, Shift keeps it
-straight — and the outline is left as it was. Let go without moving and the
-click reshapes it as before: Shift puts a point into a side or takes a point
-out, Ctrl rounds a corner off or bends a side into an arc, one undo step each.
-Instead of a plus or a minus on the pointer, the outline shows what the click
-would do: a hollow point where the new one goes, the point that goes ringed
-in red with the outline dashed without it, the rounded corner or the arc
-dashed. The pointer keeps saying move — or copy, with Ctrl.
+- Shift: a click on a selected outline puts a point into a side or takes a
+  point out; pressed and dragged past the system's drag distance it is a move,
+  kept straight. Elsewhere Shift-click picks out and Shift on bare paper lassos.
+- Ctrl: a drag copies, a click adds to the selection. Nothing is reshaped.
+- Alt: a click rounds a corner off or bends a side into an arc; a drag is
+  just a move.
+
+Nothing is drawn on the outline: the pointer says what a click does — Revu's
+arrow with a "+", a "−", an arc, a copy sign or a move sign at its foot.
 
 Every gesture here is real QTest input to the canvas's viewport.
 """
@@ -23,12 +23,12 @@ from __future__ import annotations
 
 
 import pytest
-from PySide6.QtCore import QEvent, QObject, QPointF, QRect, Qt
-from PySide6.QtGui import QColor, QRegion
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from calcforge.items.shapes import PolyItem, RectItem
+from calcforge.ui.cursors import ADD, COPY, CURVE, MOVE, REMOVE, is_revu_cursor
 from tests.test_markup_interaction_round6 import markups, page, pump, screen, vp
 
 
@@ -42,7 +42,7 @@ def w(window):
     settings.snap_to_content = settings.snap_to_alignment = False
     pump()
     yield window
-    for key in (Qt.Key_Shift, Qt.Key_Control):
+    for key in (Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt):
         QTest.keyRelease(window.view, key)
 
 
@@ -208,18 +208,61 @@ def test_shift_click_on_a_point_takes_it_out(w):
     assert len(polys(w)[0].points) == 4
 
 
-def test_ctrl_click_rounds_a_corner_and_bends_a_side(w):
+def test_alt_click_rounds_a_corner_and_bends_a_side(w):
     shape = polygon(w)
-    hold(w, Qt.Key_Control)
-    click(w, scene_of(shape, shape.points[1]), Qt.ControlModifier)
+    hold(w, Qt.Key_Alt)
+    click(w, scene_of(shape, shape.points[1]), Qt.AltModifier)
     assert shape.is_rounded(1)
-    click(w, side_middle(shape, 3), Qt.ControlModifier)
+    click(w, side_middle(shape, 3), Qt.AltModifier)
     assert shape.is_curved(3)
-    let_go(w, Qt.Key_Control)
+    let_go(w, Qt.Key_Alt)
     assert len(polys(w)) == 1 and len(shape.points) == 4, "a click copies nothing"
     w.undo_stack.undo()
     shape = polys(w)[0]
     assert shape.is_rounded(1) and not shape.is_curved(3), "each its own undo step"
+
+
+@pytest.mark.parametrize("where", ["side", "corner"])
+def test_alt_dragging_the_outline_only_moves_it(w, where):
+    shape = polygon(w)
+    points = [QPointF(p) for p in shape.points]
+    origin = QPointF(shape.pos())
+    start = side_middle(shape) if where == "side" else scene_of(shape, shape.points[1])
+    hold(w, Qt.Key_Alt)
+    gesture(w, start, QPointF(start.x() + 70, start.y() + 40), Qt.AltModifier)
+    let_go(w, Qt.Key_Alt)
+    assert polys(w) == [shape]
+    assert same_points(shape.points, points)
+    assert not shape.rounded and not shape.curved, "nothing rounded or bent"
+    moved = shape.pos() - origin
+    assert moved.x() == pytest.approx(70, abs=1.5) and moved.y() == pytest.approx(40, abs=1.5)
+
+
+@pytest.mark.parametrize("where", ["side", "corner"])
+def test_ctrl_click_reshapes_nothing_and_keeps_the_selection(w, where):
+    shape = polygon(w)
+    points = [QPointF(p) for p in shape.points]
+    here = side_middle(shape) if where == "side" else scene_of(shape, shape.points[1])
+    hold(w, Qt.Key_Control)
+    click(w, here, Qt.ControlModifier)
+    let_go(w, Qt.Key_Control)
+    assert polys(w) == [shape] and shape.isSelected()
+    assert same_points(shape.points, points)
+    assert not shape.rounded and not shape.curved, "Ctrl no longer rounds or bends"
+
+
+def test_ctrl_click_adds_another_markup_to_the_selection(w):
+    shape = polygon(w)
+    w.select_tool("rect")
+    gesture(w, page(w, 400, 140), page(w, 480, 200), Qt.NoModifier)
+    w.select_tool("select")
+    box = [i for i in markups(w) if isinstance(i, RectItem)][-1]
+    w.view.scene().clearSelection()
+    shape.setSelected(True)
+    hold(w, Qt.Key_Control)
+    click(w, box.mapToScene(box.local_rect().center()), Qt.ControlModifier)
+    let_go(w, Qt.Key_Control)
+    assert shape.isSelected() and box.isSelected()
 
 
 def test_a_rectangle_reshaped_by_a_click_but_resized_in_proportion_by_a_shift_drag(w):
@@ -263,151 +306,92 @@ def test_shift_click_elsewhere_still_picks_out_and_lassos(w):
     assert len(shape.points) == 4
 
 
-# -- what the click would do, shown on the outline -------------------------------------
+# -- the pointer says what a click does --------------------------------------------------
 
-class _Painted(QObject):
-    """Every region of the viewport repainted."""
-
-    def __init__(self, viewport):
-        super().__init__()
-        self.viewport = viewport
-        self.region = QRegion()
-        viewport.installEventFilter(self)
-
-    def eventFilter(self, watched, event):
-        if watched is self.viewport and event.type() == QEvent.Paint:
-            self.region += event.region()
-        return False
-
-    def stop(self):
-        self.viewport.removeEventFilter(self)
-
-
-def _pixel_at(w, scene_point, up_px=0) -> QColor:
-    image = vp(w).grab().toImage()
-    at = screen(w, scene_point)
-    return QColor(image.pixel(at.x(), at.y() - up_px))
-
-
-def _covers(region: QRegion, rect: QRect) -> bool:
-    return QRegion(rect).subtracted(region).isEmpty()
-
-
-@pytest.mark.parametrize("modifier, where, what", [
-    (Qt.Key_Shift, "side", "add"), (Qt.Key_Shift, "corner", "delete"),
-    (Qt.Key_Control, "corner", "round"), (Qt.Key_Control, "side", "curve")])
-def test_the_preview_shows_what_the_click_would_do_and_leaves_nothing(
-        w, modifier, where, what):
+@pytest.mark.parametrize("key, modifier, where, badge", [
+    (None, Qt.NoModifier, "inside", MOVE),
+    (None, Qt.NoModifier, "body", MOVE),
+    (Qt.Key_Shift, Qt.ShiftModifier, "side", ADD),
+    (Qt.Key_Shift, Qt.ShiftModifier, "corner", REMOVE),
+    (Qt.Key_Alt, Qt.AltModifier, "side", CURVE),
+    (Qt.Key_Alt, Qt.AltModifier, "corner", CURVE),
+    (Qt.Key_Control, Qt.ControlModifier, "side", COPY),
+    (Qt.Key_Control, Qt.ControlModifier, "corner", COPY),
+])
+def test_the_pointer_shows_revus_sign_for_what_a_click_does(w, key, modifier, where, badge):
+    """And nothing is drawn on the canvas for it: the pointer alone says."""
     shape = polygon(w)
-    preview = w.view.reshape_preview
-    start, end = (scene_of(shape, p) for p in shape.segment_ends(0))
-    here = (QPointF(start.x() + (end.x() - start.x()) * 0.3, start.y() + 2)
-            if where == "side" else scene_of(shape, shape.points[1]))
-    move(w, here)
-    assert not preview.showing(), "nothing shown without a key held"
-    hold(w, modifier)
-    move(w, QPointF(here.x() + 0.5, here.y()))
-    move(w, here)
-    assert preview.showing() and preview.what == what
-
-    if what == "add":
-        # the hollow point, on the side, nearest the pointer
-        assert preview.point.y() == pytest.approx(start.y(), abs=0.01)
-        pointer = w.view.mapToScene(screen(w, here))
-        assert preview.point.x() == pytest.approx(pointer.x(), abs=0.01)
-    elif what == "delete":
-        assert preview.point == scene_of(shape, shape.points[1])
-        # the outline without it: a triangle's three sides
-        assert preview.path is not None
-        assert not preview.path.boundingRect().isEmpty()
+    if where == "inside":          # a filled box's body, away from its outline
+        w.select_tool("rect")
+        gesture(w, page(w, 400, 300), page(w, 520, 380), Qt.NoModifier)
+        w.select_tool("select")
+        shape = [i for i in markups(w) if isinstance(i, RectItem)][-1]
+        w.view.scene().clearSelection()
+        shape.setSelected(True)
+        here = shape.mapToScene(shape.local_rect().center())
+    elif where == "corner":
+        here = scene_of(shape, shape.corner_points()[1])
     else:
-        assert preview.path is not None
-    if what in ("round", "curve"):
-        # the dashed outline differs from the outline as it is
-        now = shape.sceneTransform().map(shape.build_path())
-        assert preview.path.boundingRect() != now.boundingRect() or \
-            preview.path.length() != pytest.approx(now.length())
-
-    # the pointer still says move (copy with Ctrl), never a plus or a minus
-    from calcforge.ui.view import copy_cursor
-    cursor = w.view.cursor()
-    if modifier == Qt.Key_Control:
-        assert cursor.shape() == Qt.BitmapCursor
-        assert cursor.pixmap().cacheKey() == copy_cursor().pixmap().cacheKey()
-    else:
-        assert cursor.shape() == Qt.SizeAllCursor
-    # it is drawn: the theme's colour is on the canvas where the point is
-    drawn = preview.pixel_rect()
-    assert not drawn.isEmpty()
-    assert vp(w).rect().contains(drawn)
-
-    # let go of the key: the preview goes, and its pixels are repainted
-    painted = _Painted(vp(w))
-    let_go(w, modifier)
-    pump(3)
-    painted.stop()
-    assert not preview.showing()
-    assert _covers(painted.region, drawn.adjusted(1, 1, -1, -1)), \
-        "the pixels the preview covered were repainted when it went"
-    shown = vp(w).grab().toImage()
-    vp(w).repaint()
-    assert shown == vp(w).grab().toImage(), "a piece of the preview was left behind"
-
-    # back on, then the pointer leaves the outline: gone again, and cleared
-    hold(w, modifier)
-    move(w, QPointF(here.x() + 0.5, here.y()))
+        here = side_middle(shape)
+        here = QPointF(here.x() - 20, here.y())   # along the side, off its handles
+    move(w, QPointF(here.x() + 1, here.y()))
     move(w, here)
-    assert preview.showing()
-    drawn = preview.pixel_rect()
-    painted = _Painted(vp(w))
-    move(w, page(w, 600, 600))
-    pump(3)
-    painted.stop()
-    assert not preview.showing()
-    assert _covers(painted.region, drawn.adjusted(1, 1, -1, -1))
-    let_go(w, modifier)
+    if key is not None:
+        hold(w, key)
+        move(w, QPointF(here.x() + 0.5, here.y()))
+        move(w, here)
+    painted_before = vp(w).grab().toImage()
+    cursor = vp(w).cursor()
+    assert is_revu_cursor(cursor, badge), (where, badge, cursor.shape())
+    if key is not None:
+        let_go(w, key)
+        move(w, QPointF(here.x() + 0.5, here.y()))
+        assert not is_revu_cursor(vp(w).cursor(), badge) or badge == MOVE
+        assert vp(w).grab().toImage() == painted_before, "nothing was drawn for it"
 
 
-def test_the_preview_follows_the_pointer_along_a_side_repainting_only_its_own_pixels(w):
-    shape = polygon(w)
-    start, end = (scene_of(shape, p) for p in shape.segment_ends(0))
+def test_shift_over_a_box_corner_says_take_it_out(w):
+    w.select_tool("rect")
+    gesture(w, page(w, 140, 140), page(w, 340, 240), Qt.NoModifier)
+    w.select_tool("select")
+    box = [i for i in markups(w) if isinstance(i, RectItem)][-1]
+    box.setSelected(True)
+    corner = box.mapToScene(box.local_rect().normalized().topLeft())
+    move(w, corner)
+    assert vp(w).cursor().shape() == Qt.SizeFDiagCursor, "a resize handle, plainly"
     hold(w, Qt.Key_Shift)
-    move(w, QPointF(start.x() + 30, start.y()))
-    painted = _Painted(vp(w))
-    for step in range(1, 8):
-        move(w, QPointF(start.x() + 30 + 12 * step, start.y() + 1))
-        pump(1)
-        pointer = w.view.mapToScene(screen(w, QPointF(start.x() + 30 + 12 * step, 0)))
-        assert w.view.reshape_preview.point.x() == pytest.approx(pointer.x(), abs=0.01)
-    painted.stop()
+    move(w, QPointF(corner.x() + 0.5, corner.y()))
+    assert is_revu_cursor(vp(w).cursor(), REMOVE)
     let_go(w, Qt.Key_Shift)
-    whole = vp(w).width() * vp(w).height()
-    covered = sum(r.width() * r.height() for r in painted.region)
-    assert covered < whole * 0.25, "the hollow point repaints its own few pixels"
 
 
-def test_the_preview_is_drawn_in_the_themes_colours(w, qapp):
-    from calcforge.app import apply_theme, current_theme
-    from calcforge.theme import DARK, LIGHT, tokens
+# -- Alt-click does not leave the menus picked out --------------------------------------
 
-    before = current_theme()
+def test_alt_after_an_alt_click_does_not_take_the_keyboard_to_the_menus(w):
+    bar = w.menuBar()
     shape = polygon(w)
-    preview = w.view.reshape_preview
-    try:
-        for theme in (LIGHT, DARK):
-            apply_theme(qapp, theme)
-            pump()
-            accent, danger, _halo = preview.colours()
-            assert accent == QColor(tokens(theme)["accent"])
-            assert danger == QColor(tokens(theme)["danger"])
-            hold(w, Qt.Key_Shift)
-            corner = scene_of(shape, shape.points[1])
-            move(w, QPointF(corner.x() + 0.5, corner.y()))
-            move(w, corner)
-            assert preview.what == "delete"
-            # the red ring is on the canvas, a ring's radius from the point
-            got = _pixel_at(w, corner, up_px=5)
-            assert got.red() > got.blue() and got.red() > 120, (theme, got.name())
-            let_go(w, Qt.Key_Shift)
-    finally:
-        apply_theme(qapp, before)
+    corner = scene_of(shape, shape.points[1])
+    # what a lone Alt does: the menu bar takes the keyboard (Qt's and Revu's)
+    QTest.keyClick(vp(w), Qt.Key_Alt)
+    pump()
+    lone = bar.activeAction() is not None or bar.hasFocus()
+    assert lone, "a lone Alt does reach the menus here, so the check below means something"
+    QTest.keyClick(bar, Qt.Key_Escape)
+    pump()
+    w.view.setFocus()
+    shape.setSelected(True)
+    pump()
+    # Alt held for a click on the canvas, then let go
+    QTest.keyPress(vp(w), Qt.Key_Alt)
+    pump()
+    click(w, corner, Qt.AltModifier)
+    QTest.keyRelease(vp(w), Qt.Key_Alt)
+    pump()
+    assert shape.is_rounded(1)
+    assert bar.activeAction() is None, "no menu picked out after the Alt-click"
+    assert not bar.hasFocus() and QApplication.focusWidget() is not bar
+    # and a lone Alt afterwards still reaches the menus as it did
+    QTest.keyClick(vp(w), Qt.Key_Alt)
+    pump()
+    assert bar.activeAction() is not None or bar.hasFocus()
+    QTest.keyClick(bar, Qt.Key_Escape)

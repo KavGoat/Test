@@ -108,7 +108,8 @@ def test_hovering_a_markup_changes_the_cursor(window):
     drag(window.view, 100, 100, 220, 200)
     window.select_tool("select")
     hover(window.view, 160, 150)
-    assert window.view.cursor().shape() == Qt.SizeAllCursor
+    from calcforge.ui.cursors import MOVE, is_revu_cursor
+    assert is_revu_cursor(window.view.cursor(), MOVE)     # Revu's arrow and move sign
     hover(window.view, 500, 600)
     assert window.view.cursor().shape() == Qt.ArrowCursor
 
@@ -4380,7 +4381,8 @@ def test_the_pointer_changes_over_a_handle_a_vertex_and_a_table_edge(window):
     assert window.view.cursor().shape() == Qt.SizeFDiagCursor
 
     hover(window.view, 170, 140)                  # inside it
-    assert window.view.cursor().shape() == Qt.SizeAllCursor
+    from calcforge.ui.cursors import MOVE, is_revu_cursor
+    assert is_revu_cursor(window.view.cursor(), MOVE)
 
     hover(window.view, 600, 600)                  # bare paper
     assert window.view.cursor().shape() == Qt.ArrowCursor
@@ -5940,27 +5942,27 @@ def test_shift_over_a_point_takes_it_out(window):
     assert len(shape.points) == before - 1
 
 
-def test_ctrl_over_a_corner_rounds_it_off_and_back(window):
+def test_alt_over_a_corner_rounds_it_off_and_back(window):
     shape = _polygon(window)
     corner = shape.mapToScene(shape.points[1])
-    click(window.view, corner.x(), corner.y(), modifiers=Qt.ControlModifier)
+    click(window.view, corner.x(), corner.y(), modifiers=Qt.AltModifier)
     assert shape.is_rounded(1)
     # A rounded corner gets a handle to set how round it is.
     assert "r1" in shape.handle_points()
-    click(window.view, corner.x(), corner.y(), modifiers=Qt.ControlModifier)
+    click(window.view, corner.x(), corner.y(), modifiers=Qt.AltModifier)
     assert not shape.is_rounded(1)
 
 
-def test_ctrl_over_a_side_bends_it_into_an_arc(window):
+def test_alt_over_a_side_bends_it_into_an_arc(window):
     shape = _polygon(window)
     start, end = shape.segment_ends(0)
     middle = shape.mapToScene((start + end) / 2)
-    click(window.view, middle.x(), middle.y(), modifiers=Qt.ControlModifier)
+    click(window.view, middle.x(), middle.y(), modifiers=Qt.AltModifier)
     assert shape.is_curved(0)
     # Two handles, as Bluebeam has: how deep the curve is, and its lean.
     handles = shape.handle_points()
     assert "c0" in handles and "n0" in handles
-    click(window.view, middle.x(), middle.y(), modifiers=Qt.ControlModifier)
+    click(window.view, middle.x(), middle.y(), modifiers=Qt.AltModifier)
     assert not shape.is_curved(0)
 
 
@@ -6081,7 +6083,7 @@ def test_a_reshaped_outline_survives_a_round_trip(window):
 def test_reshaping_can_be_undone(window):
     shape = _polygon(window)
     corner = shape.mapToScene(shape.points[1])
-    click(window.view, corner.x(), corner.y(), modifiers=Qt.ControlModifier)
+    click(window.view, corner.x(), corner.y(), modifiers=Qt.AltModifier)
     assert shape.is_rounded(1)
     window.undo_stack.undo()
     shape = [i for i in markups(window) if isinstance(i, PolyItem)][-1]
@@ -7897,7 +7899,7 @@ def test_rounding_a_rectangles_corner_makes_it_a_polygon(window):
     """It stops being a rectangle the moment it stops being rectangular."""
     box = _rectangle(window)
     where = box.mapToScene(box.corner_points()[1])
-    assert window.view.reshape_at(where, Qt.ControlModifier)
+    assert window.view.reshape_at(where, Qt.AltModifier)
 
     assert box not in markups(window)
     shape = [i for i in markups(window) if isinstance(i, PolyItem)][-1]
@@ -8948,7 +8950,8 @@ def test_format_painter_keeps_the_brush_over_markups(window):
             == format_painter_cursor().pixmap().cacheKey())
     window.put_the_format_painter_down()
     hover(window.view, 180, 160)
-    assert window.view.cursor().shape() != Qt.BitmapCursor
+    from calcforge.ui.cursors import MOVE, is_revu_cursor
+    assert is_revu_cursor(window.view.cursor(), MOVE), "the brush is put down"
 
 
 

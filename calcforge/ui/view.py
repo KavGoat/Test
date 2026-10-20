@@ -13,7 +13,7 @@ from typing import Optional
 from PySide6.QtCore import (QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt,
                             QTimer, Signal)
 from PySide6.QtGui import (QBrush, QColor, QCursor, QKeyEvent,
-                           QMouseEvent, QPainter, QPainterPath, QPen, QPolygonF, QTextCursor,
+                           QMouseEvent, QPainter, QPen, QPolygonF, QTextCursor,
                            QPixmap, QRegion, QTransform, QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QGraphicsProxyWidget,
                                QGraphicsView, QGridLayout, QLabel,
@@ -33,6 +33,7 @@ from ..items.checkbox import CheckboxItem
 from ..items.text import CalloutItem, NoteItem, StampItem, TextItem, _TextBase
 from . import preferences
 from .commands import PageEditCommand, on_the_canvas
+from .cursors import ADD, CURVE, REMOVE, copy_cursor, move_cursor, revu_cursor
 from .shortcuts import TOOL
 from .tools import (ANCHOR, CLICK, CLOUD, CLOUDY, ERASE, FREE, NONE, POLY,
                     SNAPSHOT,
@@ -73,47 +74,18 @@ MOST_SIDES = 200
 SIZED_SHAPES = ("rect", "ellipse")
 CELLS_MIME = "application/x-calcforge-cells"
 FREE_MIN_STEP = 1.2
-_COPY_CURSORS: dict[str, QCursor] = {}
 _DRAWING_CURSORS: dict[str, QCursor] = {}
 
 
-def copy_cursor() -> QCursor:
-    """The move pointer with a plus beside it: Ctrl held over a markup, which
-    a drag would copy (Revu's, and the system's sign for a copy)."""
-    if "copy" in _COPY_CURSORS:
-        return _COPY_CURSORS["copy"]
-    pixmap = QPixmap(32, 32)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    centre, reach, head = QPointF(11, 11), 9.0, 3.2
-    arrows = QPainterPath()
-    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-        tip = QPointF(centre.x() + dx * reach, centre.y() + dy * reach)
-        arrows.moveTo(centre)
-        arrows.lineTo(tip)
-        # the arrowhead's two barbs, back from the tip
-        for side in (1, -1):
-            arrows.moveTo(tip)
-            arrows.lineTo(QPointF(tip.x() - dx * head + side * dy * head,
-                                  tip.y() - dy * head + side * dx * head))
-    for colour, width in (("#ffffff", 4.0), ("#000000", 1.6)):
-        painter.setPen(QPen(QColor(colour), width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        painter.drawPath(arrows)
-    # the plus, in a small box down and to the right
-    box = QRectF(19.5, 19.5, 10, 10)
-    painter.setPen(QPen(QColor("#000000"), 1.2))
-    painter.setBrush(QColor("#ffffff"))
-    painter.drawRect(box)
-    painter.setPen(QPen(QColor("#000000"), 1.6))
-    painter.drawLine(QPointF(box.center().x(), box.top() + 2.2),
-                     QPointF(box.center().x(), box.bottom() - 2.2))
-    painter.drawLine(QPointF(box.left() + 2.2, box.center().y()),
-                     QPointF(box.right() - 2.2, box.center().y()))
-    painter.end()
-    cursor = QCursor(pixmap, 11, 11)
-    _COPY_CURSORS["copy"] = cursor
-    return cursor
+def nearest_on_segment(start: QPointF, end: QPointF, point: QPointF) -> QPointF:
+    """The point of the straight run *start*–*end* nearest *point*."""
+    dx, dy = end.x() - start.x(), end.y() - start.y()
+    length = dx * dx + dy * dy
+    if length <= 1e-12:
+        return QPointF(start)
+    t = max(0.0, min(1.0, ((point.x() - start.x()) * dx
+                           + (point.y() - start.y()) * dy) / length))
+    return QPointF(start.x() + dx * t, start.y() + dy * t)
 
 
 def format_painter_cursor() -> QCursor:
@@ -380,6 +352,44 @@ def typing_somewhere_else() -> bool:
 
 
 
+class _AltUsedOnTheCanvas(QObject):
+    """Alt held for a click on the canvas is not Alt pressed for the menus.
+
+    A lone Alt, pressed and let go, takes the keyboard to the menu bar (and on
+    Windows to the menus in the title bar). Alt-click rounds a corner or bends
+    a side, and letting go of Alt after it must not leave the menus picked out
+    under the keyboard. Qt's menu bar forgets the Alt when it sees the mouse
+    pressed; this makes sure of it: from an Alt-click until Alt comes up, the
+    application's Alt release is the canvas's, and the menus never see it.
+    """
+
+    def __init__(self, view):
+        super().__init__(view)
+        self.view = view
+        self.armed = False
+
+    def arm(self) -> None:
+        if not self.armed:
+            self.armed = True
+            # installed last, so asked first — before the menu bar's own
+            QApplication.instance().installEventFilter(self)
+
+    def disarm(self) -> None:
+        if self.armed:
+            self.armed = False
+            QApplication.instance().removeEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.KeyRelease and event.key() == Qt.Key_Alt:
+            if not event.isAutoRepeat():
+                self.disarm()
+                self.view.alt_let_go()
+            return True
+        if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Alt:
+            return True                      # still the same Alt, repeating
+        return False
+
+
 class _Glide(QObject):
     """A wheel notch glides rather than jumps (the user, 2026-10-01: "jittery,
     it needs to be ultra smooth"). Each notch moves where the view is going;
@@ -579,9 +589,6 @@ class PageView(QGraphicsView):
         from .rulers import Crosshair, Rulers
         self.rulers = Rulers(self)
         self.crosshair = Crosshair(self)
-        # what a Shift- or Ctrl-click on a selected outline would do
-        from .reshapepreview import ReshapePreview
-        self.reshape_preview = ReshapePreview(self)
         self.glide = _Glide(self)
         self.tool_key = "select"
         self.sticky_tool = False
@@ -670,6 +677,8 @@ class PageView(QGraphicsView):
         # a key held down is state, not an event.
         self._control_held = False
         self._shift_held = False
+        self._alt_held = False
+        self._alt_guard = _AltUsedOnTheCanvas(self)
         self._pending_anchor: Optional[QPointF] = None
         # The cloud a cloud call-out has already drawn, waiting for its words.
         self._pending_cloud = None
@@ -914,7 +923,6 @@ class PageView(QGraphicsView):
         if key != self.tool_key:
             self._pending_anchor = None
             self._pending_cloud = None
-            self.reshape_preview.hide()
         if key in WORD_TOOLS:
             # what is typed into it is spell-checked: the dictionary is read
             # now, in the background, not at the click that opens the box
@@ -1760,6 +1768,8 @@ class PageView(QGraphicsView):
             held |= Qt.ControlModifier
         if self._shift_held:
             held |= Qt.ShiftModifier
+        if self._alt_held:
+            held |= Qt.AltModifier
         return held
 
     def snap(self, point: QPointF, force: bool = False) -> QPointF:
@@ -2262,7 +2272,16 @@ class PageView(QGraphicsView):
                 if frame.page_rect().contains(spot) else None
             frame.set_active_viewport(inside)
 
+    def alt_let_go(self) -> None:
+        """Alt has come up after an Alt-click on the canvas (see
+        _AltUsedOnTheCanvas): the pointer says what it does without it."""
+        self._alt_held = False
+        if self.tool_key == "select" and self._mode == "idle":
+            self._update_hover_cursor(self._last_scene_pos)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.modifiers() & Qt.AltModifier:
+            self._alt_guard.arm()
         self._pointer_down = event.button() == Qt.LeftButton
         scene_pos = self.mapToScene(event.position().toPoint())
         self._press_scene = scene_pos
@@ -2489,12 +2508,13 @@ class PageView(QGraphicsView):
                     event.accept()
                     return
 
-        # 4. reshaping an outline: Shift or Ctrl over one of its points or
-        # one of its sides. Only a click reshapes (the user, 2026-10-20:
-        # "drag moves and click adds"). Pressed and dragged past the drag
-        # distance, the same keys mean what they mean for any drag — Shift
-        # keeps it straight, Ctrl copies — and no point is added, taken out,
-        # rounded or bent; so what the click would do waits for the release.
+        # 4. reshaping an outline: Shift or Alt over one of its points or one
+        # of its sides (Shift adds or takes out a point, Alt rounds or bends;
+        # Ctrl reshapes nothing). Only a click reshapes (the user, 2026-10-20:
+        # "Shift then click is add/subtract point unless I start dragging").
+        # Pressed and dragged past the drag distance it is a move — kept
+        # straight with Shift — and no point is added, taken out, rounded or
+        # bent; so what the click would do waits for the release.
         self._pending_reshape = None
         target = None if many else self.shaping_target(scene_pos, event.modifiers())
         if target is not None:
@@ -2516,10 +2536,16 @@ class PageView(QGraphicsView):
             key = item.handle_at(item.mapFromScene(scene_pos))
             if key and self._pending_reshape is not None and not (
                     item is target[0] and self._shift_keeps_the_handle(key)
-                    and not event.modifiers() & Qt.ControlModifier):
-                # A point of the outline with Shift or Ctrl held: a drag from
-                # it moves (or copies) the markup, as from anywhere on it —
-                # only a box's corner or edge keeps Shift's proportions.
+                    and event.modifiers() & Qt.ShiftModifier):
+                # A point of the outline with Shift or Alt held: a drag from
+                # it moves the markup, as from anywhere on it — only a box's
+                # corner or edge keeps Shift's proportions.
+                key = None
+            if key and event.modifiers() & Qt.ControlModifier \
+                    and self.markup_at(scene_pos) is item:
+                # Ctrl on one of its points: a click or a drag is a copy of
+                # the whole markup, as from anywhere on it (the user,
+                # 2026-10-20: "Ctrl click/drag is copy")
                 key = None
             if key:
                 self._handle_item = item
@@ -2891,8 +2917,8 @@ class PageView(QGraphicsView):
 
         if self._mode in ("move", "resize", "reshape_click") \
                 and self._pending_reshape is not None:
-            # Shift or Ctrl was pressed over an outline: a click there
-            # reshapes it, a drag moves or copies it. Until the pointer has
+            # Shift or Alt was pressed over an outline: a click there
+            # reshapes it, a drag moves it. Until the pointer has
             # gone the system's drag distance it is still a click; past it,
             # it is a drag, and the click's reshaping is forgotten.
             travelled = event.position().toPoint() - self._press_view
@@ -2900,7 +2926,6 @@ class PageView(QGraphicsView):
                 event.accept()
                 return
             self._pending_reshape = None
-            self.reshape_preview.hide()
         if self._mode == "reshape_click":
             event.accept()                 # nothing here to drag
             return
@@ -3026,7 +3051,6 @@ class PageView(QGraphicsView):
             busy()
         if kind == QEvent.Leave:
             self.forget_snap()
-            self.reshape_preview.hide()
             self.viewport().update()
         return super().viewportEvent(event)
 
@@ -3170,7 +3194,6 @@ class PageView(QGraphicsView):
         self._group_resize_items = []
         self._group_handle_key = ""
         self._pending_reshape = None
-        self.reshape_preview.hide()
         self.forget_snap()
         if mode in ("rubber", "lasso"):
             self._marquee = []
@@ -3310,19 +3333,24 @@ class PageView(QGraphicsView):
         return isinstance(item, RectItem) and item.has_corners()
 
     def shaping_target(self, scene_pos: QPointF, modifiers) -> Optional[tuple]:
-        """What holding Shift or Ctrl here would do to a shape's outline.
+        """What a Shift- or Alt-click here would do to a selected outline.
 
         Shift over a point takes it away, and over a length of line puts one
-        in. Ctrl over a point rounds the corner off, and over a length of line
-        bends it into an arc. Which one it is depends only on where the
-        pointer is, so there is nothing to pick from a menu first.
+        in. Alt over a point rounds the corner off, and over a length of line
+        bends it into an arc (the user, 2026-10-20: "Shift then click is
+        add/subtract point unless I start dragging, and Ctrl click/drag is
+        copy, and Alt click is curve things"). Ctrl reshapes nothing: with
+        Ctrl, a click or a drag is about copying. Which one it is depends only
+        on where the pointer is, so there is nothing to pick from a menu first.
 
-        Says (item, what, index) — or nothing, when neither key is held or
+        Says (item, what, index) — or nothing, when no such key is held or
         the pointer is not over a shape that can be reshaped this way.
         """
+        if modifiers & Qt.ControlModifier or self.tool_key != "select":
+            return None
         shift = bool(modifiers & Qt.ShiftModifier)
-        control = bool(modifiers & Qt.ControlModifier)
-        if not (shift or control) or self.tool_key != "select":
+        alt = bool(modifiers & Qt.AltModifier)            # rounds and bends
+        if shift == alt:                                  # neither, or both
             return None
         for item in self.scene().selectedItems():
             if not (self.has_an_outline(item) and self.editable(item)):
@@ -3333,7 +3361,7 @@ class PageView(QGraphicsView):
             if vertex is not None:
                 if shift and len(item.corner_points()) > fewest_corners(item):
                     return (item, "delete", vertex)
-                if control:
+                if alt:
                     return (item, "round", vertex)
                 continue
             segment = self._segment_near(item, local, reach)
@@ -3391,7 +3419,6 @@ class PageView(QGraphicsView):
         if target is None:
             return False
         item, what, index = target
-        self.reshape_preview.hide()
         self.begin_snapshot(self.involved_frames(item))
         item = self.swap_for_a_polygon(item)
         local = item.mapFromScene(scene_pos)
@@ -3399,9 +3426,7 @@ class PageView(QGraphicsView):
             item.delete_point(index)
             said = "Point taken out"
         elif what == "add":
-            # on the side itself, nearest the click — where the preview's
-            # hollow point showed it would go, not a little off the line
-            from .reshapepreview import nearest_on_segment
+            # on the side itself, nearest the click, not a little off the line
             item.insert_point(nearest_on_segment(*item.segment_ends(index), local))
             said = "Point added"
         elif what == "round":
@@ -3456,19 +3481,20 @@ class PageView(QGraphicsView):
         if key[:1] == "l" and callable(leader_at):
             leader, part = leader_at(key)
             if leader is not None and part == "tip" and leader.clouds():
-                return Qt.SizeAllCursor
-        return cursor_for_handle(key)
+                return self.revu(move_cursor)
+        found = cursor_for_handle(key)
+        if found == Qt.SizeAllCursor:
+            # what a drag moves whole (a measurement's words): Revu's move
+            return self.revu(move_cursor)
+        return found
 
-    def _modified_move_cursor(self, item, scene_pos: QPointF, held):
-        """The pointer while Shift or Ctrl is held over a selected outline:
-        what a drag from here does. Ctrl copies the markup; Shift moves it
-        straight — or, on a box's resize handle, keeps its proportions."""
-        if held & Qt.ControlModifier:
-            return copy_cursor()
-        key = item.handle_at(item.mapFromScene(scene_pos))
-        if key and self._shift_keeps_the_handle(key):
-            return self.handle_cursor(item, key)
-        return Qt.SizeAllCursor
+    def revu(self, make, *badge):
+        """One of Revu's select pointers (cursors.py), for this screen."""
+        ratio = self.devicePixelRatioF()
+        return make(*badge, ratio) if badge else make(ratio)
+
+    #: what each reshaping's pointer shows: the sign at the arrow's foot
+    _SHAPING_BADGES = {"add": ADD, "delete": REMOVE, "round": CURVE, "curve": CURVE}
 
     @staticmethod
     def _shift_keeps_the_handle(key: str) -> bool:
@@ -3479,17 +3505,7 @@ class PageView(QGraphicsView):
     def _update_hover_cursor(self, scene_pos: QPointF,
                              event_modifiers=Qt.NoModifier) -> None:
         """Say what the pointer would do here, before it is pressed — and,
-        with Shift or Ctrl over a selected outline, what a click would do."""
-        self._previewed = False
-        try:
-            self._set_hover_cursor(scene_pos, event_modifiers)
-        finally:
-            if not self._previewed:
-                self.reshape_preview.hide()
-
-    _previewed = False
-
-    def _set_hover_cursor(self, scene_pos: QPointF, event_modifiers) -> None:
+        with Shift or Alt over a selected outline, what a click would do."""
         if self.tool_key != "select":
             return
         headings = getattr(self, "sheet_headings", None)
@@ -3518,19 +3534,18 @@ class PageView(QGraphicsView):
         held = self._held_modifiers(event_modifiers)
         shaping = None if many else self.shaping_target(scene_pos, held)
         if shaping is not None:
-            # The outline shows what a click would do; the pointer keeps
-            # saying what a drag does — move, or copy with Ctrl — because
-            # that is what a drag from here does (the user, 2026-10-20).
-            item, what, index = shaping
-            self.reshape_preview.show(item, what, index, scene_pos)
-            self._previewed = True
-            self.setCursor(self._modified_move_cursor(item, scene_pos, held))
+            # Revu's: the arrow with a small sign at its foot says what a
+            # click here does — a "+" puts a point in, a "−" takes it out, an
+            # arc rounds or bends (the user's photos, 2026-10-20). Nothing is
+            # drawn on the outline. A drag from here still moves it.
+            what = shaping[1]
+            self.setCursor(self.revu(revu_cursor, self._SHAPING_BADGES[what]))
             self.statusMessage.emit({
                 "delete": "Click to take this point out · drag to move",
                 "add": "Click to put a point in here · drag to move",
                 "round": "Click to round this corner off, or sharpen it · drag to move",
                 "curve": "Click to bend this into an arc, or straighten it · drag to move",
-            }[what] + (" a copy" if held & Qt.ControlModifier else ""))
+            }[what])
             return
         # An equation: WebSMath's pointer — the arrow over it, SMath's move
         # cursor on the band along its frame (selected equations' handles
@@ -3559,6 +3574,11 @@ class PageView(QGraphicsView):
                 if item.group:
                     continue
                 key = item.handle_at(item.mapFromScene(scene_pos))
+                if key and held & Qt.ControlModifier \
+                        and self.markup_at(scene_pos) is item:
+                    # Ctrl on a point of the markup: a drag copies the lot
+                    self.setCursor(self.revu(copy_cursor))
+                    return
                 if key:
                     self.setCursor(self.handle_cursor(item, key))
                     if key[:1] in ("b", "w", "z") and key[1:].isdigit():
@@ -3588,10 +3608,10 @@ class PageView(QGraphicsView):
         elif isinstance(item, ContentsItem) and not item.isSelected() \
                 and item.row_at(item.mapFromScene(scene_pos)) is not None:
             self.setCursor(Qt.PointingHandCursor)  # a contents line: a click follows it
-        elif self._held_modifiers(event_modifiers) & Qt.ControlModifier:
-            self.setCursor(copy_cursor())          # a drag from here copies it
+        elif held & Qt.ControlModifier:
+            self.setCursor(self.revu(copy_cursor))  # a click or a drag copies it
         else:
-            self.setCursor(Qt.SizeAllCursor)
+            self.setCursor(self.revu(move_cursor))  # Revu's: the arrow, a move sign
 
     refresh_on_release = False
     _pointer_down = False
@@ -5314,7 +5334,6 @@ class PageView(QGraphicsView):
             self._draw_pending_leader(painter, self._pending_anchor)
         if self._pending_arrow_leader is not None:
             self._draw_arrow_leader_preview(painter)
-        self.reshape_preview.paint(painter)
         self.crosshair.paint(painter)
 
     def set_search_marks(self, marks) -> None:
@@ -6026,7 +6045,9 @@ class PageView(QGraphicsView):
             self.viewport().update()
         if key == Qt.Key_Shift:
             self._shift_held = True
-        if key in (Qt.Key_Control, Qt.Key_Shift) and self.tool_key == "select" \
+        if key == Qt.Key_Alt:
+            self._alt_held = True
+        if key in (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt) and self.tool_key == "select" \
                 and self._mode == "idle":
             # What the pointer would do has just changed under it (and what
             # a click would do to the outline under it, which is shown).
@@ -6312,7 +6333,9 @@ class PageView(QGraphicsView):
             self._control_held = False
         if event.key() == Qt.Key_Shift:
             self._shift_held = False
-        if event.key() in (Qt.Key_Control, Qt.Key_Shift) \
+        if event.key() == Qt.Key_Alt:
+            self._alt_held = False
+        if event.key() in (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt) \
                 and self.tool_key == "select" and self._mode == "idle":
             self._update_hover_cursor(self._last_scene_pos)
         if event.key() == Qt.Key_Space and not event.isAutoRepeat():
@@ -6342,7 +6365,8 @@ class PageView(QGraphicsView):
         # pointer promising something it will not do.
         self._control_held = False
         self._shift_held = False
-        self.reshape_preview.hide()
+        self._alt_held = False
+        self._alt_guard.disarm()
         super().focusOutEvent(event)
 
     # ------------------------------------------------------------------
