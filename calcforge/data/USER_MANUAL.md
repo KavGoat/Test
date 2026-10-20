@@ -505,6 +505,10 @@ colours you made are kept.
 
 ### Text in markups
 
+- **Steady words.** The words in markups are spaced by the font's own widths and
+  never fitted to the screen's pixels, as a PDF viewer sets them, so they look the
+  same at every zoom and do not shift or change width when a markup is picked out,
+  hovered or clicked near.
 - **Line spacing and margins.** A text box, typewriter text, callout or Cloud+
   has Revu's **Line Spacing** — Single (1.0), 1.15, 1.5, Double (2.0) or any
   multiple — on the Properties toolbar and panel, and **Margins**, the space

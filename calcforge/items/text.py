@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
                                QInputDialog, QMenu, QStyle,
                                QStyleOptionGraphicsItem)
 
-from ..core.typography import PAGE_TEXT
+from ..core.typography import PAGE_HINTING, PAGE_TEXT
 from .base import CLOUD_SIZE, HANDLE_SIZE, MarkupItem, Style, draw_head, register_item
 
 STAMP_PRESETS = {
@@ -403,7 +403,16 @@ class _TextBase(MarkupItem):
         unkerned = self.doc.defaultFont()
         unkerned.setKerning(False)
         unkerned.setStyleStrategy(PAGE_TEXT)      # smoothed in grey (typography)
+        unkerned.setHintingPreference(PAGE_HINTING)
         self.doc.setDefaultFont(unkerned)
+        # Laid out by the font's own widths, not the screen's rounded ones:
+        # rounded, the words came out a shade wider or narrower — the letters
+        # spaced differently — wherever they were drawn at another size or
+        # onto another surface, and changed for a moment as a markup was
+        # picked out, hovered or clicked near (the user, 2026-10-19). As a PDF
+        # viewer sets them, they are the same picture at every zoom and on
+        # every surface.
+        self.doc.setUseDesignMetrics(True)
         self.doc.setDocumentMargin(0)
         self.doc.setPlainText(text)
         self._editor: Optional[QGraphicsTextItem] = None
@@ -556,6 +565,9 @@ class _TextBase(MarkupItem):
         option = QTextOption()
         option.setAlignment(self.style.alignment() & Qt.AlignHorizontal_Mask)
         option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        # (the text option carries the design metrics: a fresh one dropped
+        # them, and the words went back to the screen's rounded widths)
+        option.setUseDesignMetrics(True)
         self.doc.setDefaultTextOption(option)
         self.doc.setTextWidth(max(self.text_rect().width(), 8.0))
         self._apply_script()
@@ -1880,6 +1892,7 @@ def paint_note_icon(painter: QPainter, rect: QRectF, icon: str, body, ink,
         font.setBold(True)
         font.setPixelSize(max(int(high * 0.7), 4))
         font.setStyleStrategy(PAGE_TEXT)
+        font.setHintingPreference(PAGE_HINTING)
         painter.setFont(font)
         painter.drawText(rect, Qt.AlignCenter, "?")
     elif icon == "Insert":
@@ -1904,6 +1917,7 @@ def paint_note_icon(painter: QPainter, rect: QRectF, icon: str, body, ink,
         font.setBold(True)
         font.setPixelSize(max(int(high * (0.62 if icon == "Paragraph" else 0.5)), 4))
         font.setStyleStrategy(PAGE_TEXT)
+        font.setHintingPreference(PAGE_HINTING)
         painter.setFont(font)
         painter.drawText(rect, Qt.AlignCenter, "¶" if icon == "Paragraph" else "NP")
     else:

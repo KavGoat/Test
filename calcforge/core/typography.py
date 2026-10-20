@@ -30,6 +30,15 @@ MIN_PIXELS = 1
 #: is the same picture either way, as in Revu.
 PAGE_TEXT = QFont.StyleStrategy(QFont.PreferAntialias | QFont.NoSubpixelAntialias)
 
+#: And never fitted to the screen's pixels (hinting): fitted, each glyph's
+#: width was rounded to the pixels of whatever it was being drawn at, so
+#: the same words came out a percent or so wider in one place than another
+#: — in the page's squares, live while picked out or hovered, at another
+#: zoom — and seemed to grow and shrink as a markup was clicked (the user,
+#: 2026-10-19). Unfitted, a glyph is the same shape at every size, as in a
+#: PDF viewer.
+PAGE_HINTING = QFont.PreferNoHinting
+
 # Helvetica is what Bluebeam sets nearly every markup in, and few machines
 # have it. Qt's own fallback can land on DejaVu Sans, which is a size wider
 # and draws a foot on its "1". These three share Helvetica's metrics.
@@ -80,6 +89,7 @@ def page_font(family: str, size: float, bold: bool = False, italic: bool = False
     font.setItalic(italic)
     font.setUnderline(underline)
     font.setStyleStrategy(PAGE_TEXT)
+    font.setHintingPreference(PAGE_HINTING)
     # Text on a PDF page is set at each glyph's own width, with no pair
     # kerning; Bluebeam's is. Kerned, a title came out a point narrower
     # here than the same title in Bluebeam.

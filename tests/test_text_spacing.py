@@ -499,3 +499,22 @@ def test_alt_z_reaches_every_box_with_words(window):
         pitch = tops(item)[1] - tops(item)[0]
         assert item.local_rect().height() == pytest.approx(
             2 * pitch + pitch / 1.5 + 12, abs=0.05), item.TYPE
+
+
+def test_words_are_set_by_the_fonts_own_widths_and_never_fitted_to_pixels(qapp):
+    """The user, 2026-10-19: the words in a markup grew by a percent, or
+    their letters spread, for a moment as it was picked out, hovered or
+    clicked near. Fitted to the pixels (hinting) and spaced by the rounded
+    widths, the same words came out differently in the page's squares, live
+    on the window and at each zoom; spaced by the font's own widths and
+    never fitted, they are one picture everywhere, as in a PDF viewer."""
+    from PySide6.QtGui import QFont
+
+    from calcforge.core.typography import page_font
+    from calcforge.items.checkbox import CheckboxItem
+    from calcforge.items.text import CalloutItem, TextItem
+
+    for item in (TextItem("Satisfactory"), CalloutItem("Check weld"), CheckboxItem("A")):
+        assert item.doc.useDesignMetrics(), type(item).__name__
+        assert item.doc.defaultFont().hintingPreference() == QFont.PreferNoHinting
+    assert page_font("Helvetica", 10.87).hintingPreference() == QFont.PreferNoHinting
