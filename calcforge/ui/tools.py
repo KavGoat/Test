@@ -103,7 +103,8 @@ TOOLS: list[Tool] = [
          factory=_poly("polygon")),
     Tool("cloud", "Cloud", "cloud", CLOUDY, "Draw", "C",
          "Mark a revision: drag a rectangular Cloud, or click each corner for a "
-         "custom Cloud+ — Enter or a right-click closes it",
+         "custom Cloud+ — a double-click, the first corner again, Enter or a "
+         "right-click closes it",
          factory=_rect("cloud")),
     Tool("highlight", "Highlight Area", "highlight", DRAG, "Draw", "J",
          "Drag over anything to highlight it — it darkens what is underneath "
@@ -129,8 +130,9 @@ TOOLS: list[Tool] = [
          "Click what it points at, then click where the words go",
          factory=lambda: CalloutItem("")),
     Tool("cloud_callout", "Cloud+", "cloud_callout", CLOUD, "Annotate", "Shift+Q",
-         "Drag a rectangular Cloud or click the corners of a custom Cloud+, "
-         "then click where the words go — the cloud and note are one thing",
+         "Drag a rectangular Cloud or click the corners of a custom Cloud+ "
+         "(a double-click or the first corner again closes it), then click "
+         "where the words go — the cloud and note are one thing",
          factory=lambda: CalloutItem("")),
     Tool("checkbox", "Checkbox", "checkbox", DRAG, "Annotate", "",
          "Options with boxes to tick — click to place three, or drag a box; "

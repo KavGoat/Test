@@ -14,7 +14,7 @@ from PySide6.QtCore import (QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSi
                             QTimer, Signal)
 from PySide6.QtGui import (QBrush, QColor, QCursor, QKeyEvent,
                            QMouseEvent, QPainter, QPen, QPolygonF, QTextCursor,
-                           QPixmap, QTransform, QWheelEvent)
+                           QPixmap, QRegion, QTransform, QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QGraphicsProxyWidget,
                                QGraphicsView, QGridLayout, QLabel,
                                QLineEdit, QWidget)
@@ -2617,6 +2617,14 @@ class PageView(QGraphicsView):
             # first is another corner, whatever started it: a cloud call-out
             # used to fall through to the call-out branch here and take the
             # second corner for the place its words went.
+            if tool.mode in (CLOUDY, CLOUD) and self._back_at_the_first_corner(
+                    scene_pos, point):
+                # Revu closes a cloud clicked corner by corner when its first
+                # corner is clicked again — as well as by a double-click, Enter
+                # or a right-click.
+                self.finish_poly()
+                event.accept()
+                return
             self._add_poly_point(event, point, tool)
             event.accept()
             return
@@ -2717,19 +2725,20 @@ class PageView(QGraphicsView):
             return
         if event.buttons() == Qt.NoButton and self._mode in self.HELD_MODES:
             self._release_stale_mode()
-        if (self._pending_anchor is not None or self._pending_stamp is not None
-                or self._pending_arrow_leader is not None
-                or self._pending_cloud_leader is not None
-                or self.current_tool().mode == CLICK):
-            self.viewport().update()          # the leader, or the preview, follows
-
+        follows = (self._pending_anchor is not None or self._pending_stamp is not None
+                   or self._pending_arrow_leader is not None
+                   or self._pending_cloud_leader is not None
+                   or self.current_tool().mode == CLICK)
         if self._mode == "idle" and self.current_tool().mode not in (NONE, ERASE):
             # Nothing is being drawn yet, so nothing calls the snapping code —
             # which is why the first point of a line never showed a marker and
             # every point after it did. Working it out on the way past costs
             # nothing and means the marker is there from the first click.
+            # (The marker repaints its own few pixels: _invalidate_snap_overlay.)
             self.snap_scene(scene_pos)
-            self.viewport().update()
+            follows = True
+        if follows:
+            self._update_pointer_previews()   # the leader, or the preview, follows
 
         if self._mode == "erase":
             self.erase_at(scene_pos)
@@ -2853,7 +2862,7 @@ class PageView(QGraphicsView):
 
         if self._mode == "cloud_leader" and self._marquee:
             self._marquee[-1] = self.snap_scene(scene_pos)
-            self.viewport().update()
+            self._update_pointer_previews()
             event.accept()
             return
 
@@ -2961,6 +2970,18 @@ class PageView(QGraphicsView):
             self.statusMessage.emit(message)
         return message
 
+    def _back_at_the_first_corner(self, *points: QPointF) -> bool:
+        """Whether a click at any of *points* is on the first corner of the
+        shape being clicked out, once it has three corners to close round."""
+        draft = self._draft
+        corners = list(getattr(draft, "points", None) or [])[:-1]   # less the live one
+        if len(corners) < 3:
+            return False
+        first = draft.mapToScene(corners[0])
+        reach = self.CLOSING_REACH / max(self.zoom(), 0.05)
+        return any(math.hypot(point.x() - first.x(), point.y() - first.y()) <= reach
+                   for point in points)
+
     def _become_a_drawn_cloud(self, scene_pos: QPointF) -> None:
         """Swap the rectangle being dragged for a cloud drawn corner by corner."""
         draft = self._draft
@@ -2977,8 +2998,9 @@ class PageView(QGraphicsView):
         self._draft = cloud
         self._mode = "draw_poly"
         self.statusMessage.emit(
-            f"{self.current_tool().label}: click each corner · Enter or "
-            "right-click to close it · Esc to cancel")
+            f"{self.current_tool().label}: click each corner · double-click, "
+            "click the first corner again, Enter or right-click to close it "
+            "· Esc to cancel")
 
     def _release_stale_mode(self) -> None:
         """Come back to rest after a drag whose release went missing."""
@@ -4198,6 +4220,9 @@ class PageView(QGraphicsView):
         if note_scale:
             self.window.note_missing_scale()
 
+    #: the size a text box or call-out lands at when it is not dragged out
+    WORDS_SIZE = (170.0, 44.0)
+
     @staticmethod
     def _default_size(item: MarkupItem) -> tuple[float, float]:
         if isinstance(item, StampItem):
@@ -4205,7 +4230,7 @@ class PageView(QGraphicsView):
         if isinstance(item, CheckboxItem):
             return item.natural_size()        # every option on a line of its own
         if isinstance(item, (TextItem, CalloutItem)):
-            return 170.0, 44.0
+            return PageView.WORDS_SIZE
         if isinstance(item, ImageItem):
             return 220.0, 160.0
         return 120.0, 80.0
@@ -5128,6 +5153,90 @@ class PageView(QGraphicsView):
         # lining the thing up with what is under it.
         painter.restore()
 
+    #: where the previews that follow the pointer were last asked to be drawn,
+    #: in scene coordinates (None: not known, so the whole canvas)
+    _preview_rects_drawn: Optional[list] = None
+
+    def _update_pointer_previews(self) -> None:
+        """Repaint where the pointer's previews were and where they are now.
+
+        A call-out being placed, a leader being added, a click-placed tool
+        held: each is drawn over the page and follows the pointer. Each move
+        used to repaint the whole canvas for it — the page, its drawing and
+        every markup on screen — which was most of the work of a move and
+        made placing a call-out lag on a busy sheet (the user, 2026-10-19).
+        Now only the two places are repainted: what the preview covered and
+        what it covers now. (The snap marker and its guides repaint their own
+        pixels; the crosshair its own strips.)
+        """
+        drawn = self._preview_rects_drawn
+        now = self._pointer_preview_rects()
+        self._preview_rects_drawn = now
+        viewport = self.viewport()
+        if now is None or drawn is None:
+            viewport.update()
+            return
+        if not now and not drawn:
+            return
+        region = QRegion()
+        for rect in drawn + now:
+            region += self.mapFromScene(rect).boundingRect().adjusted(-3, -3, 3, 3)
+        viewport.update(region)
+
+    def _pointer_preview_rects(self) -> Optional[list]:
+        """The scene rectangles the previews that follow the pointer are
+        drawn in now — or None when one cannot be bounded (a held stamp or
+        group) and the whole canvas is repainted, as it always was."""
+        if self._pending_stamp is not None:
+            return None
+        rects = []
+        try:
+            if self._pending_anchor is not None:
+                preview = self._kept("callout", self._pending_callout, keep=True)
+                if preview is not None:
+                    rects.append(preview.mapRectToScene(preview.boundingRect()))
+            for found in (self._kept("arrow", self._arrow_leader_preview, keep=True),
+                          self._kept("cloud", self._cloud_leader_preview, keep=True)):
+                if found is not None:
+                    preview, origin = found
+                    rects.append(preview.boundingRect().translated(origin))
+            found = self._tool_preview()
+            if found is not None:
+                item, point = found
+                rects.append(item.boundingRect().translated(point))
+        except (RuntimeError, AttributeError):
+            return None
+        return rects
+
+    #: previews made to say where they will be drawn, kept for the paint
+    #: that follows: {name: (what they were made from, preview)}
+    _previews_kept: dict = {}
+
+    def _kept(self, name: str, make, keep: bool = False):
+        """*make()*, or the preview made for the same pointer a moment ago.
+
+        A move works out where its preview will be drawn, and the paint that
+        follows draws it: one preview made for both, not two. It is handed
+        over once — the paint takes it — so anything that changes the
+        preview without moving the pointer (a colour picked, say) repaints
+        from a fresh one.
+        """
+        at = self._last_scene_pos
+        source = (at.x(), at.y(), self._zoom, id(self._draft),
+                  None if self._pending_anchor is None
+                  else (self._pending_anchor.x(), self._pending_anchor.y()),
+                  tuple((p.x(), p.y()) for p in (self._pending_cloud or ())),
+                  tuple((p.x(), p.y()) for p in (self._marquee or ())),
+                  id(self._pending_properties), id(self._pending_arrow_leader),
+                  id(self._pending_cloud_leader))
+        kept = dict(self._previews_kept)
+        found = kept.pop(name, None)
+        made = found[1] if found is not None and found[0] == source else make()
+        if keep:
+            kept[name] = (source, made)
+        self._previews_kept = kept
+        return made
+
     def _draw_tool_preview(self, painter: QPainter) -> None:
         """Show a click-placed tool under the pointer before it is put down.
 
@@ -5136,18 +5245,10 @@ class PageView(QGraphicsView):
         until it was already on the page, which is a poor moment to find out
         how big it is or where its corner falls.
         """
-        tool = self.current_tool()
-        if tool.mode != CLICK or self._mode != "idle":
+        found = self._tool_preview()
+        if found is None:
             return
-        if tool.factory is None or self.window.view.busy_typing():
-            return
-        item = self._preview_item(tool)
-        if item is None:
-            return
-        frame = self.frame_at(self._last_scene_pos) or self.frame()
-        if frame is None:
-            return
-        point = self.snap_scene(self._last_scene_pos, frame)
+        item, point = found
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setOpacity(0.5)
@@ -5157,6 +5258,21 @@ class PageView(QGraphicsView):
         except Exception:
             pass
         painter.restore()
+
+    def _tool_preview(self):
+        """(item, scene point) of the click-placed tool's preview, or None."""
+        tool = self.current_tool()
+        if tool.mode != CLICK or self._mode != "idle":
+            return None
+        if tool.factory is None or self.window.view.busy_typing():
+            return None
+        item = self._preview_item(tool)
+        if item is None:
+            return None
+        frame = self.frame_at(self._last_scene_pos) or self.frame()
+        if frame is None:
+            return None
+        return item, self.snap_scene(self._last_scene_pos, frame)
 
     def _preview_item(self, tool: Tool):
         """One item of the tool's kind, made once and kept for the preview."""
@@ -5344,47 +5460,65 @@ class PageView(QGraphicsView):
         which is not where one goes, and is not where the one that landed
         went either, so it jumped the moment the drag ended.
         """
+        found = self._kept("cloud", self._cloud_leader_preview)
+        if found is None:
+            return
+        preview, origin = found
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.translate(origin)
+        preview.paint_leader(painter)
+        painter.restore()
+
+    def _cloud_leader_preview(self):
+        """(copy of the note with the new cloud leader, scene point its
+        (0, 0) is drawn at) for the cloud leader being placed, or None."""
         item = self._pending_cloud_leader
         if item is None:
-            return
+            return None
         if len(self._marquee) < 2:
             # not dragged yet: a cloud of a likely size at the pointer, joined
             # to the note, so choosing Add Cloud Leader shows what it will do
             # (F-12: it showed nothing until the drag)
             at = self.snap_scene(self._last_scene_pos)
             if self._inside_its_box(item, at):
-                return
+                return None
             reach = 30.0 / max(self._zoom, 0.05)
             rect = QRectF(at.x() - reach, at.y() - reach * 0.7, 2 * reach, 1.4 * reach)
         else:
             rect = QRectF(self._marquee[0], self._marquee[-1]).normalized()
         if rect.width() < 1 or rect.height() < 1:
-            return
+            return None
         preview = self._a_copy_leading_to(item, cloud=rect)
         if preview is None:
-            return
-        painter.save()
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.translate(item.mapToScene(QPointF(0, 0)))
-        preview.paint_leader(painter)
-        painter.restore()
+            return None
+        return preview, item.mapToScene(QPointF(0, 0))
 
     def _draw_arrow_leader_preview(self, painter: QPainter) -> None:
         """Show where the new arrow would point, before the click lands."""
+        found = self._kept("arrow", self._arrow_leader_preview)
+        if found is None:
+            return
+        preview, origin = found
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.translate(origin)
+        preview.paint_leader(painter)
+        painter.restore()
+
+    def _arrow_leader_preview(self):
+        """(copy of the note with the new arrow leader, scene point its
+        (0, 0) is drawn at) for the arrow leader being placed, or None."""
         item = self._pending_arrow_leader
         if item is None or item.scene() is None:
-            return
+            return None
         if self._inside_its_box(item, self._last_scene_pos):
-            return                  # never drawn through its own words (F-12)
+            return None             # never drawn through its own words (F-12)
         preview = self._a_copy_leading_to(
             item, point=self.snap_scene(self._last_scene_pos))
         if preview is None:
-            return
-        painter.save()
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.translate(item.mapToScene(QPointF(0, 0)))
-        preview.paint_leader(painter)
-        painter.restore()
+            return None
+        return preview, item.mapToScene(QPointF(0, 0))
 
     @staticmethod
     def _inside_its_box(item, scene_pos: QPointF) -> bool:
@@ -5430,7 +5564,7 @@ class PageView(QGraphicsView):
         a straight line to the pointer instead is why the leader used to have
         no hinge and then jump the moment the click landed.
         """
-        preview = self._pending_callout()
+        preview = self._kept("callout", self._pending_callout)
         if preview is None:
             return
         box = preview.mapRectToScene(preview.local_rect())
@@ -5489,12 +5623,10 @@ class PageView(QGraphicsView):
         The pointer owns the middle of the left edge, which is also the anchor
         used when the click places the actual text box.
         """
-        from ..items.text import CalloutItem
-
         if self._draft is not None:
             return self._draft.mapRectToScene(self._draft.local_rect())
         at = QPointF(self._last_scene_pos)
-        width, height = self._default_size(CalloutItem())
+        width, height = self.WORDS_SIZE        # _default_size of a CalloutItem
         return QRectF(at.x(), at.y() - height / 2, width, height)
 
     def _draw_snap_guides(self, painter: QPainter, rect: QRectF) -> None:

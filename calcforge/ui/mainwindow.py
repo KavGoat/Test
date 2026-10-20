@@ -10136,6 +10136,14 @@ class MainWindow(QMainWindow):
         type_name = payload.get("type", "")
         kind = payload.get("kind", "") or payload.get("shape_kind", "")
         to_scale = bool(payload.get("to_scale", False))
+        if type_name == "callout" and any(
+                isinstance(leader, dict) and leader.get("kind") == "cloud"
+                for leader in payload.get("leaders") or ()):
+            # A Cloud+ is a call-out that points with a cloud, and is drawn
+            # again with the Cloud+ tool — a cloud dragged or clicked round,
+            # then its words — not the Callout tool's two clicks, which left
+            # it with no cloud at all.
+            return "cloud_callout"
         for tool in TOOLS:
             if tool.factory is None:
                 continue

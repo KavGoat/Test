@@ -214,7 +214,8 @@ its default (see *Markup styles and defaults*).
   the size on the page.
 - **Polygon** (`P`) — click each corner, double-click to close.
 - **Cloud** (`C`) — a revision cloud: drag a rectangle, or click corner by corner
-  for a free-form cloud; `Enter` or a right-click closes it.
+  for a free-form cloud; a double-click, a click on the first corner again,
+  `Enter` or a right-click closes it.
 - **Highlight Area** (`J`) — drag over anything to highlight it. It darkens what is
   underneath rather than covering it.
 - **Mark for Redaction** — an opaque box over what is to be removed. Nothing is
@@ -234,8 +235,12 @@ its default (see *Markup styles and defaults*).
 - **Callout** (`Q`) — click what it points at, then click where the words go. Drag
   the orange diamonds to move the leader. Right-click for **Add Arrow Leader**,
   **Add Cloud Leader** and **Remove Leader**.
-- **Cloud+** (`Shift+Q`) — a cloud and its note as one markup: drag a rectangular
-  cloud or click a free-form one, then click where the words go.
+- **Cloud+** (`Shift+Q`) — a cloud and its note as one markup, drawn as in Revu:
+  press and drag for a rectangular cloud of that size, or click its corners for a
+  free-form one (a double-click, a click on the first corner again, `Enter` or a
+  right-click closes it); then click where the words go — the leader joins them —
+  and type. The cloud, its leader and the words are one undo step. A Cloud+ kept
+  in a tool set to draw with its properties is drawn with the Cloud+ tool.
 - **Checkbox** — options with a box to tick beside each, as on a review stamp, all
   in one markup typed like a text box. Click to put one down with three options
   (Option 1, Option 2, Option 3) picked ready to type over, or drag a box. Each line
@@ -315,7 +320,7 @@ measurement extras too: cut-outs, Units, Caption and Totals.
 | **Rectangle** | Draw | `R` | Rectangle — drag it or click twice; Shift squares it off. Its width and height are on the paper; right-click ▸ Exact Size… sets them |
 | **Ellipse** | Draw | `E` | Ellipse — hold Shift for a circle; its width and height are on the paper |
 | **Polygon** | Draw | `P` | Click each vertex, double-click to close — not scaled |
-| **Cloud** | Draw | `C` | Mark a revision: drag a rectangular Cloud, or click each corner for a custom Cloud+ — Enter or a right-click closes it |
+| **Cloud** | Draw | `C` | Mark a revision: drag a rectangular Cloud, or click each corner for a custom Cloud+ — a double-click, the first corner again, Enter or a right-click closes it |
 | **Highlight Area** | Draw | `J` | Drag over anything to highlight it — it darkens what is underneath rather than covering it |
 | **Mark for Redaction** | Draw | — | Opaque black-out box |
 | **Hyperlink** | Navigate | — | Drag a region that goes to a page, a view, a file or a web address when clicked — a real link in the saved PDF |
@@ -323,7 +328,7 @@ measurement extras too: cut-outs, Units, Caption and Totals.
 | **Whiteout** | Draw | — | Revu's Cut Content (Erase Content): drag a region to clear the flattened PDF artwork in it; Undo restores it |
 | **Text Box** | Annotate | `T` | A box of words on the page — drag the box, then type in it |
 | **Callout** | Annotate | `Q` | Click what it points at, then click where the words go |
-| **Cloud+** | Annotate | `Shift+Q` | Drag a rectangular Cloud or click the corners of a custom Cloud+, then click where the words go — the cloud and note are one thing |
+| **Cloud+** | Annotate | `Shift+Q` | Drag a rectangular Cloud or click the corners of a custom Cloud+ (a double-click or the first corner again closes it), then click where the words go — the cloud and note are one thing |
 | **Checkbox** | Annotate | — | Options with boxes to tick — click to place three, or drag a box; type one option a line, and click a box to tick it |
 | **Note** | Annotate | — | Sticky note with a comment |
 | **Stamp** | Annotate | `S` | Approval or status stamp |

@@ -36,20 +36,37 @@ from .widgets import (ColorButton, PatternCombo, UnitCombo, arrow_combo,
                       big_pattern_dropdown, fit_pattern_list, set_arrow)
 
 
+#: Each line style's sample, drawn once for its ink, weight and dashes. The
+#: Properties panel fills its line-style list again whenever the selection
+#: changes, and drawing every style for it was a quarter of the time of
+#: placing a call-out or a text box (the user, 2026-10-19: "placing a callout
+#: is laggy"). Kept with the dashes it was drawn from, so one of one's own
+#: changed is drawn again.
+_LINE_STYLE_ICONS: dict = {}
+
+
 def _line_style_icon(name: str, colour: str, width: float, cloud: bool = False) -> QIcon:
     """A line style's sample across the box — for a cloud, its scallops
     drawn in that style, as Revu's list shows a cloud's."""
     from ..items import complexlines
+    from .icons import _scales
     colour = visible_ink(colour)
     complex_line = complexlines.is_complex(name)
+    # a complex line (Double, Gas…) at one size, as Revu's samples are,
+    # so a heavy line's still fits the row
+    weight = 1.5 if complex_line else max(2.0, min(float(width) * 1.5, 6.0))
+    dashes = list(DASH_ARRAYS.get(name, []))
+    key = (name, colour, weight, bool(cloud), tuple(dashes), tuple(_scales()))
+    kept = _LINE_STYLE_ICONS.get(key)
+    if kept is not None:
+        return kept
+    if len(_LINE_STYLE_ICONS) > 512:
+        _LINE_STYLE_ICONS.clear()
 
     def draw(painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
         pen = QPen(QColor(colour or "#111318"))
-        # a complex line (Double, Gas…) at one size, as Revu's samples are,
-        # so a heavy line's still fits the row
-        pen.setWidthF(1.5 if complex_line else max(2.0, min(float(width) * 1.5, 6.0)))
-        dashes = DASH_ARRAYS.get(name, [])
+        pen.setWidthF(weight)
         if dashes:
             pen.setStyle(Qt.CustomDashLine)
             pen.setDashPattern(dashes)
@@ -67,7 +84,9 @@ def _line_style_icon(name: str, colour: str, width: float, cloud: bool = False) 
             painter.drawPath(path)
         else:
             painter.drawLine(4, 17, 146, 17)
-    return drawn_icon(draw, 150, 34)
+    made = drawn_icon(draw, 150, 34)
+    _LINE_STYLE_ICONS[key] = made
+    return made
 
 
 class _Sample:
