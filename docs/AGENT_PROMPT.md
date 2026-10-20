@@ -72,12 +72,25 @@ units included.
 
 ## 3. Rules that are never broken
 
-- **The gate, before every push**, run in a separate git worktree at the
-  exact commit being pushed. Both must pass:
-  - `QT_QPA_PLATFORM=offscreen timeout 5400 python -m pytest -p no:cacheprovider -q -n 3 -rf`
-    — every test passes;
-  - `python -m calcforge.calc.tools.mutation_check` — reports
-    **14/14 planted bugs caught**.
+- **Testing before a push is tiered** (my answer of 2026-10-20: the full suite
+  took 30–45 minutes for every small change).
+  - **The quick gate, before each push:** `python tools/qa/quick.py run`. It
+    runs every test file that changed or imports a module that changed, the
+    quick check (the fastest tests of every file, `tools/qa/quick_tests.txt`),
+    and the planted-bug check when the maths engine changed. About 5–10
+    minutes. It must pass.
+  - **The full gate, every third push at the latest, and always before you
+    tell me a piece of work is finished**, run in a separate git worktree at the
+    exact commit being pushed. Both must pass:
+    - `QT_QPA_PLATFORM=offscreen timeout 5400 python -m pytest -p no:cacheprovider -q -n 3 -rf --durations=0 --durations-min=0.5`
+      — every test passes;
+    - `python -m calcforge.calc.tools.mutation_check` — reports
+      **14/14 planted bugs caught**.
+
+    After it, rebuild the quick check from its output:
+    `python tools/qa/quick.py build <its output>`.
+  - Run the full gate instead of the quick one when `tests/conftest.py` or a
+    shared fixture changes.
 
   Push only the commit that passed: `git push origin <sha>:refs/heads/<branch>`.
   Gate a batch of merged fixes once rather than gating each fix. A commit that
@@ -277,8 +290,8 @@ list of what *worked*. No prose essays.
 - **Don't duplicate work.** One agent per area; never two on the same files
   or question.
 - **Test narrowly while working, broadly at the gate.** While fixing, run only
-  the related test files (`-n 3`). Run the full suite once per batch, at the
-  gate, in its own worktree, in the background. Never poll it with sleeps:
+  the related test files (`-n 3`). Run the quick gate before each push and the
+  full suite as §3 says, in its own worktree, in the background. Never poll it with sleeps:
   wait for its notification.
 - **Run long jobs in the background** (gate, sweeps, agents) and do something
   useful meanwhile.
