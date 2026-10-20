@@ -2540,6 +2540,8 @@ class PageView(QGraphicsView):
             self.scene().clearSelection()
             for member in family:
                 member.setSelected(True)
+        elif many:
+            self.scene().make_primary(item)   # Revu: a green-pointed one becomes the primary
         self.selectionChanged.emit()
 
         if not self.editable(item):

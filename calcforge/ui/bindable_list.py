@@ -385,6 +385,7 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'menu.tools.toolbars.tools': ('Toolbar: Tools', 'Window', 'always'),
     'menu.tools.toolbars.markup_styles': ('Toolbar: Markup Styles', 'Window', 'always'),
     'menu.tools.toolbars.properties': ('Toolbar: Properties', 'Window', 'always'),
+    'menu.tools.toolbars.alignment': ('Toolbar: Alignment', 'Window', 'always'),
     # -- insert ----------------------------------------------------------------
     'insert.insert_pdf.before': ('Insert Pages Before', 'Pages', 'always'),
     'insert.insert_image_page.before': ('Insert Image Page Before', 'Pages', 'always'),

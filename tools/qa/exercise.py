@@ -102,6 +102,13 @@ def norm(text: str, mnemonics: bool = False) -> str:
     return re.sub(r"\s+", " ", text)
 
 
+#: Revu's Align Markups (ui/alignment.py): three markups picked, enough for
+#: every one of them (Distribute wants three)
+ALIGNMENT_STATE = "three_rects"
+ALIGNMENT_NAMES = ("align width", "align height", "align size", "distribute horizontally",
+                   "distribute vertically", "centre in document", "flip horizontal",
+                   "flip vertical", "align middle", "align top", "align bottom")
+
 # what a command needs to be in reach: by its name (menu-bar and key rows)
 STATE_BY_NAME = {
     # one markup picked
@@ -118,6 +125,7 @@ STATE_BY_NAME = {
     # several
     "group": "two_rects", "align": "two_rects", "change colors": "two_rects",
     "ungroup": "group", "arrange": "rect",
+    **{name: ALIGNMENT_STATE for name in ALIGNMENT_NAMES},
     "paste": "copied", "paste in place": "copied", "paste here": "copied",
     "undo": "undoable", "redo": "redoable", "redo (revu's key)": "redoable",
     "undo history": "undoable",
@@ -400,6 +408,8 @@ def build_commands(path: str) -> list[dict]:
         if area == "Menu bar":
             path_parts = menu_path_of(where, label)
             state = state_for_name(label, None) or state_for_name(where.split(" ▸ ")[-1])
+            if where.endswith("Alignment"):
+                state = ALIGNMENT_STATE       # (not the text's Align Left)
             if where.startswith("Tools ▸ Markup") or where.startswith("Tools ▸ Measure") or (
                     where.startswith("Tools ▸ Navigation")):
                 state = "fresh"
@@ -507,7 +517,12 @@ def build_commands(path: str) -> list[dict]:
                 if "Paste Pages" in path_parts[:-1] or label == "Paste Pages":
                     state = "pages_copied"
                 if "Alignment" in path_parts[:-1] or label == "Alignment":
-                    state = "two_rects"
+                    state = ALIGNMENT_STATE
+                    if label.startswith("Distribute"):
+                        # two picked in the equation, block and table states:
+                        # Distribute wants three, and says so greyed
+                        for entry in entries[1:]:
+                            entry["expect_disabled"] = True
                 if label in ("Clear Filter",):
                     state = "table_filtered"
                 if label in ("Delete Comment",):
@@ -523,8 +538,10 @@ def build_commands(path: str) -> list[dict]:
                                         kind=kind))
                 if "(two pages" in where:
                     entries[0]["kind"] = kind
-                if "disabled here" in note or (label.startswith("No ") and
-                                               label.casefold().endswith("yet")):
+                if ("disabled here" in note and state != ALIGNMENT_STATE) or (
+                        label.startswith("No ") and label.casefold().endswith("yet")):
+                    # (an alignment command is off for the one markup the
+                    # inventory picks; three are picked for it here)
                     entries[0]["expect_disabled"] = True
         elif area == "Panels":
             panel, _, rest = where.partition(" ▸ ")
@@ -1921,6 +1938,13 @@ def fx_two_rects(win):
     return dict(item=first[0], items=first + second, point=centre_of(first[0]))
 
 
+def fx_three_rects(win):
+    ctx = fx_two_rects(win)
+    third = draw(win, "rect", (140, 260), (240, 330))
+    pick(win, ctx["items"] + third)
+    return dict(item=ctx["item"], items=ctx["items"] + third, point=ctx["point"])
+
+
 def fx_group(win):
     ctx = fx_two_rects(win)
     win.act_group.trigger()
@@ -2404,6 +2428,7 @@ FIXTURES = {
     "length": _one("measure_length", (100, 300), (320, 300)),
     "note": fx_note,
     "two_rects": fx_two_rects,
+    "three_rects": fx_three_rects,
     "group": fx_group,
     "hidden": fx_hidden,
     "flattened": fx_flattened,

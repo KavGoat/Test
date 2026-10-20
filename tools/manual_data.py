@@ -828,8 +828,8 @@ PREFERENCES = {
 #: The order the keyboard shortcut reference lists its groups in; a group
 #: not named here comes after them, in alphabetical order.
 SHORTCUT_GROUP_ORDER = [
-    "File", "Edit", "View", "Document", "Pages", "Markup", "Text", "Order", "Navigate",
-    "Draw", "Annotate", "Measure", "Sketch to Scale", "Typing", "Symbols", "SMath",
+    "File", "Edit", "View", "Document", "Pages", "Markup", "Text", "Order", "Alignment",
+    "Navigate", "Draw", "Annotate", "Measure", "Sketch to Scale", "Typing", "Symbols", "SMath",
     "Calculation", "Spreadsheet", "Panels", "Window", "Help",
 ]
 

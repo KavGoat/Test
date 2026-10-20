@@ -1952,6 +1952,11 @@ class DocumentScene(QGraphicsScene):
         self._many = False
         self._many_known = False
         self.selectionChanged.connect(self.selection_reshaped)
+        # Revu's primary markup: the order things were picked in, brought up
+        # to date when first asked after the selection changes
+        self._pick_order: list = []
+        self._picks_stale = False
+        self.selectionChanged.connect(self._picks_changed)
         # A square of a page finished drawing in the background: repaint just
         # where it belongs. The scene listens rather than each page, because a
         # page frame is thrown away and rebuilt constantly and a signal still
@@ -2004,6 +2009,61 @@ class DocumentScene(QGraphicsScene):
     def _repaint_selected(self) -> None:
         for item in self.selectedItems():
             item.update()
+
+    # -- Revu's primary markup (ui/alignment.py) ---------------------------------
+    def _picks_changed(self) -> None:
+        if not self._picks_stale:
+            self._picks_stale = True
+            # caught up before the next pick, so each click keeps its place
+            QTimer.singleShot(0, self, self._catch_up_picks)
+
+    def picked_in_order(self) -> list:
+        """The markups picked, in the order they were picked: the first is
+        Revu's primary markup, the one the others align to. Picked together
+        (a drag round them, Select All), they go in reading order."""
+        self._catch_up_picks()
+        return list(self._pick_order)
+
+    def _catch_up_picks(self) -> None:
+        if self._picks_stale:
+            import shiboken6
+            self._picks_stale = False
+            before = self._pick_order[0] if self._pick_order else None
+            picked = [item for item in self.selectedItems() if isinstance(item, MarkupItem)]
+            now = {id(item) for item in picked}
+            order = [item for item in self._pick_order
+                     if id(item) in now and shiboken6.isValid(item)]
+            kept = {id(item) for item in order}
+            new = [item for item in picked if id(item) not in kept]
+            if len(new) > 1:
+                new.sort(key=lambda item: (round(item.sceneBoundingRect().top(), 1),
+                                           item.sceneBoundingRect().left()))
+            self._pick_order = order + new
+            first = self._pick_order[0] if self._pick_order else None
+            if first is not before:
+                self._repaint_selected()          # the yellow points moved
+
+    def primary_markup(self):
+        """(asked by every picked markup as it is drawn: nothing copied)"""
+        self._catch_up_picks()
+        return self._pick_order[0] if self._pick_order else None
+
+    def make_primary(self, item) -> None:
+        """A click on a green-pointed markup: it is the primary now (Revu)."""
+        order = self.picked_in_order()
+        if item not in order or order[0] is item:
+            return
+        family = [one for one in order if item.group and one.group == item.group] or [item]
+        self._pick_order = family + [one for one in order if one not in family]
+        self._repaint_selected()
+
+    def is_secondary(self, item) -> bool:
+        """Several things picked, and *item* not (in) the primary: its
+        control points are green."""
+        if not self.many_selected():
+            return False
+        primary = self.primary_markup()
+        return primary is not None and (primary.group or id(primary)) != (item.group or id(item))
 
     def _part_of_a_page_arrived(self, key) -> None:
         self._arrived.append(key)
