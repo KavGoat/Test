@@ -225,22 +225,26 @@ def test_add_arrow_leader_never_points_into_its_own_box(w):
     assert not scene_rect(callout).contains(tip)
 
 
-def test_add_cloud_leader_shows_the_cloud_before_the_drag(w):
+def test_add_cloud_leader_is_drawn_by_hand(w):
+    """The pointer is Cloud+'s, and the cloud is the one dragged — no cloud of
+    a size of its own at the pointer first (the user, 2026-10-20: "still
+    placed a pre-sized box instead of letting me size it by hand")."""
     box = a_text_box(w)
     centre = scene_rect(box).center()
     click(w, centre)
     right_click_menu(w, centre, pick="Add Cloud Leader")
     pump()
     assert w.view._pending_cloud_leader is not None
-    move(w, centre)
-    pump()
-    before = vp(w).grab().toImage()
     move(w, page(w, 520, 470))
     pump()
-    assert vp(w).grab().toImage() != before, "a cloud is shown at the pointer"
+    assert w.view._cloud_leader_preview() is None, "nothing pre-sized at the pointer"
     drag(w, page(w, 480, 440), page(w, 560, 500))
     (callout,) = markups(w, CalloutItem)
-    assert callout.cloud_leader() is not None
+    leader = callout.cloud_leader()
+    assert leader is not None
+    drawn = callout.mapRectToParent(leader.cloud_box())
+    assert (drawn.left(), drawn.top(), drawn.width(), drawn.height()) == \
+        pytest.approx((480, 440, 80, 60), abs=1.5)
 
 
 def test_remove_leader_keeps_the_cloud_plus_cloud(w):

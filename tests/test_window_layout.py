@@ -234,8 +234,9 @@ def _points(path: QPainterPath) -> list:
 
 def _no_doubling_back(path: QPainterPath) -> None:
     """Where one piece of the outline meets the next, the line may turn
-    sharply (a cusp) but never back on itself: a curl drawn backwards — the
-    hook — turns it right round."""
+    sharply (a cusp, as Revu's scallops meet: CLOUD_SWEEP) but never back on
+    itself: a curl drawn backwards — the hook — turns it right round."""
+    from calcforge.items.base import CLOUD_SWEEP
     pieces = []          # (start tangent, end tangent) of each piece
     for i in range(path.elementCount()):
         element = path.elementAt(i)
@@ -256,7 +257,8 @@ def _no_doubling_back(path: QPainterPath) -> None:
         size = math.hypot(*came) * math.hypot(*went)
         assert size > 0
         turn = math.degrees(math.acos(max(-1.0, min(1.0, dot / size))))
-        assert turn < 150, f"the outline turns back on itself ({turn:.0f}°)"
+        assert turn < math.degrees(CLOUD_SWEEP) + 1, \
+            f"the outline turns back on itself ({turn:.0f}°)"
 
 
 @pytest.mark.parametrize("rect", [QRectF(0, 0, 160, 100), QRectF(0, 0, 97, 61),
@@ -289,8 +291,7 @@ def test_a_clouds_scallops_are_evenly_spaced():
     rect = QRectF(0, 0, 160, 100)
     path = cloud_path(QPolygonF([rect.topLeft(), rect.topRight(), rect.bottomRight(),
                                  rect.bottomLeft()]), 10.25)
-    # the cusps along the top: every scallop the same width
-    top = sorted(p.x() for p in _points(path)
-                 if p.y() < 0 and abs(p.y() + 10.25 * math.sin(math.radians(34))) < 0.6)
+    # the cusps along the top, on it as Revu's are: every scallop the same width
+    top = sorted(p.x() for p in _points(path) if abs(p.y()) < 1e-6)
     gaps = [b - a for a, b in zip(top, top[1:]) if b - a > 1]
     assert gaps and max(gaps) - min(gaps) < 0.5

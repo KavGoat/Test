@@ -2026,114 +2026,156 @@ _CLOUDS: dict = {}
 _PENS: dict = {}
 
 
+#: How much of a circle each of a cloud's scallops is. Revu's are nearly
+#: half circles standing on the outline, so neighbours meet in a sharp notch
+#: pointing in; a little short of half, so the notch has an angle to it (a
+#: half circle would turn the line straight back on itself there).
+CLOUD_SWEEP = math.radians(160)
+
+
+def cloud_arcs_for(length: float, radius: float) -> int:
+    """How many scallops a side of *length* gets: as many as fit at *radius*
+    (the Size's scallop radius), at least one, all the same. Rounded up but
+    for a sliver, so a side's scallops are at most a little (15%) wider than
+    the Size's and never stand out further than *radius* — the room every
+    cloud's bounds keep for them."""
+    chord = 2 * max(float(radius), 0.5) * math.sin(CLOUD_SWEEP / 2)
+    return max(1, int(math.ceil(float(length) / chord - 0.15)))
+
+
 def _cloud_path(polygon: QPolygonF, radius: float, closed: bool = True,
                 inverted: bool = False) -> QPainterPath:
-    """A revision cloud round *polygon*: scallops of *radius*, centred on the
-    outline, one at each corner and the rest spaced evenly along each side,
-    as Revu draws them. Neighbouring scallops meet in a cusp where their
-    circles cross outside the outline, at the same spacing and depth as a PDF
-    reader's cloudy border (Apache PDFBox's CloudyBorder: centres 2·cos 34°
-    × radius apart). The curls bulge outward; *inverted* (Bluebeam's Invert)
-    turns them inward.
+    """A revision cloud round *polygon*, as Revu draws one: along each side a
+    run of equal scallops, each an arc standing on the side and bulging
+    outward, neighbours meeting in a cusp on the outline that points in. The
+    first scallop of a side starts at its corner and the last ends at the
+    next, so every corner is a cusp and no side ends in a sliver or overlaps
+    its neighbour. *radius* is the scallops' size (cloud_radius_for); each
+    side's are stretched or shrunk a little to fit it a whole number of
+    times. *inverted* (Bluebeam's Invert) bulges them inward.
 
-    Each scallop is drawn from the cusp it shares with the one before to the
-    cusp it shares with the one after, and the last ends where the first
-    began. The PDFBox shape this replaced eased its leftover length into the
-    first scallops of each side and began each corner with a short curl
-    drawn backwards: where the path closed, at the south-east corner of a
-    dragged cloud, that showed as a hook, and the eased scallops overlapped
-    their corner (QA, 2026-10-15).
+    Revu's scallops stand on the outline. Since 2026-10-14 they had been a
+    PDF reader's cloudy border instead (Apache PDFBox's CloudyBorder, after
+    Acrobat): shallow curls a third of a circle, centred on the outline,
+    their cusps out beyond it and a three-quarter curl round every corner —
+    a different, flatter cloud, and the outline it was drawn on was inside
+    it, so a leader ended at a corner ended inside the cloud (the user,
+    2026-10-20: "Cloud no longer looks like Bluebeam").
     Worked in y-up coordinates, as the PDF's own, and turned back."""
+    path = QPainterPath()
+    arcs = _cloud_arcs(polygon, radius, closed, inverted)
+    if not arcs:
+        return path
+
+    def out(x, y):
+        return QPointF(x, -y)
+
+    def segment(cx, cy, rho, start, end):
+        quarter = (end - start) / 2.0
+        ca, sa, cb, sb = math.cos(start), math.sin(start), math.cos(end), math.sin(end)
+        bcp = 4.0 / 3.0 * (1 - math.cos(quarter)) / math.sin(quarter)
+        path.cubicTo(out(cx + rho * (ca - bcp * sa), cy + rho * (sa + bcp * ca)),
+                     out(cx + rho * (cb + bcp * sb), cy + rho * (sb - bcp * cb)),
+                     out(cx + rho * cb, cy + rho * sb))
+
+    cx, cy, rho, start = arcs[0]
+    path.moveTo(out(cx + rho * math.cos(start), cy + rho * math.sin(start)))
+    for cx, cy, rho, start in arcs:
+        # two pieces, each under a right angle, as a cubic follows a circle
+        segment(cx, cy, rho, start, start + CLOUD_SWEEP / 2)
+        segment(cx, cy, rho, start + CLOUD_SWEEP / 2, start + CLOUD_SWEEP)
+    if closed:
+        path.closeSubpath()
+    return path
+
+
+def _cloud_arcs(polygon: QPolygonF, radius: float, closed: bool = True,
+                inverted: bool = False) -> list:
+    """The scallops of the cloud round *polygon*, in order round it: each
+    (centre x, centre y, radius, angle it starts at), y up, every one turning
+    CLOUD_SWEEP anticlockwise from the start of its chord to the end."""
     points = [(p.x(), -p.y()) for p in polygon]
     # no zero-length sides, and not closed (the first point is not repeated)
     clean = []
     for pt in points:
         if not clean or math.hypot(pt[0] - clean[-1][0], pt[1] - clean[-1][1]) > 1e-9:
             clean.append(pt)
-    if len(clean) >= 2 and math.hypot(clean[0][0] - clean[-1][0],
-                                      clean[0][1] - clean[-1][1]) <= 1e-9:
+    if closed and len(clean) >= 2 and math.hypot(clean[0][0] - clean[-1][0],
+                                                 clean[0][1] - clean[-1][1]) <= 1e-9:
         clean.pop()
-    path = QPainterPath()
-    if len(clean) < 3:
-        return path
+    if len(clean) < (3 if closed else 2):
+        return []
     # anticlockwise (y up), so outward is to the right of the way round —
     # or the other way round, which turns the scallops inward
-    area = sum(clean[i][0] * clean[(i + 1) % len(clean)][1]
-               - clean[i][1] * clean[(i + 1) % len(clean)][0] for i in range(len(clean)))
+    count = len(clean)
+    area = sum(clean[i][0] * clean[(i + 1) % count][1]
+               - clean[i][1] * clean[(i + 1) % count][0] for i in range(count))
     if (area < 0) != inverted:
         clean.reverse()
     radius = max(float(radius), 0.5)
-    pitch = 2 * math.cos(math.radians(34)) * radius
-
-    # the scallops' centres, each with the way round at that point
-    centres = []
-    count = len(clean)
-    for i in range(count):
+    half = CLOUD_SWEEP / 2
+    arcs = []
+    for i in range(count if closed else count - 1):
         (x0, y0), (x1, y1) = clean[i], clean[(i + 1) % count]
         length = math.hypot(x1 - x0, y1 - y0)
-        if length <= 1e-9:
-            continue
         ux, uy = (x1 - x0) / length, (y1 - y0) / length
-        steps = max(1, math.ceil(length / pitch - 1e-9))
-        for step in range(steps):
-            t = length * step / steps
-            centres.append((x0 + ux * t, y0 + uy * t, ux, uy))
-    # sides much shorter than a scallop: one scallop, not a pile of them
-    kept = []
-    for centre in centres:
-        if kept and math.hypot(centre[0] - kept[-1][0], centre[1] - kept[-1][1]) < 0.35 * radius:
-            continue
-        kept.append(centre)
-    while (len(kept) > 3 and math.hypot(kept[0][0] - kept[-1][0],
-                                        kept[0][1] - kept[-1][1]) < 0.35 * radius):
-        kept.pop()
-    centres = kept
-    if len(centres) < 3:
-        return path
-    # circles that would not cross (a cloud smaller than its scallops) are
-    # made just big enough to
-    widest = max(math.hypot(centres[(i + 1) % len(centres)][0] - centres[i][0],
-                            centres[(i + 1) % len(centres)][1] - centres[i][1])
-                 for i in range(len(centres)))
-    radius = max(radius, widest / (2 * math.cos(math.radians(34))))
+        many = cloud_arcs_for(length, radius)
+        chord = length / many
+        rho = chord / (2 * math.sin(half))
+        # each arc's centre is inside the outline by as much as the arc is
+        # short of a half circle; its middle bulges out, to the right
+        inset = rho * math.cos(half)
+        start = math.atan2(uy, ux) - math.pi / 2 - half    # the chord's start
+        for k in range(many):
+            mx, my = x0 + ux * chord * (k + 0.5), y0 + uy * chord * (k + 0.5)
+            arcs.append((mx - uy * inset, my + ux * inset, rho, start))
+    return arcs
 
-    def cusp(a, b):
-        """Where the circles round centres *a* and *b* cross on the outside
-        (to the right of the way from a to b)."""
-        mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
-        dx, dy = b[0] - a[0], b[1] - a[1]
-        d = math.hypot(dx, dy)
-        h = math.sqrt(max(radius * radius - d * d / 4, 0.0))
-        return mx + h * dy / d, my - h * dx / d
 
-    def out(x, y):
-        return QPointF(x, -y)
+def cloud_entry(polygon: QPolygonF, radius: float, start: QPointF, aim: QPointF,
+                inverted: bool = False) -> QPointF:
+    """Where a line from *start* towards *aim* first meets the cloud drawn
+    round *polygon* — the scalloped line itself, not the polygon — so a
+    leader to a cloud ends on it (the user, 2026-10-20: "the line leader
+    terminates inside the cloud, not on the edge"). *aim* when the line never
+    meets it, or starts inside it."""
+    key = (tuple((p.x(), p.y()) for p in polygon), float(radius), bool(inverted),
+           start.x(), start.y(), aim.x(), aim.y())
+    found = _ENTRIES.get(key)
+    if found is not None:
+        return QPointF(*found)
+    sx, sy, dx, dy = start.x(), -start.y(), aim.x() - start.x(), -(aim.y() - start.y())
+    reach = dx * dx + dy * dy
+    best = None
+    if reach > 1e-12 and not cloud_path(polygon, radius, inverted=inverted).contains(start):
+        for cx, cy, rho, begin in _cloud_arcs(polygon, radius, True, inverted):
+            # |s + t·d − c|² = ρ², the arc's circle, then whether the
+            # crossing is on the arc's own part of it
+            fx, fy = sx - cx, sy - cy
+            b = fx * dx + fy * dy
+            c = fx * fx + fy * fy - rho * rho
+            under = b * b - reach * c
+            if under < 0:
+                continue
+            for t in ((-b - math.sqrt(under)) / reach, (-b + math.sqrt(under)) / reach):
+                if t < -1e-9 or t > 1 + 1e-6 or (best is not None and t >= best):
+                    continue
+                turn = (math.atan2(fy + t * dy, fx + t * dx) - begin) % (2 * math.pi)
+                if turn <= CLOUD_SWEEP + 1e-6:
+                    best = t
+    if best is None:
+        found = (aim.x(), aim.y())
+    else:
+        best = max(0.0, min(best, 1.0))
+        found = (start.x() + best * (aim.x() - start.x()),
+                 start.y() + best * (aim.y() - start.y()))
+    if len(_ENTRIES) > 2048:
+        _ENTRIES.clear()
+    _ENTRIES[key] = found
+    return QPointF(*found)
 
-    def segment(cx, cy, start, end):
-        half = (end - start) / 2.0
-        ca, sa, cb, sb = math.cos(start), math.sin(start), math.cos(end), math.sin(end)
-        bcp = 4.0 / 3.0 * (1 - math.cos(half)) / math.sin(half)
-        path.cubicTo(out(cx + radius * (ca - bcp * sa), cy + radius * (sa + bcp * ca)),
-                     out(cx + radius * (cb + bcp * sb), cy + radius * (sb - bcp * cb)),
-                     out(cx + radius * cb, cy + radius * sb))
 
-    total = len(centres)
-    cusps = [cusp(centres[i - 1], centres[i]) for i in range(total)]
-    path.moveTo(out(*cusps[0]))
-    for i, (cx, cy, ux, uy) in enumerate(centres):
-        (sx, sy), (ex, ey) = cusps[i], cusps[(i + 1) % total]
-        start = math.atan2(sy - cy, sx - cx)
-        sweep = (math.atan2(ey - cy, ex - cx) - start) % (2 * math.pi)
-        # the arc round the outside: its middle to the right of the way round
-        middle = start + sweep / 2
-        if ux * math.sin(middle) - uy * math.cos(middle) > 0:
-            sweep -= 2 * math.pi
-        pieces = max(1, math.ceil(abs(sweep) / (math.pi / 2) - 1e-9))
-        for piece in range(pieces):
-            segment(cx, cy, start + sweep * piece / pieces,
-                    start + sweep * (piece + 1) / pieces)
-    path.closeSubpath()
-    return path
+_ENTRIES: dict = {}
 
 
 _THEIR_FILE_TOOLS = None

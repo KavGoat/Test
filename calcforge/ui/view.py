@@ -964,32 +964,73 @@ class PageView(QGraphicsView):
         self.viewport().update()
 
     def begin_cloud_leader(self, item) -> None:
-        """Arm a drag that chooses the region for a new cloud leader."""
+        """Draw the cloud for a new cloud leader, as a Cloud is drawn.
+
+        Press and drag for a rectangle round the area, or click its corners
+        for a free-form one (closed by a double-click, the first corner again,
+        Enter or a right-click) — Revu's gesture, the same as the Cloud+
+        tool's own cloud; then the cloud joins the note. Nothing is put down
+        at a size of its own (the user, 2026-10-20: "still placed a pre-sized
+        box instead of letting me size it by hand")."""
         if item is None or item.scene() is None or not self.editable(item):
             return
-        if self.tool_key != "select":
-            self.set_tool("select")
-            self.toolFinished.emit("select")
+        # Cloud+'s drawing of a cloud, with the note already there
+        self.set_tool("cloud_callout")
         self._pending_cloud_leader = item
         self._mode = "idle"
         self._marquee = []
-        # What comes next is a cloud drawn round a region, joined to the note:
-        # the pointer is the Cloud+ drawing for as long as that is what a
-        # drag does.
         self.setCursor(cloud_callout_cursor())
         self.statusMessage.emit(
-            "Drag around the area for the cloud leader · Esc to cancel")
+            "Add Cloud Leader: drag a cloud round the area, or click each "
+            "corner · Esc to cancel")
         self.viewport().update()
 
     def cancel_cloud_leader(self) -> None:
         """Put down an unplaced cloud leader without changing the document."""
         self._pending_cloud_leader = None
         self._marquee = []
-        if self._mode == "cloud_leader":
-            self._mode = "idle"
+        if self._draft is not None and self.tool_key == "cloud_callout":
+            self.cancel_draft()            # the cloud half drawn for it
             self.forget_snapshot()
+        if self.tool_key == "cloud_callout":
+            self.set_tool("select")
+            self.toolFinished.emit("select")
         self.setCursor(self._cursor_for_tool(self.current_tool()))
         self.viewport().update()
+
+    def _attach_cloud_leader(self, draft) -> None:
+        """The cloud for Add Cloud Leader is drawn: it joins the note, in one
+        undo step, and the hand goes back to selecting."""
+        item, self._pending_cloud_leader = self._pending_cloud_leader, None
+        corners = self._corners_of_drawn_cloud(draft)
+        detach(draft)
+        self.forget_snapshot()
+        self.set_tool("select")
+        self.toolFinished.emit("select")
+        if item is not None and item.scene() is not None and len(corners) >= 3:
+            self.begin_snapshot(self.involved_frames(item))
+            self.window.finish_cloud_leader(item, corners)
+        self.viewport().update()
+
+    def _like_the_notes_cloud(self, draft) -> None:
+        """The cloud drawn for Add Cloud Leader in the note's own line and
+        Size, unfilled, so it looks while drawn as it will once joined."""
+        from copy import deepcopy
+        item = self._pending_cloud_leader
+        draft.style = deepcopy(item.style)
+        draft.style.fill = ""
+        draft.style.hatch = ""
+        draft.cloud_size = item.cloud_size
+        draft.cloud_invert = item.cloud_invert
+
+    @staticmethod
+    def _corners_of_drawn_cloud(draft) -> list:
+        """A drawn cloud's corners on the scene: a dragged one's four, or
+        each one clicked."""
+        if isinstance(draft, PolyItem):
+            return [draft.mapToScene(point) for point in draft.points]
+        box = draft.mapRectToScene(draft.local_rect().normalized())
+        return [box.topLeft(), box.topRight(), box.bottomRight(), box.bottomLeft()]
 
     def setCursor(self, cursor) -> None:
         """The pointer goes on the viewport, where the canvas is. One set
@@ -2260,15 +2301,6 @@ class PageView(QGraphicsView):
             event.accept()
             return
 
-        if (self._pending_cloud_leader is not None
-                and event.button() == Qt.LeftButton):
-            point = self.snap_scene(scene_pos)
-            self._mode = "cloud_leader"
-            self._marquee = [QPointF(point), QPointF(point)]
-            self.begin_snapshot(self.involved_frames(self._pending_cloud_leader))
-            event.accept()
-            return
-
         if self._size_editor is not None and event.button() == Qt.LeftButton:
             proxy = self._size_proxy
             if proxy is not None and proxy.sceneBoundingRect().contains(scene_pos):
@@ -2936,15 +2968,11 @@ class PageView(QGraphicsView):
             return
 
 
-        if self._mode == "cloud_leader" and self._marquee:
-            self._marquee[-1] = self.snap_scene(scene_pos)
-            self._update_pointer_previews()
-            event.accept()
-            return
-
         if self._mode in ("draw_drag", "draw_click", "draw_poly", "draw_free") \
                 and self._draft is not None:
             self._update_draft(scene_pos, event.modifiers())
+            if self._pending_cloud_leader is not None:
+                self._update_pointer_previews()   # Add Cloud Leader's line follows
             event.accept()
             return
 
@@ -3091,10 +3119,6 @@ class PageView(QGraphicsView):
                                       item.mapToScene(QPointF(0, 0))))
                     item.setPos(item.pos() + correction)
                 item.update()
-            self.forget_snapshot()
-        if mode == "cloud_leader":
-            self._pending_cloud_leader = None
-            self._marquee = []
             self.forget_snapshot()
         self._mode = "idle"
         self._move_items = []
@@ -3476,25 +3500,6 @@ class PageView(QGraphicsView):
         scene_pos = self.mapToScene(event.position().toPoint())
         self.forget_snap()
         self.viewport().update()
-
-        if self._mode == "cloud_leader":
-            item = self._pending_cloud_leader
-            start = self._marquee[0] if self._marquee else scene_pos
-            finish = self.snap_scene(scene_pos)
-            rect = QRectF(start, finish).normalized()
-            if rect.width() < CLICK_SLOP and rect.height() < CLICK_SLOP:
-                rect = QRectF(finish.x() - 40, finish.y() - 25, 80, 50)
-            self._pending_cloud_leader = None
-            self._marquee = []
-            self._mode = "idle"
-            if item is not None and item.scene() is not None:
-                self.window.finish_cloud_leader(item, rect)
-            else:
-                self.forget_snapshot()
-            self.setCursor(self._cursor_for_tool(self.current_tool()))
-            self.viewport().update()
-            event.accept()
-            return
 
         if self._editing_item is not None and self._mode == "idle":
             super().mouseReleaseEvent(event)
@@ -4051,6 +4056,8 @@ class PageView(QGraphicsView):
         if not item.subject:
             item.subject = subject_for(self.current_tool())
         self.window.apply_default_style(item)
+        if self._pending_cloud_leader is not None and getattr(item, "kind", "") == "cloud":
+            self._like_the_notes_cloud(item)
         if self._pending_properties:
             # Drawn with a tool taken from a set: its properties win over both
             # the toolbar and the saved default, because it was asked for.
@@ -4320,12 +4327,10 @@ class PageView(QGraphicsView):
         lands is one markup rather than a cloud and a note that happen to be
         side by side.
         """
-        if isinstance(draft, PolyItem):
-            corners = [draft.mapToScene(point) for point in draft.points]
-        else:
-            box = draft.mapRectToScene(draft.local_rect().normalized())
-            corners = [box.topLeft(), box.topRight(),
-                       box.bottomRight(), box.bottomLeft()]
+        if self._pending_cloud_leader is not None:
+            self._attach_cloud_leader(draft)        # Add Cloud Leader's cloud
+            return
+        corners = self._corners_of_drawn_cloud(draft)
         detach(draft)
         self.forget_snapshot()
         self._pending_cloud = corners
@@ -5147,12 +5152,9 @@ class PageView(QGraphicsView):
         self.tables.paint_insert_preview(painter)
         self.tables.view_moved()
         if self._marquee:
-            if self._mode == "cloud_leader":
-                self._draw_cloud_leader_preview(painter)
-            else:
-                self._draw_marquee(painter)
-        elif self._pending_cloud_leader is not None:
-            self._draw_cloud_leader_preview(painter)       # before the drag (F-12)
+            self._draw_marquee(painter)
+        if self._pending_cloud_leader is not None:
+            self._draw_cloud_leader_preview(painter)
         self._draw_group_boxes(painter)
         self.calc.draw_cross(painter)
         if self._pending_stamp is not None:
@@ -5551,22 +5553,15 @@ class PageView(QGraphicsView):
         """(copy of the note with the new cloud leader, scene point its
         (0, 0) is drawn at) for the cloud leader being placed, or None."""
         item = self._pending_cloud_leader
-        if item is None:
+        draft = self._draft
+        if item is None or draft is None or item.scene() is None:
+            # nothing drawn yet: no cloud of a size of its own (2026-10-20)
             return None
-        if len(self._marquee) < 2:
-            # not dragged yet: a cloud of a likely size at the pointer, joined
-            # to the note, so choosing Add Cloud Leader shows what it will do
-            # (F-12: it showed nothing until the drag)
-            at = self.snap_scene(self._last_scene_pos)
-            if self._inside_its_box(item, at):
-                return None
-            reach = 30.0 / max(self._zoom, 0.05)
-            rect = QRectF(at.x() - reach, at.y() - reach * 0.7, 2 * reach, 1.4 * reach)
-        else:
-            rect = QRectF(self._marquee[0], self._marquee[-1]).normalized()
-        if rect.width() < 1 or rect.height() < 1:
+        corners = self._corners_of_drawn_cloud(draft)
+        box = QPolygonF(corners).boundingRect()
+        if len(corners) < 3 or box.width() < 1 or box.height() < 1:
             return None
-        preview = self._a_copy_leading_to(item, cloud=rect)
+        preview = self._a_copy_leading_to(item, cloud=corners)
         if preview is None:
             return None
         return preview, item.mapToScene(QPointF(0, 0))
@@ -5606,7 +5601,7 @@ class PageView(QGraphicsView):
             return False
 
     def _a_copy_leading_to(self, item, point: Optional[QPointF] = None,
-                           cloud: Optional[QRectF] = None):
+                           cloud=None):
         """A copy of *item* with one more leader on it, for drawing a preview.
 
         A copy, so nothing is added to the document until the click lands, and
@@ -5620,11 +5615,11 @@ class PageView(QGraphicsView):
             data = item.serialize()
             preview = CalloutItem()
             preview.deserialize(data)
+            if isinstance(cloud, QRectF):
+                cloud = [cloud.topLeft(), cloud.topRight(),
+                         cloud.bottomRight(), cloud.bottomLeft()]
             if cloud is not None:
-                box = QRectF(item.mapFromScene(cloud.topLeft()),
-                             item.mapFromScene(cloud.bottomRight())).normalized()
-                preview.add_cloud_leader([box.topLeft(), box.topRight(),
-                                          box.bottomRight(), box.bottomLeft()])
+                preview.add_cloud_leader([item.mapFromScene(corner) for corner in cloud])
             else:
                 preview.add_leader(item.mapFromScene(point))
             return preview

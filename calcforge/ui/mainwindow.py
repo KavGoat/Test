@@ -11555,11 +11555,13 @@ class MainWindow(QMainWindow):
         self.status_hint.setText(
             f"{len(item.leaders)} leader(s) — drag the head to move it")
 
-    def finish_cloud_leader(self, item, scene_rect: QRectF) -> None:
-        """Attach a cloud leader around the region chosen on the canvas."""
+    def finish_cloud_leader(self, item, corners) -> None:
+        """Attach a cloud leader round the region drawn on the canvas: a
+        rectangle (QRectF) or the corners clicked, on the scene."""
         item = self.becomes_a_callout(item)
-        corners = [scene_rect.topLeft(), scene_rect.topRight(),
-                   scene_rect.bottomRight(), scene_rect.bottomLeft()]
+        if isinstance(corners, QRectF):
+            corners = [corners.topLeft(), corners.topRight(),
+                       corners.bottomRight(), corners.bottomLeft()]
         item.add_cloud_leader([item.mapFromScene(point) for point in corners])
         item.touch()
         item.update()
