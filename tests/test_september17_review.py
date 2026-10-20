@@ -332,11 +332,15 @@ def test_break_controls_persist(window, qapp):
     assert item.break_settings(0)[0] == pytest.approx(60)
     item.move_handle("z0", QPointF(140, 10))
     assert item.break_settings(0)[1] == pytest.approx(20)
-    for key, shape in (("b0", Qt.SizeAllCursor), ("w0", Qt.SizeHorCursor),
+    from calcforge.ui.cursors import MOVE, is_revu_cursor
+    for key, shape in (("b0", MOVE), ("w0", Qt.SizeHorCursor),
                        ("z0", Qt.SizeVerCursor)):
         point = item.mapToScene(item.handle_points()[key])
         hover(window.view, point.x(), point.y())
-        assert window.view.cursor().shape() == shape
+        if shape == MOVE:          # the break slides whole: Revu's move pointer
+            assert is_revu_cursor(window.view.cursor(), MOVE)
+        else:
+            assert window.view.cursor().shape() == shape
     width_handle = item.mapToScene(item.handle_points()["w0"])
     drag(window.view, width_handle.x(), width_handle.y(),
          width_handle.x() + 10, width_handle.y())

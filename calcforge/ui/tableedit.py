@@ -222,8 +222,13 @@ _CURSORS = {"cell": _excel("cell"), "fill": lambda: QCursor(Qt.CrossCursor),
             "row_edge": lambda: QCursor(Qt.SplitVCursor), "break": lambda: QCursor(Qt.SplitVCursor),
             "vbreak": lambda: QCursor(Qt.SplitHCursor),
             "grow": lambda: QCursor(Qt.SizeFDiagCursor),
-            # the tab picks the whole table up and moves it: the move pointer
-            "tab": lambda: QCursor(Qt.SizeAllCursor)}
+            # the tab picks the whole table up and moves it: Revu's move pointer
+            "tab": lambda: _revu_move()}
+
+
+def _revu_move():
+    from .cursors import move_cursor
+    return move_cursor()
 
 
 def _now(fmt: str) -> str:

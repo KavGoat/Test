@@ -4,9 +4,12 @@ The user, 2026-10-20: "Run a cursor check on all features, like how moving a
 hinge on a leader has a weird cursor." What Revu shows, and so what each of
 these must show:
 
-- the move pointer (four arrows) over anything a drag moves whole — a
-  markup's body, a cloud leader's cloud, a measurement's words, a table's tab;
-- with Ctrl held over a markup, the move pointer with a plus: a drag copies;
+- Revu's select arrow with a small move sign at its foot over anything a
+  drag moves whole — a markup's body, a cloud leader's cloud, a measurement's
+  words, a table's tab (the user's photos of Revu 21, 2026-10-20);
+- the arrow with a copy sign while Ctrl is held over a markup: a click or a
+  drag copies; with a "+", a "−" or an arc while Shift or Alt is held over a
+  selected outline, for what the click does there;
 - the size arrows over a resize handle, lying the way the handle pulls on
   the screen — turned with a turned markup;
 - the point pointer (the thin crosshair) over a handle that moves one point:
@@ -32,12 +35,11 @@ from PySide6.QtWidgets import QApplication
 from calcforge.items.base import POINT_CURSOR, rotate_cursor
 from calcforge.items.shapes import RectItem
 from calcforge.ui.tools import TOOLS
-from calcforge.ui.view import copy_cursor
+from calcforge.ui.cursors import ADD, BADGES, COPY, CURVE, MOVE, REMOVE, is_revu_cursor
 from tests.probe_audit import make
 from tests.test_markup_interaction_round6 import pump, screen, vp
 
 ROTATE = "rotate"
-COPY = "copy"
 
 
 @pytest.fixture
@@ -68,8 +70,9 @@ def shown(w):
     key = cursor.pixmap().cacheKey()
     if key == rotate_cursor().pixmap().cacheKey():
         return ROTATE
-    if key == copy_cursor().pixmap().cacheKey():
-        return COPY
+    for badge in BADGES:
+        if is_revu_cursor(cursor, badge):
+            return badge
     return key
 
 
@@ -87,13 +90,13 @@ def revu(item, key: str):
     if corner in SIZE:
         return SIZE[corner]
     if key in ("lbl", "lbltext"):
-        return Qt.SizeAllCursor          # a measurement's words, moved whole
+        return MOVE                      # a measurement's words, moved whole
     if key[:1] == "l" and key[1:].isdigit():
         leader, _part = item.leader_at(key)
         if leader.clouds():
-            return Qt.SizeAllCursor      # a cloud leader's cloud travels whole
+            return MOVE                  # a cloud leader's cloud travels whole
     if key[:1] == "b" and key[1:].isdigit():
-        return Qt.SizeAllCursor          # a break symbol, slid along its side
+        return MOVE                      # a break symbol, slid along its side
     return POINT_CURSOR                  # one point: a corner, an end, a hinge
 
 
@@ -243,7 +246,7 @@ def test_moving_copying_and_a_locked_markup(w):
     pump()
     middle = body_of(box)
     hover(w, middle)
-    assert shown(w) == Qt.SizeAllCursor, "a drag moves it"
+    assert shown(w) == MOVE, "a drag moves it"
     QTest.keyPress(w.view, Qt.Key_Control)
     pump()
     assert shown(w) == COPY, "Ctrl, pressed over it: a drag copies it"
@@ -251,10 +254,10 @@ def test_moving_copying_and_a_locked_markup(w):
     assert shown(w) == COPY
     QTest.keyRelease(w.view, Qt.Key_Control)
     pump()
-    assert shown(w) == Qt.SizeAllCursor, "and moves it again once let go"
+    assert shown(w) == MOVE, "and moves it again once let go"
     QTest.keyPress(w.view, Qt.Key_Shift)
     hover(w, middle)
-    assert shown(w) == Qt.SizeAllCursor, "Shift: still a move, kept straight"
+    assert shown(w) == MOVE, "Shift: still a move, kept straight"
     QTest.keyRelease(w.view, Qt.Key_Shift)
     hover(w, QPointF(700, 700))
     assert shown(w) == Qt.ArrowCursor, "bare paper"
@@ -263,7 +266,7 @@ def test_moving_copying_and_a_locked_markup(w):
     assert shown(w) == Qt.ForbiddenCursor, "a locked markup cannot be taken hold of"
 
 
-def test_shift_or_ctrl_over_a_selected_outline_still_says_move_or_copy(w):
+def test_shift_alt_or_ctrl_over_a_selected_outline_says_what_a_click_does(w):
     shape = make(w, "polygon")
     w.select_tool("select")
     w.view.scene().clearSelection()
@@ -273,16 +276,17 @@ def test_shift_or_ctrl_over_a_selected_outline_still_says_move_or_copy(w):
     corner = shape.mapToScene(shape.points[1])
     hover(w, corner)
     assert shown(w) == POINT_CURSOR, "a corner on its own moves that point"
-    QTest.keyPress(w.view, Qt.Key_Shift)
-    for where in (side, corner):
-        hover(w, where)
-        assert shown(w) == Qt.SizeAllCursor, "no plus or minus: a drag moves it"
-    QTest.keyRelease(w.view, Qt.Key_Shift)
-    QTest.keyPress(w.view, Qt.Key_Control)
-    for where in (side, corner):
-        hover(w, where)
-        assert shown(w) == COPY, "no curve sign: a drag copies it"
-    QTest.keyRelease(w.view, Qt.Key_Control)
+    for key, wanted in ((Qt.Key_Shift, {"side": ADD, "corner": REMOVE}),
+                        (Qt.Key_Alt, {"side": CURVE, "corner": CURVE}),
+                        (Qt.Key_Control, {"side": COPY, "corner": COPY})):
+        QTest.keyPress(w.view, key)
+        for name, where in (("side", side), ("corner", corner)):
+            hover(w, where)
+            assert shown(w) == wanted[name], (key, name, shown(w))
+        QTest.keyRelease(w.view, key)
+        pump()
+    hover(w, side)
+    assert shown(w) == MOVE, "keys let go: the side moves the markup"
 
 
 def test_words_being_typed_take_the_i_beam(w):
@@ -324,7 +328,7 @@ def test_a_tables_cells_headings_tab_and_edges(w):
     assert shown(w) == Qt.SplitHCursor, "a column's edge is dragged across"
     tab = table.mapToScene(table.tab_rect().center())
     hover(w, tab)
-    assert shown(w) == Qt.SizeAllCursor, "the tab picks the whole table up to move it"
+    assert shown(w) == MOVE, "the tab picks the whole table up to move it"
 
 
 def test_a_sheets_print_area_and_its_cells(w):
@@ -379,6 +383,6 @@ def test_the_hand_and_each_drawing_tool(w):
         assert vp(w).cursor().shape() == wanted.shape(), tool.key
         if wanted.shape() == Qt.BitmapCursor:
             assert vp(w).cursor().pixmap().cacheKey() == wanted.pixmap().cacheKey(), tool.key
-        assert shown(w) not in (Qt.SizeAllCursor, COPY), (tool.key, "a tool is not a move")
+        assert shown(w) not in (MOVE, COPY), (tool.key, "a tool is not a move")
         QTest.keyClick(vp(w), Qt.Key_Escape)
         pump()
