@@ -279,6 +279,10 @@ def test_the_tick_runs_out_past_its_box(qapp):
     assert dark_in(image, beyond, item) > 0, "past the top right-hand corner"
     far = QRectF(box.right() + side * 0.3, box.top() - side * 0.4, side * 0.3, side * 0.3)
     assert dark_in(image, far, item) == 0, "not running far out (too steep before)"
+    # and out past the left-hand edge at half the box's height, as a tick made
+    # by hand runs over both sides (the user, 2026-10-20)
+    left = QRectF(box.left() - side * 0.2, box.top() + side * 0.35, side * 0.15, side * 0.25)
+    assert dark_in(image, left, item) > 0, "past the left-hand edge"
 
 
 def test_narrower_wraps_without_changing_the_boxes_and_a_bigger_font_grows_them(window):

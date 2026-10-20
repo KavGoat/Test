@@ -123,15 +123,16 @@ def draw_mark(painter: QPainter, mark: str, shape: str, box: QRectF, ink: QColor
         painter.drawLine(inner.topLeft(), inner.bottomRight())
         painter.drawLine(inner.topRight(), inner.bottomLeft())
         return
-    # the stamp's tick: heavy, a short stroke down from the box's left edge
-    # at half its height to near its foot, then a long one up just past its
-    # top right-hand corner — nearly a right angle between them (the user's
-    # WSP stamp; the tick before ran far out and looked too steep)
+    # the stamp's tick: heavy, a short stroke from just out past the box's
+    # left edge at half its height down to near its foot, then a long one up
+    # out past its top right-hand corner — nearly a right angle between them,
+    # running over the box on both sides as a tick made by hand does (the
+    # user's WSP stamp, and 2026-10-20: "overflow in the left and right")
     pen.setWidthF(max(side * TICK_SHARE, 0.1))
     painter.setPen(pen)
-    tick = QPainterPath(QPointF(box.left() + side * 0.06, box.top() + side * 0.50))
-    tick.lineTo(QPointF(box.left() + side * 0.40, box.top() + side * 0.88))
-    tick.lineTo(QPointF(box.right() + side * 0.10, box.top() + side * 0.06))
+    tick = QPainterPath(QPointF(box.left() - side * 0.12, box.top() + side * 0.48))
+    tick.lineTo(QPointF(box.left() + side * 0.36, box.top() + side * 0.90))
+    tick.lineTo(QPointF(box.right() + side * 0.20, box.top() - side * 0.08))
     painter.drawPath(tick)
 
 
@@ -557,7 +558,7 @@ class CheckboxItem(TextItem):
         for box in self.box_rects():
             if box.isValid():
                 side = box.width()
-                rect = rect.united(box.adjusted(-side * 0.1, -side * 0.45,
+                rect = rect.united(box.adjusted(-side * 0.3, -side * 0.45,
                                                 side * 0.45, side * 0.1))
         grow = max(float(self.style.width or 0.0), 0.0) / 2.0 + 0.5
         return rect.adjusted(-grow, -grow, grow, grow)

@@ -256,7 +256,8 @@ its default (see *Markup styles and defaults*).
   options. Its settings are in the Properties panel's **Checkbox** section:
   **Options** (tick, or double-click to rename, each option; **Add Option**,
   **Remove Option**, **Move Up**, **Move Down**), **Box** (Square, Rounded square,
-  Circle, Diamond), **Mark** (Tick, Cross, Filled, Dot), **Multiple Selection** (on:
+  Circle, Diamond), **Mark** (Tick — a heavy tick, as made by hand, running out past
+  the box on both sides — Cross, Filled, Dot), **Multiple Selection** (on:
   several may be ticked; off: ticking one unticks the others), **Box Colour** and
   **Mark Colour** (the words' colour to begin with), **Option Spacing** (the space
   between options, as a share of the font size) and **Line Spacing**; Box ▾, Mark ▾
