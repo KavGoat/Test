@@ -30,8 +30,8 @@ import time
 import weakref
 from collections import OrderedDict
 
-from PySide6.QtCore import QRectF, Qt, QTimer
-from PySide6.QtGui import QImage, QPainter, QPixmap, QTransform
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtGui import QImage, QPaintEngine, QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem
 
 #: The side of a square, in device pixels. Small, so one square is a few
@@ -187,6 +187,113 @@ def align_with_squares(painter: QPainter, item) -> None:
     ratio = inverse * painter.deviceTransform()
     painter.setWorldTransform(world * QTransform.fromTranslate(dx / (ratio.m11() or 1.0),
                                                               dy / (ratio.m22() or 1.0)))
+
+
+def _on_a_screen_page(item) -> bool:
+    """Whether *item* is being drawn for the screen: on a page that is not
+    being printed or exported."""
+    page = item.parentItem() if item is not None else None
+    while page is not None and getattr(page, "layer", None) is None:
+        page = page.parentItem()
+    layer = getattr(page, "layer", None)
+    return layer is not None and layer._on_screen()
+
+
+def _whole(value: float) -> int:
+    """*value* to the nearest whole pixel, a half always up — and a hair
+    under a half too, so the same place reached two ways (through a square's
+    corner, or through the window's) cannot fall either side of it."""
+    return math.floor(value + 0.5 + 1e-4)
+
+
+def _figures(value: float) -> float:
+    return float(f"{value:.9g}")
+
+
+#: the paint engines that draw on screen and into the page's squares: the
+#: processor's, and the graphics card's
+_SCREEN_ENGINES = (QPaintEngine.Raster, QPaintEngine.OpenGL2)
+_WORDS_HINTS = (QPainter.Antialiasing | QPainter.TextAntialiasing
+                | QPainter.SmoothPixmapTransform)
+
+
+def paint_words(painter: QPainter, item, clip: QRectF, draw) -> None:
+    """Draw words — *draw(painter)*, inside *clip* (the painter's present
+    coordinates) — the same, pixel for pixel, whichever way they reach the
+    screen.
+
+    A markup's words reached the screen three ways: from the page's squares
+    (drawn by the processor into a picture with nothing behind it), live onto
+    the window while the markup was picked out, changed or neighboured one
+    just drawn, and live onto the window while the squares were still to
+    come. On Windows the processor smooths words drawn onto the opaque window
+    against a gamma curve, and words drawn into a clear picture without one;
+    on the graphics card (Preferences ▸ Draw with the graphics card, on by
+    default) live words are drawn by OpenGL, from glyphs of its own, set on
+    whole pixels. So the same words came out heavier or lighter, a shade
+    wider, their letters spaced differently, each time a markup went from
+    one way to the other — and a rectangle dragged past a text box took the
+    text box from one to the other and back (the user, 2026-10-20: "Text
+    flicker still there — add a text box and write something, then draw a
+    rectangle and move it around and you can see it").
+
+    Now the words are always drawn the same way: by the processor, into a
+    clear picture of their own at the device's own pixels, their corner on a
+    whole pixel, and that picture is laid on the device as it is. On paper —
+    a print, an export, a PDF's appearance — they are drawn as they are, as
+    words."""
+    engine = painter.paintEngine()
+    device = painter.deviceTransform()
+    if (engine is None or engine.type() not in _SCREEN_ENGINES or not device.isAffine()
+            or not _on_a_screen_page(item)):
+        draw(painter)
+        return
+    world = painter.worldTransform()
+    inverse, invertible = world.inverted()
+    if not invertible:
+        draw(painter)
+        return
+    # world to device = world, then the window's own (its pixel ratio, its
+    # place): undone, the picture's pixels land on the device's as they are
+    onto_device = inverse * device
+    back, invertible = onto_device.inverted()
+    if not invertible:
+        draw(painter)
+        return
+    shape = QTransform(_figures(device.m11()), _figures(device.m12()),
+                       _figures(device.m21()), _figures(device.m22()), 0.0, 0.0)
+    across, down = _whole(device.dx()), _whole(device.dy())
+    box = shape.mapRect(QRectF(clip)).translated(across, down)
+    # only what can be seen of them: a big box at a high zoom is not a
+    # picture the size of a wall
+    seen = onto_device.mapRect(QRectF(painter.window()))
+    if painter.hasClipping():
+        seen = seen.intersected(device.mapRect(painter.clipBoundingRect()))
+    area = box.intersected(seen)
+    if area.isEmpty():
+        return
+    left, top = math.floor(area.left()) - 1, math.floor(area.top()) - 1
+    right, bottom = math.ceil(area.right()) + 1, math.ceil(area.bottom()) + 1
+    if (right - left) * (bottom - top) > 4096 * 4096:
+        draw(painter)
+        return
+    image = QImage(right - left, bottom - top, QImage.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    words = QPainter(image)
+    words.setRenderHints(_WORDS_HINTS)
+    words.setPen(painter.pen())
+    words.setFont(painter.font())
+    words.setWorldTransform(shape * QTransform.fromTranslate(across - left, down - top))
+    words.setClipRect(clip)
+    try:
+        draw(words)
+    finally:
+        words.end()
+    painter.save()
+    painter.setWorldTransform(back)
+    painter.setRenderHint(QPainter.SmoothPixmapTransform, False)
+    painter.drawImage(QPointF(left, top), image)
+    painter.restore()
 
 
 def _square_picture(image: QImage) -> QPixmap:

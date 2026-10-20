@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
                                QStyleOptionGraphicsItem)
 
 from ..core.typography import PAGE_HINTING, PAGE_TEXT
+from ..ui.markuplayer import align_with_squares, paint_words
 from .base import CLOUD_SIZE, HANDLE_SIZE, MarkupItem, Style, draw_head, register_item
 
 STAMP_PRESETS = {
@@ -52,11 +53,15 @@ class _InlineEditor(QGraphicsTextItem):
         trimmed.state &= ~QStyle.State_Selected
         # the words on the pixels they have before and after typing
         # (ui/markuplayer.align_with_squares): no jump as editing ends
-        from ..ui.markuplayer import align_with_squares
         painter.save()
         align_with_squares(painter, self)
-        super().paint(painter, trimmed, widget)
-        self._paint_misspellings(painter)
+
+        def words(onto: QPainter) -> None:
+            QGraphicsTextItem.paint(self, onto, trimmed, widget)
+            self._paint_misspellings(onto)
+
+        # typed, the words are the same picture as once typed (paint_words)
+        paint_words(painter, self, self.boundingRect(), words)
         painter.restore()
 
     def _paint_misspellings(self, painter: QPainter) -> None:
@@ -1398,15 +1403,18 @@ class _TextBase(MarkupItem):
         # within whatever the painter is already held to: drawn into part of
         # a square (markuplayer._patch), the words were drawn again over
         # themselves outside it — heavier, until the square was redrawn
-        painter.setClipRect(QRectF(0, 0, rect.width() + 1, rect.height() + 1),
-                            Qt.IntersectClip)
+        held = QRectF(0, 0, rect.width() + 1, rect.height() + 1)
+        painter.setClipRect(held, Qt.IntersectClip)
         self.doc.setTextWidth(max(rect.width(), 8.0))
         offset = 0.0
         if self.style.valign in ("middle", "bottom"):
             spare = rect.height() - self._words_height()
             offset = max(spare, 0) * (0.5 if self.style.valign == "middle" else 1.0)
-            painter.translate(0, offset)
-        painter.translate(0, self._bluebeam_nudge(rect.height(), offset))
+        down = offset + self._bluebeam_nudge(rect.height(), offset)
+        # (from where the words start, as the editor's are while typing:
+        # the same corner either way, on the same pixel)
+        painter.translate(0, down)
+        held.translate(0, -down)
         # The colour has to be handed to the document layout explicitly. Left
         # to itself it takes the application's palette, which would mean the
         # words on the paper changed colour when the user switched the
@@ -1417,8 +1425,15 @@ class _TextBase(MarkupItem):
         painter.setPen(QPen(self.style.text_qcolor()))
         # its fields — page, date, a variable — filled in (items/fields.py)
         from .fields import shown_document
-        shown_document(self, on_screen=not getattr(self.parentItem(), "print_mode", False)
-                       ).documentLayout().draw(painter, context)
+        shown = shown_document(self, on_screen=not getattr(self.parentItem(), "print_mode",
+                                                           False))
+
+        def words(onto: QPainter) -> None:
+            shown.documentLayout().draw(onto, context)
+
+        # on screen, the same picture of the words by every way they are
+        # drawn there (ui/markuplayer.paint_words)
+        paint_words(painter, self, held, words)
         painter.restore()
 
     # -- serialisation -----------------------------------------------------
