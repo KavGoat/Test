@@ -2147,7 +2147,11 @@ def cloud_entry(polygon: QPolygonF, radius: float, start: QPointF, aim: QPointF,
     sx, sy, dx, dy = start.x(), -start.y(), aim.x() - start.x(), -(aim.y() - start.y())
     reach = dx * dx + dy * dy
     best = None
-    if reach > 1e-12 and not cloud_path(polygon, radius, inverted=inverted).contains(start):
+    # (a start outside the cloud's reach can't be inside it: no outline to
+    # build for that, which is every pointer move of a leader being placed)
+    reach_box = polygon.boundingRect().adjusted(-radius * 2, -radius * 2, radius * 2, radius * 2)
+    if reach > 1e-12 and (not reach_box.contains(start)
+                          or not cloud_path(polygon, radius, inverted=inverted).contains(start)):
         for cx, cy, rho, begin in _cloud_arcs(polygon, radius, True, inverted):
             # |s + t·d − c|² = ρ², the arc's circle, then whether the
             # crossing is on the arc's own part of it
