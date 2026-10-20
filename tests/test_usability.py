@@ -634,7 +634,9 @@ def test_every_label_the_user_reads_is_one_or_two_words(window, qapp):
                  "Remove Page Break", "Reset All Page Breaks", "Set Print Area",
                  "Clear Print Area",
                  # Revu's Sketch to Scale panel (the user's photo, 2026-10-18)
-                 "Show Segment Values")
+                 "Show Segment Values",
+                 # Revu's Align Markups (Center in Document; the user, 2026-10-20)
+                 "Centre in Document")
     long = [entry for entry in long if not any(name in entry for name in bluebeams)]
     assert not long, "labels of more than two words:\n" + "\n".join(sorted(set(long)))
 
@@ -4630,18 +4632,25 @@ def test_the_markup_menu_offers_the_whole_of_bluebeams(window):
 
 
 def test_align_is_offered_but_dead_until_there_are_two(window):
+    """Revu's: with one markup, Centre in Document and the flips are there
+    to use; lining up and sizing wait for a second (tests/test_alignment.py)."""
     rect = _a_rectangle(window)
     rect.setSelected(True)
     menu = window.build_context_menu(rect, QPointF(150, 150))
     align = [a for a in menu.actions() if a.text() == "Alignment"][0]
-    assert not align.isEnabled()
+    assert align.isEnabled()
+    entries = {a.text(): a for a in align.menu().actions() if a.text()}
+    assert not entries["Align Left"].isEnabled() and not entries["Align Size"].isEnabled()
+    assert entries["Centre in Document"].isEnabled() and entries["Flip Vertical"].isEnabled()
 
     other = _a_rectangle(window, 300, 120, 380, 200)
     rect.setSelected(True)
     other.setSelected(True)
     menu = window.build_context_menu(rect, QPointF(150, 150))
     align = [a for a in menu.actions() if a.text() == "Alignment"][0]
-    assert align.isEnabled()
+    entries = {a.text(): a for a in align.menu().actions() if a.text()}
+    assert entries["Align Left"].isEnabled()
+    assert not entries["Distribute Horizontally"].isEnabled(), "three or more"
 
 
 def test_the_format_painter_carries_one_markups_look_to_another(window):

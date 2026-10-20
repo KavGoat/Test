@@ -222,8 +222,11 @@ def test_the_markup_menu_is_in_revus_order(w):
     assert points == ["Add Control Point", "Subtract Control Point", "Round Corner",
                       "Insert Break"]
     align = [a.text() for a in find(menu, "Alignment").menu().actions()]
+    # Revu's Alignment (ui/alignment.py), a gap between each family
     assert align == ["Align Left", "Align Centre", "Align Right", "Align Top", "Align Middle",
-                     "Align Bottom"]
+                     "Align Bottom", "", "Align Width", "Align Height", "Align Size", "",
+                     "Distribute Horizontally", "Distribute Vertically", "",
+                     "Centre in Document", "", "Flip Horizontal", "Flip Vertical"]
     # Round All Corners: every corner, one undo step
     before = w.undo_stack.count()
     find(menu, "Round All Corners").trigger()

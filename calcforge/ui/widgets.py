@@ -722,3 +722,124 @@ class PagesRange(QWidget):
     def pages(self) -> list:
         """The chosen pages, from 0; empty when the Custom range will not read."""
         return self.page_indexes() or []
+
+
+# ---------------------------------------------------------------------------
+# a panel built again stays where it was
+# ---------------------------------------------------------------------------
+def _place_of(widget, root) -> tuple | None:
+    """*widget*'s place in *root*: its kind, name and number among the
+    widgets of its kind, which a panel built afresh for the same thing gives
+    it again."""
+    if widget is None or not shiboken6.isValid(widget) or not shiboken6.isValid(root) \
+            or not (widget is root or root.isAncestorOf(widget)):
+        return None
+    kind = type(widget)
+    same = [child for child in root.findChildren(kind) if type(child) is kind]
+    if widget is root:
+        return (kind.__name__, widget.objectName(), -1)
+    return (kind.__name__, widget.objectName(), same.index(widget)) if widget in same \
+        else None
+
+
+def _widget_at(place, root):
+    if place is None or not shiboken6.isValid(root):
+        return None
+    name, object_name, number = place
+    if number < 0:
+        return root
+    same = [child for child in root.findChildren(QWidget) if type(child).__name__ == name]
+    found = same[number] if number < len(same) else None
+    return found if found is not None and found.objectName() == object_name else None
+
+
+class focus_kept:
+    """``with focus_kept():`` — the control that has the focus keeps it
+    through what is done inside, unless that took it away on purpose into a
+    control of its own. The canvas closing a size box it had not opened
+    reached for the focus, from a page picked in Thumbnails or a tool picked
+    in the Tool Chest (the user, 2026-10-20)."""
+
+    def __init__(self, unless=None):
+        self.unless = unless            # a widget whose taking the focus is meant
+
+    def __enter__(self):
+        from PySide6.QtWidgets import QApplication
+        self.focus = QApplication.focusWidget()
+        return self
+
+    def __exit__(self, *_exc) -> bool:
+        from PySide6.QtWidgets import QApplication
+        focus = self.focus
+        now = QApplication.focusWidget()
+        if focus is None or not shiboken6.isValid(focus) or now is focus \
+                or not focus.isVisible():
+            return False
+        unless = self.unless
+        if unless is not None and shiboken6.isValid(unless) and (
+                focus is unless or unless.isAncestorOf(focus)):
+            return False                  # it was there already: nothing to keep
+        if now is not None and unless is not None and shiboken6.isValid(unless) \
+                and now is not unless and unless.isAncestorOf(now):
+            return False                  # a box of the canvas's own took it
+        focus.setFocus(Qt.OtherFocusReason)
+        return False
+
+
+class KeptPlace:
+    """How far a panel and the lists in it are scrolled, and which of its
+    controls has the focus, taken before the panel is built again and put
+    back after it — so changing a control low in a panel neither throws the
+    panel back to its top nor takes the control from under the pointer and
+    the keys (the user, 2026-10-20)."""
+
+    def __init__(self, area: QAbstractScrollArea, root: QWidget | None = None):
+        from PySide6.QtWidgets import QApplication
+        self.area = area
+        self.root = root or area
+        self.bars = {}
+        for scroller in [area] + area.findChildren(QAbstractScrollArea):
+            place = _place_of(scroller, self.root) if scroller is not area else ("area",)
+            if place is not None and scroller.isVisible():
+                self.bars[place] = (scroller.verticalScrollBar().value(),
+                                    scroller.horizontalScrollBar().value())
+        focus = QApplication.focusWidget()
+        self.focus = _place_of(focus, self.root) if focus is not self.root else None
+        self.cursor = focus.cursorPosition() if self.focus is not None and \
+            hasattr(focus, "cursorPosition") else None
+
+    def _scroller(self, place):
+        return self.area if place == ("area",) else _widget_at(place, self.root)
+
+    def restore(self, again: bool = True) -> None:
+        """Scroll back and give the control its focus back; *again* once
+        the event loop is free, as a layout may only finish then."""
+        if not shiboken6.isValid(self.area):
+            return
+        for place, (down, across) in self.bars.items():
+            scroller = self._scroller(place)
+            if scroller is None:
+                continue
+            scroller.verticalScrollBar().setValue(down)
+            scroller.horizontalScrollBar().setValue(across)
+        control = _widget_at(self.focus, self.root)
+        if control is not None and control.isVisible() and not control.hasFocus() \
+                and control.focusPolicy() != Qt.NoFocus:
+            control.setFocus(Qt.OtherFocusReason)
+            if self.cursor is not None and hasattr(control, "setCursorPosition"):
+                control.setCursorPosition(self.cursor)
+        if again:
+            from PySide6.QtCore import QTimer
+            wanted = {place: self._value(place) for place in self.bars}
+
+            def later() -> None:
+                # put back only what the late layout moved, not what a
+                # person has scrolled since
+                if all(self._value(place) in (value, 0) for place, value in wanted.items()):
+                    self.restore(again=False)
+            QTimer.singleShot(0, later)
+
+    def _value(self, place):
+        scroller = self._scroller(place)
+        return scroller.verticalScrollBar().value() if scroller is not None \
+            and shiboken6.isValid(scroller) else None

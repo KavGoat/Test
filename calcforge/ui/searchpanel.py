@@ -283,7 +283,19 @@ class SearchPanel(QWidget):
             changed += 1
         view.commit_snapshot(f"Replace ({changed})")
         self.window.refresh_lists()
+        # the results found again: the list where it was scrolled, the row
+        # picked where it was, the focus kept (the user, 2026-10-20)
+        from .widgets import KeptPlace
+        kept = KeptPlace(self.results, self)
+        row = self.results.indexOfTopLevelItem(self.results.currentItem()) \
+            if self.results.currentItem() is not None else -1
         self.run()
+        if row >= 0 and self.results.topLevelItemCount():
+            self.results.blockSignals(True)
+            self.results.setCurrentItem(self.results.topLevelItem(
+                min(row, self.results.topLevelItemCount() - 1)))
+            self.results.blockSignals(False)
+        kept.restore()
         self.summary.setText(f"Replaced {changed} — " + self.summary.text())
         return changed
 

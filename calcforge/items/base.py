@@ -562,9 +562,16 @@ def selection_pen(zoom: float) -> QPen:
     return pen
 
 
+#: Revu's secondary markups: several picked, the primary's points are gold
+#: (Revu's yellow) and the others' green (MarkupItem._paint_handles_as_picked).
+CONTROL_GREEN = QColor("#2f9e44")
+_POINT_COLOUR = [CONTROL_GOLD]
+
+
 def paint_control_point(painter: QPainter, point: QPointF, zoom: float,
-                        colour: QColor = CONTROL_GOLD) -> None:
+                        colour: Optional[QColor] = None) -> None:
     """A control point: a gold dot, as Bluebeam's."""
+    colour = _POINT_COLOUR[0] if colour is None else colour
     radius = (HANDLE_SCREEN_PX + 1.0) / zoom / 2
     pen, brush = _handle_tools(colour, 160, 0.7 / zoom)
     painter.setPen(pen)
@@ -1391,7 +1398,7 @@ class MarkupItem(QGraphicsObject):
             # its file draws it (_TheirLook): nothing of it is drawn here but
             # its handles — and this, for every markup of a marked-up set on
             # screen, every frame, was a tenth of one zoomed out
-            self.paint_handles(painter)
+            self._paint_handles_as_picked(painter)
             return
         painter.save()
         from ..ui.markuplayer import align_with_squares
@@ -1410,7 +1417,20 @@ class MarkupItem(QGraphicsObject):
                 self.apply_blend(painter)
                 self.paint_visible(painter)      # nothing while it is still theirs
         painter.restore()
-        self.paint_handles(painter)
+        self._paint_handles_as_picked(painter)
+
+    def _paint_handles_as_picked(self, painter: QPainter) -> None:
+        """The handles, with the control points green when several are
+        picked and this is not the primary (Revu's; ui/scene.py)."""
+        ask = getattr(self.scene(), "is_secondary", None) if self.isSelected() else None
+        if ask is None or not ask(self):
+            self.paint_handles(painter)
+            return
+        _POINT_COLOUR[0] = CONTROL_GREEN
+        try:
+            self.paint_handles(painter)
+        finally:
+            _POINT_COLOUR[0] = CONTROL_GOLD
 
     def _paint_blend_pass(self, painter: QPainter, blend_pass: str) -> None:
         """"base": every markup that does not multiply; "multiply": what

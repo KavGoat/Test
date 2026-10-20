@@ -447,7 +447,9 @@ def test_edit_and_the_markup_menu_group_the_same_families_alike(window):
                                                        "Send Backward", "Send to Back"]
         assert labels(entry(menu, "Alignment").menu()) == [
             "Align Left", "Align Centre", "Align Right", "Align Top", "Align Middle",
-            "Align Bottom"]
+            "Align Bottom", "Align Width", "Align Height", "Align Size",
+            "Distribute Horizontally", "Distribute Vertically", "Centre in Document",
+            "Flip Horizontal", "Flip Vertical"]
     assert "Align Centre" in labels(sub(edit, "Text"))
     # hidden markups come back from the bare page's menu
     canvas = window.build_context_menu(None, QPointF(80, 200))

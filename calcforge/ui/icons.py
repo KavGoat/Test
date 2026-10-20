@@ -176,6 +176,94 @@ def _ruler(painter: QPainter) -> None:
         painter.drawLine(QPointF(x, 20.5), QPointF(x, 17.5))
 
 
+def _alignment_icon(name: str, painter: QPainter) -> None:  # noqa: C901 - one per command
+    """Revu's Alignment toolbar: the markups as boxes in the ink, and what
+    they are lined up on — the primary's edge or centre, the page, the axis
+    of a flip — in the accent."""
+    def boxes(*rects) -> None:
+        _pen(painter, INK, 1.4)
+        painter.setBrush(Qt.NoBrush)
+        for x, y, wide, high in rects:
+            painter.drawRect(QRectF(x, y, wide, high))
+
+    def guide(x0, y0, x1, y1, dashed: bool = False) -> None:
+        _pen(painter, ACCENT, 1.6, Qt.DashLine if dashed else Qt.SolidLine)
+        painter.drawLine(QPointF(x0, y0), QPointF(x1, y1))
+
+    def span(x0, y0, x1, y1) -> None:
+        """A measured width or height: a line with an end tick at each end."""
+        _pen(painter, ACCENT, 1.3)
+        painter.drawLine(QPointF(x0, y0), QPointF(x1, y1))
+        if y0 == y1:
+            for x in (x0, x1):
+                painter.drawLine(QPointF(x, y0 - 2), QPointF(x, y0 + 2))
+        else:
+            for y in (y0, y1):
+                painter.drawLine(QPointF(x0 - 2, y), QPointF(x0 + 2, y))
+
+    if name == "align_left":
+        guide(4, 3, 4, 21)
+        boxes((6.5, 6, 13, 4.5), (6.5, 13.5, 8, 4.5))
+    elif name == "align_hcenter":
+        boxes((5, 6, 14, 4.5), (8, 13.5, 8, 4.5))
+        guide(12, 3, 12, 21)
+    elif name == "align_right":
+        guide(20, 3, 20, 21)
+        boxes((4.5, 6, 13, 4.5), (9.5, 13.5, 8, 4.5))
+    elif name == "align_top":
+        guide(3, 4, 21, 4)
+        boxes((6, 6.5, 4.5, 13), (13.5, 6.5, 4.5, 8))
+    elif name == "align_vcenter":
+        boxes((6, 5, 4.5, 14), (13.5, 8, 4.5, 8))
+        guide(3, 12, 21, 12)
+    elif name == "align_bottom":
+        guide(3, 20, 21, 20)
+        boxes((6, 4.5, 4.5, 13), (13.5, 9.5, 4.5, 8))
+    elif name == "align_width":
+        span(5, 4, 19, 4)
+        boxes((5, 8, 14, 4.5), (5, 15.5, 14, 4.5))
+    elif name == "align_height":
+        span(4, 5, 4, 19)
+        boxes((8, 5, 4.5, 14), (15.5, 5, 4.5, 14))
+    elif name == "align_size":
+        span(3.5, 4, 11, 4)
+        span(13, 4, 20.5, 4)
+        boxes((3.5, 8, 7.5, 9), (13, 8, 7.5, 9))
+    elif name == "distribute_horizontally":
+        for x in (5, 12, 19):
+            guide(x, 3, x, 6)
+            guide(x, 18, x, 21)
+        boxes((3, 7.5, 4, 9), (10, 7.5, 4, 9), (17, 7.5, 4, 9))
+    elif name == "distribute_vertically":
+        for y in (5, 12, 19):
+            guide(3, y, 6, y)
+            guide(18, y, 21, y)
+        boxes((7.5, 3, 9, 4), (7.5, 10, 9, 4), (7.5, 17, 9, 4))
+    elif name == "centre_in_document":
+        _pen(painter, INK, 1.4)
+        painter.setBrush(Qt.NoBrush)
+        page = QPolygonF([QPointF(5, 3), QPointF(15, 3), QPointF(19, 7), QPointF(19, 21),
+                          QPointF(5, 21)])
+        painter.drawPolygon(page)
+        guide(12, 7, 12, 17, dashed=True)
+        guide(7, 12, 17, 12, dashed=True)
+        boxes((9.5, 10, 5, 4))
+    elif name in ("flip_horizontal", "flip_vertical"):
+        across = name == "flip_horizontal"
+
+        def turned(points):
+            return QPolygonF([QPointF(x, y) if across else QPointF(y, x) for x, y in points])
+        _pen(painter, INK, 1.3)
+        painter.setBrush(QBrush(QColor(INK)))
+        painter.drawPolygon(turned([(10, 6), (10, 18), (3.5, 18)]))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPolygon(turned([(14, 6), (14, 18), (20.5, 18)]))
+        if across:
+            guide(12, 2.5, 12, 21.5, dashed=True)
+        else:
+            guide(2.5, 12, 21.5, 12, dashed=True)
+
+
 def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon table
     if name in ("show_grid", "snap_grid"):
         # Bluebeam's grid: a hash; snapping adds a magnet's arc in the corner
@@ -197,6 +285,10 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
             painter.drawRect(QRectF(4, 8, 13, 11))
         _pen(painter, ACCENT, 2.0)
         painter.drawArc(QRectF(11, 2, 9, 9), 180 * 16, 180 * 16)
+        return
+    if name.startswith(("align_", "distribute_")) or name in (
+            "centre_in_document", "flip_horizontal", "flip_vertical"):
+        _alignment_icon(name, painter)
         return
     if name == "overflow":
         # the » on a toolbar or the menu bar with more than it has room for,

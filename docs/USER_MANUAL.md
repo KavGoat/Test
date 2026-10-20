@@ -111,7 +111,11 @@ the bottom. Click an icon to open or close its panel; drag an icon to the other
 edge to move the panel there. Each panel's title bar can roll it up, pin it where
 it is, float it and hide it. The edge of a panel column turns blue under the
 pointer and hides the column with one click. **Window ▸ Hide/Show Panels**
-(`Shift+F4`) clears them all away for room and brings them back.
+(`Shift+F4`) clears them all away for room and brings them back. Changing
+anything in a panel — ticking an option, picking from a list, typing a value,
+picking a page, a tool or a search result — leaves the panel scrolled where it
+was and the keyboard with what you were using; only picking something else on
+the page starts the Properties panel at its top again.
 
 **Properties toolbar and Properties panel.** Whatever is selected — or the tool
 you are holding — is shown and changed on the **Properties toolbar** (Revu's bar
@@ -407,8 +411,31 @@ measurement extras too: cut-outs, Units, Caption and Totals.
 - **Order** — **Bring to Front** (`Ctrl+Shift+]`), **Bring Forward** (`Ctrl+]`),
   **Send Backward** (`Ctrl+[`), **Send to Back** (`Ctrl+Shift+[`). The PDF's own
   drawing always stays underneath.
-- **Alignment** (two or more selected) — Align Left, Centre, Right, Top, Middle,
-  Bottom.
+- **Alignment** — Revu's Align Markups, on **Edit ▸ Alignment**, a selection's
+  right-click ▸ **Alignment** and the **Alignment** toolbar (**Tools ▸ Toolbars ▸
+  Alignment**). With several selected, the first one picked is the **primary
+  markup**: its control points are yellow, the others' green; click a
+  green-pointed markup to make it the primary.
+  - **Align Left**, **Align Centre**, **Align Right**, **Align Top**, **Align
+    Middle**, **Align Bottom** (two or more): each lines up with the primary's
+    edge or centre line.
+  - **Align Width**, **Align Height**, **Align Size** (two or more): each takes the
+    primary's width, height or both, its top left corner staying put (equations,
+    tables, notes and counts keep the size of what they hold).
+  - **Distribute Horizontally**, **Distribute Vertically** (three or more): the
+    centres equally spaced between the two outermost, which stay.
+  - **Centre in Document** (one or more): each markup's centre on its page's
+    centre.
+  - **Flip Horizontal**, **Flip Vertical** (one or more): each mirrored about its
+    own centre — images, stamps, polylines, polygons, clouds, pen and highlighter
+    ink, and groups (a group turns over as one).
+
+  A group counts as one markup and a calculation block takes its equations with
+  it; equations, tables and markups align together. Each is one undo step. A
+  command needing more than is selected is greyed, and its tip says what it
+  needs. None has a key out of the box — Revu's (`Ctrl+Alt+L`, `E`, `R`, `T`, `M`,
+  `B`, `H`, `V`) are CalcForge's symbol and Paste Here keys — but any key can be
+  given to each in Keyboard Shortcuts (group **Alignment**).
 - **Lock** (`Ctrl+Shift+L` or `Ctrl+L`) stops a markup being moved or changed;
   again to unlock.
 - **Hide** takes a markup off the screen and out of print without deleting it;
@@ -2311,7 +2338,7 @@ drawn on it keeps its own colours.
 ### Toolbars and panels
 
 - **Tools ▸ Toolbars**: show or hide Main, Calculation, Measure, Tools, Markup
-  Styles and Properties; **Lock Toolbars**; **Customise Toolbars…** picks which
+  Styles, Properties and Alignment (hidden at first, as Revu's); **Lock Toolbars**; **Customise Toolbars…** picks which
   markup tools are on the toolbar (a tool taken off stays on its menu and key).
 - Panels: open and close them from the edge strips or **Window ▸ Panels**; drag an
   icon to the other side; pin, float or roll up a panel from its title bar.

@@ -126,6 +126,10 @@ class MathsPanel(QScrollArea):
         self.setObjectName("mathsPanel")
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # a palette, as its buttons are: a click between or on them leaves
+        # the keyboard with the equation (the panel itself took it, so the
+        # next key went nowhere, the user, 2026-10-20)
+        self.setFocusPolicy(Qt.NoFocus)
         inner = QWidget()
         lay = QVBoxLayout(inner)
         lay.setContentsMargins(4, 4, 4, 4)

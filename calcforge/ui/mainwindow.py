@@ -687,8 +687,12 @@ _SHORTCUT_GROUPS = {
     "duplicate": "Edit", "delete": "Edit", "select_all": "Edit", "edit_selected": "Edit",
     "lock": "Edit", "array": "Edit", "preferences": "Edit",
     "front": "Order", "back": "Order", "forward": "Order", "backward": "Order",
-    "align_left": "Order", "align_right": "Order", "align_top": "Order",
-    "align_bottom": "Order", "align_hcenter": "Order", "align_vcenter": "Order",
+    "align_left": "Alignment", "align_right": "Alignment", "align_top": "Alignment",
+    "align_bottom": "Alignment", "align_hcenter": "Alignment", "align_vcenter": "Alignment",
+    "align_width": "Alignment", "align_height": "Alignment", "align_size": "Alignment",
+    "distribute_horizontally": "Alignment", "distribute_vertically": "Alignment",
+    "centre_in_document": "Alignment", "flip_horizontal": "Alignment",
+    "flip_vertical": "Alignment",
     "text_left": "Text", "text_center": "Text", "text_right": "Text",
     "font_increase": "Text", "font_decrease": "Text",
     "bold": "Text", "italic": "Text", "underline": "Text",
@@ -1411,10 +1415,15 @@ class MainWindow(QMainWindow):
         self._act("back", "Send to Back", lambda: self.reorder("back"), "Ctrl+Shift+[", tip="Send the selection behind every other markup")
         self._act("forward", "Bring Forward", lambda: self.reorder("forward"), "Ctrl+]")
         self._act("backward", "Send Backward", lambda: self.reorder("backward"), "Ctrl+[")
-        for key, label in (("left", "Align Left"), ("hcenter", "Align Centre"),
-                           ("right", "Align Right"), ("top", "Align Top"),
-                           ("vcenter", "Align Middle"), ("bottom", "Align Bottom")):
-            self._act(f"align_{key}", label, lambda _=False, k=key: self.align_items(k))
+        # Revu's Align Markups (ui/alignment.py): on the Alignment toolbar,
+        # Edit ▸ Alignment and a selection's right-click ▸ Alignment. Revu's
+        # keys (Ctrl+Alt+L, E, R, T, M, B, H, V) are all taken here — by
+        # the symbols typed into words (λ, ε, √, Δ, µ, β, θ) and Paste Here
+        # — so these start without one; any key can be given to each.
+        from . import alignment
+        for key, (label, tip, _least) in alignment.COMMANDS.items():
+            self._act(key, label, lambda _=False, k=key: alignment.run(self, k),
+                      icon_name=alignment.ICONS[key], tip=f"{label} — {tip}")
         # Bold has always been reachable — Ctrl+B tries the words before it
         # reaches for a bookmark. Italic and underline had nothing at all:
         # Ctrl+I inserted a PDF and Ctrl+U did nothing. They are commands now,
@@ -1774,6 +1783,7 @@ class MainWindow(QMainWindow):
         self.addToolBarBreak()
         self._add_toolbar(tool_bar)
         self._build_markup_styles_bar()       # beside the tools, or wrapped below them
+        self._build_alignment_bar()
         self.addToolBarBreak()
 
         # Revu's Properties toolbar (ui/propbar.py): what the selected markup
@@ -2620,8 +2630,7 @@ class MainWindow(QMainWindow):
         fill(order_menu, (self.act_front, self.act_forward, self.act_backward, self.act_back))
         align_menu = edit_menu.addMenu("Alignment")
         align_menu.setObjectName("menuAlignment")
-        for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
-            align_menu.addAction(getattr(self, f"act_align_{key}"))
+        self.fill_alignment_menu(align_menu)
         fill(edit_menu, (self.act_flatten, self.act_recover_flattened, self.act_lock,
                          self.act_hide, self.act_show_hidden, self.act_group,
                          self.act_ungroup))
@@ -5177,9 +5186,14 @@ class MainWindow(QMainWindow):
             self.pages_panel.show_current(index)
             return
         # Anything half-finished belongs to the page being left, so it is
-        # settled here rather than being carried onto the next one.
-        self.view.end_item_edit()
-        self.view.cancel_draft()
+        # settled here rather than being carried onto the next one — without
+        # taking the focus from the panel the page was picked in (a page
+        # picked in Thumbnails left the arrow keys with the canvas, the
+        # user, 2026-10-20)
+        from .widgets import focus_kept
+        with focus_kept(unless=self.view):
+            self.view.end_item_edit()
+            self.view.cancel_draft()
         self.current_index = index
         self.view._shown_page = index
         self.scene.show_page(index)           # Single Page / Side-by-Side: its spread
@@ -7257,7 +7271,7 @@ class MainWindow(QMainWindow):
     SUBMENU_CATEGORIES = {("Tools", "Measure"): "Measure", ("Tools", "Toolbars"): "Window",
                           ("Tools", "Tool Chest"): "Panels", ("Window", "Panels"): "Panels",
                           ("Document", "Insert"): "Pages", ("Document", "Rotate Pages"): "Pages",
-                          ("Edit", "Order"): "Order", ("Edit", "Alignment"): "Order",
+                          ("Edit", "Order"): "Order", ("Edit", "Alignment"): "Alignment",
                           ("Edit", "Text"): "Text", ("Calculation", "Page Layout"): "Spreadsheet"}
 
     def _file_commands_by_menu(self) -> None:
@@ -9179,6 +9193,8 @@ class MainWindow(QMainWindow):
             from shiboken6 import isValid
             if not isValid(self.properties_panel):
                 return
+            from . import alignment
+            alignment.refresh(self)       # each command on when enough is picked
             self.view.tables.refresh_bar()          # a table picked out shows the formula bar
             shown = self.properties_panel._items
             picked = self.selected_items()
@@ -10501,30 +10517,38 @@ class MainWindow(QMainWindow):
             item.setZValue(floor + step)
 
     def align_items(self, mode: str) -> None:
-        items = [i for i in self.selected_items() if self.view.editable(i)]
-        if len(items) < 2:
-            return
-        rects = {item: item.mapRectToScene(item.bounds_without_chrome()) for item in items}
-        union = QRectF()
-        for rect in rects.values():
-            union = rect if union.isNull() else union.united(rect)
-        self.view.begin_snapshot()
-        for item, rect in rects.items():
-            delta = QPointF(0, 0)
-            if mode == "left":
-                delta.setX(union.left() - rect.left())
-            elif mode == "right":
-                delta.setX(union.right() - rect.right())
-            elif mode == "hcenter":
-                delta.setX(union.center().x() - rect.center().x())
-            elif mode == "top":
-                delta.setY(union.top() - rect.top())
-            elif mode == "bottom":
-                delta.setY(union.bottom() - rect.bottom())
-            elif mode == "vcenter":
-                delta.setY(union.center().y() - rect.center().y())
-            item.setPos(item.pos() + delta)
-        self.view.commit_snapshot("Align markups")
+        """Align Left, Centre, Right, Top, Middle or Bottom (*mode*: left,
+        hcenter, right, top, vcenter, bottom) to the primary markup."""
+        from . import alignment
+        alignment.run(self, f"align_{mode}")
+
+    def fill_alignment_menu(self, menu) -> None:
+        """Revu's Alignment commands, in its order (Edit ▸ Alignment and a
+        selection's right-click ▸ Alignment)."""
+        from . import alignment
+        alignment.refresh(self)
+        for key in alignment.ORDER:
+            if key is None:
+                menu.addSeparator()
+            else:
+                menu.addAction(getattr(self, f"act_{key}"))
+        menu.setToolTipsVisible(True)       # what each needs, when it is off
+
+    def _build_alignment_bar(self) -> None:
+        """Revu's Alignment toolbar: hidden until Tools ▸ Toolbars ▸
+        Alignment shows it, as Revu's."""
+        from . import alignment
+        bar = QToolBar("Alignment")
+        bar.setObjectName("toolbar_alignment")
+        bar.setIconSize(QSize(22, 22))
+        for key in alignment.ORDER:
+            if key is None:
+                bar.addSeparator()
+            else:
+                bar.addAction(getattr(self, f"act_{key}"))
+        self.alignment_bar = bar
+        self._add_toolbar(bar)
+        bar.hide()
 
     def array_selection(self) -> None:
         """Move or copy the selection at exact spacing, any number of times."""
@@ -12439,9 +12463,7 @@ class MainWindow(QMainWindow):
         for action in (self.act_front, self.act_forward, self.act_backward, self.act_back):
             order.addAction(action)
         align = menu.addMenu("Alignment")
-        align.setEnabled(len(self.selected_items()) > 1)
-        for key in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
-            align.addAction(getattr(self, f"act_align_{key}"))
+        self.fill_alignment_menu(align)
         if not live:
             menu.addAction(self.act_flatten)
             menu.addAction(self.act_recover_flattened)

@@ -191,7 +191,9 @@ def _set(item, name: str, value) -> None:
 
 
 def _again(panel) -> None:
-    """Show the panel afresh once the change is in (the list's rows moved)."""
+    """Show the panel afresh once the change is in (the list's rows moved,
+    and the box's size with them): where it was scrolled, the focus kept
+    (PropertiesPanel._show_items)."""
     QTimer.singleShot(0, lambda: panel.show_items(list(panel._items))
                       if panel._items else None)
 
@@ -210,9 +212,23 @@ def _row_changed(panel, options, row) -> None:
         panel._apply(lambda i: i.set_checked(number, on),
                      ("Tick " if on else "Untick ") + (words.strip() or "option"))
         if not item.multiple:
-            _again(panel)                 # the others it unticked
+            _show_ticks(panel, options, item)      # the others it unticked
     elif words != item.options()[number]:
         panel._apply(lambda i: i.rename_option(number, words), "Rename option")
+
+
+def _show_ticks(panel, options, item) -> None:
+    """The list's boxes ticked as the markup's are, in place: the panel is
+    not built again, so it stays scrolled where it was and the list keeps
+    the focus (the user, 2026-10-20)."""
+    building, panel._building = panel._building, True
+    try:
+        for number, on in enumerate(item.ticks()):
+            row = options.item(number)
+            if row is not None:
+                row.setCheckState(Qt.Checked if on else Qt.Unchecked)
+    finally:
+        panel._building = building
 
 
 def _picked(options) -> int:

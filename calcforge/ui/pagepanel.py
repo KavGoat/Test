@@ -25,6 +25,7 @@ class PagePanel(QScrollArea):
         super().__init__()
         self.window = window
         self._filling = False
+        self.setFocusPolicy(Qt.TabFocus)    # a click on a button keeps the focus where it was
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
