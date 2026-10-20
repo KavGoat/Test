@@ -572,8 +572,34 @@ def test_document_sync_pages_follow_and_clamp_at_the_others_last_page(window, tm
     assert link.pages == 0 and b.page == a.page
 
 
+def test_document_sync_a_notch_landing_at_once_moves_both_at_once(window, tmp_path):
+    """Out of the box a notch lands at once (as Revu): the other view is in
+    step as soon as it has been handled, and nothing goes back and forth."""
+    left, right = _open_split(window, tmp_path, same=True)
+    _in_hand(window, left)
+    _set_sync(window, viewsync.DOCUMENT)
+    from PySide6.QtGui import QWheelEvent
+    view = left.view
+    link = viewsync.link_between(left.view, right.view)
+    start = (_place(left.view), _place(right.view), left.view.zoom())
+    at = QPointF(100, 100)
+    QApplication.sendEvent(view.viewport(), QWheelEvent(
+        at, view.viewport().mapToGlobal(at.toPoint()), QPoint(0, 0), QPoint(0, 240),
+        Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+    assert left.view.zoom() == pytest.approx(start[2] * 1.0015 ** 240, rel=1e-9)
+    _steps_together(left.view, right.view, start[0], start[1], link)
+    landed = (_where(left.view), _where(right.view))
+    QTest.qWait(60)
+    _settle(6)
+    _unmoved(left.view, landed[0])
+    _unmoved(right.view, landed[1])
+
+
 def test_document_sync_glides_stay_in_step(window, tmp_path):
-    """A notch glides over several frames; the other view takes every step."""
+    """With Smooth zoom and scroll on, a notch glides over several frames;
+    the other view takes every step."""
+    from calcforge.ui import preferences
+    preferences.current().smooth_wheel = True
     left, right = _open_split(window, tmp_path, same=True)
     _in_hand(window, left)
     _set_sync(window, viewsync.DOCUMENT)

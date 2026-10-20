@@ -381,7 +381,11 @@ class _Glide(QObject):
     millisecond whatever the frame rate — so a quick spin of the wheel is one
     continuous movement and a single notch eases in and out of its 30 px.
     Anything else that moves the view (the scroll bar, a key, a pan) wins
-    straight away: the glide notices and lets go."""
+    straight away: the glide notices and lets go.
+
+    Only with Preferences ▸ Smooth zoom and scroll on: out of the box a notch
+    lands at once, as Revu's does (the user, 2026-10-19: "instant, like
+    Revu"; PageView.wheel_zoom and wheel_scroll)."""
 
     #: how quickly what is left is covered: ~95% of it in 3 x this
     EASE_MS = 38.0
@@ -1374,10 +1378,19 @@ class PageView(QGraphicsView):
 
         Shift scrolls sideways. Ctrl does the opposite of whatever the wheel
         is doing here: with the wheel scrolling, Ctrl zooms; with the wheel
-        zooming, Ctrl scrolls; and in page-by-page mode, where the plain wheel
-        turns pages, Ctrl zooms. It used to zoom in every case, which left no
+        zooming, Ctrl scrolls. It used to zoom in every case, which left no
         way at all to scroll with the wheel once zoom was the preference — the
         setting turned one of the two gestures off rather than swapping them.
+
+        Single Page and Side-by-Side follow the same choice, as Revu does
+        (Preferences ▸ Wheel in Single Page can have the wheel always scroll
+        there instead); scrolling there moves within the page and, at its
+        end, turns to the next or previous one (or stays, as Preferences ▸
+        Scrolling past a page's end says).
+
+        Each notch lands at once, as Revu's does (the user, 2026-10-19:
+        "instant, like Revu"); Preferences ▸ Smooth zoom and scroll has it
+        glide there instead.
 
         A trackpad sends pixelDelta and means panning by it, so two-finger
         scrolling still scrolls smoothly however the wheel is set, and Ctrl
@@ -1393,45 +1406,26 @@ class PageView(QGraphicsView):
             if raw:
                 bar.setValue(bar.value() - raw)          # a trackpad: already smooth
             else:
-                self.glide.by(bar, -notches * WHEEL_SCROLL_FACTOR)
-            event.accept()
-            return
-        if (self.scroll_mode == "page"
-                and not event.modifiers() & Qt.ControlModifier):
-            # Single Page / Side-by-Side: the wheel scrolls the page in view
-            # and, at its end, turns to the next (or the previous) one
-            delta = (pixels.y() if not pixels.isNull() else notches)
-            bar = self.verticalScrollBar()
-            shown = self.mapToScene(self.viewport().rect()).boundingRect()
-            spread = self.scene()._pages_rect
-            # the end of the page in sight (or nowhere left to scroll): turn
-            at_end = (shown.top() <= spread.top() + 0.5 or bar.value() <= bar.minimum()) \
-                if delta > 0 else \
-                (shown.bottom() >= spread.bottom() - 0.5 or bar.value() >= bar.maximum())
-            if delta and at_end:
-                self.turn_spread(-1 if delta > 0 else 1)
-            elif delta:
-                if not pixels.isNull():
-                    bar.setValue(bar.value() - pixels.y())
-                else:
-                    bar.setValue(bar.value() - int(notches * WHEEL_SCROLL_FACTOR))
+                self.wheel_scroll(bar, -notches * WHEEL_SCROLL_FACTOR)
             event.accept()
             return
         # What the wheel would do here if nothing were held, then Ctrl turns
-        # that round. In page-by-page mode the plain wheel turns pages and
-        # never zooms, whatever the preference says, so Ctrl there is a zoom.
-        unmodified_zooms = (preferences.current().wheel_zooms()
-                            and pixels.isNull()
-                            and self.scroll_mode != "page")
+        # that round.
+        prefs = preferences.current()
+        paged = self.scroll_mode == "page"
+        unmodified_zooms = pixels.isNull() and (
+            prefs.wheel_zooms_in_page_mode() if paged else prefs.wheel_zooms())
         zooming = unmodified_zooms != bool(event.modifiers() & Qt.ControlModifier)
         if zooming:
             delta = notches or pixels.y()
             if delta:
                 # Where the wheel was turned is where the zoom happens; the
                 # event knows, so it does not have to be asked for again.
-                # A notch glides there, as a notch of scrolling does: a jump
-                # of a fifth at a time is a zoom that lurches (2026-10-02).
-                self.glide.zoom_by(1.0015 ** delta, event.position())
+                self.wheel_zoom(1.0015 ** delta, event.position())
+            event.accept()
+            return
+        if paged:
+            self._scroll_in_the_page(pixels, notches)
             event.accept()
             return
         if not pixels.isNull():
@@ -1442,11 +1436,93 @@ class PageView(QGraphicsView):
             event.accept()
             return
         if notches:
-            self.glide.by(self.verticalScrollBar(), -notches * WHEEL_SCROLL_FACTOR)
+            self.wheel_scroll(self.verticalScrollBar(), -notches * WHEEL_SCROLL_FACTOR)
         event.accept()
 
-    #: How long after the last notch of a zoom the page is drawn afresh.
-    ZOOM_SETTLES_MS = 140
+    def _scroll_in_the_page(self, pixels, notches: int) -> None:
+        """Single Page / Side-by-Side: the wheel scrolls the page in view and,
+        at its end, turns to the next (or the previous) one — or stays, as
+        Preferences says."""
+        delta = pixels.y() if not pixels.isNull() else notches
+        if not delta:
+            return
+        bar = self.verticalScrollBar()
+        shown = self.mapToScene(self.viewport().rect()).boundingRect()
+        spread = self.scene()._pages_rect
+        # the end of the page in sight (or nowhere left to scroll)
+        at_end = (shown.top() <= spread.top() + 0.5 or bar.value() <= bar.minimum()) \
+            if delta > 0 else \
+            (shown.bottom() >= spread.bottom() - 0.5 or bar.value() >= bar.maximum())
+        if at_end:
+            if preferences.current().turns_at_page_end():
+                self.turn_spread(-1 if delta > 0 else 1)
+            return
+        if not pixels.isNull():
+            bar.setValue(bar.value() - pixels.y())
+        else:
+            self.wheel_scroll(bar, -notches * WHEEL_SCROLL_FACTOR)
+
+    def smooth_wheel(self) -> bool:
+        """Whether a notch glides (Preferences ▸ Smooth zoom and scroll)."""
+        return bool(getattr(preferences.current(), "smooth_wheel", False))
+
+    #: The fraction of a pixel a high-resolution wheel's notches left over,
+    #: per scroll bar, so its small steps add up to whole pixels.
+    _wheel_rest = None
+
+    def wheel_scroll(self, bar, distance: float) -> None:
+        """Scroll *bar* by *distance* pixels for the wheel: at once, as Revu,
+        or gliding there (Preferences ▸ Smooth zoom and scroll)."""
+        if self.smooth_wheel():
+            self.glide.by(bar, distance)
+            return
+        self.glide.finish()                 # one left going from before: it lands
+        if self._wheel_rest is None:
+            self._wheel_rest = {}
+        rest = self._wheel_rest.get(bar)
+        if rest is None or rest[1] != bar.value():
+            rest = (0.0, bar.value())
+        total = rest[0] + distance
+        step = int(round(total))
+        bar.setValue(bar.value() + step)
+        self._wheel_rest[bar] = (total - step if bar.value() == rest[1] + step else 0.0,
+                                 bar.value())
+
+    #: (view point, canvas point kept under it, zoom then) of the last wheel
+    #: zoom, so a run of notches at one spot keeps exactly the same point of
+    #: the page under the pointer rather than one re-read to the pixel each
+    #: time, which wandered.
+    _wheel_anchor = None
+
+    def wheel_zoom(self, factor: float, at) -> None:
+        """Zoom by *factor* about view point *at* for the wheel: at once, as
+        Revu's does — the zoom is there when the notch has been handled, the
+        drawing already made standing in, scaled (sharp where it was drawn
+        finer), until the new zoom's squares are drawn a moment after the
+        notches stop (zooming_by_hand) — or gliding there (Preferences ▸
+        Smooth zoom and scroll)."""
+        if self.smooth_wheel():
+            self._wheel_anchor = None
+            self.glide.zoom_by(factor, at)
+            return
+        self.glide.finish()
+        at = QPointF(at)
+        keep = self.viewportTransform().inverted()[0].map(at)
+        kept = self._wheel_anchor
+        if kept is not None and kept[0] == at and abs(kept[2] - self._zoom) < 1e-9:
+            # The same spot, and the view no further from it than the pixel
+            # it was rounded to: the very point the run of notches began on.
+            off = (kept[1] - keep) * self._zoom
+            if abs(off.x()) <= 1.0 and abs(off.y()) <= 1.0:
+                keep = kept[1]
+        self.zooming_by_hand()
+        self.set_zoom(self._zoom * factor, at=at, keep=keep)
+        self._wheel_anchor = (at, keep, self._zoom)
+
+    #: How long after the last notch of a zoom the page is drawn afresh: a
+    #: run of notches asks for the squares of the zoom it stops at, not of
+    #: every zoom on the way.
+    ZOOM_SETTLES_MS = 120
 
     def zooming_by_hand(self) -> None:
         """A zoom on the wheel is under way: until it has stopped for a

@@ -24,6 +24,16 @@ PREFIX = "preferences/"
 WHEEL_ZOOM = "zoom"
 WHEEL_SCROLL = "scroll"
 
+# What the wheel does in Single Page and Side-by-Side: what it does in
+# Continuous (the Mouse wheel choice, as Revu), or always scroll there.
+PAGE_WHEEL_AS_WHEEL = "as_wheel"
+PAGE_WHEEL_SCROLL = "scroll"
+
+# Scrolling on past the end of the page in Single Page and Side-by-Side:
+# turn to the next (or previous) page, as Revu, or stay on the page.
+PAGE_END_TURN = "turn"
+PAGE_END_STAY = "stay"
+
 
 def login_name() -> str:
     """The name the computer knows its user by: what Bluebeam signs markups with."""
@@ -41,6 +51,20 @@ class Preferences:
 
     wheel: str = WHEEL_ZOOM
     """Whether a notch of the wheel zooms (as Bluebeam does) or scrolls."""
+
+    page_wheel: str = PAGE_WHEEL_AS_WHEEL
+    """What the wheel does in Single Page and Side-by-Side: the same as in
+    Continuous, as Revu (the Mouse wheel choice, Ctrl the other one), or
+    always scroll there with Ctrl zooming (the user, 2026-10-19)."""
+
+    page_end: str = PAGE_END_TURN
+    """Scrolling on past the end of the page in Single Page and Side-by-Side
+    turns to the next or previous page, as Revu, or stays on the page."""
+
+    smooth_wheel: bool = False
+    """Whether a wheel notch glides to where it is going over a few frames
+    (smooth zoom and scroll) rather than landing at once, as Revu's does (the
+    user, 2026-10-19: "instant, like Revu")."""
 
     author: str = _field(default_factory=login_name)
     """The name new markups are signed with (the login name to begin with,
@@ -113,6 +137,13 @@ class Preferences:
 
     def wheel_zooms(self) -> bool:
         return self.wheel == WHEEL_ZOOM
+
+    def wheel_zooms_in_page_mode(self) -> bool:
+        """Whether a plain notch zooms in Single Page and Side-by-Side."""
+        return self.wheel_zooms() and self.page_wheel != PAGE_WHEEL_SCROLL
+
+    def turns_at_page_end(self) -> bool:
+        return self.page_end != PAGE_END_STAY
 
 
 _current: Preferences | None = None
