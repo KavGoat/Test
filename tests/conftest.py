@@ -25,7 +25,7 @@ os.environ["CALCFORGE_MARKFORGE_SETTINGS_FILE"] = os.path.join(_SANDBOX,
                                                                "markforge-absent.ini")
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtCore import QCoreApplication, QEvent, Qt
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -137,6 +137,16 @@ def window(qapp):
     # 1:1 zoom keeps synthesised view coordinates aligned with scene points.
     main.view.set_zoom(1.0)
     yield main
+    # A test that ended between a press and its release (a double-click that
+    # opened an editor under the pointer) left the button held: the next
+    # test's pointer moves were then drags, and nothing it hovered lit up.
+    held = qapp.mouseButtons()
+    if held != Qt.NoButton:
+        from PySide6.QtTest import QTest
+
+        for button in (Qt.LeftButton, Qt.RightButton, Qt.MiddleButton):
+            if held & button:
+                QTest.mouseRelease(main, button)
     main.document.modified = False
     main.undo_stack.clear()
     main.view.setScene(None)

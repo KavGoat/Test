@@ -1251,16 +1251,3 @@ tests/test_zoom_smooth.py::test_the_index_follows_the_cache_out
 tests/test_zoom_smooth.py::test_the_screen_goes_sharp_all_at_once
 tests/test_zoom_smooth.py::test_notches_in_and_out_again_leave_the_page_where_it_was
 tests/test_zoom_smooth.py::test_a_burst_of_notches_asks_for_the_zoom_it_stops_at_only
-tests/test_zz_break.py::test_break_real_right_click
-tests/test_zz_calcrows.py::test_calc_mode
-tests/test_zz_calcrows.py::test_markup_mode
-tests/test_zz_calcrows2.py::test_calc
-tests/test_zz_calcrows2.py::test_markup
-tests/test_zz_menus.py::test_dump
-tests/test_zz_typing.py::test_typing[callout]
-tests/test_zz_typing.py::test_typing[cell (typing)]
-tests/test_zz_typing.py::test_typing[equation]
-tests/test_zz_typing.py::test_typing[formula bar]
-tests/test_zz_typing.py::test_typing[search field]
-tests/test_zz_typing.py::test_typing[size field while drawing]
-tests/test_zz_typing.py::test_typing[text box]

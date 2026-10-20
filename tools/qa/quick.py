@@ -48,7 +48,9 @@ def collect():
     # (pytest.ini already passes -q: one more would list files, not tests)
     out = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-p", "no:cacheprovider"],
                          cwd=ROOT, capture_output=True, text=True).stdout
-    return [line.strip() for line in out.splitlines() if "::" in line]
+    # only the committed test files: a probe left in the work tree is not the suite
+    tracked = set(git("ls-files", "tests").split())
+    return [line.strip() for line in out.splitlines() if "::" in line and line.split("::")[0] in tracked]
 
 
 def build(gate_output):
