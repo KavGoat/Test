@@ -111,7 +111,11 @@ the bottom. Click an icon to open or close its panel; drag an icon to the other
 edge to move the panel there. Each panel's title bar can roll it up, pin it where
 it is, float it and hide it. The edge of a panel column turns blue under the
 pointer and hides the column with one click. **Window ▸ Hide/Show Panels**
-(`Shift+F4`) clears them all away for room and brings them back.
+(`Shift+F4`) clears them all away for room and brings them back. Changing
+anything in a panel — ticking an option, picking from a list, typing a value,
+picking a page, a tool or a search result — leaves the panel scrolled where it
+was and the keyboard with what you were using; only picking something else on
+the page starts the Properties panel at its top again.
 
 **Properties toolbar and Properties panel.** Whatever is selected — or the tool
 you are holding — is shown and changed on the **Properties toolbar** (Revu's bar

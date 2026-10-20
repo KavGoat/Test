@@ -32,7 +32,7 @@ from .icons import drawn_icon, icon, visible_ink
 from .stylecaps import CLOUD, CORNER
 from .stylecaps import (ARROW_SIZE, DASH, FILL, FILL_OPACITY, HATCH, OPACITY, STROKE,
                         WIDTH, common_capabilities, takes_end_fill)
-from .widgets import (ColorButton, PatternCombo, UnitCombo, arrow_combo,
+from .widgets import (ColorButton, KeptPlace, PatternCombo, UnitCombo, arrow_combo,
                       big_pattern_dropdown, fit_pattern_list, set_arrow)
 
 
@@ -2517,12 +2517,22 @@ class BookmarksPanel(QWidget):
     # -- display -----------------------------------------------------------
     def rebuild(self, document=None) -> None:
         document = document or self.window.document
+        # built again after a bookmark is added, renamed or deleted here: the
+        # list stays scrolled where it was, the row picked where it was
+        # (the user, 2026-10-20)
+        kept = KeptPlace(self.tree, self)
+        current = self.tree.currentItem()
+        row = self.tree.indexOfTopLevelItem(current) if current is not None else -1
         self.tree.clear()
         for mark, index in document.contents_entries():
             node = QTreeWidgetItem([("    " * mark.level) + mark.title,
                                     str(index + 1)])
             node.setData(0, Qt.UserRole, mark)
             self.tree.addTopLevelItem(node)
+        if row >= 0 and self.tree.topLevelItemCount():
+            self.tree.setCurrentItem(self.tree.topLevelItem(
+                min(row, self.tree.topLevelItemCount() - 1)))
+        kept.restore()
         self._enable()
 
     def _selected(self):
@@ -2923,6 +2933,9 @@ class ToolSetsPanel(QWidget):
 
         wanted = keep or self.current_set_name()
         rolled = self.rolled_up()
+        # built again for a change made here (a tool's mode, the tool size):
+        # where it was scrolled, the focus kept; a set asked for is shown
+        kept = KeptPlace(self.tree, self) if not keep else None
         self.groups = toolsets.load_toolsets()
         self.tree.blockSignals(True)
         self.tree.clear()
@@ -2966,9 +2979,15 @@ class ToolSetsPanel(QWidget):
             self.tree.itemExpanded.connect(self._sync_header)
             self.tree.itemCollapsed.connect(self._sync_header)
             self._watching_expansion = True
-        if wanted:
+        if kept is not None:
+            header = self.header_for(wanted) if wanted else None
+            if header is not None and self.tree.currentItem() is None:
+                self.tree.setCurrentItem(header)
+            self.fit_width()
+            kept.restore()
+        elif wanted:
             self.show_set(wanted)
-        self.fit_width()
+            self.fit_width()
         self.refresh_buttons()
 
     def _fill(self, header, group) -> None:
@@ -3079,7 +3098,9 @@ class ToolSetsPanel(QWidget):
     def use_selected(self) -> None:
         entry = self.current_entry()
         if entry is not None:
-            self.window.use_tool_entry(entry)
+            from .widgets import focus_kept
+            with focus_kept(unless=self.window.view):    # the chest keeps the keys
+                self.window.use_tool_entry(entry)
 
     def add_selection(self) -> None:
         self.window.add_to_toolset(None, into=self.current_set_name())
@@ -3557,6 +3578,10 @@ class PropertySection(QGroupBox):
         super().__init__(title)
         self.setObjectName("propSection")
         self.setCheckable(True)
+        # folded from its title with the mouse or Tab and Space; a click on a
+        # button inside it (Add Option) leaves the focus where it was rather
+        # than handing it to the section (the user, 2026-10-20)
+        self.setFocusPolicy(Qt.TabFocus)
         self.setChecked(title not in PropertySection.folded)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(2, 2, 2, 6)
@@ -3625,6 +3650,7 @@ class PropertiesPanel(QScrollArea):
         super().__init__()
         self.window = window
         self.setObjectName("propertiesPanel")     # the theme's Revu-style number boxes
+        self.setFocusPolicy(Qt.TabFocus)          # (a click between controls keeps the focus)
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -3675,7 +3701,17 @@ class PropertiesPanel(QScrollArea):
                 application.installEventFilter(watcher)
 
     def _show_items(self, items: list[MarkupItem], style_edit=None) -> None:
-        self._items = [i for i in items if isinstance(i, MarkupItem)]
+        wanted = [i for i in items if isinstance(i, MarkupItem)]
+        # The same markups shown again — a change made here, or on the
+        # toolbar, that the panel is built afresh for: it stays scrolled where
+        # it was and the control in use keeps the focus (the user,
+        # 2026-10-20: the Checkbox panel jumped to its top as an option was
+        # ticked). Another selection starts at the top.
+        same = bool(wanted) and len(wanted) == len(self._items) \
+            and all(a is b for a, b in zip(wanted, self._items)) \
+            and (style_edit is None) == (self._style_edit is None)
+        self._kept = KeptPlace(self, self.body) if same else None
+        self._items = wanted
         if not self._items and style_edit is None:
             styles = getattr(self.window, "markup_styles", None)
             held = styles.panel_sample() if styles is not None else None
@@ -3843,7 +3879,8 @@ class PropertiesPanel(QScrollArea):
             spin.setKeyboardTracking(False)
 
     def _settle(self) -> None:
-        """Re-lay-out the rebuilt form and scroll back to the top.
+        """Re-lay-out the rebuilt form and scroll back to the top — or, for
+        the same markups shown again, to where it was.
 
         Without this the scroll area keeps the geometry of the *previous*
         selection for one more event loop turn, which leaves the panel showing
@@ -3860,6 +3897,10 @@ class PropertiesPanel(QScrollArea):
         # height and let the panel scroll instead.
         self.body.setMinimumHeight(self.layout.sizeHint().height())
         self.body.adjustSize()
+        kept, self._kept = getattr(self, "_kept", None), None
+        if kept is not None:
+            kept.restore()
+            return
         self.verticalScrollBar().setValue(0)
         self.horizontalScrollBar().setValue(0)
 
@@ -5323,7 +5364,11 @@ class PropertiesPanel(QScrollArea):
             return
         if not self.window.view.tables.is_open():
             return
-        change()
+        # (the formula bar's controls hand the keys back to the cells; a
+        # change made here keeps them in the panel)
+        from .widgets import focus_kept
+        with focus_kept(unless=self.window.view):
+            change()
 
     def _cells_format(self, **fields) -> None:
         self._cells_do(lambda: self.window.view.tables.format(**fields))

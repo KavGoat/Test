@@ -5177,9 +5177,14 @@ class MainWindow(QMainWindow):
             self.pages_panel.show_current(index)
             return
         # Anything half-finished belongs to the page being left, so it is
-        # settled here rather than being carried onto the next one.
-        self.view.end_item_edit()
-        self.view.cancel_draft()
+        # settled here rather than being carried onto the next one — without
+        # taking the focus from the panel the page was picked in (a page
+        # picked in Thumbnails left the arrow keys with the canvas, the
+        # user, 2026-10-20)
+        from .widgets import focus_kept
+        with focus_kept(unless=self.view):
+            self.view.end_item_edit()
+            self.view.cancel_draft()
         self.current_index = index
         self.view._shown_page = index
         self.scene.show_page(index)           # Single Page / Side-by-Side: its spread
