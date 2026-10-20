@@ -359,14 +359,26 @@ measurement extras too: cut-outs, Units, Caption and Totals.
 
 - **Select**: click a markup. `Shift`+click adds or takes away, `Ctrl`+click adds.
   **Edit ▸ Select All** (`Ctrl+A`) selects every markup on the page.
-- **Move**: drag it (`Shift` keeps the move straight). `Ctrl`+drag leaves a copy
-  behind. Drag it onto another page and it belongs to that page. The arrow keys
-  nudge by 1 mm, `Shift`+arrow by 1 pt.
-- **Resize**: drag a handle. The blue dot on a dashed stalk turns the markup;
+- **Move**: drag it (`Shift` keeps the move straight: across, down or at 45°).
+  `Ctrl`+drag leaves a copy behind — the pointer shows a plus while `Ctrl` is
+  held over a markup. Either key works from anywhere on the markup, its outline
+  and its points included: a drag with them held always moves or copies it and
+  never changes its shape. Drag it onto another page and it belongs to that page.
+  The arrow keys nudge by 1 mm, `Shift`+arrow by 1 pt.
+- **Resize**: drag a handle; the arrows on the pointer lie the way the handle
+  pulls, turned with a turned markup. `Shift` on a corner keeps the proportions.
+  The blue dot on a dashed stalk turns the markup;
   **Properties panel ▸ Layout** has its exact position, size and rotation.
 - **Control points** (lines, polylines, polygons, clouds, rectangles…): drag a
-  point to move it. `Shift`- or `Ctrl`-click a point or side adds or removes a
-  point, and a double-click on a polyline or polygon adds one. Right-click ▸
+  point to move it — over a single point, a leader's arrow head or its hinge the
+  pointer is a thin crosshair. A *click* (not a drag) with a key held reshapes
+  the selected outline: `Shift`+click on a side puts a point in where you click,
+  on a point takes it out; `Ctrl`+click on a corner rounds it off (or sharpens
+  it again), on a side bends it into an arc (or straightens it). While the key
+  is held the outline shows what the click would do: a hollow point where the
+  new one goes, the point that goes ringed in red with the outline dashed
+  without it, or the rounded corner or the arc dashed. A double-click on a
+  polyline or polygon adds a point too. Right-click ▸
   **Control Point** has **Add Control Point**, **Insert Break**, **Subtract Control
   Point** and **Round Corner**; there are also **Arc Segment**, **Round All
   Corners** and, for a rectangle or ellipse, **Convert to Polygon**.

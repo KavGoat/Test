@@ -4400,17 +4400,19 @@ def test_a_locked_markup_says_so_with_the_pointer(window):
 
 def test_every_vertex_of_a_polyline_gets_the_same_pointer(window):
     from PySide6.QtCore import Qt
-    from calcforge.items.base import cursor_for_handle
+    from calcforge.items.base import POINT_CURSOR, cursor_for_handle
 
-    assert cursor_for_handle("v0") == Qt.PointingHandCursor
-    assert cursor_for_handle("v7") == Qt.PointingHandCursor
+    # One point moves: the point pointer, whichever it is (the user,
+    # 2026-10-20: a leader's hinge showed an odd one).
+    assert POINT_CURSOR == Qt.CrossCursor
+    assert cursor_for_handle("v0") == POINT_CURSOR
+    assert cursor_for_handle("v7") == POINT_CURSOR
     # A call-out's arrow heads and hinges are numbered too, and there is no
     # limit to how many of them one comment may want.
-    assert cursor_for_handle("l0") == Qt.PointingHandCursor
-    assert cursor_for_handle("l9") == Qt.PointingHandCursor
-    # A hinge takes hold rather than points: it slides along its own line and
-    # hops from side to side.
-    assert cursor_for_handle("e0") == Qt.OpenHandCursor
+    assert cursor_for_handle("l0") == POINT_CURSOR
+    assert cursor_for_handle("l9") == POINT_CURSOR
+    assert cursor_for_handle("e0") == POINT_CURSOR
+    assert cursor_for_handle("c0_3") == POINT_CURSOR     # a Cloud+'s corner
     # Turning: Revu's curled arrow, for a markup and for a measurement's words
     from calcforge.items.base import rotate_cursor
     assert cursor_for_handle("lblrot") is rotate_cursor() is cursor_for_handle("rot")
@@ -4418,31 +4420,6 @@ def test_every_vertex_of_a_polyline_gets_the_same_pointer(window):
     # the scale box's corners resize diagonally
     assert cursor_for_handle("scale_nw") == Qt.SizeFDiagCursor
     assert cursor_for_handle("scale_ne") == Qt.SizeBDiagCursor
-
-
-def test_shape_modifiers_have_distinct_add_remove_and_curve_cursors(window):
-    box = _a_rectangle(window)
-    box.setSelected(True)
-    window.select_tool("select")
-
-    def hover_with(x, y, modifiers):
-        QApplication.sendEvent(window.view.viewport(), _mouse(
-            window.view, QEvent.MouseMove, x, y, Qt.NoButton, Qt.NoButton,
-            modifiers))
-
-    hover_with(180, 120, Qt.ShiftModifier)       # top side
-    add = window.view.cursor().pixmap().cacheKey()
-    assert add
-
-    hover_with(120, 120, Qt.ShiftModifier)       # top-left point
-    remove = window.view.cursor().pixmap().cacheKey()
-    assert remove and remove != add
-
-    hover_with(180, 120, Qt.ControlModifier)
-    curve = window.view.cursor().pixmap().cacheKey()
-    assert curve and curve not in (add, remove)
-    hover(window.view, 600, 600)
-    assert window.view.cursor().shape() == Qt.ArrowCursor
 
 
 def test_finishing_a_rectangle_resize_recomputes_the_cursor(window):
