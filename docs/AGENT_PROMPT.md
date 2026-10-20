@@ -244,8 +244,10 @@ list of what *worked*. No prose essays.
 - Shortcuts need real key dispatch: `QTest.keyClick(widget, key, mods)`.
   `sendEvent` skips the shortcut map. Typing in a cell goes to the focused
   cell editor, not the canvas.
-- Wheel scrolling glides, so call `window.view.finish_scrolling()` after
-  wheel events. The plain wheel *zooms* by design.
+- A wheel notch lands at once (as Revu); with Preferences ▸ Smooth zoom and
+  scroll on it glides, so call `window.view.finish_scrolling()` after wheel
+  events (harmless when nothing glides). The plain wheel *zooms* by design,
+  in Single Page too.
 - Context menus run modally. Inspect them by calling the builders instead:
   `window.build_context_menu(item, scene_pos)`, `window.page_menu(i)`.
 - Undo rebuilds items. Re-find markups and sheet runs after undo or redo;

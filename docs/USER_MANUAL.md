@@ -804,7 +804,11 @@ cells' own Find and Replace — see Part 3.)
 - **Zoom**: the plain **wheel zooms** at the pointer, as in Revu; `Ctrl`+wheel
   scrolls; `Shift`+wheel scrolls sideways; a trackpad's two-finger scroll scrolls
   (and zooms with `Ctrl`). Preferences ▸ Mouse wheel swaps zoom and scroll: with
-  the wheel scrolling, `Ctrl`+wheel zooms. **View ▸ Fit Page**
+  the wheel scrolling, `Ctrl`+wheel zooms. As in Revu, each notch lands at once —
+  no animation — and the point under the pointer stays under it; the drawing
+  already made stands in (sharp where it was drawn finer) for the moment the new
+  zoom's drawing takes, which starts as soon as the notches stop. Preferences ▸
+  **Smooth zoom and scroll** makes each notch glide there instead. **View ▸ Fit Page**
   (`Ctrl+9`), **Fit Width** (`Ctrl+0`), **Actual Size** (`Ctrl+8`), **Zoom to
   Selection** (`Ctrl+2`), **Zoom In** and **Zoom Out** (no key by default), and the
   zoom box in the status bar.
@@ -821,9 +825,18 @@ cells' own Find and Replace — see Part 3.)
   `Ctrl+Page Down`) turn pages; `Ctrl+Home` / `Ctrl+End` reach the very ends. The
   space bar or the middle button pans.
 - **Page layouts** (View, or the status bar): **Single Page Mode** (one page,
-  fitted; the wheel turns the page at its end), **Continuous Mode**,
-  **Side-by-Side Mode**, **Continuous Side-by-Side Mode** and **Show Cover Page in
-  Side-by-Side**.
+  fitted), **Continuous Mode**, **Side-by-Side Mode**, **Continuous Side-by-Side
+  Mode** and **Show Cover Page in Side-by-Side**. The wheel works as in Revu:
+  - **Continuous** (and Continuous Side-by-Side) scroll through all the pages, at
+    Fit Page too.
+  - **Single Page** (and Side-by-Side, a spread at a time) shows one page only,
+    however far you zoom out. The wheel zooms or scrolls as it does in Continuous;
+    scrolling moves within the page and, at its end, turns to the next (or
+    previous) page.
+  - Preferences ▸ **Wheel in Single Page** can have the plain wheel always scroll
+    there (`Ctrl`+wheel zooming), and Preferences ▸ **Scrolling past a page's
+    end** can have it stay on the page (`Ctrl+Left` / `Ctrl+Right` still turn
+    it).
 - **Rotate View** — turn the screen view clockwise (`Ctrl+Shift+.`) or
   anticlockwise (`Ctrl+Shift+,`) to read a sideways drawing; **Reset Rotation**.
   The page itself is not changed.
@@ -2208,6 +2221,9 @@ rather than to the document; they are the same in every document you open.
 | Option | Where | Default | What it does |
 |---|---|---|---|
 | **Mouse wheel** | Preferences ▸ Canvas | Zooms in and out | Whether a plain turn of the wheel zooms at the pointer (as in Revu) or scrolls. Ctrl with the wheel does the other one. |
+| **Wheel in Single Page** | Preferences ▸ Canvas | As the mouse wheel (as Revu) | What a plain turn of the wheel does in Single Page and Side-by-Side: the same as in Continuous (the Mouse wheel choice), as in Revu, or always scroll there, with Ctrl and the wheel zooming. |
+| **Scrolling past a page's end** | Preferences ▸ Canvas | Turns to the next page | In Single Page and Side-by-Side, scrolling on past the end of the page turns to the next (or previous) page, as in Revu, or stays on the page. |
+| **Smooth zoom and scroll** | Preferences ▸ Canvas | Off | Each notch of the wheel glides there over a few frames. Off, each notch lands at once, as in Revu. |
 | **Author** | Preferences ▸ Writing | Your login name | The name new markups are signed with (your login name to begin with); saved PDFs carry it as each markup's author. |
 | **Check spelling** | Preferences ▸ Writing | On | Words typed on the page are checked as you type. |
 | **Dictionary** | Preferences ▸ Writing | New Zealand English | Which spelling words are checked against (New Zealand English). |

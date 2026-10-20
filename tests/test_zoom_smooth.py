@@ -178,7 +178,85 @@ def _wheel(view, notches, at):
     QApplication.sendEvent(view.viewport(), event)
 
 
+def _smooth(on: bool = True) -> None:
+    """Preferences ▸ Smooth zoom and scroll: a notch glides (off: it lands
+    at once, as Revu's does — the user, 2026-10-19)."""
+    from calcforge.ui import preferences
+
+    preferences.current().smooth_wheel = on
+
+
+def test_a_notch_of_zoom_lands_at_once_under_the_pointer(pdf_window, qapp):
+    """The user, 2026-10-19: zooming must be instant, like Revu. The zoom is
+    there as soon as the notch has been handled — no frames on the way — and
+    the point under the pointer stays under it."""
+    view = pdf_window.view
+    view.set_zoom(1.0)
+    at = QPointF(view.viewport().width() * 0.3, view.viewport().height() * 0.4)
+    under = view.viewportTransform().inverted()[0].map(at)
+    _wheel(view, 1, at)
+    assert view.zoom() == pytest.approx(1.0015 ** 120, rel=1e-9), "landed, at once"
+    assert not view.glide.timer.isActive(), "nothing left to animate"
+    still = view.viewportTransform().map(under)
+    assert abs(still.x() - at.x()) <= 0.5 and abs(still.y() - at.y()) <= 0.5
+
+
+def test_notches_in_and_out_again_leave_the_page_where_it_was(pdf_window, qapp):
+    """A run of notches at one spot keeps exactly the same point of the page
+    under the pointer: in and out again, nothing has drifted."""
+    view = pdf_window.view
+    view.set_zoom(1.0)
+    at = QPointF(view.viewport().width() * 0.62, view.viewport().height() * 0.37)
+    under = view.viewportTransform().inverted()[0].map(at)
+    for notches in (1, 1, 1, 1, 1, -1, -1, -1, -1, -1, -1, -1, 1, 1):
+        _wheel(view, notches, at)
+        qapp.processEvents()
+        still = view.viewportTransform().map(under)
+        assert abs(still.x() - at.x()) <= 0.5 and abs(still.y() - at.y()) <= 0.5, \
+            (view.zoom(), still, at)
+    assert view.zoom() == pytest.approx(1.0, rel=1e-9)
+
+
+def test_a_burst_of_notches_asks_for_the_zoom_it_stops_at_only(pdf_window, qapp, monkeypatch):
+    """Each notch lands at once, so a quick spin is a dozen zooms: none of
+    the ones on the way is drawn afresh — the drawing already made stands in
+    — and a moment after the last, the zoom it stopped at is."""
+    from calcforge.io import pdftiles
+
+    view = pdf_window.view
+    view.set_zoom(1.0)
+    view.viewport().grab()
+    qapp.processEvents()
+    asked = []
+    real = pdftiles.TILES._ask
+    monkeypatch.setattr(pdftiles.TILES, "_ask", lambda key, *a, **k: (
+        asked.append(key), real(key, *a, **k))[1])
+    at = QPointF(view.viewport().width() * 0.45, view.viewport().height() * 0.5)
+    zooms = []
+    for _ in range(6):
+        _wheel(view, 1, at)
+        zooms.append(view.zoom())
+        view.viewport().grab()                # each notch's frame, drawn
+        qapp.processEvents()
+    on_the_way = {pdftiles.zoom_step(zoom * view.viewport().devicePixelRatioF())
+                  for zoom in zooms[:-1]}
+    assert not [key for key in asked if isinstance(key, pdftiles.TileKey)], \
+        "nothing new is drawn while the notches come"
+    deadline = time.monotonic() + 3
+    while (pdftiles.TILES.held() or view._zoom_settled.isActive()) \
+            and time.monotonic() < deadline:
+        qapp.processEvents()
+    view.viewport().grab()
+    qapp.processEvents()
+    final = pdftiles.zoom_step(view.zoom() * view.viewport().devicePixelRatioF())
+    scales = {key.scale for key in asked if isinstance(key, pdftiles.TileKey)}
+    assert final in scales, "the zoom it stopped at is drawn"
+    assert not scales & on_the_way, f"no zoom on the way is drawn: {sorted(scales)}"
+
+
 def test_a_notch_of_zoom_glides_and_keeps_the_point_under_the_pointer(pdf_window, qapp):
+    """With Preferences ▸ Smooth zoom and scroll on, a notch still glides."""
+    _smooth()
     view = pdf_window.view
     view.set_zoom(1.0)
     at = QPointF(view.viewport().width() * 0.3, view.viewport().height() * 0.4)
@@ -275,9 +353,12 @@ def test_nothing_is_drawn_ahead_while_a_zoom_moves(qapp):
 def test_a_zoom_has_where_it_is_going_drawn_while_it_moves(pdf_window, qapp):
     """The user, 2026-10-08: "on zoom it is blurry and then takes a split
     second to render, Bluebeam ... it's always sharp". The squares of the zoom
-    a glide is heading for are asked for at the notch, not after it stops."""
+    a glide is heading for are asked for at the notch, not after it stops
+    (with Smooth zoom and scroll on; a notch that lands at once is drawn
+    a moment after the notches stop)."""
     from calcforge.io import pdftiles
 
+    _smooth()
     view = pdf_window.view
     view.set_zoom(1.0)
     at = QPointF(view.viewport().rect().center())

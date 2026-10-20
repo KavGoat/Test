@@ -1912,7 +1912,20 @@ class PreferencesDialog(QDialog):
 
         self.setWindowTitle("Preferences")
         self.prefs = prefs
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        # The groups scroll when the screen is too short for all of them (an
+        # 800 x 600 one); OK and Cancel stay in sight below.
+        from PySide6.QtWidgets import QFrame, QScrollArea
+        scroller = QScrollArea()
+        scroller.setObjectName("preferencesScroll")
+        scroller.setWidgetResizable(True)
+        scroller.setFrameShape(QFrame.NoFrame)
+        scroller.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        groups = QWidget()
+        scroller.setWidget(groups)
+        outer.addWidget(scroller, 1)
+        layout = QVBoxLayout(groups)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         canvas = QGroupBox("Canvas")
         form = QFormLayout(canvas)
@@ -1926,23 +1939,57 @@ class PreferencesDialog(QDialog):
                               "Shift and the wheel scroll sideways; a trackpad scrolls, "
                               "and zooms with Ctrl")
         form.addRow("Mouse wheel", self.wheel)
+        # Single Page and Side-by-Side (the user, 2026-10-19: as Revu, but
+        # customisable): the wheel as in Continuous, or always scrolling.
+        self.page_wheel = QComboBox()
+        self.page_wheel.setObjectName("pageWheel")
+        self.page_wheel.addItem("As the mouse wheel (as Revu)", prefs_module.PAGE_WHEEL_AS_WHEEL)
+        self.page_wheel.addItem("Always scrolls (Ctrl zooms)", prefs_module.PAGE_WHEEL_SCROLL)
+        self.page_wheel.setCurrentIndex(max(self.page_wheel.findData(
+            getattr(prefs, "page_wheel", prefs_module.PAGE_WHEEL_AS_WHEEL)), 0))
+        self.page_wheel.setToolTip(
+            "What a plain turn of the wheel does in Single Page and Side-by-Side:\n"
+            "the same as in Continuous (the Mouse wheel choice above), as Revu,\n"
+            "or always scroll there, with Ctrl and the wheel zooming")
+        form.addRow("Wheel in Single Page", self.page_wheel)
+        self.page_end = QComboBox()
+        self.page_end.setObjectName("pageEnd")
+        self.page_end.addItem("Turns to the next page", prefs_module.PAGE_END_TURN)
+        self.page_end.addItem("Stays on the page", prefs_module.PAGE_END_STAY)
+        self.page_end.setCurrentIndex(max(self.page_end.findData(
+            getattr(prefs, "page_end", prefs_module.PAGE_END_TURN)), 0))
+        self.page_end.setToolTip(
+            "Scrolling on past the end of the page in Single Page and Side-by-Side:\n"
+            "turn to the next (or previous) page, as Revu, or stay on the page\n"
+            "(Ctrl+Left / Ctrl+Right and the page buttons still turn it)")
+        form.addRow("Scrolling past a page's end", self.page_end)
+        self.smooth_wheel = QCheckBox("Smooth zoom and scroll")
+        self.smooth_wheel.setObjectName("smoothWheel")
+        self.smooth_wheel.setChecked(bool(getattr(prefs, "smooth_wheel", False)))
+        self.smooth_wheel.setToolTip(
+            "Each notch of the wheel glides there over a few frames.\n"
+            "Off: each notch lands at once, as in Revu")
         self.snapping = QCheckBox("Drawing snap")
         self.snapping.setToolTip("Catch on what is already drawn")
         self.snapping.setChecked(prefs.snap_while_drawing)
         self.snapping.setToolTip("Corners, midpoints and line ends pull the "
                                  "pointer to them while you draw")
-        form.addRow("", self.snapping)
         self.insertion = QCheckBox("Insertion point")
         self.insertion.setChecked(prefs.insertion_point)
         self.insertion.setToolTip(
             "Click empty paper to leave a caret there; the arrow keys move it")
-        form.addRow("", self.insertion)
         self.gpu_drawing = QCheckBox("Draw with the graphics card")
         self.gpu_drawing.setChecked(getattr(prefs, "gpu_drawing", True))
         self.gpu_drawing.setToolTip(
             "Smooth scrolling and panning on high-density (Retina, 4K) screens.\n"
             "Turn off if pages draw wrongly with your graphics driver.")
-        form.addRow("", self.gpu_drawing)
+        ticks = QGridLayout()
+        ticks.setContentsMargins(0, 0, 0, 0)
+        ticks.addWidget(self.smooth_wheel, 0, 0)
+        ticks.addWidget(self.snapping, 0, 1)
+        ticks.addWidget(self.insertion, 1, 0)
+        ticks.addWidget(self.gpu_drawing, 1, 1)
+        form.addRow("", ticks)
         # Recoverable flattening is Flatten Markups' Allow Markup Recovery
         # now, as in Revu, and remembered from there (the user, 2026-10-15).
         layout.addWidget(canvas)
@@ -2023,13 +2070,23 @@ class PreferencesDialog(QDialog):
         layout.addWidget(calcs)
 
         layout.addStretch(1)
-        layout.addWidget(_buttons(self))
+        outer.addWidget(_buttons(self))
+        # as tall as the groups need, but never taller than the screen
+        natural = groups.sizeHint().height()
+        screen = (parent.screen() if parent is not None else None) or self.screen()
+        room = screen.availableGeometry().height() - 120 if screen is not None else natural
+        scroller.setMinimumHeight(max(min(natural, room), 160))
+        scroller.setMinimumWidth(groups.sizeHint().width()
+                                 + scroller.verticalScrollBar().sizeHint().width())
 
     def result_preferences(self):
         from . import preferences as prefs_module
 
         return prefs_module.Preferences(
             wheel=self.wheel.currentData(),
+            page_wheel=self.page_wheel.currentData(),
+            page_end=self.page_end.currentData(),
+            smooth_wheel=self.smooth_wheel.isChecked(),
             author=self.author.text().strip(),
             check_spelling=self.spelling.isChecked(),
             dictionary=self.dictionary.currentData(),

@@ -317,14 +317,16 @@ def test_the_footer_switches_between_continuous_and_page_scrolling(window):
     assert window.status_scroll.text() == "Single Page"
     assert window.view.scroll_mode == "page"
 
-    wheel(window.view, -120)
+    # as in Continuous (and Revu): Ctrl and the wheel scroll, and at the
+    # page's end turn it; the plain wheel zooms
+    wheel(window.view, -120, Qt.ControlModifier)
     assert window.current_index == 1
     assert window.view.visible_page_index() == 1
-    wheel(window.view, 120)
+    wheel(window.view, 120, Qt.ControlModifier)
     assert window.current_index == 0
 
     before = window.view.zoom()
-    wheel(window.view, 120, Qt.ControlModifier)
+    wheel(window.view, 120)
     assert window.view.zoom() > before
     assert window.current_index == 0
 
@@ -557,15 +559,47 @@ def test_closing_a_panel_any_other_way_unlights_its_icon(window):
     assert not window.left_rail.buttons["dock_pages"].isChecked()
 
 
+def test_a_wheel_notch_scrolls_at_once(window):
+    """The user, 2026-10-19: scrolling must be instant, like Revu — each notch
+    lands at once, no glide."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QApplication
+    from calcforge.ui import preferences
+    _three_pages(window)
+    window.show()
+    preferences.current().wheel = preferences.WHEEL_SCROLL
+    view = window.view
+    bar = view.verticalScrollBar()
+    bar.setValue(bar.maximum() // 3)
+    QApplication.processEvents()
+    start = bar.value()
+    centre = QPointF(view.viewport().rect().center())
+    for notch in range(1, 4):
+        QApplication.sendEvent(view.viewport(), QWheelEvent(
+            centre, view.viewport().mapToGlobal(centre.toPoint()), QPoint(), QPoint(0, -120),
+            Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+        assert bar.value() == start + 30 * notch, "each notch is there at once"
+    assert not view.glide.timer.isActive()
+    # a high-resolution wheel's eighth-notches add up to the same distance
+    for _ in range(8):
+        QApplication.sendEvent(view.viewport(), QWheelEvent(
+            centre, view.viewport().mapToGlobal(centre.toPoint()), QPoint(), QPoint(0, -15),
+            Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+    assert bar.value() == start + 120
+
+
 def test_a_wheel_notch_glides_instead_of_jumping(window):
-    """The user, 2026-10-01: scrolling was jittery. A notch now eases over a
-    few frames, and a quick spin is one continuous movement."""
+    """The user, 2026-10-01: scrolling was jittery. With Preferences ▸ Smooth
+    zoom and scroll on, a notch eases over a few frames, and a quick spin is
+    one continuous movement."""
     import time
     from PySide6.QtWidgets import QApplication
     from calcforge.ui import preferences
     _three_pages(window)
     window.show()
     prefs = preferences.current()
+    prefs.smooth_wheel = True
     was = prefs.wheel
     prefs.wheel = preferences.WHEEL_SCROLL
     try:

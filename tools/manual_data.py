@@ -767,6 +767,16 @@ PREFERENCES = {
     "wheel": ("Preferences ▸ Canvas", "Mouse wheel",
               "Whether a plain turn of the wheel zooms at the pointer (as in Revu) or "
               "scrolls. Ctrl with the wheel does the other one."),
+    "page_wheel": ("Preferences ▸ Canvas", "Wheel in Single Page",
+                   "What a plain turn of the wheel does in Single Page and Side-by-Side: "
+                   "the same as in Continuous (the Mouse wheel choice), as in Revu, or "
+                   "always scroll there, with Ctrl and the wheel zooming."),
+    "page_end": ("Preferences ▸ Canvas", "Scrolling past a page's end",
+                 "In Single Page and Side-by-Side, scrolling on past the end of the page "
+                 "turns to the next (or previous) page, as in Revu, or stays on the page."),
+    "smooth_wheel": ("Preferences ▸ Canvas", "Smooth zoom and scroll",
+                     "Each notch of the wheel glides there over a few frames. Off, each "
+                     "notch lands at once, as in Revu."),
     "snap_while_drawing": ("Preferences ▸ Canvas", "Drawing snap",
                            "Corners, midpoints and line ends pull the pointer to them "
                            "while you draw."),

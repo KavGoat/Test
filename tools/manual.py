@@ -198,6 +198,9 @@ def sheet_functions_section(problems: list) -> str:
 #: How a default reads in the table, where the stored value would not.
 _DEFAULT_WORDS = {
     "wheel": {"zoom": "Zooms in and out", "scroll": "Scrolls up and down"},
+    "page_wheel": {"as_wheel": "As the mouse wheel (as Revu)",
+                   "scroll": "Always scrolls (Ctrl zooms)"},
+    "page_end": {"turn": "Turns to the next page", "stay": "Stays on the page"},
     "dictionary": {"en_NZ": "New Zealand English"},
     "result_fractions": {"decimal": "Decimal", "fraction": "Fraction", "auto": "Auto"},
 }
