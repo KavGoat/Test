@@ -3,6 +3,15 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-20 — steady text, the one-option Checkbox, instant zoom and scroll, callout placing, the quick gate (pushed at fd0fded and df85b0b)
+
+- Full test runs passed at 2040269 and df85b0b (`-n 3`, every-command tests included); 14/14 planted bugs caught each time.
+- Words in markups are set by the font's own widths and never fitted to pixels, so they don't grow or respace when picked out or hovered (checked offscreen; to be confirmed on Windows).
+- The Checkbox goes down with one option at a click, with no drag; the tick is drawn as the stamp's.
+- A wheel notch zooms or scrolls at once; Single Page and Side-by-Side follow the Mouse wheel setting; Preferences ▸ Canvas has the old Single Page wheel, turning at a page's end, and smooth zoom (off).
+- Placing a callout, Text Box or Cloud+ repaints only the preview (a move on a marked-up sheet 11 → 5 ms; the placing click 76–92 → 54–67 ms for a callout); line-style samples are kept; a Cloud+ in a tool set draws with the Cloud+ tool; a clicked cloud closes on its first corner.
+- The quick gate (`tools/qa/quick.py`): the changed tests plus the fastest of every file, 3.5 minutes against about 45; the full suite every third push and before work is reported finished. Tests start with the mouse buttons up.
+
 ## 2026-10-19 (evening) — references follow the cells, one document per file, the Checkbox, text spacing, pages deleted elsewhere (pushed at 169dd6c)
 
 - Full test runs passed at 1dd36a7, f507a97 and 169dd6c (`-n 3`, every-command tests included); 14/14 planted bugs caught each time. Runs at 8986ad9, a8cef3d and 7c246ed failed (a three-word menu label, the page menu's mirror, the panel's new rows unreached by the exerciser, Single Page Mode unreached in full runs only); fixed before 169dd6c.
