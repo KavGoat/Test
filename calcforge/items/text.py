@@ -1443,6 +1443,11 @@ class _TextBase(MarkupItem):
         from .fields import shown_document
         shown = shown_document(self, on_screen=not getattr(self.parentItem(), "print_mode",
                                                            False))
+        if shown.isEmpty():
+            # no words, no picture of them to make — a callout being placed
+            # is drawn at every move of the pointer
+            painter.restore()
+            return
 
         def words(onto: QPainter) -> None:
             shown.documentLayout().draw(onto, context)

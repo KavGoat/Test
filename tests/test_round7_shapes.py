@@ -153,12 +153,17 @@ def test_every_selected_markup_paints_its_own_control_points(w):
     assert one.isSelected() and two.isSelected()
     pump(3)
     image = vp(w).grab().toImage()
-    for item in (one, two):
+    for item, gold in ((one, True), (two, False)):
         for name in ("nw", "se"):
             at = screen(w, item.mapToScene(item.handle_points()[name]))
             colour = image.pixelColor(at.x(), at.y())
-            # a gold control point, not white paper
-            assert colour.red() > 180 and colour.blue() < 120, (item, name, colour.name())
+            # a control point, not white paper: gold on the markup picked
+            # first (the primary, as in Revu's alignment), green on the rest
+            if gold:
+                assert colour.red() > 180 and colour.blue() < 120, (item, name, colour.name())
+            else:
+                assert colour.green() > 120 and colour.red() < 120 and colour.blue() < 120, (
+                    item, name, colour.name())
     # and nothing is drawn at the corner of a box round the pair
     both = scene_rect(one).united(scene_rect(two))
     at = screen(w, both.topRight())

@@ -2010,6 +2010,15 @@ class DocumentScene(QGraphicsScene):
         for item in self.selectedItems():
             item.update()
 
+    def _repaint_points(self) -> None:
+        """Only the picked markups' control points changed colour: their
+        place on screen is drawn again, the markups themselves untouched — an
+        update would have taken each out of its page's squares (drawn live
+        from then on, until it was let go)."""
+        for item in self.selectedItems():
+            if isinstance(item, MarkupItem):
+                self.update(item.sceneBoundingRect())
+
     # -- Revu's primary markup (ui/alignment.py) ---------------------------------
     def _picks_changed(self) -> None:
         if not self._picks_stale:
@@ -2041,7 +2050,7 @@ class DocumentScene(QGraphicsScene):
             self._pick_order = order + new
             first = self._pick_order[0] if self._pick_order else None
             if first is not before:
-                self._repaint_selected()          # the yellow points moved
+                self._repaint_points()            # the yellow points moved
 
     def primary_markup(self):
         """(asked by every picked markup as it is drawn: nothing copied)"""
@@ -2055,7 +2064,7 @@ class DocumentScene(QGraphicsScene):
             return
         family = [one for one in order if item.group and one.group == item.group] or [item]
         self._pick_order = family + [one for one in order if one not in family]
-        self._repaint_selected()
+        self._repaint_points()
 
     def is_secondary(self, item) -> bool:
         """Several things picked, and *item* not (in) the primary: its
