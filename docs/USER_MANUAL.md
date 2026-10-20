@@ -521,7 +521,10 @@ colours you made are kept.
 - **Steady words.** The words in markups are spaced by the font's own widths and
   never fitted to the screen's pixels, as a PDF viewer sets them, so they look the
   same at every zoom and do not shift or change width when a markup is picked out,
-  hovered or clicked near.
+  hovered or clicked near. On screen the words are always drawn the same way —
+  the same pixels whether the markup is still, picked out, being typed in, or has
+  another markup dragged past it, and with the graphics card on or off — so they
+  never flicker, swell or lighten for a moment.
 - **Line spacing and margins.** A text box, typewriter text, callout or Cloud+
   has Revu's **Line Spacing** — Single (1.0), 1.15, 1.5, Double (2.0) or any
   multiple — on the Properties toolbar and panel, and **Margins**, the space
@@ -833,6 +836,12 @@ cells' own Find and Replace — see Part 3.)
   moving, the drawing already made stands in, scaled; once you stop, the page
   is drawn sharp at exactly the zoom on screen, the same as before. Scrolling
   draws ahead in the direction you are going. Nothing needs setting.
+- **Crisp when zoomed out.** Below 100 % the drawing's line work is drawn onto
+  the screen's pixels, as in Revu: every hairline is one solid, dark pixel wide
+  wherever it falls, double lines stay apart and coloured lines keep their
+  colour, instead of thin lines coming out as pale grey pairs of pixels. Words
+  stay smoothed, and from 100 % up lines are smoothed as before. Only the screen
+  changes; prints, exports and the PDF are not affected.
 - **Moving about**: `Page Up` / `Page Down` move a screenful; `Home` and `End` go
   to the first and last page; `Ctrl+Left` / `Ctrl+Right` (and `Ctrl+Page Up` /
   `Ctrl+Page Down`) turn pages; `Ctrl+Home` / `Ctrl+End` reach the very ends. The

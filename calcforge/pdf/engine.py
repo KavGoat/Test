@@ -55,6 +55,30 @@ pymupdf.TOOLS.mupdf_display_warnings(False)
 MIN_LINE_PIXELS = 1.0
 pymupdf.TOOLS.set_graphics_min_line_width(MIN_LINE_PIXELS)
 
+# And on screen, zoomed out — fewer pixels than points — line work is drawn
+# onto the pixels rather than smoothed across them. Smoothed, a hairline a
+# pixel wide that fell half way between two rows of pixels came out as two
+# rows of half grey: the same sheet's lines were black or pale grey by where
+# they happened to fall, double lines ran together into a grey band and
+# coloured lines went pastel (the user, 2026-10-20: "Fuzzy is not good
+# enough ... Bluebeam looks better in zoomed out mode and more legible").
+# MuPDF's centre-of-pixel rule (graphics anti-aliasing level 9) gives each
+# line exactly the row of pixels its middle crosses, solid, as Bluebeam
+# draws a zoomed-out sheet, with no gaps along a sloping line. Words stay
+# smoothed (their own level), and so does everything from the zoom at which
+# a point is a pixel up, where lines are wide enough for smoothing to be
+# worth having. It is quicker to draw than smoothing, and changes only the
+# pixels on screen, never a print, an export or the PDF.
+CRISP_BELOW = 1.0
+SMOOTH_LINES = 8
+CRISP_LINES = 9
+
+
+def line_art_level(scale: float) -> int:
+    """The anti-aliasing level line work is drawn at, *scale* pixels to the
+    point, on screen."""
+    return CRISP_LINES if scale < CRISP_BELOW - 1e-9 else SMOOTH_LINES
+
 
 def drain_messages() -> str:
     """Whatever MuPDF has been complaining about, and a clean slate."""
@@ -527,16 +551,26 @@ def leave_out(page, without: "tuple") -> None:
 def raster_from(drawing, region: tuple[float, float, float, float],
                 scale: float, alpha: bool = False) -> Optional[Raster]:
     """Part of an already-parsed page, at *scale* pixels to the display point
-    (*alpha*: on a clear background, for an annotation drawn on its own)."""
+    (*alpha*: on a clear background, for an annotation drawn on its own), for
+    the screen: zoomed out, its line work on the pixels (line_art_level)."""
+    from pymupdf import mupdf
+
+    level = line_art_level(scale)
+    before = mupdf.fz_graphics_aa_level()
     try:
         clip = pymupdf.Rect(*region).normalize()
         if clip.is_empty:
             return None
+        if level != before:
+            mupdf.fz_set_graphics_aa_level(level)
         pixmap = drawing.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
                                     clip=clip, alpha=alpha)
     except Exception:                                  # noqa: BLE001
         drain_messages()
         return None
+    finally:
+        if level != before:
+            mupdf.fz_set_graphics_aa_level(before)
     return _raster_of(pixmap)
 
 
