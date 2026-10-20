@@ -6,9 +6,11 @@ always before saying a piece of work is finished; docs/AGENT_PROMPT.md §3).
 
     python tools/qa/quick.py build GATE_OUTPUT    pick the quick check from a full
                                                   run made with --durations=0
-    python tools/qa/quick.py run [--base REV]     run the quick gate on the work
+    python tools/qa/quick.py run [--base REV] [--workers N]
+                                                  run the quick gate on the work
                                                   tree; REV defaults to the pushed
-                                                  branch
+                                                  branch, N to 3 (fewer while
+                                                  agents are testing too)
 
 The quick check is the fastest tests of every test file, up to a few seconds
 of each file, every test function's quickest case first; it is written to
@@ -119,7 +121,7 @@ def tests_for(files):
     return tests
 
 
-def run(base):
+def run(base, workers="3"):
     started = time.time()
     files = changed(base)
     whole = sorted(tests_for(files))
@@ -133,7 +135,7 @@ def run(base):
         args.write("\n".join(whole + quick) + "\n")
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
     try:
-        code = subprocess.run([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", "-n", "3", "-rf",
+        code = subprocess.run([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", "-n", workers, "-rf",
                                f"@{args.name}"], cwd=ROOT, env=env).returncode
     finally:
         os.unlink(args.name)
@@ -151,7 +153,8 @@ def main(argv):
         return 0
     if argv[:1] == ["run"]:
         base = argv[argv.index("--base") + 1] if "--base" in argv else f"origin/{BRANCH}"
-        return run(base)
+        workers = argv[argv.index("--workers") + 1] if "--workers" in argv else "3"
+        return run(base, workers)
     print(__doc__)
     return 2
 
