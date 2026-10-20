@@ -3,6 +3,16 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-20 (later) — steady words, crisp zoomed out, Revu's clouds, alignment, panels that stay put, Revu's cursors (pushed at 803db9d)
+
+- Full test run at 803db9d: every test passed but one timing check (dimming a thousand markups, 233 ms against 200 under the run's load; 89–94 ms alone, against 83–87 ms before); 14/14 planted bugs caught. An earlier run at faebaaa failed three tests (callout placing budget; two handle-colour tests), fixed at 4193b1e.
+- Words in markups are drawn the same pixels by every path; zoomed out, hairlines are one solid pixel.
+- Clouds are Revu's scallops again; cloud leaders end on the cloud; Add Cloud Leader is drawn by hand.
+- Panels keep their scroll and focus when a control in them is used.
+- Revu's alignment: primary markup, Align Width/Height/Size, Distribute, Centre in Document, Flip, an Alignment toolbar and right-click submenu.
+- Cursors as Revu's (arrow with a small sign); Shift-click adds or takes away a point, Ctrl copies, Alt-click rounds or bends; a drag always moves.
+- The Checkbox tick runs past its box on both sides.
+
 ## 2026-10-20 — steady text, the one-option Checkbox, instant zoom and scroll, callout placing, the quick gate (pushed at fd0fded and df85b0b)
 
 - Full test runs passed at 2040269 and df85b0b (`-n 3`, every-command tests included); 14/14 planted bugs caught each time.
