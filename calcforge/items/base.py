@@ -633,29 +633,40 @@ def rotate_cursor():
     return _ROTATE_CURSOR
 
 
+#: The pointer over a handle that moves one point — a polyline's corner, a
+#: line's end, a leader's arrow head or its hinge, a Cloud+'s corner, an arc's
+#: bend: the thin crosshair, which says "this point goes where you put it"
+#: (the user, 2026-10-20: a hinge showed an odd pointer). The pointing hand it
+#: was promises a link to click, and the open hand a page to pan.
+POINT_CURSOR = Qt.CrossCursor
+
+#: the numbered handles that each move a single point (see cursor_for_handle)
+_POINT_LETTERS = ("v", "l", "e", "c", "n", "r")
+
+
 def cursor_for_handle(key: str):
     """The pointer for a handle, including the numbered ones.
 
     A polyline has as many handles as it has corners — v0, v1, v2 — so they
-    cannot be listed one by one. Every one of them moves a point, which is
-    what the pointing hand means everywhere else in the app.
+    cannot be listed one by one. Each moves one point, and gets the point
+    pointer; the box's own corners and edges resize, and say which way.
     """
     if key in ROTATE_HANDLES:
         return rotate_cursor()
     if key in HANDLE_CURSORS:
         return HANDLE_CURSORS[key]
+    if key == "elbow":
+        return POINT_CURSOR
     letter, rest = key[:1], key[1:]
+    if letter == "c" and "_" in rest and rest.replace("_", "").isdigit():
+        return POINT_CURSOR             # a corner of a Cloud+'s cloud: c0_3
     if rest.isdigit():
         if letter == "w":
-            return Qt.SizeHorCursor
+            return Qt.SizeHorCursor     # a break's width, along its side
         if letter == "z":
-            return Qt.SizeVerCursor
-        if letter == "e":
-            # A hinge slides along a line and hops from side to side: an open
-            # hand says "take hold of this", which is what it is for.
-            return Qt.OpenHandCursor
-        if letter in ("v", "l", "c", "n", "r"):
-            return Qt.PointingHandCursor
+            return Qt.SizeVerCursor     # a break's height, across it
+        if letter in _POINT_LETTERS:
+            return POINT_CURSOR
     return Qt.SizeAllCursor
 
 

@@ -221,7 +221,9 @@ _CURSORS = {"cell": _excel("cell"), "fill": lambda: QCursor(Qt.CrossCursor),
             "corner": lambda: QCursor(Qt.ArrowCursor), "col_edge": lambda: QCursor(Qt.SplitHCursor),
             "row_edge": lambda: QCursor(Qt.SplitVCursor), "break": lambda: QCursor(Qt.SplitVCursor),
             "vbreak": lambda: QCursor(Qt.SplitHCursor),
-            "grow": lambda: QCursor(Qt.SizeFDiagCursor), "tab": lambda: QCursor(Qt.OpenHandCursor)}
+            "grow": lambda: QCursor(Qt.SizeFDiagCursor),
+            # the tab picks the whole table up and moves it: the move pointer
+            "tab": lambda: QCursor(Qt.SizeAllCursor)}
 
 
 def _now(fmt: str) -> str:
