@@ -215,7 +215,10 @@ its default (see *Markup styles and defaults*).
 - **Polygon** (`P`) — click each corner, double-click to close.
 - **Cloud** (`C`) — a revision cloud: drag a rectangle, or click corner by corner
   for a free-form cloud; a double-click, a click on the first corner again,
-  `Enter` or a right-click closes it.
+  `Enter` or a right-click closes it. As in Revu, each side is a run of equal
+  arcs standing on it and bulging outward, meeting in sharp cusps that point
+  in, with a cusp at every corner; **Cloud intensity** sets how big the arcs
+  are.
 - **Highlight Area** (`J`) — drag over anything to highlight it. It darkens what is
   underneath rather than covering it.
 - **Mark for Redaction** — an opaque box over what is to be removed. Nothing is
@@ -234,7 +237,11 @@ its default (see *Markup styles and defaults*).
   edit the words again.
 - **Callout** (`Q`) — click what it points at, then click where the words go. Drag
   the orange diamonds to move the leader. Right-click for **Add Arrow Leader**,
-  **Add Cloud Leader** and **Remove Leader**.
+  **Add Cloud Leader** and **Remove Leader**. **Add Cloud Leader** draws the
+  cloud by hand, as the Cloud tool does: press and drag a rectangle round the
+  area, or click its corners for a free-form one; the leader then joins it, in
+  one undo step. `Esc` puts it down with nothing changed. A cloud leader ends on
+  the cloud's scalloped edge.
 - **Cloud+** (`Shift+Q`) — a cloud and its note as one markup, drawn as in Revu:
   press and drag for a rectangular cloud of that size, or click its corners for a
   free-form one (a double-click, a click on the first corner again, `Enter` or a

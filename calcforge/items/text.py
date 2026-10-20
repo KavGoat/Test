@@ -899,7 +899,7 @@ class _TextBase(MarkupItem):
         centre = rect.center()
         half_width = max(rect.width() / 2, 1.0)
         half_height = max(rect.height() / 2, 1.0)
-        tip = self.tip_of(leader)
+        tip = self.aim_of(leader)
         across = (tip.x() - centre.x()) / half_width
         down = (tip.y() - centre.y()) / half_height
         if abs(across) >= abs(down):
@@ -923,7 +923,7 @@ class _TextBase(MarkupItem):
         """
         rect = self._rect.normalized()
         hinge = self.hinge_on(side, leader.reach)
-        return not _crosses(rect, hinge, self.tip_of(leader))
+        return not _crosses(rect, hinge, self.aim_of(leader))
 
     def side_point_of(self, leader: "_Leader") -> QPointF:
         """The middle of the side this leader leaves by."""
@@ -1121,16 +1121,32 @@ class _TextBase(MarkupItem):
         """How big the puffs on a cloud leader are."""
         return self.cloud_radius
 
+    def aim_of(self, leader) -> QPointF:
+        """What the leader heads for, which decides the side it leaves by.
+
+        An arrow leader's place it points to. A cloud leader's is the corner
+        or edge middle of its region nearest the note, so the join moves with
+        the box and the region rather than being remembered from wherever it
+        was first drawn.
+        """
+        if leader.clouds():
+            return leader.join_nearest(self._rect.normalized().center())
+        return QPointF(leader.tip)
+
     def tip_of(self, leader) -> QPointF:
         """Where the leader's line ends.
 
         An arrow leader ends at the place it points to. A cloud leader ends
-        where its line meets the cloud — the nearest corner or edge middle to
-        the note — so the join moves with the box and the region rather than
-        being remembered from wherever it was first drawn.
+        on the cloud: where its line, on the way from the hinge to its aim,
+        first meets the scalloped edge — not inside the cloud at the region's
+        straight corner or edge middle, as Revu's does not (the user,
+        2026-10-20).
         """
         if leader.clouds():
-            return leader.join_nearest(self._rect.normalized().center())
+            from .base import cloud_entry
+            return cloud_entry(QPolygonF(list(leader.cloud)), self.cloud_radius_of(leader),
+                               self.elbow_of(leader), self.aim_of(leader),
+                               inverted=self.cloud_invert)
         return QPointF(leader.tip)
 
     def _leader_signature(self) -> tuple:
@@ -1707,11 +1723,11 @@ class CalloutItem(_TextBase):
         return leader.cloud_box() if leader is not None else QRectF()
 
     def cloud_join(self) -> QPointF:
-        """Where the line meets the cloud: its nearest corner or edge middle."""
+        """Where the line meets the cloud: on its scalloped edge."""
         leader = self.cloud_leader()
         if leader is None:
             return QPointF()
-        return leader.join_nearest(self._rect.normalized().center())
+        return self.tip_of(leader)
 
     def box_join(self) -> QPointF:
         """Where the line leaves the note: the middle of the side facing the cloud."""
