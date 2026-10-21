@@ -84,7 +84,11 @@ def test_a_page_restored_from_its_record_calculates_again(window):
     put(window, 0, 60, 100, "d:6")
     use = put(window, 0, 60, 200, "d*2=")
     frame = window.document.pages[0].frame
-    frame.load_items(frame.serialize_items())
+    record = frame.serialize_items()
+    # emptied first, so both are made again from the record (a page put back
+    # as it already is keeps its markups as they are — scene.load_items)
+    frame.load_items([])
+    frame.load_items(record)
     items = [i for i in frame.markups() if isinstance(i, CalcItem)]
     assert len(items) == 2
     again = max(items, key=lambda i: i.pos().y())
