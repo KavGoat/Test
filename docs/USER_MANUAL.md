@@ -239,7 +239,11 @@ its default (see *Markup styles and defaults*).
   is). It works on text boxes, typewriter text, callouts and Cloud+ notes; the
   callout's Properties toolbar also has it as **Fit to text**. Double-click to
   edit the words again.
-- **Callout** (`Q`) — click what it points at, then click where the words go. Drag
+- **Callout** (`Q`) — click what it points at, then click where the words go. The
+  first click snaps to what is drawn; the box for the words follows the pointer
+  exactly and lands where it was shown (on the grid when you snap to it), and its
+  leader keeps to the side it leaves by until another side clearly faces what it
+  points at, so it does not jump from side to side. The same goes for Cloud+. Drag
   the orange diamonds to move the leader. Right-click for **Add Arrow Leader**,
   **Add Cloud Leader** and **Remove Leader**. **Add Cloud Leader** draws the
   cloud by hand, as the Cloud tool does: press and drag a rectangle round the

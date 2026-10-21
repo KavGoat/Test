@@ -294,6 +294,17 @@ def is_clear_of_the_panels() -> bool:
     return _CLEAR_OF_THE_PANELS[0] > 0
 
 
+def _facing(item, leader, side: str) -> float:
+    """How squarely *side* of the call-out *item* faces what *leader* aims
+    at, as CalloutItem.facing_side weighs it: the larger, the better."""
+    rect = item.local_rect().normalized()
+    centre = rect.center()
+    aim = item.aim_of(leader)
+    across = (aim.x() - centre.x()) / max(rect.width() / 2, 1.0)
+    down = (aim.y() - centre.y()) / max(rect.height() / 2, 1.0)
+    return {"left": -across, "right": across, "top": -down, "bottom": down}.get(side, 0.0)
+
+
 class _KeptSides(dict):
     """{markup or line work: PageView.sides_of it} for one page, kept by the
     page with what PageView._nearby_snap_items read of it last."""
@@ -1909,6 +1920,30 @@ class PageView(QGraphicsView):
             return self.snap(scene_pos)
         return frame.mapToScene(self.snap(frame.mapFromScene(scene_pos)))
 
+    def words_point(self, scene_pos: QPointF) -> QPointF:
+        """Where a call-out's or a Cloud+'s words go for the pointer at
+        *scene_pos* — the second click: where the pointer is, on the grid
+        when the grid is snapped to, and nothing else.
+
+        Not caught by the markups, the drawing or a line-up, as the point it
+        points at is: on a marked-up sheet there is something to catch every
+        few pixels, so the box the leader runs to was drawn under the pointer
+        while the marker hopped from one end of a line to the next, and the
+        click then put the box down at the marker — a jump each time (the
+        user, 2026-10-21: "Callout placement still jittery, not smooth").
+        """
+        if not preferences.current().snap_while_drawing:
+            return QPointF(scene_pos)
+        frame = self.frame_at(scene_pos) or self.frame()
+        if frame is None:
+            return self.snap(QPointF(scene_pos))
+        return frame.mapToScene(self.snap(frame.mapFromScene(scene_pos)))
+
+    def placing_words(self) -> bool:
+        """Whether the next click puts a call-out's words down."""
+        return (self._pending_anchor is not None and self._mode == "idle"
+                and self.current_tool().mode in (ANCHOR, CLOUD))
+
     def forget_snap(self) -> None:
         """Nothing is caught: take the marker off."""
         self._invalidate_snap_overlay(self._snap_marker, self._snap_guides)
@@ -2929,7 +2964,11 @@ class PageView(QGraphicsView):
             if self.current_tool().key != original_tool:
                 event.accept()
                 return
-        point = self.snap_scene(scene_pos, frame)
+        if self.placing_words():
+            self.forget_snap()
+            point = self.words_point(scene_pos)
+        else:
+            point = self.snap_scene(scene_pos, frame)
         if self._mode == "draw_click":
             # The second click of a click-click drawing.
             self._mode = "idle"
@@ -3062,7 +3101,11 @@ class PageView(QGraphicsView):
             # every point after it did. Working it out on the way past costs
             # nothing and means the marker is there from the first click.
             # (The marker repaints its own few pixels: _invalidate_snap_overlay.)
-            self.snap_scene(scene_pos)
+            if self.placing_words():
+                if self._snap_marker is not None or self._snap_guides:
+                    self.forget_snap()             # (the words are not caught)
+            else:
+                self.snap_scene(scene_pos)
             follows = True
         if follows:
             self._update_pointer_previews()   # the leader, or the preview, follows
@@ -3260,6 +3303,7 @@ class PageView(QGraphicsView):
             undone.append("the held tool")
         if self._pending_anchor is not None:
             self._pending_anchor = None
+            self._side_held = None
             undone.append("the call-out")
         if self._insertion_point is not None:
             self._insertion_point = None
@@ -4481,6 +4525,13 @@ class PageView(QGraphicsView):
         elif anchor is not None:
             item.tip = item.mapFromScene(anchor)
         item.refresh(page=self.page())
+        if item.leaders:
+            # the side the preview's leader was holding to, so the leader
+            # lands where it was drawn
+            leader, held = item.leaders[0], self.held_side(point)
+            if held and item.side_is_usable(leader, held):
+                leader.side = "" if held == item.facing_side(leader) else held
+        self._side_held = None
         self.scene().clearSelection()
         item.setSelected(True)
         self.selectionChanged.emit()
@@ -6137,7 +6188,45 @@ class PageView(QGraphicsView):
                             for corner in self._pending_cloud])
         else:
             item.tip = item.mapFromScene(anchor)
+        if item.leaders:
+            self._hold_the_side(item, item.leaders[0])
         return item
+
+    #: how much more another side has to face what the leader points at
+    #: before the leader of a call-out being placed moves over to it
+    SIDE_HOLD = 0.2
+
+    #: (what the call-out being placed points at, where its words were, the
+    #: side its leader left by) as of the last move
+    _side_held = None
+
+    def _hold_the_side(self, item, leader) -> None:
+        """The leader of the call-out being placed leaves by the side it left
+        by a move ago until another side faces what it points at clearly
+        better. Worked out afresh on every move, the side flipped from one to
+        the other and back as the pointer wavered along the diagonal where
+        two of them face it equally — the hinge jumping across the box at
+        every pixel (the user, 2026-10-21: "jittery")."""
+        leader.side = ""
+        aim = self._pending_anchor
+        about = None if aim is None else (round(aim.x(), 3), round(aim.y(), 3))
+        held = self._side_held[2] if self._side_held and self._side_held[0] == about else ""
+        wanted = item.facing_side(leader)
+        if held and held != wanted and item.side_is_usable(leader, held) \
+                and _facing(item, leader, held) >= (1 - self.SIDE_HOLD) * _facing(
+                    item, leader, wanted):
+            leader.side = held
+        words = self.words_point(self._last_scene_pos)
+        self._side_held = (about, (round(words.x(), 3), round(words.y(), 3)),
+                           item.side_of(leader))
+
+    def held_side(self, words: QPointF) -> str:
+        """The side the leader of the call-out being placed was leaving by
+        with its words at *words*, if it was drawn there."""
+        held = self._side_held
+        if held is None or held[1] != (round(words.x(), 3), round(words.y(), 3)):
+            return ""
+        return held[2]
 
     def _callout_as_placed(self, cloud: bool):
         """A call-out wearing the look the next one will land with — the one
@@ -6169,7 +6258,7 @@ class PageView(QGraphicsView):
         """
         if self._draft is not None:
             return self._draft.mapRectToScene(self._draft.local_rect())
-        at = QPointF(self._last_scene_pos)
+        at = self.words_point(self._last_scene_pos)   # where the click puts it
         width, height = self.WORDS_SIZE        # _default_size of a CalloutItem
         return QRectF(at.x(), at.y() - height / 2, width, height)
 
