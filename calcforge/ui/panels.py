@@ -200,6 +200,15 @@ def _remembered_filter_list() -> bool:
     return value if isinstance(value, bool) else str(value).lower() in ("true", "1")
 
 
+#: A thumbnail's part in a workbook shown in Thumbnails (PagesPanel._sections_in):
+#: {"head": its first page, "collapsed": shown as one entry, "member": shown
+#: page by page, "key": the workbook's key}.
+SECTION_ROLE = Qt.UserRole + 1
+#: Whether a thumbnail prints: 0 it does, 1 some of the workbook doesn't,
+#: 2 none of it does.
+NO_PRINT_ROLE = Qt.UserRole + 2
+
+
 class _ThumbnailDelegate(QStyledItemDelegate):
     """A thumbnail as Revu draws one: the page with a thin neutral edge,
     framed in Revu's blue when it is picked out (a softer frame under the
@@ -246,6 +255,13 @@ class _ThumbnailDelegate(QStyledItemDelegate):
         top = room.bottom() + 1 + self.UNDER
         return QRect(cell.left() + 2, top, cell.width() - 4, max(cell.bottom() - top + 1, 1))
 
+    def toggle_rect(self, cell: QRect) -> QRect:
+        """A workbook entry's first line of words (its ▸ and name): a click
+        there shows or hides its pages."""
+        words = self.lines_rect(cell)
+        return QRect(words.left(), words.top() - 2, words.width(),
+                     QFontMetrics(self.strip.font()).height() + 4)
+
     # -- Qt's side -------------------------------------------------------------
     def sizeHint(self, option, index) -> QSize:
         return self.strip.cell_size()
@@ -256,6 +272,8 @@ class _ThumbnailDelegate(QStyledItemDelegate):
         from ..theme import tokens
         colours = tokens(current_theme())
         cell = option.rect
+        if cell.width() <= 0 or cell.height() <= 0:
+            return       # a page hidden behind its workbook's entry: Qt still asks
         picture = index.data(Qt.DecorationRole)
         picture = picture if isinstance(picture, QIcon) else None
         page = self.picture_rect(cell, picture)
@@ -263,18 +281,43 @@ class _ThumbnailDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         picked = bool(option.state & QStyle.State_Selected)
         hovered = bool(option.state & QStyle.State_MouseOver)
+        section = index.data(SECTION_ROLE) or {}
+        if section.get("member"):
+            # a workbook's pages, shown: a band behind them says which they are
+            band = QColor(colours["accent_soft"])
+            band.setAlpha(150)
+            painter.fillRect(cell.adjusted(0, 2, 0, -2), band)
         if picked or hovered:
             frame = page.adjusted(-self.FRAME, -self.FRAME, self.FRAME, self.FRAME)
             painter.fillRect(frame, QColor(colours["thumb_picked" if picked
                                                   else "thumb_hover"]))
+        if section.get("collapsed"):
+            # a workbook as one entry: its first page on a stack of sheets
+            painter.setPen(QPen(QColor(colours["thumb_edge"]), 1))
+            for step in (8, 4):
+                behind = page.translated(step, -step)
+                painter.fillRect(behind, Qt.white)
+                painter.drawRect(behind.adjusted(0, 0, -1, -1))
+        silent = index.data(NO_PRINT_ROLE) or 0
+        if silent == 2:
+            painter.setOpacity(0.45)       # nothing of it prints: greyed
         if picture is not None:
             picture.paint(painter, page)
         else:
             painter.fillRect(page, Qt.white)
+        painter.setOpacity(1.0)
         # the thin neutral edge: a white page on a pale panel keeps its shape
         painter.setPen(QPen(QColor(colours["thumb_edge"]), 1))
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(page.adjusted(0, 0, -1, -1))
+        if silent:
+            # a crossed-out printer in the corner: it doesn't print (or some of it)
+            from .sheettabs import no_print_pixmap
+            mark = no_print_pixmap(14, painter.device().devicePixelRatioF()
+                                   if painter.device() is not None else 1.0, "#404854")
+            spot = QRect(page.right() - 17, page.top() + 3, 14, 14)
+            painter.fillRect(spot.adjusted(-1, -1, 1, 1), QColor(255, 255, 255, 220))
+            painter.drawPixmap(spot, mark)
         # the number (and the label), and under it the scale: centred
         ink = index.data(Qt.ForegroundRole)
         painter.setPen(ink.color() if hasattr(ink, "color") else QColor(colours["ink"]))
@@ -383,6 +426,14 @@ class PageListWidget(QListWidget):
         if event.type() in (QEvent.FontChange, QEvent.StyleChange):
             self.relayout()
 
+    def shown_count(self) -> int:
+        """How many thumbnails are showing: a workbook shown as one entry
+        hides the rest of its pages."""
+        return sum(1 for row in range(self.count()) if not self.isRowHidden(row))
+
+    def shown_rows(self) -> list:
+        return [row for row in range(self.count()) if not self.isRowHidden(row)]
+
     def scroll_bar_width(self) -> int:
         return max(self.verticalScrollBar().sizeHint().width(), 1)
 
@@ -418,13 +469,14 @@ class PageListWidget(QListWidget):
             # viewport itself catches up with a change of policy later
             margins = self.viewportMargins()
             across = self.contentsRect().width() - margins.left() - margins.right()
-            columns, share = self.columns_for(across, cell.width(), self.count())
-            rows = -(-self.count() // columns)
+            shown = self.shown_count()
+            columns, share = self.columns_for(across, cell.width(), shown)
+            rows = -(-shown // columns)
             tall = self.contentsRect().height() - margins.top() - margins.bottom()
-            scrolls = self.count() > 0 and rows * cell.height() > tall
+            scrolls = shown > 0 and rows * cell.height() > tall
             if scrolls:
                 columns, share = self.columns_for(across - self.scroll_bar_width(),
-                                                  cell.width(), self.count())
+                                                  cell.width(), shown)
             self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn if scrolls
                                             else Qt.ScrollBarAlwaysOff)
             grid = QSize(share, cell.height())
@@ -466,6 +518,8 @@ class PageListWidget(QListWidget):
         page covering where it is going, and not Qt's no-entry cross over the
         strip it is being dragged along (the user, 2026-10-05)."""
         rows = sorted(self.row(entry) for entry in self.selectedItems())
+        if self.picked is not None:
+            rows = self.picked()          # a workbook's entry: all its pages
         if not rows and self.currentRow() >= 0:
             rows = [self.currentRow()]
         if not rows:
@@ -486,6 +540,9 @@ class PageListWidget(QListWidget):
             self.set_external_drop_row(None)
 
     dragging_rows = None
+    #: The pages picked out, a workbook's entry standing for all its pages
+    #: (PagesPanel.picked_rows).
+    picked = None
 
     @staticmethod
     def _drag_picture(count: int, ratio: float = 1.0) -> QPixmap:
@@ -528,25 +585,27 @@ class PageListWidget(QListWidget):
 
     def uses_horizontal_slots(self) -> bool:
         """Whether successive thumbnails currently share a visual row."""
-        if self.count() > 1:
-            first = self.visualItemRect(self.item(0))
-            second = self.visualItemRect(self.item(1))
+        shown = self.shown_rows()
+        if len(shown) > 1:
+            first = self.visualItemRect(self.item(shown[0]))
+            second = self.visualItemRect(self.item(shown[1]))
             return abs(first.center().y() - second.center().y()) < \
                 max(first.height(), second.height()) / 2
         return self.viewport().width() >= self.CELL_WIDTH * 2
 
     def drop_indicator_line(self, row: int):
         """The visible slot for an external page drop, in viewport pixels."""
-        if not self.count():
+        shown = self.shown_rows()
+        if not shown:
             return QPointF(6, 6), QPointF(max(self.viewport().width() - 6, 6), 6)
+        # the slot in front of *row*: the first thumbnail showing from there
+        # (a workbook's hidden pages are behind its entry)
+        ahead = next((r for r in shown if r >= row), None)
+        reference = self.visualItemRect(self.item(ahead if ahead is not None else shown[-1]))
         if not self.uses_horizontal_slots():
-            reference = self.visualItemRect(
-                self.item(row if row < self.count() else self.count() - 1))
-            y = reference.top() if row < self.count() else reference.bottom()
+            y = reference.top() if ahead is not None else reference.bottom()
             return QPointF(reference.left() + 3, y), QPointF(reference.right() - 3, y)
-        reference = self.visualItemRect(
-            self.item(row if row < self.count() else self.count() - 1))
-        x = reference.left() if row < self.count() else reference.right()
+        x = reference.left() if ahead is not None else reference.right()
         return QPointF(x, reference.top() + 3), QPointF(x, reference.bottom() - 3)
 
     def paintEvent(self, event) -> None:
@@ -670,6 +729,12 @@ class PagesPanel(QWidget):
             self._button_icons[button] = picture
 
         self.list = PageListWidget()
+        #: The workbooks shown page by page (by key); the rest are one entry.
+        self.expanded: set = set()
+        #: The workbooks whose entry the reader picked (it stands for all its pages).
+        self._section_pick: set = set()
+        self.list.picked = self.picked_rows
+        self.list.itemSelectionChanged.connect(self._picked_in_strip)
         self.list.scale = self._remembered_scale()
         self.list.zoomed.connect(self.set_thumbnail_scale)
         # Sheets are drawn as they are scrolled to rather than all at once.
@@ -873,10 +938,13 @@ class PagesPanel(QWidget):
             after = (position.x() > box.center().x()
                      if self.list.uses_horizontal_slots()
                      else position.y() > box.center().y())
+            section = self._collapsed.get(row)
+            if after and section is not None:
+                return section.last + 1     # after a workbook shown as one: after all of it
             return row + int(after)
         # In the gaps, find the first visual centre after the pointer rather
         # than treating every empty pixel as the end of the document.
-        for row in range(self.list.count()):
+        for row in self.list.shown_rows():
             box = self.list.visualItemRect(self.list.item(row))
             if position.y() < box.top():
                 return row
@@ -1057,6 +1125,17 @@ class PagesPanel(QWidget):
                 return True
         if watched is self.list.viewport():
             kind = event.type()
+            if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton \
+                    and not event.modifiers():
+                point = event.position().toPoint()
+                entry = self.list.itemAt(point)
+                row = self.list.row(entry) if entry is not None else -1
+                section = self.section_at(row)
+                if section is not None and row == section.first \
+                        and self.list.delegate.toggle_rect(
+                            self.list.visualItemRect(entry)).contains(point):
+                    self.toggle_section(row)    # its name: show or hide its pages
+                    return True
             if kind == QEvent.MouseMove:
                 self._hover_row = self.drop_row(event.position().toPoint())
                 self.list.set_external_drop_row(
@@ -1117,6 +1196,9 @@ class PagesPanel(QWidget):
             self.list.clearSelection()
             entry.setSelected(True)
             self.list.setCurrentItem(entry)
+        if index in self._collapsed:
+            # a workbook's entry right-clicked: the menu is about all its pages
+            self._section_pick.add(self._collapsed[index].key)
         menu = self.window.page_menu(index)
         menu.exec(self.list.viewport().mapToGlobal(point))
 
@@ -1139,11 +1221,25 @@ class PagesPanel(QWidget):
         pages (the user, 2026-10-17); one page picked follows the view."""
         listed = self.list
         entry = listed.item(row)
+        shown = self.shown_row(row)
         if entry is not None:
-            listed.set_in_view(row)      # the outline goes where the reader is
+            listed.set_in_view(shown)    # the outline goes where the reader is
         if entry is None or self._following_the_strip:
             return                      # the strip itself chose it: as it chose
         from PySide6.QtCore import QItemSelectionModel
+        if shown != row:
+            # a page of a workbook shown as one entry: the entry is outlined;
+            # a run (or the workbook) picked out stays picked while scrolling,
+            # and going to the page picks nothing (it is not the workbook)
+            if keep_run and listed.selectedItems():
+                return
+            was = listed.blockSignals(True)
+            listed.clearSelection()
+            listed.selectionModel().setCurrentIndex(listed.indexFromItem(listed.item(shown)),
+                                                    QItemSelectionModel.NoUpdate)
+            listed.blockSignals(was)
+            self._section_pick.clear()
+            return
         index = listed.indexFromItem(entry)
         run = keep_run and len(listed.selectedItems()) > 1
         if entry.isSelected() or run:
@@ -1152,6 +1248,7 @@ class PagesPanel(QWidget):
             flags = QItemSelectionModel.NoUpdate
         else:
             flags = QItemSelectionModel.ClearAndSelect
+            self._section_pick.clear()  # gone to its first page, not picked
         was = listed.blockSignals(True)
         listed.selectionModel().setCurrentIndex(index, flags)
         listed.blockSignals(was)
@@ -1228,13 +1325,156 @@ class PagesPanel(QWidget):
                 tip += "\nExcluded from print and export"
             entry.setToolTip(f"{tip}\n{page.setup.size_name} {page.setup.orientation}"
                              f"\nScale {page.scale.label}")
+            entry.setData(NO_PRINT_ROLE, 0 if page.printable else 2)
             self.list.addItem(entry)
+        if self._sections_in(document):
+            lines = 2                        # a workbook's name over its pages
         self.list.caption_lines = lines
         self.list.relayout()                 # the rows the pages now need
-        self.list.setCurrentRow(current)
-        self.list.in_view_row = current
+        shown = self.shown_row(current)
+        if shown != current:
+            from PySide6.QtCore import QItemSelectionModel
+            self.list.selectionModel().setCurrentIndex(
+                self.list.model().index(shown, 0), QItemSelectionModel.NoUpdate)
+        else:
+            self.list.setCurrentRow(current)
+        self.list.in_view_row = shown
         self._suppress = False
         self._draw_what_is_on_screen()
+
+    # -- workbooks: one entry each, its pages shown on asking ----------------------
+    def _sections_in(self, document) -> list:
+        """Mark each workbook in the strip (the user, 2026-10-21: "treat
+        spreadsheet workbooks as a section ... shown in the thumbnail too
+        instead of individual pages"): its first page's thumbnail is its
+        entry, "▸ Loads" over "pages 2–10", on a stack of sheets, and its
+        other pages are hidden behind it until it is expanded (collapsed to
+        start, so a long workbook doesn't push the drawings out of sight).
+        The page numbers stay the document's."""
+        from .sheetpages import sections
+        found = sections(document, fresh=True)
+        self._collapsed = {}
+        self._hidden = {}
+        self._members = {}
+        listed = self.list
+        keys = {section.key for section in found}
+        self.expanded &= keys
+        self._section_pick &= keys
+        for section in found:
+            collapsed = section.key not in self.expanded
+            pages = [document.pages[i] for i in section.pages]
+            printing = sum(1 for page in pages if page.printable)
+            silent = 0 if printing == len(pages) else (2 if printing == 0 else 1)
+            for row in section.pages:
+                self._members[row] = section
+                entry = listed.item(row)
+                if entry is None:
+                    continue
+                head = row == section.first
+                entry.setData(SECTION_ROLE, {"head": head, "collapsed": collapsed and head,
+                                             "member": not collapsed, "key": section.key})
+                listed.setRowHidden(row, collapsed and not head)
+                if collapsed and not head:
+                    self._hidden[row] = section
+            head = listed.item(section.first)
+            if head is None:
+                continue
+            sheets = ", ".join(section._names)
+            if collapsed:
+                self._collapsed[section.first] = section
+                head.setText(f"▸ {section.name}\n{section.page_range()}")
+                head.setData(NO_PRINT_ROLE, silent)
+                if silent == 2:
+                    head.setForeground(QColor("#8b929c"))
+                else:
+                    head.setData(Qt.ForegroundRole, None)
+                said = {0: "", 1: f"\n{len(pages) - printing} of its {len(pages)} pages "
+                        "don't print", 2: "\nIt doesn't print"}[silent]
+                head.setToolTip(f"{section.label()}\nSheets: {sheets}{said}\n"
+                                "Click the picture to go to it; click its name to show "
+                                "its pages")
+            else:
+                number = head.text().split("\n")
+                head.setText(f"▾ {section.name}\n{number[0]}")
+                head.setToolTip(f"{section.label()}\nSheets: {sheets}\n"
+                                "Click its name to show it as one entry\n" + head.toolTip())
+        return found
+
+    _collapsed: dict = {}
+    _hidden: dict = {}
+    _members: dict = {}
+
+    def shown_row(self, row: int) -> int:
+        """The thumbnail that shows page *row*: its workbook's entry when
+        its pages are hidden behind it."""
+        section = self._hidden.get(row)
+        return section.first if section is not None else row
+
+    def section_at(self, row: int):
+        """The workbook page *row* is a page of, as the strip shows it."""
+        return self._members.get(row)
+
+    def is_collapsed(self, key: str) -> bool:
+        return key not in self.expanded
+
+    def set_expanded(self, key: str, on: bool) -> None:
+        """Show a workbook's pages one by one (or as one entry again)."""
+        if on == (key in self.expanded):
+            return
+        picked = self.picked_rows()
+        if on:
+            self.expanded.add(key)
+        else:
+            self.expanded.discard(key)
+        self._section_pick.discard(key)
+        document = getattr(self.window, "document", None)
+        if document is not None:
+            self.rebuild(document, getattr(self.window, "current_index", 0))
+            self.pick([row for row in picked if not self.list.isRowHidden(row)])
+
+    def toggle_section(self, row: int) -> None:
+        section = self.section_at(row)
+        if section is not None:
+            self.set_expanded(section.key, self.is_collapsed(section.key))
+
+    def add_section_entries(self, menu: QMenu, index: int) -> None:
+        """A page of a workbook's menu: Expand Section (its pages one by one
+        in Thumbnails) or Collapse Section (one entry again)."""
+        from .sheetpages import section_of
+        document = getattr(self.window, "document", None)
+        section = section_of(document, index) if document is not None else None
+        if section is None:
+            return
+        if self.is_collapsed(section.key):
+            entry = menu.addAction("Expand Section",
+                                   lambda: self.set_expanded(section.key, True))
+            entry.setToolTip(f"Show {section.label()} page by page in Thumbnails")
+        else:
+            entry = menu.addAction("Collapse Section",
+                                   lambda: self.set_expanded(section.key, False))
+            entry.setToolTip(f"Show {section.label()} as one entry in Thumbnails")
+
+    def picked_rows(self) -> list:
+        """The pages picked out: a workbook's entry, picked in the strip,
+        is all its pages (deleted, moved, copied or extracted together)."""
+        rows = sorted(self.list.row(entry) for entry in self.list.selectedItems())
+        out = []
+        for row in rows:
+            section = self._collapsed.get(row)
+            if section is not None and section.key in self._section_pick:
+                out.extend(section.pages)
+            else:
+                out.append(row)
+        return sorted(set(out))
+
+    def _picked_in_strip(self) -> None:
+        """The reader picked thumbnails: a workbook's entry among them is
+        the workbook."""
+        if self._suppress:
+            return
+        self._section_pick = {self._collapsed[self.list.row(entry)].key
+                              for entry in self.list.selectedItems()
+                              if self.list.row(entry) in self._collapsed}
 
     def _placeholder(self, page, document) -> QIcon:
         """A row's picture until it is in view: a PDF page's small sheet if
@@ -1265,8 +1505,8 @@ class PagesPanel(QWidget):
             if not 0 <= index < len(document.pages):
                 break
             entry = self.list.item(index)
-            if entry is None:
-                continue
+            if entry is None or self.list.isRowHidden(index):
+                continue                 # a workbook's pages behind its entry
             # A row well below the fold is not worth a render yet. The margin
             # is a screenful, so scrolling lands on sheets already drawn.
             box = self.list.visualItemRect(entry)

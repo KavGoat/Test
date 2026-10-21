@@ -579,9 +579,14 @@ class TableEditing:
             scene = view.scene()
             wanted = scene is not None and any(isinstance(i, TableItem) for i in scene.selectedItems())
         if not wanted and window is not None and getattr(window, "document", None) is not None:
-            pages = window.document.pages
-            index = getattr(window, "current_index", 0)
-            wanted = 0 <= index < len(pages) and pages[index].sheet is not None
+            tabs = getattr(window, "sheet_tabs", None)
+            if tabs is not None and getattr(window, "view", None) is view:
+                # the spreadsheet view: a workbook in view (sheettabs.py)
+                wanted = tabs.in_view()
+            else:
+                pages = window.document.pages
+                index = getattr(window, "current_index", 0)
+                wanted = 0 <= index < len(pages) and pages[index].sheet is not None
         if self.item is None:
             bar.name.clear()
             bar.edit.clear()

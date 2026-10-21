@@ -62,6 +62,13 @@ def record_bytes(document, facts: Optional[dict] = None) -> bytes:
                             if not key.startswith("_")}
         itself = set(facts.get("itself", ()))
         assets = {key: value for key, value in assets.items() if key not in itself}
+        held = set(facts.get("held_back", ()))
+        for page in data.get("pages", []):
+            if page.get("uid") in held and page.get("pdf_key") in itself:
+                # a page held back stood on this file's page, which it no
+                # longer has: it is CalcForge's own page again
+                page["pdf_key"] = None
+                page["pdf_page_index"] = None
         prints = facts.get("_prints", {})
         written = facts.get("_ours", {})
         for page in data.get("pages", []):
@@ -160,12 +167,34 @@ def write(document, path: str, appearance: bool = True) -> str:
     return note
 
 
+def held_back(document) -> list:
+    """The pages not written as pages of the saved PDF: a spreadsheet's
+    pages that don't print (the user, 2026-10-21: a sheet marked Don't
+    Print). Other readers — Acrobat, Revu, a browser — then neither show nor
+    print them, where an optional content group set not to print would still
+    print each as a blank sheet; CalcForge's record keeps them whole, and
+    they come back where they were when the file is opened here. Pages that
+    came from somebody's PDF are always written (the file is their copy), and
+    a file must have a page, so a document whose every page would be held
+    back is written whole."""
+    held = [page for page in document.pages
+            if getattr(page, "sheet", None) is not None and not page.printable]
+    return held if len(held) < len(document.pages) else []
+
+
 def _assemble(document, path: str, appearance: bool = True) -> None:
     """Build the file page by page, from whatever each page came from, in
     memory, and write it once."""
     import pymupdf
 
     from . import calclayer
+
+    held = held_back(document)
+    if held:
+        gone = {id(page) for page in held}
+        written = [page for page in document.pages if id(page) not in gone]
+    else:
+        written = list(document.pages)
 
     output = pymupdf.open()
     sources: dict[str, object] = {}       # the PDFs pages are coming from
@@ -178,7 +207,7 @@ def _assemble(document, path: str, appearance: bool = True) -> None:
     appearances = None
     carried: set = set()                  # pages that kept their annotations
     try:
-        whole = _one_source_whole(document)
+        whole = _one_source_whole(document, written)
         if whole is not None:
             # Every page is a page of one PDF at its own size: that PDF is
             # copied and its pages picked out, rather than each page grafted
@@ -189,31 +218,35 @@ def _assemble(document, path: str, appearance: bool = True) -> None:
             output = engine.open_bytes(document.asset(key))
             sources[key] = engine.open_bytes(document.asset(key))
             output.select(wanted)
-            for index, page in enumerate(document.pages):
+            for index, page in enumerate(written):
                 _drop_the_ones_taken_over(output[index], page)
                 carried.add(page.uid)
         else:
-            for page in document.pages:
+            for page in written:
                 if _add_page_body(output, document, page, sources):
                     carried.add(page.uid)
-        for index, page in enumerate(document.pages):
+        for index, page in enumerate(written):
             calclayer.mark_page(output, index, page.uid)
         layers: dict = {}
         if appearance:
-            _draw_a_layer(output, document, leftovers, opened, calclayer.SHEET)
-            layers = _draw_a_layer(output, document, leftovers, opened, calclayer.CALC)
+            _draw_a_layer(output, document, leftovers, opened, calclayer.SHEET, written)
+            layers = _draw_a_layer(output, document, leftovers, opened, calclayer.CALC,
+                                   written)
             # The markups go in as real annotations, not as ink on the page.
             # A saved document is a PDF that anybody can open, and a markup
             # that cannot be picked up in the editor it is opened in is a
             # picture of a markup. The record is still what this application
             # reads back.
-            appearances = _place_the_markups(output, document, carried, opened)
+            appearances = _place_the_markups(output, document, carried, opened, written)
             from .export import outline_and_links
             from . import pdflinks
-            outline, links = outline_and_links(document, _drawn_pages(document))
+            outline, links = outline_and_links(
+                document, [page for page in written if page.frame is not None])
             pdflinks._set_outline(output, outline)
             pdflinks._add_links(output, links)
         facts = _file_facts(document, sources, carried, layers, output)
+        if held:
+            facts["held_back"] = [page.uid for page in held]
         engine.embed(output, RECORD_ENTRY, record_bytes(document, facts))
         output.set_metadata(pdf_properties(document))
         engine.save_as(output, path, also=tuple(opened))
@@ -231,17 +264,18 @@ def _assemble(document, path: str, appearance: bool = True) -> None:
             _throw_away(scratch)
 
 
-def _one_source_whole(document):
-    """(key, page numbers) when every page is a page of one PDF at its own
-    size, else None."""
-    if not document.pages:
+def _one_source_whole(document, pages: Optional[list] = None):
+    """(key, page numbers) when every page (of *pages*, the ones written) is
+    a page of one PDF at its own size, else None."""
+    pages = document.pages if pages is None else pages
+    if not pages:
         return None
-    key = document.pages[0].pdf_key
+    key = pages[0].pdf_key
     data = document.asset(key)
     if not key or not data:
         return None
     wanted = []
-    for page in document.pages:
+    for page in pages:
         if page.pdf_key != key or page.pdf_page_index is None:
             return None
         wanted.append(int(page.pdf_page_index))
@@ -250,7 +284,7 @@ def _one_source_whole(document):
     except PdfError:
         return None
     try:
-        for page, index in zip(document.pages, wanted):
+        for page, index in zip(pages, wanted):
             if not 0 <= index < source.page_count:
                 return None
             across, down = engine.page_size(source, index)
@@ -314,11 +348,13 @@ def _ours_written(output) -> dict:
     return found
 
 
-def _place_the_markups(output, document, carried: set, opened: list):
+def _place_the_markups(output, document, carried: set, opened: list,
+                       pages: Optional[list] = None):
     """Every markup that is not already its own annotation, as one of ours."""
     from . import annotate
 
-    appearances = annotate.markups_to_place(document, document.pages, carried)
+    appearances = annotate.markups_to_place(
+        document, document.pages if pages is None else pages, carried)
     if not appearances.entries:
         return appearances
     try:
@@ -423,7 +459,7 @@ def _drawn_pages(document) -> list:
 
 
 def _draw_a_layer(output, document, leftovers: list, opened: list,
-                  kind: str) -> dict:
+                  kind: str, pages: Optional[list] = None) -> dict:
     """Paint one of CalcForge's layers onto the pages, tagged as such.
 
     The sheet (``SHEET``) is everything but the markups and the equations:
@@ -440,7 +476,8 @@ def _draw_a_layer(output, document, leftovers: list, opened: list,
     """
     from . import calclayer
 
-    drawn = _drawn_pages(document)
+    written = document.pages if pages is None else pages
+    drawn = [page for page in written if page.frame is not None]
     if kind == calclayer.CALC:
         drawn = [page for page in drawn
                  if getattr(page, "sheet", None) is not None
@@ -458,7 +495,7 @@ def _draw_a_layer(output, document, leftovers: list, opened: list,
         opened.append(overlay)
         if overlay.page_count != len(drawn):
             return {}
-        where = {id(page): index for index, page in enumerate(document.pages)}
+        where = {id(page): index for index, page in enumerate(written)}
         for offset, page in enumerate(drawn):
             index = where.get(id(page))
             if index is None or not 0 <= index < output.page_count:
@@ -614,6 +651,10 @@ def _take_the_file_back(document, data: bytes, record: dict, assets: dict) -> No
         signed = calclayer.is_signed(source)
         record_pages = {page.get("uid"): page for page in record.get("pages", [])}
         record_order = [page.get("uid") for page in record.get("pages", [])]
+        # a spreadsheet's pages that don't print were not written as pages
+        # (held_back): they come back from the record, where they were
+        kept_back = [record_pages.pop(uid) for uid in facts.get("held_back") or ()
+                     if uid in record_pages]
         key = f"asset_{uuid.uuid4().hex[:12]}.pdf"
         pages: list = []
         changed: list = []
@@ -654,6 +695,15 @@ def _take_the_file_back(document, data: bytes, record: dict, assets: dict) -> No
     for index, (numbers, replaced) in foreign.items():
         _read_their_markups(document, cleaned, index, pages[index], numbers, assets,
                             replaced)
+    for page in sorted(kept_back, key=lambda p: record_order.index(p.get("uid"))):
+        at = record_order.index(page.get("uid"))
+        placed = {other.get("uid"): k for k, other in enumerate(pages)}
+        before = next((placed[uid] for uid in reversed(record_order[:at]) if uid in placed), -1)
+        for payload in _payloads(page.get("items", [])):
+            payload.pop("annotation_print", None)     # (only a written page's are read)
+            payload.pop("written_print", None)
+        page.pop("markup_prints", None)
+        pages.insert(before + 1, page)
     gone = list(record_pages.values())
     # What was deleted, as it was saved here, for Restore — taken before a
     # spreadsheet's cells are moved off its deleted first page below

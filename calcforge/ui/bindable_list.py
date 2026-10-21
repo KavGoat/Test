@@ -421,6 +421,9 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'print.advanced_cancel': ('Advanced Printing: Cancel', 'File', 'always'),
     'page.include_in_print_export': ('Include Page in Print & Export', 'Pages', 'always'),
     'page.go_to_page': ('Go to Page', 'Pages', 'always'),
+    # a workbook's pages in Thumbnails: one entry, or page by page
+    'page.expand_section': ('Expand Workbook Section in Thumbnails', 'Pages', 'always'),
+    'page.collapse_section': ('Collapse Workbook Section in Thumbnails', 'Pages', 'always'),
     'page.calc_section_break_above_this_page':
         ('Calc Section Break Above This Page', 'Pages', 'always'),
     'page.page_grid': ('Page Grid (this page)', 'Pages', 'always'),
@@ -822,6 +825,8 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'sheettab.go_to': ('Sheet tab: Go To', 'Spreadsheet', 'table'),
     # an imported Excel workbook's names its own, or document variables
     'sheettab.self_contained': ('Sheet tab: Self-contained', 'Spreadsheet', 'table'),
+    # Print / Don't Print for a sheet (its pages left out of print and export)
+    'sheettab.print': ('Sheet tab: Print (or Don\'t Print)', 'Spreadsheet', 'table'),
     # -- properties ------------------------------------------------------------
     'properties.document_default': ('Properties: Document default', 'Markup', 'always'),
     # Revu's Edit beside Show Caption: the caption's values and label
