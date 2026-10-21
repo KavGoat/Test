@@ -919,16 +919,50 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
         _glyph(painter, name[:2].upper(), INK, 8)
 
 
-def cursor_pixmap(name: str, size: int = 24) -> QPixmap:
-    """The same drawing an icon uses, as a pixmap for a cursor."""
-    pixmap = QPixmap(size, size)
+def cursor_pixmap(name: str, size: int = 24, ratio: float = 1.0) -> QPixmap:
+    """The same drawing an icon uses, as a pixmap for a cursor.
+
+    A pointer is seen over the page, which is white in either theme, and
+    over drawings, which may be dark — never over the toolbar the icon was
+    tinted for. So it is drawn in the light theme's dark inks whatever the
+    theme (in the dark theme's inks the Cloud tool's pointer was white on the
+    white page: the user, 2026-10-21), with a white edge round it to read
+    over dark ink. *ratio* is the screen's pixel ratio, so it is crisp there.
+    """
+    ratio = max(float(ratio), 1.0)
+    side = round(size * ratio)
+    drawing = QPixmap(side, side)
+    drawing.fill(Qt.transparent)
+    was = _theme
+    _apply_inks("light")
+    try:
+        painter = QPainter(drawing)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.scale(side / 24.0, side / 24.0)
+        painter.setBrush(Qt.NoBrush)
+        _draw(name, painter)
+        painter.end()
+    finally:
+        _apply_inks(was)
+    # the white edge: the drawing's shape in white, a device pixel or so round
+    white = QPixmap(drawing.size())
+    white.fill(Qt.transparent)
+    tint = QPainter(white)
+    tint.drawPixmap(0, 0, drawing)
+    tint.setCompositionMode(QPainter.CompositionMode_SourceIn)
+    tint.fillRect(white.rect(), QColor("#ffffff"))
+    tint.end()
+    reach = max(1, round(ratio))
+    pixmap = QPixmap(drawing.size())
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    painter.scale(size / 24.0, size / 24.0)
-    painter.setBrush(Qt.NoBrush)
-    _draw(name, painter)
+    for dx in range(-reach, reach + 1):
+        for dy in range(-reach, reach + 1):
+            if dx or dy:
+                painter.drawPixmap(dx, dy, white)
+    painter.drawPixmap(0, 0, drawing)
     painter.end()
+    pixmap.setDevicePixelRatio(ratio)
     return pixmap
 
 

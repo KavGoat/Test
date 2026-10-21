@@ -137,6 +137,11 @@ def badge_pixmap(badge: str, ratio: float = 1.0) -> QPixmap:
     return pixmap
 
 
+def screen_ratio() -> float:
+    """The main screen's pixel ratio, for a cursor drawn crisp on it."""
+    return _ratio()
+
+
 def _ratio() -> float:
     screen = QGuiApplication.primaryScreen()
     return screen.devicePixelRatio() if screen is not None else 1.0
