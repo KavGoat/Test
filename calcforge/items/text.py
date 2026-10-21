@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
 
 from ..core.typography import PAGE_HINTING, PAGE_TEXT
 from ..ui.markuplayer import align_with_squares, paint_words
-from .base import CLOUD_SIZE, HANDLE_SIZE, MarkupItem, Style, draw_head, register_item
+from .base import (CLOUD_SIZE, HANDLE_SIZE, MarkupItem, Style, crisp_strokes, draw_head,
+                   register_item)
 
 STAMP_PRESETS = {
     "APPROVED": "#2f9e44",
@@ -1554,6 +1555,7 @@ class TextItem(_TextBase):
         elif self.style.corner_radius > 0:
             painter.drawRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
         else:
+            crisp_strokes(painter)               # sharp zoomed out (base)
             painter.drawRect(rect)
         self.paint_text(painter)
 
@@ -1792,6 +1794,8 @@ class CalloutItem(_TextBase):
                                    self.style.corner_radius)
             draw(painter, outline, self.style)
         else:
+            if self.style.corner_radius <= 0:
+                crisp_strokes(painter)           # sharp zoomed out (base)
             painter.drawRoundedRect(rect, self.style.corner_radius,
                                     self.style.corner_radius)
         self.paint_text(painter)

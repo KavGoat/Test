@@ -199,24 +199,31 @@ def _on_a_screen_page(item) -> bool:
     return layer is not None and layer._on_screen()
 
 
+#: Zoomed out on screen, a markup's lines are drawn sharp: no thinner than
+#: one device pixel, thin ones a whole number of pixels wide, and straight
+#: ones without smoothing (items/base.crisp_strokes), so each is one solid
+#: dark row of pixels. Smoothed at a pixel and a bit like the drawing's
+#: (pdf/engine.ZOOMED_OUT_LINE_PIXELS), a markup's line was soft-edged; the
+#: user wanted markups crisp and the drawing soft (2026-10-21: "maybe markups
+#: don't fuzzy at all?"). Curves keep their smoothing, a pixel wide at least.
+MARKUP_LINE_PIXELS = 1.0
+
+
 def thinnest_line(painter: QPainter, item) -> float:
-    """The thinnest *item*'s lines are drawn through *painter*, in the
-    painter's present units: on screen and zoomed out, the drawing's own
-    thinnest line (pdf/engine.thinnest_line), so a markup's hairline is as
-    clear as the drawing's beside it — a faint grey thread it was, zoomed
-    out, beside the drawing's dark ones (the user, 2026-10-21). Nothing in a
-    print, an export, or from 100 % up."""
-    from ..pdf.engine import MIN_LINE_PIXELS, thinnest_line as drawing_thinnest
+    """One device pixel in *painter*'s present units, while *item* is drawn on
+    screen zoomed out (below 100 %): the thinnest its lines are drawn, and
+    the unit they are made whole pixels of. Nothing (0) in a print, an
+    export, or from 100 % up."""
+    from ..pdf.engine import ZOOMED_OUT_BELOW
 
     engine = painter.paintEngine()
     if engine is None or engine.type() not in _SCREEN_ENGINES:
         return 0.0
     device = painter.deviceTransform()
     scale = math.sqrt(abs(device.m11() * device.m22() - device.m12() * device.m21()))
-    pixels = drawing_thinnest(scale)
-    if scale <= 0 or pixels <= MIN_LINE_PIXELS or not _on_a_screen_page(item):
+    if scale <= 0 or scale >= ZOOMED_OUT_BELOW - 1e-9 or not _on_a_screen_page(item):
         return 0.0
-    return pixels / scale
+    return MARKUP_LINE_PIXELS / scale
 
 
 def _whole(value: float) -> int:

@@ -266,14 +266,17 @@ class Style:
                 _PENS.clear()
             _PENS[key] = made
         pen = QPen(made)
-        floor = _THINNEST[0]
+        pixel = _THINNEST[0]
         width = pen.widthF()
-        if floor > width and self.width > 0:
-            # on screen, zoomed out: no thinner than the drawing's own lines
-            # (ui/markuplayer.thinnest_line), its dashes as long as they were
-            pen.setWidthF(floor)
-            if pen.style() == Qt.CustomDashLine:
-                pen.setDashPattern([step * width / floor for step in pen.dashPattern()])
+        if pixel > 0 and self.width > 0:
+            # on screen, zoomed out: sharp — a whole number of pixels wide,
+            # one at least (ui/markuplayer.thinnest_line), dashes as long
+            pixels = width / pixel
+            if pixels < WHOLE_PIXELS_BELOW:
+                sharp = max(round(pixels), 1) * pixel
+                pen.setWidthF(sharp)
+                if pen.style() == Qt.CustomDashLine:
+                    pen.setDashPattern([step * width / sharp for step in pen.dashPattern()])
         return pen
 
     def _make_pen(self, scale: float) -> QPen:
@@ -2099,9 +2102,60 @@ def cloud_path(polygon: QPolygonF, radius: float, closed: bool = True,
 #: repaint and into every square it crosses.
 _CLOUDS: dict = {}
 _PENS: dict = {}
-#: the thinnest a markup's line is drawn just now, in its own units: set while
-#: it paints on screen zoomed out (MarkupItem.paint), else nothing
+#: one device pixel in a markup's own units while it paints on screen zoomed
+#: out (MarkupItem.paint, ui/markuplayer.thinnest_line), else nothing
 _THINNEST = [0.0]
+#: and lines narrower than this many pixels are drawn a whole number wide
+WHOLE_PIXELS_BELOW = 2.5
+
+
+def crisp_strokes(painter: QPainter, path: Optional[QPainterPath] = None) -> None:
+    """Lines about to be drawn with the painter's pen — a rectangle's sides,
+    or *path* — on screen zoomed out (ui/markuplayer.thinnest_line). Every
+    one running straight across or down the screen: drawn without smoothing,
+    so each lies on whole pixels, one solid row. A slanting line or a curve
+    keeps its smoothing (in steps it would look broken), as thick as the
+    drawing's own thinnest (pdf/engine.ZOOMED_OUT_LINE_PIXELS), so it is as
+    dark as a line of the drawing."""
+    pixel = _THINNEST[0]
+    if pixel <= 0:
+        return
+    device = painter.deviceTransform()
+    if path is None:
+        square = abs(device.m12()) <= 1e-9 and abs(device.m21()) <= 1e-9
+    else:
+        square = _square_to_the_screen(path, device)
+    if square:
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        return
+    from ..pdf.engine import ZOOMED_OUT_LINE_PIXELS
+
+    pen = painter.pen()
+    if pen.style() != Qt.NoPen and not pen.isCosmetic() \
+            and pen.widthF() < ZOOMED_OUT_LINE_PIXELS * pixel:
+        width = pen.widthF()
+        pen.setWidthF(ZOOMED_OUT_LINE_PIXELS * pixel)
+        if pen.style() == Qt.CustomDashLine and width > 0:
+            pen.setDashPattern([step * width / pen.widthF() for step in pen.dashPattern()])
+        painter.setPen(pen)
+
+
+def _square_to_the_screen(path: QPainterPath, device) -> bool:
+    """Whether *path* is straight lines only, each running across or down
+    the screen through *device* (to a twentieth of a pixel)."""
+    curve = QPainterPath.ElementType.CurveToElement
+    move = QPainterPath.ElementType.MoveToElement
+    last = None
+    for index in range(path.elementCount()):
+        element = path.elementAt(index)
+        if element.type == curve:
+            return False
+        here = device.map(QPointF(element.x, element.y))
+        if element.type != move and last is not None:
+            if abs(here.x() - last.x()) > 0.05 and abs(here.y() - last.y()) > 0.05:
+                return False
+        last = here
+    return True
 
 
 #: A PDF reader's cloudy border (Apache PDFBox's CloudyBorder, after
