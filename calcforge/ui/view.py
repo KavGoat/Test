@@ -89,17 +89,18 @@ def nearest_on_segment(start: QPointF, end: QPointF, point: QPointF) -> QPointF:
 
 
 def format_painter_cursor() -> QCursor:
-    """The paint-brush pointer shown while Format Painter holds a look."""
+    """The paint-brush pointer shown while Format Painter holds a look: dark
+    ink with a white edge (icons.cursor_pixmap), whatever the theme."""
     if "format_painter" not in _DRAWING_CURSORS:
         from . import icons
+        from .cursors import screen_ratio
 
-        pixmap = QPixmap(28, 28)
+        ratio = screen_ratio()
+        pixmap = QPixmap(round(28 * ratio), round(28 * ratio))
+        pixmap.setDevicePixelRatio(ratio)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        # A white halo so the brush reads on a dark drawing as well as paper.
-        halo = icons.cursor_pixmap("format_painter", 26)
-        painter.drawPixmap(1, 1, halo)
+        painter.drawPixmap(1, 1, icons.cursor_pixmap("format_painter", 26, ratio))
         painter.end()
         _DRAWING_CURSORS["format_painter"] = QCursor(pixmap, 3, 25)
     return _DRAWING_CURSORS["format_painter"]
@@ -154,12 +155,18 @@ def drawing_cursor(icon_name: str) -> QCursor:
     if icon_name in _DRAWING_CURSORS:
         return _DRAWING_CURSORS[icon_name]
     from . import icons
+    from .cursors import screen_ratio
 
-    pixmap = QPixmap(34, 34)
+    # the tool's drawing in dark ink with a white edge, whatever the theme
+    # (icons.cursor_pixmap), and a crosshair blue on white: both read on the
+    # white page and on a dark drawing
+    ratio = screen_ratio()
+    pixmap = QPixmap(round(34 * ratio), round(34 * ratio))
+    pixmap.setDevicePixelRatio(ratio)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing, True)
-    painter.drawPixmap(10, 0, icons.cursor_pixmap(icon_name, 22))
+    painter.drawPixmap(10, 0, icons.cursor_pixmap(icon_name, 22, ratio))
     for pen in (QPen(QColor("#ffffff"), 3.5),
                 QPen(QColor("#1971c2"), 1.4)):
         pen.setCapStyle(Qt.RoundCap)
@@ -291,30 +298,14 @@ def cloud_cursor() -> QCursor:
     global _CLOUD_CURSOR
     if _CLOUD_CURSOR is None:
         from . import icons
+        from .cursors import screen_ratio
 
-        pixmap = icons.cursor_pixmap("cloud", 24)
+        # dark ink with a white edge, whatever the theme: in the dark theme's
+        # light ink it vanished on the white page (the user, 2026-10-21)
+        pixmap = icons.cursor_pixmap("cloud", 24, screen_ratio())
         # Hot spot at the middle, because the cloud is drawn around the point.
         _CLOUD_CURSOR = QCursor(pixmap, 12, 12)
     return _CLOUD_CURSOR
-
-
-def _with_a_halo(pixmap: QPixmap) -> QPixmap:
-    """The drawing with a thin white edge round it, to read over dark ink."""
-    white = QPixmap(pixmap.size())
-    white.fill(Qt.transparent)
-    tint = QPainter(white)
-    tint.drawPixmap(0, 0, pixmap)
-    tint.setCompositionMode(QPainter.CompositionMode_SourceIn)
-    tint.fillRect(white.rect(), QColor("#ffffff"))
-    tint.end()
-    out = QPixmap(pixmap.size())
-    out.fill(Qt.transparent)
-    painter = QPainter(out)
-    for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)):
-        painter.drawPixmap(dx, dy, white)
-    painter.drawPixmap(0, 0, pixmap)
-    painter.end()
-    return out
 
 
 _ARROW_LEADER_CURSOR = None
@@ -330,9 +321,10 @@ def arrow_leader_cursor() -> QCursor:
     global _ARROW_LEADER_CURSOR
     if _ARROW_LEADER_CURSOR is None:
         from . import icons
+        from .cursors import screen_ratio
 
         size = 32
-        pixmap = _with_a_halo(icons.cursor_pixmap("callout", size))
+        pixmap = icons.cursor_pixmap("callout", size, screen_ratio())   # edged in white
         # The icon's arrowhead ends at (4, 20.5) of 24.
         _ARROW_LEADER_CURSOR = QCursor(pixmap, round(4 * size / 24), round(20.5 * size / 24))
     return _ARROW_LEADER_CURSOR
@@ -351,8 +343,9 @@ def cloud_callout_cursor() -> QCursor:
     global _CLOUD_CALLOUT_CURSOR
     if _CLOUD_CALLOUT_CURSOR is None:
         from . import icons
+        from .cursors import screen_ratio
 
-        pixmap = _with_a_halo(icons.cursor_pixmap("cloud_callout", 32))
+        pixmap = icons.cursor_pixmap("cloud_callout", 32, screen_ratio())   # edged in white
         # The icon's cloud sits at (1.5–13.5, 13–21.5) of 24: its middle.
         _CLOUD_CALLOUT_CURSOR = QCursor(pixmap, round(7.5 * 32 / 24), round(17.2 * 32 / 24))
     return _CLOUD_CALLOUT_CURSOR
