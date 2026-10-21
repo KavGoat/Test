@@ -1,16 +1,18 @@
 """Revu's select pointers: the arrow with a small sign at its lower right.
 
 The user's photos of Revu 21 (2026-10-20): over a selected markup the
-ordinary black arrow carries a small four-way move sign; with Shift over a
+ordinary arrow carries a small four-way move sign; with Shift over a
 side of a selected shape, a small thin "+". By the same pattern a "−" over a
 point a Shift-click takes out, a small arc where an Alt-click rounds a corner
 or bends a side, and a small boxed "+" where a Ctrl-drag copies. The sign says
 what a click (or, for move and copy, a drag) does from there; nothing is drawn
 on the canvas.
 
-Each is black with a white outline, so it reads on a dark drawing as well as
-on paper, and is drawn at the screen's own pixel ratio (100 %, 125 %, 150 %,
-200 %…) so it is crisp there rather than scaled up from a small picture.
+The arrow is the system's own white one outlined in black, so the pointer
+keeps its look as it gains a sign; the sign is black with a white outline,
+so it reads on a dark drawing as well as on paper. Each is drawn at the
+screen's own pixel ratio (100 %, 125 %, 150 %, 200 %…) so it is crisp there
+rather than scaled up from a small picture.
 """
 from __future__ import annotations
 
@@ -34,8 +36,8 @@ def arrow_path() -> QPainterPath:
     """The ordinary select arrow, tip at the hot spot, in logical pixels."""
     path = QPainterPath()
     x, y = HOT_SPOT
-    for px, py in ((0, 0), (0, 16.5), (4.0, 12.8), (6.8, 19.2), (9.4, 18.1),
-                   (6.7, 11.9), (11.7, 11.9)):
+    # on whole pixels, as the system's arrow: its outline one crisp pixel
+    for px, py in ((0, 0), (0, 16), (4, 12), (7, 19), (9, 18), (6, 11), (11, 11)):
         if px == 0 and py == 0:
             path.moveTo(x + px, y + py)
         else:
@@ -100,12 +102,16 @@ def badge_pixmap(badge: str, ratio: float = 1.0) -> QPixmap:
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing, True)
+    # the arrow as the system's own: white, outlined in black — the pointer
+    # is that arrow everywhere else, and turning black as it went over a
+    # markup was jarring (the user, 2026-10-20)
     arrow = arrow_path()
-    painter.setPen(QPen(_HALO, 2.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-    painter.setBrush(_INK)
+    painter.save()
+    painter.setRenderHint(QPainter.Antialiasing, False)
+    painter.setPen(QPen(_INK, 1.0, Qt.SolidLine, Qt.SquareCap, Qt.MiterJoin))
+    painter.setBrush(_HALO)
     painter.drawPath(arrow)
-    painter.setPen(Qt.NoPen)
-    painter.drawPath(arrow)
+    painter.restore()
     sign = badge_path(badge)
     heads = move_heads() if badge == MOVE else QPainterPath()
     painter.setBrush(Qt.NoBrush if badge != COPY else _HALO)
