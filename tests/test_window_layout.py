@@ -232,11 +232,13 @@ def _points(path: QPainterPath) -> list:
             for i in range(path.elementCount())]
 
 
-def _no_doubling_back(path: QPainterPath) -> None:
+def _no_doubling_back(path: QPainterPath, polygon: QPolygonF, radius: float) -> None:
     """Where one piece of the outline meets the next, the line may turn
-    sharply (a cusp, as Revu's scallops meet: CLOUD_SWEEP) but never back on
-    itself: a curl drawn backwards — the hook — turns it right round."""
-    from calcforge.items.base import CLOUD_SWEEP
+    sharply (a cusp), and it turns right round once per scallop, at the end
+    of the tail each tucks behind the one before — but nowhere else: a curl
+    drawn backwards (the hook, or the crossing tails of the corners and the
+    closing join of 14 Oct) turns it right round where it shows."""
+    from calcforge.items.base import _cloud_arcs
     pieces = []          # (start tangent, end tangent) of each piece
     for i in range(path.elementCount()):
         element = path.elementAt(i)
@@ -252,13 +254,17 @@ def _no_doubling_back(path: QPainterPath) -> None:
                 step = (element.x - p0.x, element.y - p0.y)
                 pieces.append((step, step))
     assert len(pieces) > 8
+    reversals = 0
     for (_s, came), (went, _e) in zip(pieces, pieces[1:] + pieces[:1]):
         dot = came[0] * went[0] + came[1] * went[1]
         size = math.hypot(*came) * math.hypot(*went)
         assert size > 0
         turn = math.degrees(math.acos(max(-1.0, min(1.0, dot / size))))
-        assert turn < math.degrees(CLOUD_SWEEP) + 1, \
-            f"the outline turns back on itself ({turn:.0f}°)"
+        if turn > 179:
+            reversals += 1
+        else:
+            assert turn < 150, f"the outline turns back on itself ({turn:.0f}°)"
+    assert reversals == len(_cloud_arcs(polygon, radius)), "one tail to each scallop"
 
 
 @pytest.mark.parametrize("rect", [QRectF(0, 0, 160, 100), QRectF(0, 0, 97, 61),
@@ -269,7 +275,7 @@ def test_a_cloud_closes_without_a_hook(rect):
     path = cloud_path(polygon, 10.25)
     points = _points(path)
     assert (points[0] - points[-1]).manhattanLength() < 1e-6
-    _no_doubling_back(path)
+    _no_doubling_back(path, polygon, 10.25)
 
 
 def test_a_dragged_cloud_closes_without_a_hook(window):
@@ -284,14 +290,20 @@ def test_a_dragged_cloud_closes_without_a_hook(window):
     path = cloud.hatch_region()
     points = _points(path)
     assert (points[0] - points[-1]).manhattanLength() < 1e-6
-    _no_doubling_back(path)
+    _no_doubling_back(path, QPolygonF([rect.topLeft(), rect.topRight(), rect.bottomRight(),
+                                       rect.bottomLeft()]), cloud.cloud_radius)
 
 
 def test_a_clouds_scallops_are_evenly_spaced():
     rect = QRectF(0, 0, 160, 100)
     path = cloud_path(QPolygonF([rect.topLeft(), rect.topRight(), rect.bottomRight(),
                                  rect.bottomLeft()]), 10.25)
-    # the cusps along the top, on it as Revu's are: every scallop the same width
-    top = sorted(p.x() for p in _points(path) if abs(p.y()) < 1e-6)
-    gaps = [b - a for a, b in zip(top, top[1:]) if b - a > 1]
-    assert gaps and max(gaps) - min(gaps) < 0.5
+    # the cusps along the top, where neighbouring circles cross: every
+    # scallop the same width
+    from calcforge.items.base import _cloud_arcs
+    centres = sorted(cx for cx, cy, *_rest in _cloud_arcs(
+        QPolygonF([rect.topLeft(), rect.topRight(), rect.bottomRight(),
+                   rect.bottomLeft()]), 10.25) if abs(cy) < 1e-6)
+    gaps = [b - a for a, b in zip(centres, centres[1:])]
+    assert gaps and max(gaps) - min(gaps) < 1e-6
+    assert path.boundingRect().contains(rect)

@@ -1,17 +1,18 @@
-"""Clouds drawn as Revu draws them, leaders that end on them, and Add Cloud
-Leader drawn by hand (the user, 2026-10-20, on Windows against Revu 21:
-"Cloud no longer looks like Bluebeam, in Cloud or Callout." "The cloud leader
-has issues where the line leader terminates inside the cloud, not on the
-edge." "Adding a cloud leader to an existing callout still placed a pre-sized
-box instead of letting me size it by hand.").
+"""Clouds drawn as Revu's look, leaders that end on them, and Add Cloud Leader
+drawn by hand (the user, 2026-10-20, on Windows against Revu 21: "Cloud no
+longer looks like Bluebeam, in Cloud or Callout." "The cloud leader has
+issues where the line leader terminates inside the cloud, not on the edge."
+"Adding a cloud leader to an existing callout still placed a pre-sized box
+instead of letting me size it by hand."; 2026-10-21, shown the clouds
+CalcForge has drawn: "B with the corners are better than that").
 
-Revu's revision cloud is a run of equal arcs along each side, standing on the
-side and bulging outward, neighbours meeting in a sharp cusp on the outline
-that points in; the first arc of a side starts at its corner and the last
-ends at the next. Since 2026-10-14 the scallops had been a PDF reader's
-cloudy border (PDFBox's, after Acrobat): shallow curls centred on the
-outline, their cusps out beyond it — a flatter cloud, drawn round an outline
-inside it, so a leader ended at the region's corner ended inside the cloud.
+B is fe32d28's cloud (14 Oct), a PDF reader's cloudy border (PDFBox's, after
+Acrobat): circles of the Size's radius centred on the outline, about 1.66
+radii apart, each scallop tucking its start behind the one before. Its
+corners and the join where it closed were untidy — a corner curl begun
+backwards and eased first scallops left tails crossing there. Now a scallop
+is centred on every corner, the rest are spread evenly along each side, and
+every scallop, the first and last included, is drawn by the same rule.
 """
 from __future__ import annotations
 
@@ -21,8 +22,8 @@ import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainterPath, QPolygonF
 
-from calcforge.items.base import (CLOUD_SWEEP, cloud_arcs_for, cloud_path,
-                                  cloud_radius_for)
+from calcforge.items.base import (CLOUD_PITCH, CLOUD_TAIL, _cloud_arcs, cloud_path,
+                                  cloud_radius_for, cloud_steps)
 from calcforge.items.shapes import RectItem
 from calcforge.items.text import CalloutItem
 from tests.test_markup_interaction_round6 import (click, drag, key, markups, move,
@@ -35,14 +36,8 @@ def _box(rect: QRectF) -> QPolygonF:
                       rect.bottomLeft()])
 
 
-def _cusps(path: QPainterPath) -> list:
-    """Where one scallop meets the next: the end of every second piece."""
-    points = [QPointF(path.elementAt(0).x, path.elementAt(0).y)]
-    for i in range(path.elementCount()):
-        if path.elementAt(i).type == QPainterPath.CurveToElement:
-            end = path.elementAt(i + 2)
-            points.append(QPointF(end.x, end.y))
-    return points[::2]
+def _poly(*points) -> QPolygonF:
+    return QPolygonF([QPointF(x, y) for x, y in points])
 
 
 def _distance_to_polygon_edge(point: QPointF, polygon: QPolygonF) -> float:
@@ -65,71 +60,148 @@ def _distance_to_path(point: QPointF, path: QPainterPath) -> float:
     return best
 
 
+def _on_screen(x, y) -> QPointF:
+    """A point worked out y up, as the cloud is, back on the page."""
+    return QPointF(x, -y)
+
+
+def _outline(arcs, steps=24) -> list:
+    """The visible line round the cloud, scallop by scallop from cusp to
+    cusp: a list of each scallop's points."""
+    scallops = []
+    for cx, cy, rho, start, sweep, _tail in arcs:
+        scallops.append([_on_screen(cx + rho * math.cos(start + sweep * k / steps),
+                                    cy + rho * math.sin(start + sweep * k / steps))
+                         for k in range(steps + 1)])
+    return scallops
+
+
+def _crosses(a, b, c, d) -> bool:
+    def side(p, q, r):
+        return (q.x() - p.x()) * (r.y() - p.y()) - (q.y() - p.y()) * (r.x() - p.x())
+    return (side(a, b, c) * side(a, b, d) < -1e-9) and (side(c, d, a) * side(c, d, b) < -1e-9)
+
+
+def _simple(scallops, reach, near=8) -> bool:
+    """Whether no scallop's line crosses another's within *near* of it
+    round the cloud (further off, only a cloud too narrow for its scallops
+    could), but where neighbours meet in their cusp."""
+    count = len(scallops)
+    for i in range(count):
+        for k in range(1, min(near, count - 1) + 1):
+            j = (i + k) % count
+            first, other = scallops[i], scallops[j]
+            if (first[len(first) // 2] - other[len(other) // 2]).manhattanLength() > 6 * reach:
+                continue                          # too far apart to meet
+            for m in range(len(first) - 1):
+                for n in range(len(other) - 1):
+                    if k == 1 and m == len(first) - 2 and n == 0:
+                        continue                  # their shared cusp
+                    if k == count - 1 and m == 0 and n == len(other) - 2:
+                        continue
+                    if _crosses(first[m], first[m + 1], other[n], other[n + 1]):
+                        return False
+    return True
+
+
+SIZES = [(1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (3.0, 2.0), (2.0, 4.0), (3.0, 4.0)]
+RECTS = [QRectF(0, 0, 160, 90), QRectF(0, 0, 97, 61), QRectF(0, 0, 300, 24),
+         QRectF(0, 0, 40, 220), QRectF(0, 0, 18, 14), QRectF(0, 0, 900, 600)]
+POLYGONS = {
+    "quad": _poly((0, 0), (150, 10), (120, 100), (20, 80)),
+    "sharp 30°": _poly((0, 0), (160, 0), (160 - 160 * math.cos(math.radians(30)),
+                                           160 * math.sin(math.radians(30)))),
+    "obtuse": _poly((0, 0), (120, -30), (240, 0), (240, 90), (0, 90)),
+    "notched": _poly((0, 0), (120, -20), (110, 100), (60, 50), (10, 100)),
+}
+
+
+def _shapes():
+    for rect in RECTS:
+        yield f"rect {rect.width():g}x{rect.height():g}", _box(rect)
+    yield from POLYGONS.items()
+
+
 # -- the cloud's shape -------------------------------------------------------
 
-@pytest.mark.parametrize("size, width", [(2.0, 1.0), (1.0, 1.0), (3.0, 2.0), (2.0, 4.0),
-                                         (0.5, 0.5)])
-@pytest.mark.parametrize("rect", [QRectF(0, 0, 160, 90), QRectF(0, 0, 97, 61),
-                                  QRectF(0, 0, 300, 24)])
-def test_scallops_stand_on_each_side_corner_to_corner(rect, size, width):
-    """Arcs per side as the Size and line width make them, equal along each
-    side, a cusp at every corner and between neighbours on the outline,
-    each arc bulging outward and no further than the scallop radius."""
+@pytest.mark.parametrize("size, width", SIZES)
+@pytest.mark.parametrize("rect", RECTS, ids=lambda r: f"{r.width():g}x{r.height():g}")
+def test_a_scallop_on_every_corner_and_the_rest_even(rect, size, width):
+    """B's scallops — the Size's radius, about 1.66 radii apart — centred on
+    each corner and spread evenly along each side, all the same on a side."""
     radius = cloud_radius_for(size, width)
-    polygon = _box(rect)
-    path = cloud_path(polygon, radius)
-    cusps = _cusps(path)
-    expected = 2 * (cloud_arcs_for(rect.width(), radius)
-                    + cloud_arcs_for(rect.height(), radius))
-    assert len(cusps) == expected + 1, "one cusp after each arc, back to the first"
-    assert (cusps[0] - cusps[-1]).manhattanLength() < 1e-6, "it closes where it began"
-    for cusp in cusps:
-        assert _distance_to_polygon_edge(cusp, polygon) < 1e-6, \
-            "every cusp is on the outline, pointing in"
-    for corner in polygon:
-        assert min((cusp - corner).manhattanLength() for cusp in cusps) < 1e-6, \
-            "each corner is a cusp: arcs start and end neatly there"
-    # along each side the arcs are the same, and none is a sliver
-    for length in (rect.width(), rect.height()):
-        arcs = cloud_arcs_for(length, radius)
-        chord = length / arcs
-        assert chord <= 2 * radius * math.sin(CLOUD_SWEEP / 2) * 1.15 + 1e-9
-        assert arcs == 1 or chord >= 2 * radius * math.sin(CLOUD_SWEEP / 2) * 0.5
-    gaps = sorted(round(math.hypot(b.x() - a.x(), b.y() - a.y()), 6)
-                  for a, b in zip(cusps, cusps[1:]))
-    assert set(gaps) <= {round(rect.width() / cloud_arcs_for(rect.width(), radius), 6),
-                         round(rect.height() / cloud_arcs_for(rect.height(), radius), 6)}
-    # outward, and the arcs' height is the Size's
-    bounds = path.boundingRect()
-    assert bounds.contains(rect)
-    reach = max(rect.top() - bounds.top(), bounds.bottom() - rect.bottom(),
-                rect.left() - bounds.left(), bounds.right() - rect.right())
-    assert 0.5 * radius < reach <= radius + 1e-6
+    arcs = _cloud_arcs(_box(rect), radius)
+    centres = [_on_screen(cx, cy) for cx, cy, *_rest in arcs]
+    assert all(rho == radius for _x, _y, rho, *_rest in arcs), "B's size"
+    for corner in _box(rect):
+        assert min((c - corner).manhattanLength() for c in centres) < 1e-6, \
+            "a scallop centred on the corner"
+    expected = 2 * (cloud_steps(rect.width(), radius) + cloud_steps(rect.height(), radius))
+    assert len(centres) == expected
+    gaps = {round(math.hypot(b.x() - a.x(), b.y() - a.y()), 6)
+            for a, b in zip(centres, centres[1:] + centres[:1])}
+    assert gaps <= {round(rect.width() / cloud_steps(rect.width(), radius), 6),
+                    round(rect.height() / cloud_steps(rect.height(), radius), 6)}, \
+        "every side's scallops equal"
+    for gap in gaps:
+        assert gap < 2 * radius, "neighbours' circles cross"
+    long_side = max(rect.width(), rect.height())
+    if long_side > 6 * CLOUD_PITCH * radius:
+        spacing = long_side / cloud_steps(long_side, radius)
+        assert spacing == pytest.approx(CLOUD_PITCH * radius, rel=0.12), "B's spacing"
 
 
-def test_a_polygon_clouds_scallops_start_at_each_corner():
-    corners = [QPointF(0, 0), QPointF(150, 10), QPointF(120, 100), QPointF(20, 80)]
-    polygon = QPolygonF(corners)
-    radius = cloud_radius_for(2.0, 1.0)
-    cusps = _cusps(cloud_path(polygon, radius))
-    for corner in corners:
-        assert min((cusp - corner).manhattanLength() for cusp in cusps) < 1e-6
-    for cusp in cusps:
-        assert _distance_to_polygon_edge(cusp, polygon) < 1e-6
-    sides = sum(cloud_arcs_for(math.hypot(b.x() - a.x(), b.y() - a.y()), radius)
-                for a, b in zip(corners, corners[1:] + corners[:1]))
-    assert len(cusps) == sides + 1
+@pytest.mark.parametrize("size, width", SIZES)
+@pytest.mark.parametrize("name, polygon", list(_shapes()), ids=[n for n, _ in _shapes()])
+@pytest.mark.parametrize("inverted", [False, True], ids=["out", "inverted"])
+def test_the_outline_is_clean_at_corners_and_where_it_closes(name, polygon, size, width,
+                                                             inverted):
+    """No tail or spur crossing out of the cloud, no scallop crossing
+    another, nothing further out than a scallop, and the outline closes on a
+    cusp like every other."""
+    radius = cloud_radius_for(size, width)
+    bounds = polygon.boundingRect()
+    if inverted and min(bounds.width(), bounds.height()) < 2.5 * radius:
+        pytest.skip("turned inward, scallops from facing sides meet across a cloud "
+                    "narrower than they are")
+    arcs = _cloud_arcs(polygon, radius, inverted=inverted)
+    assert len(arcs) >= 3
+    outline = _outline(arcs)
+    assert _simple(outline, radius), "the outline never crosses itself"
+    for cx, cy, rho, start, sweep, tail in arcs:
+        assert sweep > 0
+        assert 0 <= tail <= CLOUD_TAIL + 1e-9, "B's tail, no longer"
+    # every tail tucked inside the scallop before it: hidden, never a spur
+    for (px, py, prho, *_p), (cx, cy, rho, start, _sweep, tail) in zip(
+            arcs[-1:] + arcs[:-1], arcs):
+        for k in range(1, 9 if tail > 0 else 1):
+            angle = start - tail * k / 8
+            x, y = cx + rho * math.cos(angle), cy + rho * math.sin(angle)
+            assert math.hypot(x - px, y - py) < prho, "the tail is behind its neighbour"
+    # nothing further out than a scallop from the outline
+    path = cloud_path(polygon, radius, inverted=inverted)
+    for ring in path.toSubpathPolygons():
+        for point in ring:
+            assert _distance_to_polygon_edge(point, polygon) <= radius + 0.05
+    # it closes where it began, on a cusp: the last scallop's end
+    first = QPointF(path.elementAt(0).x, path.elementAt(0).y)
+    last = path.elementAt(path.elementCount() - 1)
+    assert (first - QPointF(last.x, last.y)).manhattanLength() < 1e-6
+    cx, cy, rho, start, sweep, _tail = arcs[-1]
+    end = _on_screen(cx + rho * math.cos(start + sweep), cy + rho * math.sin(start + sweep))
+    assert (end - first).manhattanLength() < 1e-6, "the closing join is a cusp"
+    # and that cusp is where both its scallops' circles cross, as every cusp is
+    (ax, ay, *_a), (bx, by, *_b) = arcs[-1], arcs[0]
+    for x, y in ((ax, ay), (bx, by)):
+        assert math.hypot(first.x() - x, -first.y() - y) == pytest.approx(radius)
 
 
-def test_invert_turns_the_arcs_inward_on_the_same_cusps():
+def test_invert_turns_the_scallops_inward_round_the_same_outline():
     rect = QRectF(0, 0, 120, 80)
     out = cloud_path(_box(rect), 10.0)
     inward = cloud_path(_box(rect), 10.0, inverted=True)
     assert out.boundingRect().contains(rect)
     assert rect.adjusted(-1e-6, -1e-6, 1e-6, 1e-6).contains(inward.boundingRect())
-    def spots(path):
-        return sorted({(round(p.x(), 4) + 0.0, round(p.y(), 4) + 0.0) for p in _cusps(path)})
-    assert spots(out) == spots(inward)
 
 
 def test_a_drawn_cloud_is_stroked_with_round_joins_at_its_line_width(window):

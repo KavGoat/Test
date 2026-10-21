@@ -2041,14 +2041,20 @@ def cloud_path(polygon: QPolygonF, radius: float, closed: bool = True,
                inverted: bool = False) -> QPainterPath:
     """Convert a polyline into a Bluebeam-style revision cloud; *inverted*
     turns the scallops the other way (Bluebeam's Invert)."""
-    key = (tuple((point.x(), point.y()) for point in polygon), radius, closed, inverted)
+    if polygon.isEmpty():
+        return QPainterPath()
+    # kept by shape, wherever it is: a cloud being placed or dragged is the
+    # same cloud moved, not a new one to work out on every move
+    ox, oy = polygon[0].x(), polygon[0].y()
+    key = (tuple((point.x() - ox, point.y() - oy) for point in polygon), radius,
+           closed, inverted)
     made = _CLOUDS.get(key)
     if made is None:
-        made = _cloud_path(polygon, radius, closed, inverted)
+        made = _cloud_path(polygon.translated(-ox, -oy), radius, closed, inverted)
         if len(_CLOUDS) > 2048:
             _CLOUDS.clear()
         _CLOUDS[key] = made
-    return QPainterPath(made)
+    return made.translated(ox, oy)
 
 
 #: Clouds and pens already worked out: the same cloud is drawn again on every
@@ -2057,41 +2063,43 @@ _CLOUDS: dict = {}
 _PENS: dict = {}
 
 
-#: How much of a circle each of a cloud's scallops is. Revu's are nearly
-#: half circles standing on the outline, so neighbours meet in a sharp notch
-#: pointing in; a little short of half, so the notch has an angle to it (a
-#: half circle would turn the line straight back on itself there).
-CLOUD_SWEEP = math.radians(160)
+#: A PDF reader's cloudy border (Apache PDFBox's CloudyBorder, after
+#: Acrobat), which Revu's clouds look like: circles of the scallop radius
+#: centred on the outline, CLOUD_PITCH × radius apart, so neighbours cross
+#: 34° off the line between them; each scallop runs on CLOUD_TAIL back from
+#: where it crosses the one before (to 12° off that line) — its end tucked
+#: behind its neighbour, the overlapping look of a drawn cloud.
+CLOUD_PITCH = 2 * math.cos(math.radians(34))
+CLOUD_TAIL = math.radians(22)
+#: The widest a side's scallops are spread to fit it, in radii: their
+#: circles must still cross.
+CLOUD_WIDEST = 1.9
 
 
-def cloud_arcs_for(length: float, radius: float) -> int:
-    """How many scallops a side of *length* gets: as many as fit at *radius*
-    (the Size's scallop radius), at least one, all the same. Rounded up but
-    for a sliver, so a side's scallops are at most a little (15%) wider than
-    the Size's and never stand out further than *radius* — the room every
-    cloud's bounds keep for them."""
-    chord = 2 * max(float(radius), 0.5) * math.sin(CLOUD_SWEEP / 2)
-    return max(1, int(math.ceil(float(length) / chord - 0.15)))
+def cloud_steps(length: float, radius: float) -> int:
+    """How many scallops a side of *length* is shared out into: the cloudy
+    border's spacing (CLOUD_PITCH radii), all equal, rounded up but for a
+    sliver and never so few that the circles would not cross."""
+    radius = max(float(radius), 0.5)
+    length = float(length)
+    return max(1, int(math.ceil(length / (CLOUD_PITCH * radius) - 0.2)),
+               int(math.ceil(length / (CLOUD_WIDEST * radius))))
 
 
 def _cloud_path(polygon: QPolygonF, radius: float, closed: bool = True,
                 inverted: bool = False) -> QPainterPath:
-    """A revision cloud round *polygon*, as Revu draws one: along each side a
-    run of equal scallops, each an arc standing on the side and bulging
-    outward, neighbours meeting in a cusp on the outline that points in. The
-    first scallop of a side starts at its corner and the last ends at the
-    next, so every corner is a cusp and no side ends in a sliver or overlaps
-    its neighbour. *radius* is the scallops' size (cloud_radius_for); each
-    side's are stretched or shrunk a little to fit it a whole number of
-    times. *inverted* (Bluebeam's Invert) bulges them inward.
+    """A revision cloud round *polygon*, drawn as a PDF reader draws a cloudy
+    border and Revu's clouds look (PDFBox's CloudyBorder, after Acrobat):
+    scallops of *radius* centred on the outline, each bulging out and
+    tucking its start behind the one before. *inverted* (Bluebeam's Invert)
+    turns them inward.
 
-    Revu's scallops stand on the outline. Since 2026-10-14 they had been a
-    PDF reader's cloudy border instead (Apache PDFBox's CloudyBorder, after
-    Acrobat): shallow curls a third of a circle, centred on the outline,
-    their cusps out beyond it and a three-quarter curl round every corner —
-    a different, flatter cloud, and the outline it was drawn on was inside
-    it, so a leader ended at a corner ended inside the cloud (the user,
-    2026-10-20: "Cloud no longer looks like Bluebeam").
+    Clean where PDFBox's is not: a scallop is centred on every corner and the
+    rest are spread evenly along each side, every scallop drawn by the same
+    rule — so no corner curl begun backwards, no eased first scallops, no
+    tails crossing at the corners, and the join where the outline closes is
+    one more join like the others (the user, 2026-10-21: "B with the
+    corners are better").
     Worked in y-up coordinates, as the PDF's own, and turned back."""
     path = QPainterPath()
     arcs = _cloud_arcs(polygon, radius, closed, inverted)
@@ -2109,32 +2117,46 @@ def _cloud_path(polygon: QPolygonF, radius: float, closed: bool = True,
                      out(cx + rho * (cb + bcp * sb), cy + rho * (sb - bcp * cb)),
                      out(cx + rho * cb, cy + rho * sb))
 
-    cx, cy, rho, start = arcs[0]
+    def turn(cx, cy, rho, start, sweep):
+        # up to 140° to a piece: a scallop and its tail in one, off the circle
+        # by under a hundredth of its radius — and a third fewer pieces to
+        # draw than at right angles, on every repaint of a sheet of clouds
+        pieces = max(1, int(math.ceil(abs(sweep) / math.radians(140) - 1e-9)))
+        for piece in range(pieces):
+            segment(cx, cy, rho, start + sweep * piece / pieces,
+                    start + sweep * (piece + 1) / pieces)
+
+    cx, cy, rho, start, _sweep, _tail = arcs[0]
     path.moveTo(out(cx + rho * math.cos(start), cy + rho * math.sin(start)))
-    for cx, cy, rho, start in arcs:
-        # two pieces, each under a right angle, as a cubic follows a circle
-        segment(cx, cy, rho, start, start + CLOUD_SWEEP / 2)
-        segment(cx, cy, rho, start + CLOUD_SWEEP / 2, start + CLOUD_SWEEP)
-    if closed:
-        path.closeSubpath()
+    for cx, cy, rho, start, sweep, tail in arcs:
+        if tail > 1e-6:
+            # back from the cusp behind the scallop before, and out again
+            turn(cx, cy, rho, start, -tail)
+            turn(cx, cy, rho, start - tail, tail + sweep)
+        else:
+            turn(cx, cy, rho, start, sweep)
+    # the last scallop ends on the cusp the first began from
+    path.closeSubpath()
     return path
 
 
 def _cloud_arcs(polygon: QPolygonF, radius: float, closed: bool = True,
                 inverted: bool = False) -> list:
     """The scallops of the cloud round *polygon*, in order round it: each
-    (centre x, centre y, radius, angle it starts at), y up, every one turning
-    CLOUD_SWEEP anticlockwise from the start of its chord to the end."""
+    (centre x, centre y, radius, angle of the cusp it starts from, sweep to
+    the cusp it ends on, tail tucked back behind the one before), y up,
+    turning anticlockwise. The sweep is the scallop's outline; the tail is
+    hidden inside its neighbour. A cloud is always closed."""
     points = [(p.x(), -p.y()) for p in polygon]
-    # no zero-length sides, and not closed (the first point is not repeated)
+    # no zero-length sides, and the first point not repeated
     clean = []
     for pt in points:
         if not clean or math.hypot(pt[0] - clean[-1][0], pt[1] - clean[-1][1]) > 1e-9:
             clean.append(pt)
-    if closed and len(clean) >= 2 and math.hypot(clean[0][0] - clean[-1][0],
-                                                 clean[0][1] - clean[-1][1]) <= 1e-9:
+    if len(clean) >= 2 and math.hypot(clean[0][0] - clean[-1][0],
+                                      clean[0][1] - clean[-1][1]) <= 1e-9:
         clean.pop()
-    if len(clean) < (3 if closed else 2):
+    if len(clean) < 3:
         return []
     # anticlockwise (y up), so outward is to the right of the way round —
     # or the other way round, which turns the scallops inward
@@ -2144,23 +2166,103 @@ def _cloud_arcs(polygon: QPolygonF, radius: float, closed: bool = True,
     if (area < 0) != inverted:
         clean.reverse()
     radius = max(float(radius), 0.5)
-    half = CLOUD_SWEEP / 2
-    arcs = []
-    for i in range(count if closed else count - 1):
+    # a centre on every corner, the rest evenly along each side
+    centres = []
+    for i in range(count):
         (x0, y0), (x1, y1) = clean[i], clean[(i + 1) % count]
         length = math.hypot(x1 - x0, y1 - y0)
-        ux, uy = (x1 - x0) / length, (y1 - y0) / length
-        many = cloud_arcs_for(length, radius)
-        chord = length / many
-        rho = chord / (2 * math.sin(half))
-        # each arc's centre is inside the outline by as much as the arc is
-        # short of a half circle; its middle bulges out, to the right
-        inset = rho * math.cos(half)
-        start = math.atan2(uy, ux) - math.pi / 2 - half    # the chord's start
-        for k in range(many):
-            mx, my = x0 + ux * chord * (k + 0.5), y0 + uy * chord * (k + 0.5)
-            arcs.append((mx - uy * inset, my + ux * inset, rho, start))
-    return arcs
+        steps = cloud_steps(length, radius)
+        for step in range(steps):
+            t = step / steps
+            centres.append((x0 + (x1 - x0) * t, y0 + (y1 - y0) * t))
+    # sides much shorter than a scallop: one scallop, not a pile of them
+    kept = []
+    for centre in centres:
+        if kept and math.hypot(centre[0] - kept[-1][0], centre[1] - kept[-1][1]) < 0.35 * radius:
+            continue
+        kept.append(centre)
+    while len(kept) > 3 and math.hypot(kept[0][0] - kept[-1][0],
+                                       kept[0][1] - kept[-1][1]) < 0.35 * radius:
+        kept.pop()
+    centres = kept
+    widest = 2 * radius * 0.999
+
+    def apart(a, b):
+        return min(math.hypot(b[0] - a[0], b[1] - a[1]), widest)
+
+    def crossing(a, b):
+        """How far off the line from *a* to *b* their circles cross."""
+        return math.acos(apart(a, b) / (2 * radius))
+
+    def scallops():
+        """Each centre's scallop round its neighbours, or the index of one
+        they cover (a sharp inside corner), which is left out."""
+        total = len(centres)
+        arcs = []
+        for i in range(total):
+            before, (cx, cy), after = centres[i - 1], centres[i], centres[(i + 1) % total]
+            back = math.atan2(before[1] - cy, before[0] - cx)
+            on = math.atan2(after[1] - cy, after[0] - cx)
+            came, goes = crossing(before, (cx, cy)), crossing((cx, cy), after)
+            # the outside: anticlockwise from the way back to the way on
+            sweep = (on - back) % (2 * math.pi) - came - goes
+            if sweep <= 1e-6 or (sweep < math.radians(12) and total > 3 and math.hypot(
+                    after[0] - before[0], after[1] - before[1]) < widest):
+                return i                # hidden, or a sliver its neighbours can close over
+            # a cusp already under the scallop beyond: the two either side
+            # of this one cross before it shows — but a sliver
+            enters = (cx + radius * math.cos(back + came), cy + radius * math.sin(back + came))
+            leaves = (cx + radius * math.cos(on - goes), cy + radius * math.sin(on - goes))
+            if total > 3 and (
+                    math.hypot(enters[0] - after[0], enters[1] - after[1]) < radius * 0.999
+                    or math.hypot(leaves[0] - before[0], leaves[1] - before[1]) < radius * 0.999):
+                return i
+            # the tail stays clear of the line between them (and so behind
+            # the scallop before), however close a side's scallops are
+            tail = min(CLOUD_TAIL, max(came - math.radians(6), 0.0))
+            arcs.append((cx, cy, radius, back + came, sweep, tail))
+        return arcs
+
+    def on_arc(arc, x, y) -> bool:
+        cx, cy, _rho, start, sweep, _tail = arc
+        return (math.atan2(y - cy, x - cx) - start) % (2 * math.pi) <= sweep
+
+    def buried(arcs):
+        """Scallops shut in where two near ones either side of them cross —
+        at a sharp inside corner the scallops of its two sides meet before
+        the corner's own: (the first shut in, how many), or None."""
+        total = len(arcs)
+        for k in range(2, min(7, total - 1)):
+            for i in range(total):
+                first, last = arcs[i], arcs[(i + k) % total]
+                ax, ay, bx, by = first[0], first[1], last[0], last[1]
+                gap = math.hypot(bx - ax, by - ay)
+                if gap >= widest or gap < 1e-9:
+                    continue
+                h = math.sqrt(radius * radius - gap * gap / 4)
+                mx, my = (ax + bx) / 2, (ay + by) / 2
+                for sign in (1, -1):
+                    x = mx + sign * h * (by - ay) / gap
+                    y = my - sign * h * (bx - ax) / gap
+                    if on_arc(first, x, y) and on_arc(last, x, y):
+                        return (i + 1) % total, k - 1
+        return None
+
+    while True:
+        if len(centres) < 3:
+            return []
+        arcs = scallops()
+        if isinstance(arcs, int):
+            del centres[arcs]
+            continue
+        covered = buried(arcs)
+        if covered is None or len(centres) - covered[1] < 3:
+            return arcs
+        first, many = covered
+        for _ in range(many):
+            if first >= len(centres):
+                first = 0
+            del centres[first]
 
 
 def cloud_entry(polygon: QPolygonF, radius: float, start: QPointF, aim: QPointF,
@@ -2183,7 +2285,7 @@ def cloud_entry(polygon: QPolygonF, radius: float, start: QPointF, aim: QPointF,
     reach_box = polygon.boundingRect().adjusted(-radius * 2, -radius * 2, radius * 2, radius * 2)
     if reach > 1e-12 and (not reach_box.contains(start)
                           or not cloud_path(polygon, radius, inverted=inverted).contains(start)):
-        for cx, cy, rho, begin in _cloud_arcs(polygon, radius, True, inverted):
+        for cx, cy, rho, begin, sweep, _tail in _cloud_arcs(polygon, radius, True, inverted):
             # |s + t·d − c|² = ρ², the arc's circle, then whether the
             # crossing is on the arc's own part of it
             fx, fy = sx - cx, sy - cy
@@ -2196,7 +2298,7 @@ def cloud_entry(polygon: QPolygonF, radius: float, start: QPointF, aim: QPointF,
                 if t < -1e-9 or t > 1 + 1e-6 or (best is not None and t >= best):
                     continue
                 turn = (math.atan2(fy + t * dy, fx + t * dx) - begin) % (2 * math.pi)
-                if turn <= CLOUD_SWEEP + 1e-6:
+                if turn <= sweep + 1e-6:
                     best = t
     if best is None:
         found = (aim.x(), aim.y())

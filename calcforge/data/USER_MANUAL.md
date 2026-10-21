@@ -219,10 +219,10 @@ its default (see *Markup styles and defaults*).
 - **Polygon** (`P`) — click each corner, double-click to close.
 - **Cloud** (`C`) — a revision cloud: drag a rectangle, or click corner by corner
   for a free-form cloud; a double-click, a click on the first corner again,
-  `Enter` or a right-click closes it. As in Revu, each side is a run of equal
-  arcs standing on it and bulging outward, meeting in sharp cusps that point
-  in, with a cusp at every corner; **Cloud intensity** sets how big the arcs
-  are.
+  `Enter` or a right-click closes it. As in Revu, the cloud is a ring of
+  overlapping scallops centred on the outline, one on every corner and the rest
+  spaced evenly along each side, each tucked behind the one before;
+  **Cloud intensity** sets how big they are.
 - **Highlight Area** (`J`) — drag over anything to highlight it. It darkens what is
   underneath rather than covering it.
 - **Mark for Redaction** — an opaque box over what is to be removed. Nothing is
