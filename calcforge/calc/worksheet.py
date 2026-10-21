@@ -22,14 +22,14 @@ from typing import Optional
 
 from .editor import MathEditor
 from .engine import ast as A
-from .engine.display import DExpr, display_value
+from .engine.display import DExpr, display_value, in_unit_box
 from .engine.errors import SMathError, err
 from .engine.evaluator import Context, DefinitionIndex, Evaluator, IndexedContext
 from .engine.numformat import NumberFormat
 from .engine.parser import ParseError, parse_row
 from .engine.model import Program, Row
 from .engine.units import Quantity, unit_offset
-from .engine.values import Matrix, Q, need_scalar
+from .engine.values import Matrix, need_scalar
 from .plot import PlotState
 
 _ids = itertools.count(1)
@@ -528,24 +528,19 @@ class Worksheet:
         offset = 0.0
         if isinstance(unode, A.UnitRef):
             offset = unit_offset(unode.name)
+        # SMath keeps the unit typed in the box at the end and fills the gap
+        # with the units still needed: 980.665 N with kg in the box shows
+        # 980.665 m/s² kg (display.in_unit_box, which cells use too)
         if isinstance(q, Quantity):
-            if q.dims != uval.dims:
-                if offset:
-                    raise err("units_mismatch", node=unode)
-                # SMath keeps the unit typed in the box at the end and fills
-                # the gap with the units still needed: 980.665 N with kg in
-                # the box shows 9.8066 m/s² kg
-                rest = tuple(a - b for a, b in zip(q.dims, uval.dims))
-                return display_value(Q(q.value / uval.value, rest), fmt)
-            shown = Q((q.value - offset) / uval.value)
+            shown = in_unit_box(q, uval.value, uval.dims, offset)
+            if shown is None:
+                raise err("units_mismatch", node=unode)
             return display_value(shown, fmt)
         if isinstance(q, Matrix):
-            if any(x.dims != uval.dims for x in q.items):
-                if offset:
-                    raise err("units_mismatch", node=unode)
-                return display_value(Matrix(q.nrows, q.ncols, [
-                    Q(x.value / uval.value, tuple(a - b for a, b in zip(x.dims, uval.dims))) for x in q.items]), fmt)
-            return display_value(Matrix(q.nrows, q.ncols, [Q((x.value - offset) / uval.value) for x in q.items]), fmt)
+            items = [in_unit_box(x, uval.value, uval.dims, offset) for x in q.items]
+            if any(x is None for x in items):
+                raise err("units_mismatch", node=unode)
+            return display_value(Matrix(q.nrows, q.ncols, items), fmt)
         return display_value(value, fmt)
 
     def recalc_if_auto(self) -> None:

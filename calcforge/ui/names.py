@@ -249,9 +249,14 @@ class NameDialog(QDialog):
 
 
 def define(tables, name: str, refers_to: str, scope=None, comment: str = "",
-           replacing=None) -> Optional[str]:
-    """Define (or redefine) a name as one undo step; the problem, if any."""
+           replacing=None, variable: Optional[bool] = None) -> Optional[str]:
+    """Define (or redefine) a name as one undo step; the problem, if any.
+    *variable*: a CalcForge variable (the cell's Variable box) or a
+    spreadsheet's own name; None keeps what *replacing* was (a new name is
+    the spreadsheet's)."""
     item = tables.item
+    if variable is None:
+        variable = bool(replacing is not None and replacing.variable)
 
     def change(wb):
         old = replacing
@@ -263,7 +268,8 @@ def define(tables, name: str, refers_to: str, scope=None, comment: str = "",
                 old = wb.names.get((name.lower(), old.key[1]), old)
             old_scope = wb.sheet_by_id(old.sheet) if old.sheet else None
             wb.remove_name(old.name, old_scope, old.book)
-        wb.define_name(name, refers_to, scope, comment, home=scope or item.sheet)
+        wb.define_name(name, refers_to, scope, comment, home=scope or item.sheet,
+                       variable=variable)
     return change_names(tables, "Define name", change)
 
 
@@ -282,7 +288,7 @@ def scope_text(wb, dn) -> str:
     book = wb.books.get(dn.book) if dn.book else None
     if book is not None:
         return f"{book.name} ({'self-contained' if book.self_contained else 'document variables'})"
-    return "Workbook"
+    return "Workbook (CalcForge variable)" if dn.variable else "Workbook"
 
 
 # -- the Name Manager -----------------------------------------------------------------------------

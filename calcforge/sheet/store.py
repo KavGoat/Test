@@ -77,7 +77,8 @@ def sheet_to_dict(sheet) -> dict:
 def names_homed_on(sheet) -> list:
     """The defined names kept, saved and undone with this sheet: those whose
     cells are on it, and those naming no cells that were made here.
-    Each: [name, refers to, local to this sheet, comment]."""
+    Each: [name, refers to, local to this sheet, comment], then True for
+    a CalcForge variable (DefinedName.variable)."""
     from . import formula as F
 
     out = []
@@ -101,7 +102,8 @@ def names_homed_on(sheet) -> list:
         else:
             homed = (dn.home if dn.home is not None else dn.sheet) == sheet.id
         if homed:
-            out.append([dn.name, dn.refers_to, dn.sheet == sheet.id, dn.comment])
+            out.append([dn.name, dn.refers_to, dn.sheet == sheet.id, dn.comment] +
+                       ([True] if dn.variable else []))
     return out
 
 
@@ -152,12 +154,13 @@ def load_sheet(sheet, data: dict) -> None:
                 name, refers_to = entry[0], entry[1]
                 local = bool(entry[2]) if len(entry) > 2 else False
                 comment = entry[3] if len(entry) > 3 else ""
+                variable = bool(entry[4]) if len(entry) > 4 else False
                 key = name_key(sheet, name, local)
                 if key not in wb.names:
                     from .workbook import DefinedName
                     wb.names[key] = DefinedName(name, refers_to, sheet.id if local else None,
                                                 comment or "", sheet.id,
-                                                None if local else sheet.book)
+                                                None if local else sheet.book, variable)
                     wb._name_dirty(key[0])
     finally:
         wb.journal = journal

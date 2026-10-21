@@ -925,7 +925,8 @@ cells' own Find and Replace — see Part 3.)
   inches, centimetres, millimetres, points or picas. **Full-Screen Crosshair**:
   two lines across the drawing that meet at the pointer.
 - **Show Grid** (`Ctrl+'`), **Snap to Grid**, **Show Margins**, **Name Tags** (the
-  names of tables, sheets and named cells, on screen and in print).
+  names of tables, sheets and cells named as CalcForge variables, on screen and in
+  print; a spreadsheet's own names carry none).
 - **Dimmer**: **View ▸ Dimmer** or **Dim Content** (`Ctrl+F5`) tones down the
   page's own drawing (0–100 %) so the markups stand out — on screen only.
 - **Dark Mode** (`Ctrl+3`) — see *Customisation ▸ Themes*. The page stays white
@@ -993,7 +994,10 @@ Here** has Equation, Calc Text, Calculation Block and Plot.
   unit is drawn in blue.
 - **The unit box.** After `=`, the result has a small black box after it. Press →
   (or click the box) and type the unit you want the answer in — `kN·m`, `MPa`,
-  `mm`, or a custom unit (below). Leave it empty for SMath's own choice.
+  `mm`, or a custom unit (below). Leave it empty for SMath's own choice. A unit of
+  another kind is not refused: as in SMath, the units still needed are put before
+  it, so the number times them times your unit is the answer (`12.5 kN` with `N²`
+  in the box shows `12500 s²/(kg·m) N²`).
 - **Custom units.** A quantity you define, such as `kips:1000'lbf`, is a unit
   wherever it is written with the apostrophe, as in SMath: `2'kips` in an equation
   below the definition (drawn blue like any unit), `kips` in a unit box, and
@@ -1176,7 +1180,10 @@ then reads `name = value`.
 An equation reads a table's (or spreadsheet's) values four ways — only tables
 **above** it in reading order (a table's place is its top-left corner):
 
-- **a named cell**: `W_total` (name it with Define Name or the Name Box — Part 3);
+- **a named cell**: `W_total` for a cell named as a CalcForge variable (its
+  right-click **Variable** box), `Loads.W_total` for a spreadsheet's own name
+  (Define Name, the Name Box, the Name Manager, Create from Selection) — a
+  spreadsheet's names are its sheet's, never read bare (Part 3, *Names*);
 - **a cell**: `Table1.D12`, or a spreadsheet's `Seismic_Actions.H44` — a sheet whose
   name has spaces or other such characters is written with each run of them as one
   `_` (`Seismic Actions` is `Seismic_Actions`, `Tables (2)` is `Tables_2`);
@@ -1210,8 +1217,9 @@ sheet is made in the equations that read it, in the same undo step:
 - **delete the cell an equation reads** — the reference becomes `T.#REF` and the
   equation shows a red error, *T.#REF: the cell it read was deleted (#REF!)*, until
   you change it (undo puts the cell and the reference back);
-- **rename a name** in the Name Manager — `W_total` becomes `W_sum` (an equation
-  defining a variable of the same spelling keeps its own);
+- **rename a name** in the Name Manager — `W_total` becomes `W_sum`, and
+  `Loads.W_total` becomes `Loads.W_sum` (an equation defining a variable of the
+  same spelling keeps its own);
 - **retype a column's heading** — `Loads.Load` becomes `Loads.Load_kN`. Text in
   quotes, such as a lookup's `"Load"`, is left alone, as Excel leaves text.
 
@@ -1506,7 +1514,19 @@ function's arguments with the current one in bold.
 ### Names
 
 A **name** stands for a cell, a block or a constant (`W_total`,
-`Loads!$B$2:$B$9`, `g = 9.81`), and cell formulas and the equations use it alike.
+`Loads!$B$2:$B$9`, `g = 9.81`). There are two kinds:
+
+- **a spreadsheet's own name** — made with Define Name, the Name Box, the Name
+  Manager or Create from Selection (and an Excel file's names). It is the sheet's:
+  the cells' formulas use it as Excel's do, and the equations and other pages read
+  it only with its sheet's name, `Loads.W_total` (the sheet the cells it names are
+  on). A bare `W_total` in an equation does not reach it. It carries no name tag;
+- **a CalcForge variable** — a cell or block named with its right-click
+  **Variable** box. The equations read it bare, `W_total`, as any variable, and its
+  name is tagged on the cells (View ▸ Name Tags).
+
+The Name Manager lists both; its Scope says *Workbook (CalcForge variable)* for a
+variable. Editing a name there keeps its kind.
 
 - **Define Name…** (right-click ▸ Names), the **Name Box** (select the cells, type
   the name, `Enter`), **Name Manager…** (`Ctrl+F3`: every name, to add, edit or
@@ -1538,10 +1558,17 @@ Cells hold units and calculate with them, as the equations do:
   `10 kN·m`, `10 kN/m * 3 m` is `30 kN`;
 - units that do not match are `#UNITS!`; a quantity compared with plain 0 tests
   its sign (`=A1>0`); an empty cell added to a quantity counts as zero of that unit;
-- **the unit box** after the value in the formula bar shows the selected cells'
-  quantities in the unit typed into it (`kN`, `kN/m`, `MPa`, or a custom unit);
-  blank shows them as typed. A finished unit that does not fit is drawn red, with
-  why. **Format Cells ▸ Number** can give a display unit too;
+- **the unit box** after the value in the formula bar (and the black box after a
+  selected cell's quantity) shows the cells' quantities in the unit typed into it
+  (`kN`, `kN/m`, `MPa`, `N^2`, or a custom unit), exactly as an equation's unit box
+  does: of the same kind it converts (`kN` to `N`, `kN·m` to `N·mm`); of another
+  kind the units still needed are put before it, so `12.5 kN` with `N^2` typed
+  shows `12500 s²/(kg·m) N²`. As it is typed the box writes the unit as SMath does
+  — `N^2` becomes `N²`, `m^-1` `m⁻¹`, `*` a dot — and the cell draws it the same
+  way. Blank shows them as typed. What SMath refuses is drawn red, with SMath's
+  words: a name that is no unit (`frobs - not defined.`), a unit written wrongly
+  (`Syntax is incorrect.`), °C or °F on another kind of quantity (`Units don't
+  match.`). **Format Cells ▸ Number** can give a display unit too;
 - CalcForge's unit functions: `VALUEIN(x, "kN")` (a plain number in kN),
   `CONVERT(x, "kN")` (shown in kN), `UNITOF(x)`, `STRIPUNIT(x)` and `INTERP`.
 

@@ -236,9 +236,15 @@ def test_the_name_box_names_the_cell_too(w):
     QTest.keyClicks(box, "test")
     QTest.keyClick(box, Qt.Key_Return)
     pump()
-    assert run.sheet.workbook.find_name("test", None) is not None
+    dn = run.sheet.workbook.find_name("test", None)
+    assert dn is not None and not dn.variable
+    # the Name Box's name is the spreadsheet's own: read as Sheet.test, not
+    # bare (the user, 2026-10-21) — test= reads the equation's
     asked = equation(w, 2, 60, "test=")
-    assert shown(asked) == "2"
+    assert shown(asked) == "5 kN"
+    from calcforge.sheet.docbook import sheet_ident
+    qualified = equation(w, 2, 120, f"{sheet_ident(run.sheet.name)}.test=")
+    assert shown(qualified) == "2"
 
 
 def test_an_equation_after_the_named_cell_wins(w):

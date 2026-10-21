@@ -35,14 +35,15 @@ def on_page(calc, page, y, text, x=36):
 
 def a_sheet(book, page, y=0, name="Sheet1", cells=(), names=(), kind="sheet", uid=None):
     """A sheet (or table) at (36, y) px on a page, holding *cells* {(row, col): text}
-    and defined names {name: refers_to}."""
+    and cells named as CalcForge variables {name: refers_to} (the cell's
+    Variable box: read bare by the equations)."""
     uid = uid or f"u-{name}"
     sheet = book.attach(uid, name, kind)
     wb = book.workbook
     for (row, col), text in dict(cells).items():
         wb.set_input(sheet, row, col, text)
     for defined, refers in dict(names).items():
-        wb.define_name(defined, refers)
+        wb.define_name(defined, refers, variable=True)
     book.place(uid, f"p{page}", 36.0, float(y))
     return sheet
 

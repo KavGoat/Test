@@ -57,6 +57,16 @@ def unit_runs(unit: str) -> list:
     ("2", True)], "m^-1" is [("m", False), ("−1", True)]. Display only:
     what is stored, copied and written to Excel stays as typed (the user,
     2026-10-15)."""
+    if BOX_GAP in unit:
+        # the units SMath fills in, a gap, then the unit typed in the box
+        filled, _gap, typed = unit.partition(BOX_GAP)
+        out = unit_runs(filled)
+        for text, raised in [(" ", False)] + unit_runs(typed):
+            if out and out[-1][1] == raised:
+                out[-1] = (out[-1][0] + text, raised)
+            else:
+                out.append((text, raised))
+        return out
     out: list = []
 
     def put(text, raised):
@@ -819,9 +829,13 @@ def format_value(value, code: Optional[str] = None, unit: Optional[str] = None,
     if isinstance(value, str):
         return format_text(value, code)
     if isinstance(value, Qty):
-        shown_unit = unit or value.unit or default_unit(value.dims)
-        x = value.si
-        if shown_unit:
+        filled = unit and in_unit_box(value, unit)
+        if filled:
+            x, shown_unit = filled
+        else:
+            shown_unit = unit or value.unit or default_unit(value.dims)
+            x = value.si
+        if shown_unit and not filled:
             try:
                 factor, dims, offset = unit_parts(shown_unit)
                 if tuple(dims) != tuple(value.dims):
@@ -829,7 +843,14 @@ def format_value(value, code: Optional[str] = None, unit: Optional[str] = None,
                     factor, dims, offset = unit_parts(shown_unit) if shown_unit else (1.0, None, 0.0)
                 x = (value.si - offset) / factor
             except Exception:
+                # no unit (frobs): as typed, as when none is given
                 shown_unit = default_unit(value.dims)
+                if value.unit and value.unit != unit:
+                    try:
+                        unit_parts(value.unit)
+                        shown_unit = value.unit
+                    except Exception:
+                        pass
                 factor, _d, offset = unit_parts(shown_unit) if shown_unit else (1.0, None, 0.0)
                 x = (value.si - offset) / factor
         # kN*m is written kN·m, as CalcForge's equations write it
@@ -844,6 +865,41 @@ def format_value(value, code: Optional[str] = None, unit: Optional[str] = None,
     if isinstance(value, (int, float)):
         return format_number(float(value), code, fit, significant)
     return Shown(str(value))
+
+
+# Between the units SMath fills in and the unit typed in a cell's unit box
+# (12500 s²/(kg·m) N²): a gap, as SMath draws the box's unit after the
+# result's, where a space would be drawn as a product's dot (unit_runs).
+BOX_GAP = "\u2009"
+
+
+def in_unit_box(value: Qty, unit: str) -> Optional[tuple]:
+    """A quantity shown in the unit typed in its cell's unit box when that
+    unit is of another dimension: as SMath's unit placeholder (the equations'
+    own code, calc/engine/display.in_unit_box), the typed unit stays at the
+    end and the units still needed go before it, in the unit and prefix an
+    equation shows them in, so the number times those units times the typed
+    unit is the value — 12.5 kN with N^2 typed is 12500 s²/(kg·m) N².
+    (number, unit as shown) or None: of the same dimension (converted as
+    any unit), no unit at all, or a temperature with an offset (°C) of
+    another dimension, which SMath refuses."""
+    from calcforge.calc.engine.display import display_quantity, in_unit_box as box, unit_factor
+    from calcforge.calc.engine.numformat import NumberFormat
+    from calcforge.calc.engine.units import Quantity
+    from .values import _written
+    try:
+        factor, dims, offset = unit_parts(unit)
+    except Exception:
+        return None
+    if tuple(dims) == tuple(value.dims):
+        return None
+    shown = box(Quantity(value.si, tuple(value.dims)), factor, dims, offset)
+    if shown is None:
+        return None
+    rest = display_quantity(shown, NumberFormat()).unit
+    x = shown.value / unit_factor(rest)
+    typed = unit.strip().replace("*", "·")
+    return x, (_written(rest) + BOX_GAP + typed) if rest is not None else typed
 
 
 def is_date_format(code: Optional[str]) -> bool:

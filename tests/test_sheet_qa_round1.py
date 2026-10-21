@@ -612,7 +612,7 @@ def test_the_unit_box_goes_when_another_cell_or_the_page_is_clicked(w, said):
     click(w, cell_scene(run, "D6"))
     assert not left_over(w), "the box with = in it was left over the cells"
     assert run.sheet.workbook.style_of(run.sheet, 1, 1).unit is None, "= is not a unit"
-    assert any("unit" in m.lower() for m in said), said
+    assert "Syntax is incorrect." in said, said       # as SMath says it
     equals_in_the_unit_box(w, run)
     click(w, w.document.pages[0].frame.mapToScene(QPointF(300, 300)))
     assert not left_over(w)

@@ -246,7 +246,7 @@ class TableControls:
     def _unit_chosen(self) -> None:
         if self._syncing:
             return
-        self.set_unit(self.unit.text().strip(), self.unit)
+        self.set_unit(self.unit.unit_text(), self.unit)
 
     def set_unit(self, text: str, box) -> bool:
         """The selected cells shown in unit *text* (blank: as typed), typed
@@ -254,11 +254,11 @@ class TableControls:
         False, and why under the box, when it is refused."""
         st = self._style()
         if text:
-            # as the unit box on the cell: a unit of another kind than the
-            # selected cells' values is refused, and why is said (the user,
-            # 2026-10-15); as SMath, what was typed stays in the box in red
-            # to be put right, and the cells keep the unit they have (the
-            # user, 2026-10-19)
+            # as the unit box on the cell: what SMath refuses (a name that
+            # is no unit, °C on a force) is refused, and why is said; as
+            # SMath, what was typed stays in the box in red to be put right,
+            # and the cells keep the unit they have (the user, 2026-10-19).
+            # A unit of another kind is taken as SMath takes it (2026-10-21)
             why = self._unit_refusal(text)
             if why is not None:
                 from .cellunits import say_refusal
@@ -272,8 +272,8 @@ class TableControls:
         return True
 
     def _unit_refusal(self, text: str):
-        """Why *text* can't be the output unit of the selected cells (the
-        first quantity of another kind among them), or None."""
+        """Why *text* can't be the output unit of the selected cells (as
+        SMath refuses it for the first of them it can't be), or None."""
         from .cellunits import output_unit_refusal
         why = output_unit_refusal(text, None)
         if why is not None:
@@ -333,7 +333,7 @@ class TableControls:
             self.valign.setCurrentIndex({"bottom": 0, "center": 1, "top": 2}.get(st.v_align, 0))
             self.wrap.setChecked(st.wrap)
             self.number.setCurrentIndex(format_index(st.number_format))
-            self.unit.setText(st.unit or "")
+            self.unit.set_unit_text(st.unit)
         finally:
             self._syncing = False
 

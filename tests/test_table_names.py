@@ -151,7 +151,8 @@ def test_equations_read_a_named_block_as_a_vector(w):
     tables.select((1, 1), (3, 1))
     names.define(tables, "Wl", f"{table.name}!$B$2:$B$4")
     tables.close()
-    write_lines(w, ["S:sum(Wl)", "S="], y=400)
+    # a spreadsheet's own name is its sheet's: Sheet.Name (the user, 2026-10-21)
+    write_lines(w, [f"S:sum({table.name}.Wl)", "S="], y=400)
     assert answer(w, "S=") == "60"
 
 

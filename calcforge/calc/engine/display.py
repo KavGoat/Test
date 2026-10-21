@@ -13,7 +13,7 @@ from typing import Optional
 from .numformat import FormattedNumber, NumberFormat, format_real
 from .unitdata import UNITS
 from .units import OBSERVED_UNITS, Quantity, base_unit_parts, derived_per_base, derived_unit_for
-from .values import Matrix, String
+from .values import Matrix, Q, String
 
 
 @dataclass
@@ -141,6 +141,27 @@ def engineering_unit(unit: Optional[DUnit], magnitude: float):
         if magnitude < limit:
             return DUnit([("mm", n)], []), 1e-3 ** n
     return unit, 1.0
+
+
+def in_unit_box(q: Quantity, factor: float, dims: tuple, offset: float = 0.0) -> Optional[Quantity]:
+    """SMath's unit placeholder (the unit typed into the box after a result,
+    of size *factor* and dimension *dims*): the quantity shown before that
+    unit. Of the same dimension it converts (12.5 kN with N in the box:
+    12500, then N). Of another it is not refused: SMath keeps the typed unit
+    at the end and puts before it the units still needed, what is left of
+    the value's dimension once the typed unit's is taken out, so the number
+    times those units times the typed unit is the value (980.665 N with kg
+    in the box shows 980.665 m/s² kg). None for a unit with an offset (°C)
+    of another dimension, which SMath refuses ("Units don't match.").
+
+    The equations' result (calc/worksheet.py) and a cell's own unit
+    (sheet/numfmt.py) both use it, so the two show the same."""
+    if tuple(q.dims) != tuple(dims):
+        if offset:
+            return None
+        rest = tuple(a - b for a, b in zip(q.dims, dims))
+        return Q(q.value / factor, rest)
+    return Q((q.value - offset) / factor)
 
 
 def display_quantity(q: Quantity, fmt: NumberFormat, scale: float = 1.0,

@@ -241,9 +241,9 @@ class FormatCellsDialog(QDialog):
         self._update_sample()
 
     def _unit_refusal(self):
-        """Why the unit typed can't be the cell's (a non-unit, or one of
-        another kind than its value), or None."""
-        unit = self.unit.text().strip()
+        """Why the unit typed can't be the cell's, as SMath refuses it (a
+        name that is no unit, °C on a force), or None."""
+        unit = self.unit.unit_text()
         if not unit:
             return None
         from .cellunits import output_unit_refusal
@@ -258,7 +258,7 @@ class FormatCellsDialog(QDialog):
             self.unit.flag(why)
 
     def _update_sample(self) -> None:
-        unit = self.unit.text().strip() or None
+        unit = self.unit.unit_text() or None
         if unit and self._unit_refusal() is not None:
             unit = None                # not (yet) a unit: the sample as typed
         code = self.custom.text() or None
@@ -402,7 +402,7 @@ class FormatCellsDialog(QDialog):
     def changes(self) -> dict:
         """The style fields that differ from what the active cell has."""
         st = self.start
-        unit = self.unit.text().strip() or None
+        unit = self.unit.unit_text() or None
         if unit:
             from .cellunits import output_unit_refusal
             if output_unit_refusal(unit, self.value) is not None:

@@ -19,8 +19,8 @@ import re
 from typing import Optional
 
 from PySide6.QtCore import QCoreApplication, QPoint, QRectF, Qt
-from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QInputMethodEvent, QPainter,
-                           QTextCharFormat)
+from PySide6.QtGui import (QColor, QFont, QFontInfo, QFontMetricsF, QInputMethodEvent,
+                           QPainter, QTextCharFormat)
 from PySide6.QtWidgets import QLineEdit
 
 UNIT_BLUE = QColor("#0000ff")              # WebSMath's unit colour (calc/ui/layout.py)
@@ -34,56 +34,41 @@ _IN_FORMULA = re.compile(
     rf"(?:(?<![\w.$]){_NUMBER}\s*|')({_UNIT_CHARS}(?:\s*[*/·^]\s*(?:{_UNIT_CHARS}|-?[\d.]+))*)")
 
 
-# What an engineer calls a quantity of each dimension (m, kg, s, A, K... as
-# calc/engine/unitdata.py BASE orders them), for saying why an output unit
-# was refused.
-_KINDS = {
-    (1,): "a length", (2,): "an area", (3,): "a volume", (4,): "a second moment of area",
-    (0, 1): "a mass", (0, 0, 1): "a time", (0, 0, 0, 1): "a current",
-    (0, 0, 0, 0, 1): "a temperature", (0, 0, -1): "a frequency",
-    (1, 1, -2): "a force", (2, 1, -2): "a moment", (-1, 1, -2): "a pressure",
-    (0, 1, -2): "a force per length", (-2, 1, -2): "a weight per volume",
-    (2, 1, -3): "a power", (1, 0, -1): "a speed", (1, 0, -2): "an acceleration",
-    (-3, 1): "a density", (-1, 1): "a mass per length", (3, 0, -1): "a flow rate",
-}
-
-
-def _kind(dims) -> str:
-    dims = tuple(dims)
-    while dims and dims[-1] == 0:
-        dims = dims[:-1]
-    return _KINDS.get(dims, "")
-
-
 def output_unit_refusal(text: str, value) -> Optional[str]:
     """Why *text* can't be the unit a cell holding *value* is shown in, or
-    None when it can (the user, 2026-10-15: kN on a cell holding 12.5 kN·m
-    was kept without a word, and showed up later on a force typed there)."""
-    from ..sheet.numfmt import format_value, unit_display
-    from ..sheet.values import Qty, UnitTextError, unit_parts
+    None when it can — said as SMath says it of the unit typed into an
+    equation's unit box. Any unit expression is taken: of the value's
+    dimension it converts, of another SMath fills in the units still needed
+    before it (sheet/numfmt.in_unit_box; the user, 2026-10-21: "it should
+    handle it like SMath"). Refused, as SMath refuses them: a name that is
+    no unit ("frobs - not defined."), a unit written wrongly ("Syntax is
+    incorrect.") and a temperature with an offset (°C) on a quantity of
+    another kind ("Units don't match.")."""
+    from ..calc.engine.errors import MESSAGES
+    from ..sheet.values import _UNIT_TOKEN, Qty, UNITS, UnitTextError, unit_parts
     try:
-        _f, dims, _o = unit_parts(text)
+        _f, dims, offset = unit_parts(text)
     except UnitTextError:
-        # Nm: two units written together, which is no unit; say how to write it
-        for k in range(1, len(text)):
-            a, b = text[:k], text[k:]
-            try:
-                unit_parts(a)
-                unit_parts(b)
-            except UnitTextError:
+        for m in _UNIT_TOKEN.finditer(text):
+            name = (m.group(5) or "").lstrip("'")
+            if not name or name in UNITS:
                 continue
-            return (f"“{text}” is not a unit — for {a} times {b} write {a}*{b} "
-                    f"(shown {a}·{b})")
-        return f"“{text}” is not a unit"
-    if not isinstance(value, Qty) or tuple(dims) == tuple(value.dims):
-        return None
-    mine = unit_display(text)
-    what = (_kind(dims) or "another kind of quantity") if any(dims) else "a plain number"
-    held = (_kind(value.dims) or "a quantity") if any(value.dims) else "a plain number"
-    shown = format_value(value).unit
-    if shown:
-        held += f" ({unit_display(shown)})"
-    return f"{mine} is {what}; this cell holds {held}"
+            try:
+                unit_parts(name)
+                continue                  # one of the document's own units
+            except UnitTextError:
+                pass
+            why = MESSAGES["not_defined"].format(name)
+            # Nm: two units written together; say how to write their product
+            for k in range(1, len(name)):
+                a, b = name[:k], name[k:]
+                if a in UNITS and b in UNITS:
+                    return f"{why} For {a} times {b} write {a}*{b} (shown {a}·{b})"
+            return why
+        return MESSAGES["syntax"]
+    if isinstance(value, Qty) and offset and tuple(dims) != tuple(value.dims):
+        return MESSAGES["units_mismatch"]
+    return None
 
 
 def say_refusal(view, why: str, box=None) -> None:
@@ -165,6 +150,32 @@ def unit_slot(text: str) -> Optional[int]:
     return None
 
 
+# A unit as SMath's unit box shows it while it is typed (the user,
+# 2026-10-21: "it looks like N^2, not how it should be"): powers raised
+# (N², m⁻¹) and products with a dot (kN·m), as the cell and the equations
+# draw them; division with the solidus a single line has. What is stored
+# stays plain (plain_unit): N^2, kN*m.
+_TO_SUPERSCRIPT = str.maketrans("0123456789-−", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁻")
+_FROM_SUPERSCRIPT = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123456789-")
+# a whole power: ^2, ^-1, ^(-1) — not one with a point (^0.5 stays as typed)
+_POWER = re.compile(r"\^\s*(?:\(\s*([-−]?)\s*(\d+)\s*\)|([-−]?)\s*(\d+)(?![\d.]))")
+_RAISED = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+(?:\.\d*)?")
+
+
+def pretty_unit(text: str) -> str:
+    """*text* as SMath's unit box shows it: kN*m^-1 is kN·m⁻¹."""
+    def raised(m):
+        sign, digits = (m.group(1), m.group(2)) if m.group(2) else (m.group(3), m.group(4))
+        return (sign + digits).translate(_TO_SUPERSCRIPT)
+    return _POWER.sub(raised, text).replace("*", "·")
+
+
+def plain_unit(text: str) -> str:
+    """A unit as shown in a unit box, written plainly: kN·m⁻¹ is kN*m^-1."""
+    text = _RAISED.sub(lambda m: "^" + m.group(0).translate(_FROM_SUPERSCRIPT), text)
+    return text.replace("·", "*").replace("⋅", "*")
+
+
 def unit_placeholder(font: QFont, colour: Optional[QColor] = None):
     """SMath's empty slot as the equations draw it (calc/ui/layout.py,
     Layout.placeholder): the "H" of SMath's equation font at *font*'s size,
@@ -217,10 +228,11 @@ class UnitSlot:
     """What SMath's unit boxes share (the unit box after a cell's result,
     the formula bar's, and Format Cells' "Show quantities in"): empty or
     unfinished, SMath's black placeholder shows where the unit goes, and
-    nothing is said while it is typed; a finished unit that is not one (or
-    not of the cell's kind) is drawn in SMath's error red, with why in its
+    nothing is said while it is typed; a finished unit SMath would refuse
+    (output_unit_refusal) is drawn in SMath's error red, with why in its
     tip, until it is typed into again (the user, 2026-10-19: "does not have
-    the filler unit like smath — currently says wrong unit").
+    the filler unit like smath — currently says wrong unit"). As it is
+    typed, it is written as SMath's box writes it: N^2 is N² (pretty_unit).
 
     For QLineEdit subclasses: call _init_slot() from __init__ (after any
     style sheet of its own), and paint_unit_slot() at the end of
@@ -234,6 +246,26 @@ class UnitSlot:
         self._own_sheet = self.styleSheet()
         # typed into again, or given another cell's unit: no longer refused
         self.textChanged.connect(lambda _t: self.unflag())
+        # shown as SMath's unit box shows it, as it is typed: N^2 is N²
+        self.textEdited.connect(self._typed)
+        if self.text():
+            self.setText(pretty_unit(self.text()))
+
+    def _typed(self, text: str) -> None:
+        new = pretty_unit(plain_unit(text))
+        if new == text:
+            return
+        caret = len(pretty_unit(plain_unit(text[:self.cursorPosition()])))
+        self.setText(new)
+        self.setCursorPosition(min(caret, len(new)))
+
+    def unit_text(self) -> str:
+        """The unit typed, written plainly (kN*m^-1), as it is stored."""
+        return plain_unit(self.text()).strip()
+
+    def set_unit_text(self, text: Optional[str]) -> None:
+        """Show unit *text* (as stored, kN*m^-1) as SMath's box does."""
+        self.setText(pretty_unit(text or ""))
 
     def flag(self, why: str) -> None:
         """The unit as finished is refused: red, and why in its tip."""
@@ -493,9 +525,11 @@ class ResultUnit(UnitSlot, QLineEdit):
         self.tables = tables
         self.setObjectName("resultUnit")
         self.setFrame(False)
-        self.setStyleSheet("QLineEdit { background: white; color: #0000ff; "
-                           "border: 1px solid #217346; padding: 0px 1px; }")
+        self.setStyleSheet(self._SHEET)
+        self.ensurePolished()
+        self._base_px = QFontInfo(self.font()).pixelSize()   # the window's text box size
         self._init_slot()
+        self.textChanged.connect(lambda _t: self._fit())
         self.list = SuggestionList(tables.view)
         self.list.hide()
         self.list.itemClicked.connect(lambda _i: self._take())
@@ -504,25 +538,45 @@ class ResultUnit(UnitSlot, QLineEdit):
         self._done = True
         self.hide()
 
+    _SHEET = ("QLineEdit { background: white; color: #0000ff; "
+              "border: 1px solid #217346; padding: 0px 1px; }")
+
     def open(self, item, cell, rect) -> None:
         """Over *rect* (of *item*), for cell *cell*."""
         self.cell = (item.uid, cell)
         st = item.sheet.workbook.style_of(item.sheet, *cell)
         view = self.tables.view
         box = view.mapFromScene(item.mapToScene(rect)).boundingRect()
-        font = self.font()
-        font.setPixelSize(max(9, int(box.height() * 0.9)))
-        self.setFont(font)
-        width = max(48, int(self.fontMetrics().horizontalAdvance((st.unit or "") + "WW")))
-        self.setGeometry(box.left() - 1, box.center().y() - self.sizeHint().height() // 2,
-                         width, self.sizeHint().height())
+        # the cell's own size at the zoom it is seen at, as the cell's text
+        # box has it, so N² and m⁻¹ read as they are typed (the window's
+        # style sheet sets every text box's size: this one's follows the zoom)
+        scale = abs(view.transform().m11()) + abs(view.transform().m12())
+        size = max(self._base_px, int(round((st.size or 11.0) * scale)))
         self.unflag()
-        self.setText(st.unit or "")
+        self._own_sheet = self._SHEET + "QLineEdit { font-size: %dpx; }" % size
+        self.setStyleSheet(self._own_sheet)
+        font = self.font()
+        font.setPixelSize(size)
+        self.setFont(font)
+        self._least = max(48, 4 * size)
+        self.setGeometry(box.left() - 1, box.center().y() - self.sizeHint().height() // 2,
+                         self._width(pretty_unit(st.unit or "")), self.sizeHint().height())
+        self.set_unit_text(st.unit)
         self._done = False
         self.show()
         self.raise_()
         self.setFocus()
         self.selectAll()
+
+    _least = 48
+
+    def _width(self, text: str) -> int:
+        return max(self._least, int(self.fontMetrics().horizontalAdvance(text + "WW")))
+
+    def _fit(self) -> None:
+        """Wide enough for what is typed, as SMath's box grows with it."""
+        if self.isVisible() and self._width(self.text()) != self.width():
+            self.resize(self._width(self.text()), self.height())
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
@@ -612,7 +666,7 @@ class ResultUnit(UnitSlot, QLineEdit):
         if self._done:
             return
         if keep and not leaving:
-            why = self._refusal(self.text().strip())
+            why = self._refusal(self.unit_text())
             if why is not None:
                 # as SMath: the unit stays, in red, until it is put right
                 # (or Esc), and why is said
@@ -624,7 +678,7 @@ class ResultUnit(UnitSlot, QLineEdit):
         self._done = True
         self.list.hide()
         self.list.tooltip.hide()
-        text = self.text().strip()
+        text = self.unit_text()
         self.hide()
         tables = self.tables
         tables.view.setFocus()
@@ -636,8 +690,8 @@ class ResultUnit(UnitSlot, QLineEdit):
             return
         st = item.sheet.workbook.style_of(item.sheet, *cell)
         if text:
-            # a unit of another kind than the value is refused, and why is
-            # said, as is why a non-unit was (the user, 2026-10-15)
+            # what SMath refuses is refused, and why is said; a unit of
+            # another kind is taken, as SMath takes it (2026-10-21)
             why = output_unit_refusal(text, item.sheet.workbook.value(item.sheet, *cell))
             if why is not None:
                 say_refusal(tables.view, why, self)

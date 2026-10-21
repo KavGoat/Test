@@ -120,9 +120,9 @@ def test_the_formula_bars_unit_box(window):
         box.completer().popup().hide()
     QTest.keyClick(box, Qt.Key_Return)
     settle()
-    assert box.flagged() and "is not a unit" in box.flagged()
+    assert box.flagged() == "frobs - not defined.", "as SMath says it"
     assert box.text() == "frobs" and red(box) > 10, "drawn in SMath's error red"
-    assert "is not a unit" in w.status_hint.text()
+    assert w.status_hint.text() == "frobs - not defined."
     assert wb.style_of(table.sheet, 0, 0).unit == "kN", "the cell keeps its unit"
     # typed into again: no longer red
     QTest.keyClick(box, Qt.Key_Backspace)
@@ -165,22 +165,22 @@ def test_the_unit_box_after_the_cells_result(window):
     QTest.keyClick(box, Qt.Key_Return)
     settle()
     assert not box.isVisible() and wb.style_of(table.sheet, 0, 0).unit == "kN"
-    # a finished unit of another kind: kept in the box in red, with why
+    # a finished name that is no unit: kept in the box in red, with why
     box = _open_result_unit(w, table)
     box.selectAll()
-    for ch in "kN*m":
+    for ch in "kNxyz":
         QTest.keyClick(box, ch)
         settle()
         assert box.flagged() is None
     box.list.hide()
     QTest.keyClick(box, Qt.Key_Return)
     settle()
-    assert box.isVisible() and box.flagged() and "this cell holds a force" in box.flagged()
+    assert box.isVisible() and box.flagged() == "kNxyz - not defined."
     assert red(box) > 10
     assert w.status_hint.text() == box.flagged()
     assert wb.style_of(table.sheet, 0, 0).unit == "kN"
     # put right, it is taken
-    for _ in range(2):
+    for _ in range(3):
         QTest.keyClick(box, Qt.Key_Backspace)
         settle()
     assert box.flagged() is None and box.text() == "kN"
@@ -228,11 +228,11 @@ def test_format_cells_show_quantities_in(window):
     QTest.keyClick(field, Qt.Key_Backspace)
     settle()
     assert dialog.sample.text().replace(" ", " ").startswith("12.5")
-    # finished (Tab on) as a unit of another kind: red, with why
-    field.setText("kN*m")
+    # finished (Tab on) as a name that is no unit: red, with why
+    field.setText("frobs")
     field.editingFinished.emit()
     settle()
-    assert field.flagged() and "this cell holds a force" in field.flagged()
+    assert field.flagged() == "frobs - not defined."
     assert field.toolTip() == field.flagged() and red(field) > 10
     assert dialog.changes().get("unit") in (None, "") or "unit" not in dialog.changes()
     # typed into again: not red; a good unit goes in

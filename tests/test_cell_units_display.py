@@ -6,8 +6,9 @@ shows them (the user, 2026-10-15):
 * once entered, a cell's unit is drawn in SMath's unit blue, its powers
   raised (m², m⁻¹), products with a dot (kN·m) — on screen and on paper
   alike; what is stored, copied and pasted into Excel stays plain text;
-* an output unit of another kind than the value (kN on a moment) is refused
-  with the reason on the status bar, as is a non-unit (Nm).
+* an output unit of another kind than the value (kN on a moment) is taken as
+  SMath takes it (the units still needed before it); a non-unit (Nm) is
+  refused with SMath's reason on the status bar.
 """
 from __future__ import annotations
 
@@ -246,7 +247,7 @@ def _type_into_result_unit(w, table, text):
     pump()
 
 
-def test_an_output_unit_of_another_kind_is_refused_and_said_why(window):
+def test_an_output_unit_of_another_kind_is_filled_in_as_smath(window):
     w = window
     w.show()
     w.view.set_zoom(2.0)
@@ -255,18 +256,18 @@ def test_an_output_unit_of_another_kind_is_refused_and_said_why(window):
     wb.set_input(table.sheet, 0, 0, "12.5 kN*m")
     w.view.tables.select((0, 0))
     pump()
+    # kN on a moment: SMath puts the missing m before the kN typed
     _type_into_result_unit(w, table, "kN")
-    assert wb.style_of(table.sheet, 0, 0).unit in (None, "")
-    assert w.status_hint.text() == "kN is a force; this cell holds a moment (kN·m)"
-    assert shown(table, "A1") == "12.5 kN·m"
+    assert wb.style_of(table.sheet, 0, 0).unit == "kN"
+    assert shown(table, "A1") == "12.5 m\u2009kN"
     _type_into_result_unit(w, table, "Nm")
-    assert wb.style_of(table.sheet, 0, 0).unit in (None, "")
-    assert "“Nm” is not a unit" in w.status_hint.text() and "N*m" in w.status_hint.text()
-    # nothing left over: a force typed later shows as typed
+    assert wb.style_of(table.sheet, 0, 0).unit == "kN", "a non-unit is not taken"
+    assert w.status_hint.text() == "Nm - not defined. For N times m write N*m (shown N·m)"
+    # a force typed later: the kN converts
     wb.set_input(table.sheet, 0, 0, "3000 N")
     pump()
-    assert shown(table, "A1") == "3000 N"
-    # a unit of the same kind is taken
+    assert shown(table, "A1") == "3 kN"
+    # a unit of the same kind converts
     wb.set_input(table.sheet, 0, 0, "12.5 kN*m")
     pump()
     _type_into_result_unit(w, table, "N*m")
@@ -274,7 +275,7 @@ def test_an_output_unit_of_another_kind_is_refused_and_said_why(window):
     assert shown(table, "A1") == "12500 N·m"
 
 
-def test_the_formula_bars_unit_box_refuses_it_too(window):
+def test_the_formula_bars_unit_box_takes_it_too(window):
     w = window
     w.show()
     table = make_table(w)
@@ -287,11 +288,16 @@ def test_the_formula_bars_unit_box_refuses_it_too(window):
     box.setText("kN")
     box.editingFinished.emit()
     pump()
-    assert wb.style_of(table.sheet, 0, 0).unit in (None, "")
-    assert w.status_hint.text() == "kN is a force; this cell holds a moment (kN·m)"
-    # as SMath (the user, 2026-10-19): what was typed stays, in red, to be
-    # put right — the cell keeps the unit it has
-    assert box.text() == "kN" and box.flagged() == w.status_hint.text()
+    assert wb.style_of(table.sheet, 0, 0).unit == "kN"
+    assert shown(table, "A1") == "12.5 m\u2009kN"
+    # as SMath (the user, 2026-10-19): a name that is no unit stays, in red,
+    # to be put right — the cell keeps the unit it has
+    box.setText("frobs")
+    box.editingFinished.emit()
+    pump()
+    assert w.status_hint.text() == "frobs - not defined."
+    assert box.text() == "frobs" and box.flagged() == w.status_hint.text()
+    assert wb.style_of(table.sheet, 0, 0).unit == "kN"
     box.setText("kN*m")
     assert box.flagged() is None
     box.editingFinished.emit()

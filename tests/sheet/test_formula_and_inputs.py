@@ -122,7 +122,9 @@ def test_quantities_show_in_their_unit():
     q = with_unit(5.25, "kN")
     assert format_value(q, "0.00").text == "5.25 kN"
     assert format_value(q, "0.0", unit="N").text == "5250.0 N"
-    assert format_value(q, None, unit="m").text == "5.25 kN", "a unit that doesn't fit is ignored"
+    # a unit of another kind: SMath's, the units still needed before it
+    assert format_value(q, None, unit="m").text == "5.25 kN/m\u2009m"
+    assert format_value(q, None, unit="frobs").text == "5.25 kN", "a name that is no unit is ignored"
 
 
 def test_units_simplify():
