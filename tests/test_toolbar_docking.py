@@ -1,0 +1,147 @@
+"""Toolbars dragged to the window's edges (the user, 2026-10-21: "Crashed
+while I was trying to move the alignment toolbar to the right of the window.
+Those toolbars (not panel bars) cannot be between the [panel] bar and the
+sheet, they must be on the outer side of the window").
+
+Each toolbar is dragged by its handle with the mouse to the right edge and
+the left edge — the panels on that side open, and closed — and back to the
+top. Dragging the Alignment toolbar to the right crashed: as it hovered over
+the side, it stood on end, and the window rearranged its toolbars under it
+while Qt's drag still held a pointer into the old arrangement. Now nothing is
+rearranged until the toolbar is let go and has landed; then a toolbar on a
+side edge has a column of its own between the window's edge and the panel
+rail, never between the rail and the sheet. A saved arrangement and Reset
+Layout keep to the same rule.
+"""
+from __future__ import annotations
+
+import pytest
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
+BARS = ["toolbar_alignment", "toolbar_main", "toolbar_calculation", "toolbar_measure",
+        "toolbar_tools", "toolbar_markup_styles", "toolbar_style"]
+TOP_ONLY = ("toolbar_style", "toolbar_markup_styles")
+
+
+def pump(times: int = 4) -> None:
+    for _ in range(times):
+        QApplication.processEvents()
+
+
+@pytest.fixture
+def w(window):
+    window.show()
+    window.activateWindow()
+    window.alignment_bar.setVisible(True)
+    pump()
+    return window
+
+
+def bar_named(w, name):
+    return next(bar for bar in w.toolbars if bar.objectName() == name)
+
+
+def drag(w, bar, to: QPoint) -> None:
+    """Take hold of the toolbar's handle and drag it to *to* (window
+    coordinates), a step at a time, the event loop running between steps as
+    it does under a hand; then let go and give it the moment it takes to
+    glide into place."""
+    handle = QPoint(4, bar.height() // 2) if bar.orientation() == Qt.Horizontal \
+        else QPoint(bar.width() // 2, 4)
+    QTest.mousePress(bar, Qt.LeftButton, Qt.NoModifier, handle)
+    pump(1)
+    start = bar.mapTo(w, handle)
+    for step in range(1, 13):
+        QTest.mouseMove(bar, bar.mapFrom(w, start + (to - start) * step / 12))
+        pump(2)
+    QTest.mouseRelease(bar, Qt.LeftButton, Qt.NoModifier, bar.mapFrom(w, to))
+    QTest.qWait(700)
+    pump()
+
+
+def outside_the_rail(w, bar, area) -> bool:
+    w.layout().activate()
+    rail = w.right_rail_bar if area == Qt.RightToolBarArea else w.left_rail_bar
+    if area == Qt.RightToolBarArea:
+        return bar.geometry().left() >= rail.geometry().right()
+    return bar.geometry().right() <= rail.geometry().left()
+
+
+@pytest.mark.parametrize("name", BARS)
+@pytest.mark.parametrize("side", ["right", "left"])
+def test_each_toolbar_dragged_to_a_side_lands_outside_the_panel_rail(w, name, side):
+    w.show_panel("dock_properties", True)
+    w.show_panel("dock_pages", True)
+    pump()
+    bar = bar_named(w, name)
+    edge = QPoint(w.width() - 3, w.height() // 2) if side == "right" \
+        else QPoint(3, w.height() // 2)
+    drag(w, bar, edge)
+    assert not bar.isFloating()
+    area = Qt.RightToolBarArea if side == "right" else Qt.LeftToolBarArea
+    if name in TOP_ONLY:
+        assert w.toolBarArea(bar) == Qt.TopToolBarArea, "it only goes top or bottom"
+    else:
+        assert w.toolBarArea(bar) == area
+        assert outside_the_rail(w, bar, area), "between the window's edge and the rail"
+        panels = [dock for dock in w.panels if dock.isVisible() and not dock.isFloating()
+                  and w.dockWidgetArea(dock) == (Qt.RightDockWidgetArea if side == "right"
+                                                 else Qt.LeftDockWidgetArea)]
+        assert panels, "a panel is open on that side"
+        for dock in panels:
+            if side == "right":
+                assert dock.geometry().right() <= bar.geometry().left()
+            else:
+                assert dock.geometry().left() >= bar.geometry().right()
+    drag(w, bar, QPoint(w.width() // 2, 60))
+    assert w.toolBarArea(bar) == Qt.TopToolBarArea and not bar.isFloating()
+
+
+@pytest.mark.parametrize("side", ["right", "left"])
+def test_the_alignment_toolbar_goes_to_a_side_with_its_panels_closed(w, side):
+    for dock in w.panels:
+        dock.hide()
+    pump()
+    bar = w.alignment_bar
+    edge = QPoint(w.width() - 3, w.height() // 2) if side == "right" \
+        else QPoint(3, w.height() // 2)
+    drag(w, bar, edge)
+    area = Qt.RightToolBarArea if side == "right" else Qt.LeftToolBarArea
+    assert w.toolBarArea(bar) == area and outside_the_rail(w, bar, area)
+    # a panel opened afterwards opens between the toolbar's column and the sheet
+    w.show_panel("dock_properties" if side == "right" else "dock_pages", True)
+    pump()
+    dock = w.dock_properties if side == "right" else w.dock_pages
+    assert outside_the_rail(w, bar, area)
+    if side == "right":
+        assert dock.geometry().right() <= bar.geometry().left()
+    else:
+        assert dock.geometry().left() >= bar.geometry().right()
+
+
+def test_a_saved_layout_with_a_toolbar_inside_the_rail_is_put_outside(w):
+    bar = w.alignment_bar
+    # an arrangement from before, with the toolbar between the rail and the
+    # sheet: restored, it goes outside the rail
+    w.addToolBar(Qt.RightToolBarArea, bar)
+    pump()
+    state = w.saveState()
+    w.restoreState(state)
+    pump()
+    assert w.toolBarArea(bar) == Qt.RightToolBarArea
+    assert outside_the_rail(w, bar, Qt.RightToolBarArea)
+
+
+def test_reset_layout_puts_every_toolbar_back_as_it_started(w):
+    bar = w.alignment_bar
+    drag(w, bar, QPoint(w.width() - 3, w.height() // 2))
+    assert w.toolBarArea(bar) == Qt.RightToolBarArea
+    w.reset_layout()
+    pump()
+    assert w.toolBarArea(bar) == Qt.TopToolBarArea
+    assert bar.isHidden(), "the Alignment toolbar starts hidden, as Revu's"
+    for other in w.toolbars:
+        if other is not bar:
+            assert w.toolBarArea(other) == Qt.TopToolBarArea and other.isVisible()

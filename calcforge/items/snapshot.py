@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainter, QPicture
 
-from .base import MarkupItem, Style, build_item, register_item
+from .base import (MarkupItem, Style, build_item, handle_zoom, paint_control_point,
+                   paint_rotate_handle, register_item)
 
 
 def picture_of(items, box: QRectF) -> QPicture:
@@ -71,6 +72,9 @@ class SnapshotItem(MarkupItem):
         # — so what it was taken of is kept beside it. That is what makes a
         # snapshot's colours changeable at all.
         self.source_items: list[dict] = []
+        # Flip Horizontal / Vertical (ui/alignment.py): the drawing mirrored
+        # in its box — across, and top to bottom
+        self.mirrored = (False, False)
         # Drawing the kept vectors is heavier than replaying a recording, so
         # the result is kept at screen resolution until the zoom changes.
         from PySide6.QtWidgets import QGraphicsItem
@@ -151,7 +155,45 @@ class SnapshotItem(MarkupItem):
         """The size the snapshot was taken at — what it looks right at."""
         return QRectF(self.source_rect).normalized()
 
+    def mirror(self, across: bool) -> None:
+        """Flip the drawing in its box, left to right or top to bottom."""
+        flipped_across, flipped_down = self.mirrored
+        self.mirrored = (not flipped_across, flipped_down) if across else \
+            (flipped_across, not flipped_down)
+        self.update()
+
+    def _turn_for_mirror(self, painter: QPainter, rect: QRectF) -> None:
+        across, down = self.mirrored
+        if not (across or down):
+            return
+        middle = rect.center()
+        painter.translate(middle)
+        painter.scale(-1.0 if across else 1.0, -1.0 if down else 1.0)
+        painter.translate(-middle)
+
     # -- painting ----------------------------------------------------------
+    def paint_handles(self, painter: QPainter) -> None:
+        """One outline when picked, as every other markup has: the scale box
+        with its corners. The box of the shape itself, dashed a few points
+        inside it, was a second outline round a snapshot, whose drawing has
+        no edge of its own to tell the two apart (the user, 2026-10-21)."""
+        if not self.isSelected() or not self._handles_visible or self.group \
+                or self.locked or not self.has_scale_box():
+            super().paint_handles(painter)
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        zoom = handle_zoom(painter)
+        rect = self.local_rect().normalized()
+        self.paint_scale_box(painter, zoom)
+        for key, point in self.handle_points().items():
+            if key == "rot":
+                paint_rotate_handle(painter, point,
+                                    QPointF(rect.center().x(), self.scale_box().top()), zoom)
+            else:
+                paint_control_point(painter, point, zoom)
+        painter.restore()
+
     def _vector_sources(self) -> list:
         """The kept source markups, built once and reused for vector output."""
         key = id(self.source_items), len(self.source_items)
@@ -177,6 +219,7 @@ class SnapshotItem(MarkupItem):
             painter.save()
             painter.setOpacity(self.style.opacity)
             painter.setClipRect(rect, Qt.IntersectClip)
+            self._turn_for_mirror(painter, rect)
             painter.translate(rect.topLeft())
             if taken.width() > 0 and taken.height() > 0:
                 painter.scale(rect.width() / taken.width(),
@@ -198,6 +241,7 @@ class SnapshotItem(MarkupItem):
             painter.save()
             painter.setOpacity(self.style.opacity)
             painter.setClipRect(rect, Qt.IntersectClip)
+            self._turn_for_mirror(painter, rect)
             painter.translate(rect.topLeft())
             if taken.width() > 0 and taken.height() > 0:
                 painter.scale(rect.width() / taken.width(),
@@ -233,6 +277,8 @@ class SnapshotItem(MarkupItem):
                      self._rect.width(), self._rect.height()],
             "source_items": self.source_items,
         })
+        if any(self.mirrored):
+            data["mirrored"] = [bool(self.mirrored[0]), bool(self.mirrored[1])]
         return data
 
     def deserialize(self, data: dict) -> None:
@@ -243,6 +289,9 @@ class SnapshotItem(MarkupItem):
         taken = data.get("source_rect")
         self.source_rect = QRectF(*taken) if taken else QRectF(self._rect)
         self.source_items = list(data.get("source_items") or [])
+        turned = data.get("mirrored") or [False, False]
+        self.mirrored = (bool(turned[0]), bool(turned[1])) if len(turned) == 2 \
+            else (False, False)
         # A snapshot payload carries no markup style — it is a recording, not
         # something drawn with a pen. Generic deserialisation used to replace
         # the borderless default with the red line every drawn markup starts

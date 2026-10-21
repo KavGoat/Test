@@ -478,6 +478,31 @@ class _OnRelayout(QObject):
         return False
 
 
+class _ToolbarDrags(QObject):
+    """Knows when a toolbar is held by its handle (being dragged to another
+    edge). While it is, nothing may rearrange the toolbars: Qt's toolbar
+    drag keeps a pointer into the window's toolbar layout, and a row break
+    put in or a toolbar moved under it (the rows rewrapping as the window's
+    layout changed, a toolbar stood on end being given its column) left it
+    pointing at nothing — the next movement of the pointer crashed the
+    program (the user, 2026-10-21: moving the Alignment toolbar to the
+    right). What was put off is done once the toolbar is let go."""
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.held = None
+
+    def eventFilter(self, watched, event) -> bool:
+        kind = event.type()
+        if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            self.held = watched
+        elif kind == QEvent.MouseButtonRelease and self.held is not None:
+            self.held = None
+            QTimer.singleShot(0, self.window, self.window._after_toolbar_drag)
+        return False
+
+
 class DetachableTabBar(QTabBar):
     """A document tab bar that reports a drag released outside itself."""
 
@@ -926,6 +951,10 @@ class MainWindow(QMainWindow):
         # What the arrangement looks like out of the box, so it can be put
         # back later however far it has been dragged about.
         self._default_state = self.saveState()
+        # (the toolbars hidden out of the box stay hidden after Reset Layout:
+        # the Alignment bar, as Revu's)
+        self._hidden_by_default = {bar.objectName() for bar in self.toolbars
+                                   if bar.isHidden()}
         self.restore_layout()
         # The arrangement is written out shortly after it changes, not only on
         # a clean quit — a crash or a kill should not cost the layout.
@@ -1705,6 +1734,9 @@ class MainWindow(QMainWindow):
         work on end, goes top or bottom only."""
         bar.setMovable(True)
         bar.setFloatable(False)
+        if getattr(self, "_toolbar_drags", None) is None:
+            self._toolbar_drags = _ToolbarDrags(self)
+        bar.installEventFilter(self._toolbar_drags)
         if bar.objectName() in self.TOP_AND_BOTTOM_ONLY:
             bar.setAllowedAreas(Qt.TopToolBarArea | Qt.BottomToolBarArea)
         else:
@@ -4753,6 +4785,8 @@ class MainWindow(QMainWindow):
         the breaks there is room to do without."""
         if not self.isVisible() or not self.toolbars:
             return
+        if self._a_toolbar_is_held():
+            return                     # done once it is let go (_ToolbarDrags)
         room = self.contentsRect().width()
         wanted: set = set()
         for area in (Qt.TopToolBarArea, Qt.BottomToolBarArea):
@@ -4786,6 +4820,8 @@ class MainWindow(QMainWindow):
         """The arrangement as the user made it: without the row breaks put
         in only because the window is narrow just now."""
         made = [bar for bar in getattr(self, "_auto_breaks", ()) if self.toolBarBreak(bar)]
+        if self._a_toolbar_is_held():
+            made = []                  # (no breaks touched under a dragged toolbar)
         for bar in made:
             self.removeToolBarBreak(bar)
         try:
@@ -5474,9 +5510,28 @@ class MainWindow(QMainWindow):
             columns.add(x)
         return True
 
+    def _a_toolbar_is_held(self) -> bool:
+        """A toolbar being dragged, or still gliding into its place after
+        it (none floats otherwise: they are not floatable)."""
+        drags = getattr(self, "_toolbar_drags", None)
+        if drags is not None and drags.held is not None:
+            return True
+        return any(bar.isFloating() for bar in getattr(self, "toolbars", ()))
+
+    def _after_toolbar_drag(self) -> None:
+        """A toolbar let go: its column, and the rows wrapped, once it has
+        landed."""
+        if self._a_toolbar_is_held():
+            QTimer.singleShot(60, self, self._after_toolbar_drag)
+            return
+        self.arrange_side_toolbars()
+        self._wrap_toolbar_rows()
+
     def arrange_side_toolbars(self) -> None:
         """Give each toolbar on a side edge a column of its own, outside the
         rail; put one that cannot stand on end back at the top."""
+        if self._a_toolbar_is_held():
+            return                     # done once it is let go (_ToolbarDrags)
         for bar in self.toolbars:
             if (bar.objectName() in self.TOP_AND_BOTTOM_ONLY
                     and self.toolBarArea(bar) in self._side_rails()):
@@ -5536,7 +5591,8 @@ class MainWindow(QMainWindow):
         self.show_panel("dock_properties", True)
         for bar in self.toolbars:
             bar.setMovable(True)
-            bar.show()
+            bar.setVisible(bar.objectName() not in getattr(self, "_hidden_by_default", ()))
+        self.arrange_side_toolbars()
         self.act_pin_panels.setChecked(False)
         self.act_lock_toolbars.setChecked(False)
         self.visible_tools = None
@@ -9226,6 +9282,8 @@ class MainWindow(QMainWindow):
             scene.selection_reshaped()        # grouped or ungrouped, perhaps
         items = self.selected_items()
         self.properties_panel.show_items(self.panel_subjects())
+        from . import alignment
+        alignment.refresh(self)            # (another tab's picks, too)
         self.default_button.setEnabled(len(items) == 1)
         self._refresh_style_controls()
         if len(items) == 1:

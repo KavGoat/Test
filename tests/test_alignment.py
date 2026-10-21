@@ -413,7 +413,10 @@ def test_too_few_picked_leaves_a_command_off_and_says_why(w):
     assert "select two markups or more" in w.act_align_left.toolTip()
     assert not w.act_distribute_horizontally.isEnabled()
     assert "three markups or more" in w.act_distribute_horizontally.toolTip()
-    assert w.act_centre_in_document.isEnabled() and w.act_flip_horizontal.isEnabled()
+    assert w.act_centre_in_document.isEnabled()
+    # a rectangle is not one Revu flips
+    assert not w.act_flip_horizontal.isEnabled()
+    assert "text boxes do not" in w.act_flip_horizontal.toolTip()
     w.view.scene().clearSelection()
     pump()
     assert not w.act_centre_in_document.isEnabled()
@@ -435,3 +438,224 @@ def test_every_command_can_be_given_a_key(w, three):
     finally:
         w.shortcuts.reset("command.align_top")
         w.apply_shortcuts()
+
+
+# ---------------------------------------------------------------------------
+# greyed when it does not apply (the user, 2026-10-21: "Make sure the
+# alignment thing greys out when not applicable")
+# ---------------------------------------------------------------------------
+def _strength(button) -> int:
+    """How many of the button's pixels stand out from its background."""
+    picture = button.grab().toImage()
+    ground = QColor(picture.pixel(1, 1))
+    count = 0
+    for x in range(picture.width()):
+        for y in range(picture.height()):
+            if abs(QColor(picture.pixel(x, y)).lightness() - ground.lightness()) > 70:
+                count += 1
+    return count
+
+
+WANTS = {"align_left": 2, "align_hcenter": 2, "align_right": 2, "align_top": 2,
+         "align_vcenter": 2, "align_bottom": 2, "align_width": 2, "align_height": 2,
+         "align_size": 2, "distribute_horizontally": 3, "distribute_vertically": 3,
+         "centre_in_document": 1, "flip_horizontal": 1, "flip_vertical": 1}
+
+
+def test_each_button_greys_until_enough_are_picked(w):
+    from tests.test_every_command_is_bindable import _draw
+    shapes = []
+    for corners in ((100, 100, 200, 160), (260, 120, 340, 200), (140, 260, 260, 330)):
+        before = {id(i) for i in w.view.scene().ordered_markups()}
+        _draw(w, "polygon", *corners)
+        shapes += [i for i in w.view.scene().ordered_markups() if id(i) not in before]
+    assert len(shapes) == 3
+    w.view.scene().clearSelection()
+    pump()
+    dim, lit = {}, {}
+    for count in range(0, 4):
+        if count:
+            shape = shapes[count - 1]
+            point = shape.mapToScene((shape.points[0] + shape.points[1]) / 2)
+            QTest.mouseClick(w.view.viewport(), Qt.LeftButton,
+                             Qt.ShiftModifier if count > 1 else Qt.NoModifier, at(w, point))
+            pump()
+        assert len(w.selected_items()) == count
+        for key, least in WANTS.items():
+            action = getattr(w, f"act_{key}")
+            button = w.alignment_bar.widgetForAction(action)
+            assert button.isEnabled() == (count >= least), (key, count)
+            assert action.isEnabled() == (count >= least), (key, count)
+            if count >= least:
+                lit.setdefault(key, _strength(button))
+            else:
+                dim.setdefault(key, _strength(button))
+    for key in WANTS:
+        assert dim[key] * 2 < lit[key], f"{key}: greyed is plainly fainter"
+
+
+def test_a_key_does_nothing_while_its_command_is_greyed(w):
+    a = draw_rect(w, 100, 100, 160, 160)
+    pick(w, a)
+    where = box(a)
+    try:
+        w.shortcuts.set_sequence("command.align_left", "Ctrl+Shift+F6")
+        w.apply_shortcuts()
+        w.view.setFocus()
+        QTest.keyClick(w.view, Qt.Key_F6, Qt.ControlModifier | Qt.ShiftModifier)
+        pump()
+        assert box(a) == where and not w.act_align_left.isEnabled()
+    finally:
+        w.shortcuts.reset("command.align_left")
+        w.apply_shortcuts()
+
+
+# ---------------------------------------------------------------------------
+# what flips (the user, 2026-10-21: "Callouts are flippable in Revu, but the
+# text is not flipped … Text box not flippable"; "Snapshot could not be
+# flipped?")
+# ---------------------------------------------------------------------------
+def test_a_text_box_does_not_flip_and_is_left_alone_among_others(w):
+    from calcforge.items.text import TextItem
+    from tests.test_every_command_is_bindable import _draw
+    words = TextItem("Note", QRectF(0, 0, 120, 40))
+    w.document.pages[0].frame.add_markup(words, QPointF(100, 100))
+    w.refresh_lists()
+    pump()
+    pick(w, words)
+    assert not w.act_flip_horizontal.isEnabled() and not w.act_flip_vertical.isEnabled()
+    _draw(w, "polyline", 300, 120, 380, 200)
+    line = [i for i in w.view.scene().ordered_markups() if isinstance(i, PolyItem)][-1]
+    pick(w, words)
+    QTest.mouseClick(w.view.viewport(), Qt.LeftButton, Qt.ShiftModifier,
+                     at(w, line.mapToScene((line.points[0] + line.points[1]) / 2)))
+    pump()
+    assert set(w.selected_items()) == {words, line}
+    assert w.act_flip_horizontal.isEnabled()
+    text_before = box(words)
+    first = line.mapToScene(line.points[0])
+    press(w, "flip_horizontal")
+    assert box(words) == text_before, "the text box is left as it was"
+    assert (line.mapToScene(line.points[0]) - first).manhattanLength() > 1, "the line flipped"
+
+
+def test_a_callout_flips_its_box_and_leader_but_not_its_words(w):
+    from calcforge.items.text import CalloutItem
+    callout = CalloutItem("Check", QRectF(0, 0, 100, 40), [QPointF(-80, 90)])
+    w.document.pages[0].frame.add_markup(callout, QPointF(300, 200))
+    w.refresh_lists()
+    pump()
+    pick(w, callout)
+    tip = callout.mapToScene(callout.tip)
+    text_box = box(callout)
+    assert tip.x() < text_box.left(), "the leader is on the left"
+    words = callout.doc.toPlainText()
+    press(w, "flip_horizontal")
+    callout = next(i for i in w.view.scene().ordered_markups() if isinstance(i, CalloutItem))
+    tip_now = callout.mapToScene(callout.tip)
+    assert tip_now.x() > box(callout).right(), "the leader is on the right now"
+    # mirrored about the middle of the lot: the box where the tip was, the
+    # tip where the box's far side was
+    assert abs(box(callout).left() - tip.x()) < 0.01, "the box went to the left"
+    assert abs(tip_now.x() - text_box.right()) < 0.01
+    assert abs(tip_now.y() - tip.y()) < 0.01 and abs(box(callout).top() - text_box.top()) < 0.01
+    assert callout.transform().isIdentity(), "the words are not mirrored"
+    assert callout.doc.toPlainText() == words
+    undo(w)
+    callout = next(i for i in w.view.scene().ordered_markups() if isinstance(i, CalloutItem))
+    assert (callout.mapToScene(callout.tip) - tip).manhattanLength() < 0.01
+
+
+def _a_snapshot(w):
+    """A snapshot of part of the page with a red box at its left, pasted
+    back and moved clear of it."""
+    from calcforge.items.snapshot import SnapshotItem
+    frame = w.document.pages[0].frame
+    red = RectItem("rect", QRectF(0, 0, 40, 60))
+    red.style.stroke = "#ff0000"
+    red.style.fill = "#ff0000"
+    red.style.fill_opacity = 1.0
+    frame.add_markup(red, QPointF(110, 110))
+    w.take_snapshot(frame, QRectF(100, 100, 160, 80))
+    w.paste_items()
+    pump()
+    (shot,) = [i for i in w.view.scene().ordered_markups() if isinstance(i, SnapshotItem)]
+    w.view.begin_snapshot()
+    shot.setPos(QPointF(200, 400))
+    w.view.commit_snapshot("Move")
+    return next(i for i in w.view.scene().ordered_markups() if isinstance(i, SnapshotItem))
+
+
+def _red_either_side(image, rect: QRectF) -> tuple:
+    left = right = 0
+    for x in range(int(rect.left()) + 2, int(rect.right()) - 2):
+        for y in range(int(rect.top()) + 2, int(rect.bottom()) - 2):
+            if not (0 <= x < image.width() and 0 <= y < image.height()):
+                continue
+            shade = QColor(image.pixel(x, y))
+            if shade.red() > 200 and shade.green() < 90 and shade.blue() < 90:
+                if x < rect.center().x():
+                    left += 1
+                else:
+                    right += 1
+    return left, right
+
+
+def test_a_snapshot_flips_and_stays_flipped_saved_and_exported(w, tmp_path):
+    import pymupdf
+    from PySide6.QtGui import QImage
+    from calcforge.items.snapshot import SnapshotItem
+    from tests.test_propbar_gaps import save_and_reopen
+
+    def snapshot():
+        return next(i for i in w.view.scene().ordered_markups() if isinstance(i, SnapshotItem))
+
+    def drawn():
+        shot = snapshot()
+        w.view.scene().clearSelection()
+        w.view.centerOn(box(shot).center())
+        pump()
+        w.view.viewport().repaint()
+        return _red_either_side(w.view.viewport().grab().toImage(),
+                                QRectF(w.view.mapFromScene(box(shot)).boundingRect()))
+    _a_snapshot(w)
+    left, right = drawn()
+    assert left > 50 and right == 0, "the red box is on the left"
+    pick(w, snapshot())
+    assert w.act_flip_horizontal.isEnabled()
+    press(w, "flip_horizontal")
+    left, right = drawn()
+    assert right > 50 and left == 0, "flipped: on the right"
+    path = save_and_reopen(w, tmp_path)
+    assert snapshot().mirrored == (True, False)
+    left, right = drawn()
+    assert right > 50 and left == 0, "still flipped when opened again"
+    # and as another reader draws the saved PDF
+    zoom = 2.0
+    pix = pymupdf.open(path)[0].get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
+    image = QImage(pix.samples, pix.width, pix.height, pix.stride,
+                   QImage.Format_RGB888).copy()
+    where = w.document.pages[0].frame.mapRectFromScene(box(snapshot()))
+    left, right = _red_either_side(image, QRectF(where.x() * zoom, where.y() * zoom,
+                                                 where.width() * zoom, where.height() * zoom))
+    assert right > 50 and left == 0, "MuPDF draws it flipped too"
+
+
+def test_a_picked_snapshot_has_one_outline(w):
+    shot = _a_snapshot(w)
+    w.view.centerOn(box(shot).center())
+    pick(w, shot)
+    w.view.viewport().repaint()
+    pump()
+    image = w.view.viewport().grab().toImage()
+    rect = w.view.mapFromScene(box(shot)).boundingRect()
+    # down through its top edge a quarter of the way along: each blue line
+    # crossed is an outline (the handles are at the corners and the middle)
+    x = rect.left() + rect.width() // 4
+    rows = []
+    for y in range(rect.top() - 14, rect.top() + 6):
+        shades = [QColor(image.pixel(x + dx, y)) for dx in range(0, 6)]
+        if any(c.blue() > 150 and c.red() < 140 for c in shades):
+            rows.append(y)
+    lines = [y for n, y in enumerate(rows) if n == 0 or y - rows[n - 1] > 1]
+    assert len(lines) == 1, f"one outline, not {len(lines)} ({rows})"
