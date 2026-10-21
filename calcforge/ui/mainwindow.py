@@ -6310,9 +6310,9 @@ class MainWindow(QMainWindow):
         from .sheetpages import move_allowed
         if not move_allowed(self.document, source, count, target):
             # a run of spreadsheet pages is one sheet: it moves whole, and
-            # nothing goes in between its pages
-            self.status_hint.setText("A spreadsheet's pages move together, and nothing goes "
-                                     "between them")
+            # nothing goes in between its pages (nor between a workbook's sheets)
+            from .sheetpages import why_not_moved
+            self.status_hint.setText(why_not_moved(self.document, source, count, target))
             self.pages_panel.rebuild(self.document, self.current_index)
             return
 
@@ -6761,8 +6761,8 @@ class MainWindow(QMainWindow):
 
     def selected_pages(self) -> list[int]:
         """Which pages the page panel has picked out, if it has picked any."""
-        rows = [self.pages_panel.list.row(entry)
-                for entry in self.pages_panel.list.selectedItems()]
+        # a workbook's entry picked out is all its pages (PagesPanel.picked_rows)
+        rows = self.pages_panel.picked_rows()
         return sorted(row for row in rows if 0 <= row < len(self.document.pages))
 
     def pages_acted_on(self, index: Optional[int] = None) -> list[int]:
@@ -6924,6 +6924,7 @@ class MainWindow(QMainWindow):
         # -- CalcForge's own ------------------------------------------------------------
         go = menu.addAction("Go to Page", lambda: self._go_to_page_asked(index))
         go.setToolTip("Go to this page")
+        self.pages_panel.add_section_entries(menu, index)   # a workbook's pages in Thumbnails
         bookmark = menu.addAction(self.act_bookmark.text(), lambda: self.bookmark_page(index))
         bookmark.setToolTip("Add this page to the document bookmarks")
         if page.sheet is not None:

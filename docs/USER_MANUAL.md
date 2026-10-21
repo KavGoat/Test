@@ -755,6 +755,19 @@ and **Insert Spreadsheet Page** (each with Before or After on its arrow; a click
 puts it after this page), **Duplicate Page** and **Delete Pages**; on a narrow
 panel they go on a line of their own under the title.
 
+**A workbook is one entry.** The pages of a workbook — an Excel workbook brought
+in, or spreadsheet pages made here side by side — show in Thumbnails as one
+entry: its first page on a stack of sheets, with **▸ Loads** over **pages 2–10**
+(the document's own page numbers, which stay as they are everywhere else).
+Click the picture to go to its first page; click its name (the ▸) to show its
+pages one by one (**▾ Loads**, on a tinted band) and again to fold them back;
+**Expand Section** / **Collapse Section** on a page's right-click menu do the
+same. It starts folded. Picked, the entry is the whole workbook: Delete Pages,
+Cut, Copy, Move Up / Down, Extract Pages, Print Pages and dragging it act on all
+its pages; with its pages shown, a page picked is that page. Nothing goes between
+an Excel workbook's sheets: a page dragged there is refused (and said so in the
+status bar), and a page inserted after one of its sheets goes after the workbook.
+
 **A page's right-click menu** (also **Document ▸ Current Page**): Page Setup…,
 Set Scale…, Cut, Copy and Paste Pages (Before or After), Move Up, Move Down,
 Insert Blank Page, Insert Spreadsheet Page, Insert Pages, Insert Image Page and
@@ -792,8 +805,9 @@ Duplicate Page, Add Bookmark (`Ctrl+B`) and Table of Contents.
   CalcForge's own calculation margins.
 - **Page labels**: rename a page's label (the name shown under its thumbnail and
   in the page box).
-- **Include in Print & Export** off greys a page out: it is left out of printing
-  and export.
+- **Include in Print & Export** off greys a page out, with a crossed-out printer
+  in its corner: it is left out of printing and export. A workbook's entry has
+  the printer when some of its pages don't print, and is greyed when none do.
 
 **Bookmarks panel** (`Alt+B`) — Add, Rename and Delete bookmarks, and
 **Contents** for a table of contents. An opened PDF's own outline arrives as
@@ -846,8 +860,9 @@ Print dialog with the preview built in:
 - **Defaults ▾** and **Advanced** (the print engine, resolution, bands and grid).
 
 What prints is exactly what is drawn: equations, tables and charts are part of the
-page and print with Document Only. A page with *Include in Print & Export* off, or
-a markup with its **Print** tick off, does not print.
+page and print with Document Only. A page with *Include in Print & Export* off, a
+sheet marked **Don't Print** (see *Sheet tabs*), or a markup with its **Print**
+tick off, does not print.
 
 **File ▸ Export ▸ PDF…** (`Ctrl+E`) writes a plain PDF with the markups drawn in;
 **Images…** writes every printable page as a picture; **Markups Summary…** (also
@@ -1689,19 +1704,41 @@ the equation and R² on the chart). The axis titles carry the cells' units.
 
 ### Sheet tabs
 
-Under the canvas, a tab for every spreadsheet in reading order (tables have none).
+Under the canvas, beside the scroll bar, a tab for each sheet of the workbook in
+view, in reading order (tables have none). The tabs, like the formula bar, show
+only in the **spreadsheet view**: while the page in view — the one the page box
+shows — is a page of a workbook, or while one of its sheets is open for its cells
+(a click on a cell). Scroll off the workbook and they go, once the middle of the
+window is a little way past its edge (so they don't flicker at the boundary); a
+sheet open for its cells is closed once none of its pages is on screen, unless a
+cell is being typed in.
+
 Click a tab to go to it; double-click to rename; drag it to move the sheet's
-pages; **+** adds a sheet at the end. Right-click a tab for **Insert Sheet**,
-**Delete**, **Rename…** and **Go To** — and, on a sheet of an imported Excel
+pages among the workbook's; **+** adds a sheet at the end of the workbook (to an
+Excel workbook, one of its sheets, sharing its names). Right-click a tab — or
+press and hold it, on a touch screen — for **Insert Sheet**, **Delete**,
+**Rename…**, **Print** and **Go To** — and, on a sheet of an imported Excel
 workbook, the **Self-contained** tick (see *Excel workbooks*). Rename a table from its right-click menu
 (**Rename Table…**) or the Properties panel; references follow a rename. Sheet and
 table names are unique in the whole document.
+
+**Print / Don't Print.** **Print** on a tab's menu is ticked while the sheet
+prints; untick it for **Don't Print** (one undo step). A sheet that doesn't print
+has a grey tab with a crossed-out printer (its tooltip says so), and its pages
+are greyed in Thumbnails. Its pages are left out of Print, Export ▸ PDF and
+Images, and are not written as pages of the saved PDF, so Acrobat, Revu or a
+browser neither shows nor prints them; CalcForge keeps them in the file's own
+record and puts them back where they were when it opens the file. The sheet is
+still part of the document: equations and other sheets read its cells as before.
 
 ### Excel workbooks
 
 **File ▸ Open** an `.xlsx` makes a new document of it; **File ▸ Import ▸ Excel
 Workbook** (or Document ▸ Insert, or a page's menu) adds one Before or After the
-current page. A workbook with several worksheets asks which to bring in. Each
+current page. A workbook with several worksheets asks which to bring in, and
+for each whether it prints: the window lists the worksheets with a tick to bring
+each in and a **Print** column, ticked (**Print**) to start; untick it for
+**Don't Print** (see *Sheet tabs*). Each
 worksheet becomes a run of spreadsheet pages with its cells, formulas, formatting,
 sizes, merges, names, comments, validation, conditional formatting and page
 layout; hidden worksheets come in too. Charts, pictures and a print scale other

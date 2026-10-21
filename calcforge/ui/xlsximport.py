@@ -79,6 +79,7 @@ def pages_for(imported, base: PageSetup) -> list:
     from ..items.sheetpage import SheetRunItem
 
     pages = []
+    silent = getattr(imported, "no_print", None) or set()
     for sheet in imported.sheets:
         setup = _setup_for(sheet, base)
         item = SheetRunItem()
@@ -88,6 +89,7 @@ def pages_for(imported, base: PageSetup) -> list:
         for k in range(count):
             page = Page(PageSetup.from_dict(setup.to_dict()))
             page.sheet = item.uid
+            page.printable = sheet.name not in silent     # Don't Print, chosen on import
             if k == 0:
                 page._pending_items = [record]
             pages.append(page)
@@ -221,33 +223,99 @@ def _say(window, imported) -> None:
         QMessageBox.information(window, "Excel workbook", text)
 
 
+class _SheetRow:
+    """A worksheet's row in the chooser: its tick (bring it in) and its
+    Print / Don't Print, read as the list's rows were before the Print
+    column came (``item(i).checkState()``, ``.text()``)."""
+
+    def __init__(self, item):
+        self.item = item
+
+    def checkState(self):
+        return self.item.checkState(0)
+
+    def setCheckState(self, state) -> None:
+        self.item.setCheckState(0, state)
+
+    def text(self) -> str:
+        return self.item.text(0)
+
+    def data(self, role):
+        return self.item.data(0, role)
+
+    def prints(self) -> bool:
+        from PySide6.QtCore import Qt
+        return self.item.checkState(1) == Qt.Checked
+
+    def set_prints(self, on: bool) -> None:
+        from PySide6.QtCore import Qt
+        self.item.setCheckState(1, Qt.Checked if on else Qt.Unchecked)
+
+
+class _SheetList:
+    """The chooser's worksheets: a two-column list (the worksheet, ticked
+    to bring it in; and Print, ticked while it is to print)."""
+
+    def __init__(self, tree):
+        self.tree = tree
+
+    def count(self) -> int:
+        return self.tree.topLevelItemCount()
+
+    def item(self, row: int) -> _SheetRow:
+        return _SheetRow(self.tree.topLevelItem(row))
+
+
 class SheetChooser:
     """The worksheets of a workbook, each with a tick — all ticked to start —
-    to bring in only some; and whether the workbook is self-contained (its
-    names its own; ticked to start), with the names that would clash when
-    it isn't."""
+    to bring in only some, and each with Print or Don't Print (Print to
+    start; the user, 2026-10-21: "on import of Excel let me select print or
+    not print a sheet individually"); and whether the workbook is
+    self-contained (its names its own; ticked to start), with the names
+    that would clash when it isn't."""
 
     KEEP, RENAME, AHEAD = "self-contained", "rename", "go ahead"
+    PRINT, NO_PRINT = "Print", "Don't Print"
 
     def __init__(self, parent, imported, taken: Optional[dict] = None, book_name: str = "Workbook"):
         from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
-                                       QListWidget, QListWidgetItem, QPushButton, QVBoxLayout)
+        from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
+                                       QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
+                                       QVBoxLayout)
         self.imported = imported
         self.dialog = dialog = QDialog(parent)
         dialog.setWindowTitle("Import Excel workbook")
         layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel("Bring in these worksheets:"))
-        self.list = QListWidget()
+        layout.addWidget(QLabel("Bring in these worksheets, and whether each prints:"))
+        self.tree = tree = QTreeWidget()
+        tree.setObjectName("workbookSheets")
+        tree.setRootIsDecorated(False)
+        tree.setUniformRowHeights(True)
+        # by the keys too: arrows to a worksheet's tick or its Print, Space ticks it
+        from PySide6.QtWidgets import QAbstractItemView
+        tree.setSelectionBehavior(QAbstractItemView.SelectItems)
+        tree.setColumnCount(2)
+        tree.setHeaderLabels(["Worksheet", "Print"])
+        tree.headerItem().setToolTip(1, "Print: its pages print and export. Don't Print: they "
+                                        "come in, and their cells are read, but they are "
+                                        "left out of printing and export")
+        tree.header().setStretchLastSection(False)
+        tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        # room for "Don't Print" and its tick, whichever it says
+        tree.header().setSectionResizeMode(1, QHeaderView.Fixed)
+        tree.header().resizeSection(1, tree.fontMetrics().horizontalAdvance(self.NO_PRINT) + 48)
         for sheet in imported.sheets:
             count = len(sheet.data.get("cells", []))
             note = f"{count:,} cell{'s' * (count != 1)}" + (", hidden in Excel" if sheet.hidden else "")
-            entry = QListWidgetItem(f"{sheet.name}    ({note})")
-            entry.setData(Qt.UserRole, sheet.name)
+            entry = QTreeWidgetItem([f"{sheet.name}    ({note})", self.PRINT])
+            entry.setData(0, Qt.UserRole, sheet.name)
             entry.setFlags(entry.flags() | Qt.ItemIsUserCheckable)
-            entry.setCheckState(Qt.Checked)
-            self.list.addItem(entry)
-        layout.addWidget(self.list)
+            entry.setCheckState(0, Qt.Checked)
+            entry.setCheckState(1, Qt.Checked)
+            entry.setToolTip(1, "Ticked: Print. Unticked: Don't Print")
+            tree.addTopLevelItem(entry)
+        self.list = _SheetList(tree)
+        layout.addWidget(tree)
         row = QHBoxLayout()
         for label, state in (("Select all", Qt.Checked), ("Clear", Qt.Unchecked)):
             button = QPushButton(label)
@@ -267,8 +335,40 @@ class SheetChooser:
         self.warning.setStyleSheet("color: #c92a2a")
         self.warning.hide()
         layout.insertWidget(layout.count() - 1, self.warning)
-        self.list.itemChanged.connect(lambda _i: self._enable())
+        tree.itemChanged.connect(self._changed)
         self._scope_part(layout, taken or {}, book_name)
+        dialog.resize(max(dialog.sizeHint().width(), 460), dialog.sizeHint().height())
+
+    def _changed(self, item, column: int) -> None:
+        """A tick changed: Print says Print or Don't Print, and a worksheet
+        left out has its Print greyed (nothing of it comes in to print)."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QPalette
+        tree = self.tree
+        was = tree.blockSignals(True)
+        try:
+            on = item.checkState(1) == Qt.Checked
+            item.setText(1, self.PRINT if on else self.NO_PRINT)
+            coming = item.checkState(0) == Qt.Checked
+            item.setData(1, Qt.ForegroundRole, None if coming else
+                         tree.palette().brush(QPalette.Disabled, QPalette.Text))
+        finally:
+            tree.blockSignals(was)
+        if column == 0:
+            self._enable()
+
+    def no_print(self) -> list:
+        """The worksheets chosen as Don't Print."""
+        from PySide6.QtCore import Qt
+        return [self.list.item(i).data(Qt.UserRole) for i in range(self.list.count())
+                if not self.list.item(i).prints()]
+
+    def set_prints(self, name: str, on: bool) -> None:
+        """Print (or Don't Print) for the worksheet *name*."""
+        from PySide6.QtCore import Qt
+        for i in range(self.list.count()):
+            if self.list.item(i).data(Qt.UserRole) == name:
+                self.list.item(i).set_prints(on)
 
     def _scope_part(self, layout, taken: dict, book_name: str) -> None:
         """The Self-contained tick box, and under it (when unticked and some
@@ -424,6 +524,8 @@ def choose_sheets(window, imported, path: str = "", document=None) -> bool:
     if not chosen:
         return False
     keep_only(imported, chosen)
+    # the worksheets chosen as Don't Print (pages_for): its pages come in not printing
+    imported.no_print = set(chooser.no_print()) & set(chosen) if chooser is not None else set()
     if how == SheetChooser.RENAME:
         imported.renamed = prefix_names(imported, [n for n, _why in chooser.clashes], prefix)
     make_book(imported, book_name, os.path.basename(path or ""), how == SheetChooser.KEEP)
@@ -457,11 +559,16 @@ def insert_workbook(window, path: Optional[str] = None, index: Optional[int] = N
     which = window.page_index(index)
     if before:
         # in front of the page, or of the whole spreadsheet run it is part of
+        # (of the whole Excel workbook, on one of its sheets)
         target = which
         pages_now = document.pages
         while target > 0 and pages_now[target].sheet is not None \
                 and pages_now[target - 1].sheet == pages_now[target].sheet:
             target -= 1
+        from .sheetpages import section_of
+        section = section_of(document, target)
+        if section is not None and section.book is not None:
+            target = section.first
     else:
         target = safe_target(document, which + 1)
     base = document.pages[which].setup

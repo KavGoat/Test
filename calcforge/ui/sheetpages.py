@@ -44,6 +44,139 @@ def run_of(document, index: int) -> list:
     return []
 
 
+# -- workbooks: sections of the document ----------------------------------------------------------
+class Section:
+    """A workbook laid out in the document: consecutive spreadsheet pages
+    whose sheets are one Excel workbook brought in, or sheets made here next
+    to each other (the user, 2026-10-21: "treat spreadsheet workbooks as a
+    section"). Thumbnails shows it as one entry, and its sheets are the tabs
+    under the canvas while it is in view."""
+
+    def __init__(self, key: str, book: Optional[str]):
+        self.key = key                    # its first sheet's run id
+        self.book = book                  # the imported workbook (Book.id), or None
+        self.name = "Workbook"
+        self.runs: list = []              # run ids, in order
+        self.pages: list = []             # page indexes, in order
+
+    @property
+    def first(self) -> int:
+        return self.pages[0]
+
+    @property
+    def last(self) -> int:
+        return self.pages[-1]
+
+    def page_range(self) -> str:
+        """"pages 2–10", or "page 3"."""
+        a, b = self.first + 1, self.last + 1
+        return f"page {a}" if a == b else f"pages {a}–{b}"
+
+    def label(self) -> str:
+        """"Loads — pages 2–10"."""
+        return f"{self.name} — {self.page_range()}"
+
+
+def _run_record(document, uid: str):
+    """(its sheet if on the canvas, else None; its record if still waiting
+    to be, else None) for run *uid*."""
+    from shiboken6 import isValid
+
+    from ..items.sheetpage import SheetRunItem
+    for page in document.pages:
+        if page.sheet != uid:
+            continue
+        frame = page.frame
+        if frame is not None and isValid(frame):
+            for item in frame.markups():
+                if isinstance(item, SheetRunItem) and item.uid == uid:
+                    return item.sheet, (item._data if item.sheet is None else None)
+        for record in getattr(page, "_pending_items", None) or ():
+            if isinstance(record, dict) and record.get("type") == "sheet_run" \
+                    and record.get("uid") == uid:
+                return None, record.get("table") or {}
+    return None, None
+
+
+def run_book(document, uid: str) -> tuple:
+    """(Book.id or None, the workbook's name as shown, the sheet's name) of
+    run *uid*."""
+    sheet, record = _run_record(document, uid)
+    if sheet is not None:
+        book_id = getattr(sheet, "book", None)
+        found = sheet.workbook.books.get(book_id) if book_id else None
+        shown = None
+        if found is not None:
+            import os
+            shown = os.path.splitext(found.file)[0] if found.file else found.name
+        return book_id, shown, sheet.name
+    record = record or {}
+    book = record.get("book") or {}
+    shown = None
+    if book.get("id"):
+        import os
+        shown = os.path.splitext(book.get("file") or "")[0] or book.get("name") or "Workbook"
+    return book.get("id"), shown, record.get("name") or "Sheet"
+
+
+def sections(document, fresh: bool = False) -> list:
+    """The document's workbooks, in page order (kept until its pages or
+    their sheets change; *fresh*: worked out again, a sheet renamed)."""
+    pages = document.pages
+    key = tuple((i, id(p), p.sheet, id(p.frame)) for i, p in enumerate(pages)
+                if p.sheet is not None)
+    cached = getattr(document, "_sections_cache", None)
+    if not fresh and cached is not None and cached[0] == key and cached[1] == len(pages):
+        return cached[2]
+    out: list = []
+    for run, indexes in runs(document):
+        book, shown, sheet_name = run_book(document, run)
+        last = out[-1] if out else None
+        if last is not None and last.last == indexes[0] - 1 and last.book == book:
+            last.runs.append(run)
+            last.pages.extend(indexes)
+        else:
+            last = Section(run, book)
+            last.runs.append(run)
+            last.pages.extend(indexes)
+            last.name = shown or sheet_name
+            last._names = []
+            out.append(last)
+        last._names.append(sheet_name)
+    for section in out:
+        if section.book is None and len(section.runs) > 1:
+            section.name = "Workbook"      # sheets made here, side by side
+    document._sections_cache = (key, len(pages), out)
+    return out
+
+
+def section_of(document, index: int) -> Optional[Section]:
+    """The workbook page *index* is a page of, or None."""
+    for section in sections(document):
+        if section.first <= index <= section.last:
+            return section
+    return None
+
+
+def run_pages(document, uid: str) -> list:
+    return [i for i, page in enumerate(document.pages) if page.sheet == uid]
+
+
+def sheet_prints(document, uid: str) -> bool:
+    """Whether sheet (run) *uid* prints: any of its pages does."""
+    return any(document.pages[i].printable for i in run_pages(document, uid))
+
+
+def set_sheet_printing(window, uid: str, on: bool) -> None:
+    """Print / Don't Print for a sheet: all its pages, one undo step (the
+    user, 2026-10-21). A sheet that doesn't print stays in the document —
+    equations and other sheets still read its cells — but its pages are
+    left out of Print, Export and the saved PDF's pages."""
+    pages = run_pages(window.document, uid)
+    if pages:
+        window.set_pages_printable(pages, bool(on))
+
+
 def run_items(scene) -> list:
     from ..items.sheetpage import SheetRunItem
     out = []
@@ -145,6 +278,8 @@ def add_run_pages(window, short: list) -> None:
             page = document.add_page(last + 1 + k)
             page.setup = PageSetup.from_dict(frames[0].page.setup.to_dict())
             page.sheet = item.uid
+            # a sheet that doesn't print grows pages that don't either
+            page.printable = frames[-1].page.printable
     window.rebuild_scenes()
 
 
@@ -179,8 +314,10 @@ def insert_sheet_page(window, index: Optional[int] = None, before: bool = False,
         pages = run_of(document, which)
         target = pages[-1] + 1
         setup = PageSetup.from_dict(document.pages[pages[0]].setup.to_dict())
+        printable = document.pages[pages[-1]].printable
     else:
         run = None
+        printable = True
         target = safe_target(document, which if before else which + 1)
         setup = PageSetup.from_dict(here.setup.to_dict())
         # a new sheet starts with Excel's Normal margins, so it falls onto
@@ -194,12 +331,57 @@ def insert_sheet_page(window, index: Optional[int] = None, before: bool = False,
         page.setup = setup
         if run is not None:
             page.sheet = run
+            page.printable = printable
         else:
             item = SheetRunItem()
             page.sheet = item.uid
             page._pending_items = [item.serialize()]
         window.current_index = target
     window._structural_change("Insert spreadsheet page", mutate)
+
+
+def new_sheet_in(window, section: Section) -> None:
+    """The sheet tabs' +: a new sheet at the end of the workbook in view —
+    one of the Excel workbook's sheets when it is one (sharing its names),
+    its paper the last sheet's, with Excel's Normal margins."""
+    from ..items.sheetpage import SheetRunItem
+
+    document = window.document
+    target = section.last + 1
+    setup = PageSetup.from_dict(document.pages[section.last].setup.to_dict())
+    (setup.margin_left, setup.margin_top, setup.margin_right,
+     setup.margin_bottom) = EXCEL_MARGINS_MM
+    book = None
+    if section.book is not None:
+        from ..sheet.docbook import book_for
+        found = book_for(document).workbook.books.get(section.book)
+        book = found.to_dict() if found is not None else None
+
+    def mutate():
+        page = document.add_page(target)
+        page.setup = setup
+        item = SheetRunItem()
+        record = item.serialize()
+        if book is not None:
+            record["table"] = {"name": None, "cells": [], "styles": [{}], "book": dict(book)}
+        page.sheet = item.uid
+        page._pending_items = [record]
+        window.current_index = target
+    window._structural_change("Insert spreadsheet page", mutate)
+
+
+def why_not_moved(document, source: int, count: int, target: int) -> str:
+    """What to say when a reorder is refused (move_allowed False)."""
+    pages = list(document.pages)
+    moving = pages[source:source + count]
+    for page in moving:
+        pages.remove(page)
+    landing = max(0, min(int(target), len(pages)))
+    pages[landing:landing] = moving
+    if not book_kept_whole(document, pages):
+        return ("An Excel workbook's sheets stay together: move the whole workbook "
+                "(its entry in Thumbnails), and nothing goes between its sheets")
+    return "A spreadsheet's pages move together, and nothing goes between them"
 
 
 def safe_target(document, target: int) -> int:
@@ -209,6 +391,10 @@ def safe_target(document, target: int) -> int:
     while 0 < target < len(pages) and pages[target - 1].sheet is not None \
             and pages[target - 1].sheet == pages[target].sheet:
         target += 1
+    # nor between two sheets of an Excel workbook: after the workbook
+    for section in sections(document):
+        if section.book is not None and section.first < target <= section.last:
+            return section.last + 1
     return target
 
 
@@ -298,7 +484,26 @@ def move_allowed(document, source: int, count: int, target: int) -> bool:
     for run in {p.sheet for p in before}:
         if [p for p in before if p.sheet == run] != [p for p in after if p.sheet == run]:
             return False
-    return True
+    return book_kept_whole(document, pages)
+
+
+def book_kept_whole(document, pages: list) -> bool:
+    """Whether every Excel workbook's sheets are still side by side in
+    *pages* (the document's pages in a new order): nothing goes between the
+    sheets of a workbook brought in."""
+    books = {}
+    for section in sections(document):
+        if section.book is not None:
+            for run in section.runs:
+                books[run] = section.book
+    if not books:
+        return True
+    where: dict = {}
+    for i, page in enumerate(pages):
+        book = books.get(page.sheet) if page.sheet is not None else None
+        if book is not None:
+            where.setdefault(book, []).append(i)
+    return all(spots[-1] - spots[0] + 1 == len(spots) for spots in where.values())
 
 
 def turn_run(window, index: int) -> None:

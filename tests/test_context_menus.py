@@ -274,7 +274,8 @@ def test_the_page_tab_and_sheet_tab_menus(w):
                                "New Window", "Open in Split View", "Duplicate Tab"]
     sheet_page(w)
     w.sheet_tabs.refresh()
-    assert top_level(w.sheet_tabs.build_menu(0)) == ["Insert Sheet", "Delete", "Rename…", "Go To"]
+    assert top_level(w.sheet_tabs.build_menu(0)) == ["Insert Sheet", "Delete", "Rename…", "Print",
+                                                     "Go To"]
 
 
 def test_calc_modes_page_menu_has_smaths_inserts(w):
