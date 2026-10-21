@@ -126,7 +126,7 @@ def test_a_toolbar_on_the_left_edge_is_a_column_outside_the_rail_and_panels(wind
     window.show()
     _settle(qapp)
     measure = _bars(window)["toolbar_measure"]
-    assert measure.isAreaAllowed(Qt.LeftToolBarArea)
+    assert measure.objectName() not in window.TOP_AND_BOTTOM_ONLY   # it may stand on end
     window.addToolBar(Qt.LeftToolBarArea, measure)
     _settle(qapp)
     assert window.toolBarArea(measure) == Qt.LeftToolBarArea
