@@ -199,6 +199,26 @@ def _on_a_screen_page(item) -> bool:
     return layer is not None and layer._on_screen()
 
 
+def thinnest_line(painter: QPainter, item) -> float:
+    """The thinnest *item*'s lines are drawn through *painter*, in the
+    painter's present units: on screen and zoomed out, the drawing's own
+    thinnest line (pdf/engine.thinnest_line), so a markup's hairline is as
+    clear as the drawing's beside it — a faint grey thread it was, zoomed
+    out, beside the drawing's dark ones (the user, 2026-10-21). Nothing in a
+    print, an export, or from 100 % up."""
+    from ..pdf.engine import MIN_LINE_PIXELS, thinnest_line as drawing_thinnest
+
+    engine = painter.paintEngine()
+    if engine is None or engine.type() not in _SCREEN_ENGINES:
+        return 0.0
+    device = painter.deviceTransform()
+    scale = math.sqrt(abs(device.m11() * device.m22() - device.m12() * device.m21()))
+    pixels = drawing_thinnest(scale)
+    if scale <= 0 or pixels <= MIN_LINE_PIXELS or not _on_a_screen_page(item):
+        return 0.0
+    return pixels / scale
+
+
 def _whole(value: float) -> int:
     """*value* to the nearest whole pixel, a half always up — and a hair
     under a half too, so the same place reached two ways (through a square's
