@@ -514,15 +514,123 @@ class _ToolbarDrags(QObject):
         super().__init__(window)
         self.window = window
         self.held = None
+        # the side edge the held toolbar will go to if let go now, and the
+        # one it is to go to once it has landed
+        self.side = None
+        self.pending = None
+        self.indicator = None
 
     def eventFilter(self, watched, event) -> bool:
         kind = event.type()
         if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
             self.held = watched
+            self.side = None
+        elif kind == QEvent.MouseMove and self.held is watched \
+                and event.buttons() & Qt.LeftButton:
+            self._follow(watched, event.globalPosition().toPoint())
         elif kind == QEvent.MouseButtonRelease and self.held is not None:
+            if self.side is not None:
+                self.pending = (self.held, self.side)
             self.held = None
+            self.side = None
+            self._show(None)
             QTimer.singleShot(0, self.window, self.window._after_toolbar_drag)
         return False
+
+    # -- where a toolbar dragged to a side edge will land ------------------------
+    #
+    # Qt's own preview of a drop on a side edge is a gap in the panel rail's
+    # column — under the rail, between it and the panels — which is not where
+    # the toolbar goes (the user, 2026-10-21: "the preview shows it joining
+    # the bottom of the panel toolbar but then it goes to the right"). So no
+    # toolbar may be dropped into a side area by Qt (_add_toolbar), and the
+    # column it will have, at the window's edge outside the rail, is shown
+    # here instead; once it is let go and has landed it is put there
+    # (MainWindow._after_toolbar_drag). Nothing in the toolbar layout moves
+    # while it is held: the indicator is a widget of its own over the window.
+    EDGE_REACH = 56                 # how near the edge the pointer brings it
+
+    def _follow(self, bar, pointer) -> None:
+        window = self.window
+        if bar.objectName() in window.TOP_AND_BOTTOM_ONLY or not bar.isFloating():
+            self._show(None)
+            return
+        at = window.mapFromGlobal(pointer)
+        rails = {Qt.RightToolBarArea: window.right_rail_bar,
+                 Qt.LeftToolBarArea: window.left_rail_bar}
+        side = None
+        if at.x() >= min(window.width() - self.EDGE_REACH,
+                         rails[Qt.RightToolBarArea].geometry().left()):
+            side = Qt.RightToolBarArea
+        elif at.x() <= max(self.EDGE_REACH, rails[Qt.LeftToolBarArea].geometry().right()):
+            side = Qt.LeftToolBarArea
+        top = rails[Qt.RightToolBarArea].geometry().top()
+        if side is not None and not (top <= at.y() <= window.height()):
+            side = None
+        self.side = side
+        self._show(self.column_for(bar, side) if side is not None else None)
+
+    def column_for(self, bar, side) -> QRect:
+        """Where *bar* will stand on end on *side*: a column of its own at
+        the window's edge, outside the rail, the rail's height."""
+        window = self.window
+        rail = window.right_rail_bar if side == Qt.RightToolBarArea else window.left_rail_bar
+        thickness = self.thickness_on_end(bar)
+        outer = window.contentsRect()
+        box = rail.geometry()
+        left = outer.right() + 1 - thickness if side == Qt.RightToolBarArea \
+            else outer.left()
+        return QRect(left, box.top(), thickness, box.height())
+
+    @staticmethod
+    def thickness_on_end(bar) -> int:
+        """How wide *bar* is stood on end: its widest button, and the bar's
+        own margins round it (worked out without standing it on end, which
+        would move it in the layout while it is held)."""
+        if bar.orientation() == Qt.Vertical:
+            return bar.width()
+        widest = 0
+        for action in bar.actions():
+            widget = bar.widgetForAction(action)
+            if widget is not None and not widget.isHidden() and not action.isSeparator():
+                widest = max(widest, widget.sizeHint().width())
+        margins = bar.layout().contentsMargins() if bar.layout() is not None else None
+        room = margins.left() + margins.right() if margins is not None else 0
+        return max(widest + room, 24)
+
+    def _show(self, column) -> None:
+        indicator = self.indicator
+        if column is None:
+            if indicator is not None:
+                indicator.hide()
+            return
+        if indicator is None:
+            indicator = self.indicator = _DropColumn(self.window)
+        indicator.setGeometry(column)
+        indicator.show()
+        indicator.raise_()
+
+
+class _DropColumn(QWidget):
+    """The column a toolbar dragged to a side edge will have: the accent's
+    outline over the window, where Qt would have shown its gap."""
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.setObjectName("toolbarDropColumn")
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.hide()
+
+    def paintEvent(self, _event) -> None:
+        from PySide6.QtGui import QPalette, QPen
+        painter = QPainter(self)
+        accent = self.palette().color(QPalette.Highlight)
+        fill = QColor(accent)
+        fill.setAlpha(60)
+        painter.fillRect(self.rect(), fill)
+        painter.setPen(QPen(accent, 2))
+        painter.drawRect(self.rect().adjusted(1, 1, -1, -1))
+        painter.end()
 
 
 class DetachableTabBar(QTabBar):
@@ -1759,10 +1867,10 @@ class MainWindow(QMainWindow):
         if getattr(self, "_toolbar_drags", None) is None:
             self._toolbar_drags = _ToolbarDrags(self)
         bar.installEventFilter(self._toolbar_drags)
-        if bar.objectName() in self.TOP_AND_BOTTOM_ONLY:
-            bar.setAllowedAreas(Qt.TopToolBarArea | Qt.BottomToolBarArea)
-        else:
-            bar.setAllowedAreas(Qt.AllToolBarAreas)
+        # Qt drops a toolbar only on the top or bottom edge; one brought to a
+        # side edge is put in its column outside the rail by _ToolbarDrags,
+        # Qt's preview of that drop being a gap under the rail
+        bar.setAllowedAreas(Qt.TopToolBarArea | Qt.BottomToolBarArea)
         bar.orientationChanged.connect(
             lambda orientation, b=bar: self._toolbar_stood_on_end(b, orientation))
         bar.topLevelChanged.connect(
@@ -5551,6 +5659,14 @@ class MainWindow(QMainWindow):
         if self._a_toolbar_is_held():
             QTimer.singleShot(60, self, self._after_toolbar_drag)
             return
+        drags = getattr(self, "_toolbar_drags", None)
+        pending = drags.pending if drags is not None else None
+        if pending is not None:
+            drags.pending = None
+            bar, side = pending
+            from shiboken6 import isValid
+            if isValid(bar) and bar in self.toolbars:
+                self.addToolBar(side, bar)
         self.arrange_side_toolbars()
         self._wrap_toolbar_rows()
 

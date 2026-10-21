@@ -43,10 +43,11 @@ def bar_named(w, name):
     return next(bar for bar in w.toolbars if bar.objectName() == name)
 
 
-def drag(w, bar, to: QPoint) -> None:
+def drag(w, bar, to: QPoint, before_letting_go=None) -> None:
     """Take hold of the toolbar's handle and drag it to *to* (window
     coordinates), a step at a time, the event loop running between steps as
-    it does under a hand; then let go and give it the moment it takes to
+    it does under a hand; *before_letting_go()* looks at the window while it
+    is still held there; then let go and give it the moment it takes to
     glide into place."""
     handle = QPoint(4, bar.height() // 2) if bar.orientation() == Qt.Horizontal \
         else QPoint(bar.width() // 2, 4)
@@ -56,9 +57,49 @@ def drag(w, bar, to: QPoint) -> None:
     for step in range(1, 13):
         QTest.mouseMove(bar, bar.mapFrom(w, start + (to - start) * step / 12))
         pump(2)
+    QTest.qWait(300)              # held there, as a hand pauses before letting go
+    if before_letting_go is not None:
+        before_letting_go()
     QTest.mouseRelease(bar, Qt.LeftButton, Qt.NoModifier, bar.mapFrom(w, to))
     QTest.qWait(700)
     pump()
+
+
+def rails(w) -> dict:
+    return {Qt.RightToolBarArea: w.right_rail_bar.geometry(),
+            Qt.LeftToolBarArea: w.left_rail_bar.geometry()}
+
+
+def preview_check(w, bar, area, side_capable: bool, out: dict):
+    """What is shown while the toolbar is held at the edge: the column it
+    will have, at the window's edge outside the rail — and no gap opened in
+    the rail's own column (Qt's preview of joining it, under the rail)."""
+    before = rails(w)
+
+    def check():
+        from PySide6.QtWidgets import QWidget
+        pump()
+        assert rails(w) == before, "nothing opened beside or under the panel rail"
+        assert w.toolBarArea(bar) != area or not bar.isFloating()
+        column = w.findChild(QWidget, "toolbarDropColumn")
+        if not side_capable:
+            assert column is None or not column.isVisible(), "it only goes top or bottom"
+            return
+        assert column is not None and column.isVisible(), "the place it will go is shown"
+        shown = column.geometry()
+        rail = before[area]
+        edge = w.contentsRect()
+        # hard against the window's edge — where the rail is now, which moves
+        # in to make room — never inside the rail, under it or beside the panels
+        if area == Qt.RightToolBarArea:
+            assert shown.right() == edge.right()
+        else:
+            assert shown.left() == edge.left()
+        assert shown.width() < 2 * rail.width(), "a toolbar's column, nothing wider"
+        assert shown.top() == rail.top() and shown.height() == rail.height()
+        out["shown"] = shown
+        out["picture"] = w.grab()
+    return check
 
 
 def outside_the_rail(w, bar, area) -> bool:
@@ -78,9 +119,16 @@ def test_each_toolbar_dragged_to_a_side_lands_outside_the_panel_rail(w, name, si
     bar = bar_named(w, name)
     edge = QPoint(w.width() - 3, w.height() // 2) if side == "right" \
         else QPoint(3, w.height() // 2)
-    drag(w, bar, edge)
-    assert not bar.isFloating()
     area = Qt.RightToolBarArea if side == "right" else Qt.LeftToolBarArea
+    seen = {}
+    drag(w, bar, edge, preview_check(w, bar, area, name not in TOP_ONLY, seen))
+    assert not bar.isFloating()
+    if name not in TOP_ONLY:
+        # it lands where it was shown it would
+        w.layout().activate()
+        landed = bar.geometry()
+        assert abs(landed.left() - seen["shown"].left()) <= 3
+        assert abs(landed.right() - seen["shown"].right()) <= 3
     if name in TOP_ONLY:
         assert w.toolBarArea(bar) == Qt.TopToolBarArea, "it only goes top or bottom"
     else:
@@ -107,8 +155,8 @@ def test_the_alignment_toolbar_goes_to_a_side_with_its_panels_closed(w, side):
     bar = w.alignment_bar
     edge = QPoint(w.width() - 3, w.height() // 2) if side == "right" \
         else QPoint(3, w.height() // 2)
-    drag(w, bar, edge)
     area = Qt.RightToolBarArea if side == "right" else Qt.LeftToolBarArea
+    drag(w, bar, edge, preview_check(w, bar, area, True, {}))
     assert w.toolBarArea(bar) == area and outside_the_rail(w, bar, area)
     # a panel opened afterwards opens between the toolbar's column and the sheet
     w.show_panel("dock_properties" if side == "right" else "dock_pages", True)

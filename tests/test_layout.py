@@ -86,13 +86,12 @@ def test_toolbars_go_to_any_edge_but_never_into_a_panel_rail(window):
     2026-10-15: "allow toolbars to be dragged to the side on their own column
     (can't join the panel column)"); the Properties and Markup Styles bars,
     whose boxes and words do not work on end, stay top or bottom."""
+    # Qt itself drops a toolbar only top or bottom: its preview of a side drop
+    # was a gap under the rail (the user, 2026-10-21), so a toolbar brought to
+    # a side edge is put in its column by the window (test_toolbar_docking.py)
     for bar in window.toolbars:
         assert bar.isMovable()
-        if bar.objectName() in window.TOP_AND_BOTTOM_ONLY:
-            assert bar.allowedAreas() == (Qt.TopToolBarArea | Qt.BottomToolBarArea)
-        else:
-            assert bar.isAreaAllowed(Qt.LeftToolBarArea)
-            assert bar.isAreaAllowed(Qt.RightToolBarArea)
+        assert bar.allowedAreas() == (Qt.TopToolBarArea | Qt.BottomToolBarArea)
     tools = toolbars(window)["toolbar_tools"]
     window.addToolBar(Qt.BottomToolBarArea, tools)
     assert window.toolBarArea(tools) == Qt.BottomToolBarArea
