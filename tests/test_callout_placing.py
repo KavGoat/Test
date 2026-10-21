@@ -26,6 +26,16 @@ what changed, on the card too (ui/cardsurface.py), the list puts in just the
 rows that changed, undo makes again only what differs, and the panel's old
 controls go at once.
 
+And the leader following the pointer to where the words go (the user,
+2026-10-21: "when I am moving my cursor to place the text box part, that's
+what is laggy"): each move made the call-out afresh (its style applied twice
+over, its words measured), asked every markup of the page where it was to
+snap, and the pointer's place in the status bar laid the bar out and painted
+it whole — on the graphics card, a frame of its own between the canvas's.
+Now the call-out is kept while its look is the same, the page's snapping
+targets are read once while it does not change, the status bar's place is
+written in the move's own frame and the rulers repaint only their marks.
+
 Cloud+ is Revu's: press and drag for a rectangular cloud of that size, or
 click its corners for a free-form one — closed by a double-click, by clicking
 the first corner again, by Enter or by a right-click — and then a click for
@@ -222,6 +232,217 @@ def test_a_line_style_sample_is_drawn_once():
         != first.cacheKey()
 
 
+# -- the leader following the pointer to where the words go -------------------
+
+#: the window's own work for one move while the leader follows the pointer
+#: on a marked-up sheet: 3–4.5 ms (from 4–8 ms before the preview's call-out
+#: and the page's snapping targets were kept from move to move, 2026-10-21)
+FOLLOW_MEDIAN_BUDGET = 6.0
+FOLLOW_P95_BUDGET = 20.0
+
+
+class _Seen(QObject):
+    """Every paint of *widgets* — the share of each it covered — and every
+    frame the window put on the screen."""
+
+    def __init__(self, window, widgets):
+        super().__init__()
+        self.window = window
+        self.widgets = list(widgets)
+        self.shares = {id(widget): [] for widget in self.widgets}
+        self.frames = 0
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        kind = event.type()
+        if kind == QEvent.UpdateRequest and watched is self.window:
+            self.frames += 1
+        elif kind == QEvent.Paint:
+            for widget in self.widgets:
+                if watched is widget:
+                    whole = max(widget.width() * widget.height(), 1)
+                    painted = sum(r.width() * r.height() for r in event.region())
+                    self.shares[id(widget)].append(painted / whole)
+        return False
+
+    def of(self, widget) -> list:
+        return self.shares[id(widget)]
+
+    def stop(self) -> None:
+        QApplication.instance().removeEventFilter(self)
+
+
+def test_the_leader_follows_the_pointer_at_a_frames_cost(w, tmp_path, monkeypatch):
+    """Between the click on what a call-out points at and the click that puts
+    its words down, each move of the pointer is a few milliseconds of the
+    window's work, painted in the same pass of the event loop as the move —
+    one frame, not a timer's hop later — and it repaints the leader and the
+    rulers' marks, nothing else: the call-out the preview is drawn from is
+    not made again, no panel is built again, and the status bar is not laid
+    out and painted whole for the pointer's place (the user, 2026-10-21: "when
+    I am moving my cursor to place the text box part, that's what is laggy,
+    while the leader is recalculating the hinge")."""
+    import calcforge.ui.view as view_module
+
+    _marked_up(w, tmp_path)
+    app = QApplication.instance()
+    view, rulers, bar = w.view, w.view.rulers, w.statusBar()
+    w.select_tool("callout")
+    pump()
+    start = page(w, 300, 300)
+    click(w, start)
+    for i in range(4):                        # its look is worked out once
+        move(w, QPointF(start.x() + 20 + 3 * i, start.y() - 2 * i))
+        pump()
+
+    made, rebuilt = [], []
+    plain_callout = view_module.CalloutItem
+
+    class Counted(plain_callout):
+        def __init__(self, *args, **kwargs):
+            made.append(1)
+            super().__init__(*args, **kwargs)
+    monkeypatch.setattr(view_module, "CalloutItem", Counted)
+    for panel, name in ((w.properties_panel, "show_items"), (w.markups_panel, "refresh"),
+                        (w.markups_panel, "rebuild")):
+        plain = getattr(panel, name)
+        monkeypatch.setattr(panel, name, lambda *a, _plain=plain, _name=name, **k: (
+            rebuilt.append(_name), _plain(*a, **k))[1])
+    seen = _Seen(w, [vp(w), rulers.top, rulers.left, bar])
+
+    def follow(moves: int, first: int, pace: float = 0.0) -> tuple:
+        work, at_once = [], 0
+        for i in range(first, first + moves):
+            point = QPointF(start.x() + 150 + 3 * i, start.y() - 2 * i)
+            painted = len(seen.of(vp(w)))
+            began = time.thread_time()
+            move(w, point)
+            app.processEvents()               # one pass of the event loop
+            if len(seen.of(vp(w))) > painted:
+                at_once += 1
+            pump()
+            work.append((time.thread_time() - began) * 1000.0)
+            time.sleep(pace)
+        return sorted(work), at_once
+
+    try:
+        work, at_once = follow(40, 0)
+        # and with the rulers up, at a pointer's pace: what goes to the screen
+        w.act_rulers.trigger()
+        follow(2, 40)                         # (shown: drawn whole, once)
+        seen.shares = {key: [] for key in seen.shares}
+        seen.frames = 0
+        _paced, paced_at_once = follow(30, 42, pace=0.012)
+    finally:
+        seen.stop()
+
+    median, p95 = statistics.median(work), work[int(len(work) * 0.95)]
+    assert median < FOLLOW_MEDIAN_BUDGET and p95 < FOLLOW_P95_BUDGET, (
+        f"a move of the leader is {median:.1f} ms of work (median), {p95:.1f} ms (95th)")
+    assert at_once >= 36 and paced_at_once >= 27, (
+        f"only {at_once} of 40 and {paced_at_once} of 30 moves were painted in "
+        f"the event loop's pass that took the move")
+    assert not made, f"the call-out the preview is drawn from was made {len(made)} times"
+    assert not rebuilt, f"a panel was built again as the pointer moved: {rebuilt}"
+    canvas = sorted(seen.of(vp(w)))
+    assert canvas and canvas[len(canvas) // 2] < 0.15, \
+        f"a move repainted {canvas[len(canvas) // 2]:.0%} of the canvas"
+    for ruler in (rulers.top, rulers.left):
+        assert seen.of(ruler) and max(seen.of(ruler)) < 0.1, \
+            f"a ruler was painted whole for the pointer's mark: {seen.of(ruler)}"
+    assert all(share < 0.5 for share in seen.of(bar)), \
+        "the status bar was painted whole for the pointer's place"
+    assert seen.frames <= len(seen.of(vp(w))) + 3, (
+        f"{seen.frames} frames for {len(seen.of(vp(w)))} paints of the canvas: "
+        f"the pointer's place went to the screen in frames of its own")
+    rulers_now = [_held_of(w, ruler) for ruler in (rulers.top, rulers.left)]
+    for ruler in (rulers.top, rulers.left):
+        ruler.repaint()
+    assert rulers_now == [_held_of(w, ruler) for ruler in (rulers.top, rulers.left)], \
+        "a ruler's mark left something of where it was"
+    assert _held(w) == _as_drawn_afresh(w), "the leader left a piece of itself behind"
+    key(w, Qt.Key_Escape)
+
+
+def test_the_preview_is_the_call_out_that_lands(w):
+    """The call-out the preview is drawn from is kept from move to move, and
+    is still the one a click would put down: where it is, where its leader
+    leaves the box and turns, and how it looks — the toolbar's look changed
+    half way is the look it then has."""
+    view = w.view
+    w.select_tool("callout")
+    pump()
+    click(w, page(w, 200, 300))
+    anchor = view._pending_anchor              # (as snapped)
+
+    def fresh():
+        item = CalloutItem("")
+        w.apply_default_style(item)
+        box = view._pending_callout_box()
+        item.set_local_rect(QRectF(0, 0, box.width(), box.height()))
+        item.setPos(box.topLeft())
+        item.tip = item.mapFromScene(anchor)
+        return item
+
+    def same(preview, made) -> None:
+        assert preview.pos() == made.pos() and preview.local_rect() == made.local_rect()
+        assert preview.tip == made.tip and preview.elbow() == made.elbow()
+        assert preview.side() == made.side() and preview.side_point() == made.side_point()
+        assert preview.style == made.style
+
+    previews = []
+    for i, point in enumerate((page(w, 380, 220), page(w, 90, 330), page(w, 210, 120),
+                               page(w, 230, 470))):
+        if i == 2:
+            w.default_style.stroke = "#1c7ed6"     # the toolbar's colour changed
+        move(w, point)
+        pump()
+        preview = view._pending_callout()
+        previews.append(preview)
+        same(preview, fresh())
+    assert previews[0] is previews[1], "the preview's call-out was made again for a move"
+    assert previews[1] is not previews[2], "the new look did not make a new one"
+    assert previews[3].style.stroke == "#1c7ed6"
+    click(w, page(w, 230, 470))
+    pump()
+    (placed,) = markups(w, CalloutItem)
+    assert placed.style.stroke == previews[3].style.stroke
+    assert placed.mapToScene(placed.tip) == previews[3].mapToScene(previews[3].tip)
+    key(w, Qt.Key_Escape)
+
+
+def test_snapping_finds_a_markup_where_it_is_now(w):
+    """What the pointer snaps to is read once while nothing on the page
+    changes — and afresh once something has: a markup moved or resized is
+    caught where it is, not where it was."""
+    from calcforge.items.shapes import RectItem
+
+    w.document.settings.snap_to_items = True
+    w.select_tool("rect")
+    drag(w, page(w, 140, 140), page(w, 260, 220))
+    w.select_tool("select")
+    (box,) = markups(w, RectItem)
+    view = w.view
+    corner = box.mapToScene(box.local_rect().normalized().topRight())
+    assert view.snap_to_item(corner + QPointF(1, 1)) is not None
+    box.setPos(box.pos() + QPointF(120, 60))
+    moved = box.mapToScene(box.local_rect().normalized().topRight())
+    caught = view.snap_to_item(moved + QPointF(1, 1))
+    assert caught is not None and abs(caught.x() - moved.x()) < 0.01 \
+        and abs(caught.y() - moved.y()) < 0.01, "the moved rectangle was not caught"
+    # widened by its handle, as the user would
+    view.scene().clearSelection()
+    box.setSelected(True)
+    pump()
+    handle = box.mapToScene(box.local_rect().normalized().bottomRight())
+    drag(w, handle, handle + QPointF(80, 0))
+    wider = box.mapToScene(box.local_rect().normalized().topRight())
+    assert wider.x() > moved.x() + 60, "the rectangle was widened"
+    caught = view.snap_to_item(wider + QPointF(1, 1))
+    assert caught is not None and abs(caught.x() - wider.x()) < 0.01, \
+        "the widened rectangle was caught where its corner was"
+
+
 # -- the whole gesture: the click, the words, finishing, undo -------------------
 
 class _Steps:
@@ -267,6 +488,12 @@ def _held(window):
     partial repaints and all, not a fresh paint as a grab is."""
     from tests.test_big_pdf_smooth import _shown
     return _shown(window, window.view.viewport())
+
+
+def _held_of(window, widget):
+    """*widget* as the window holds it, as last painted."""
+    from tests.test_big_pdf_smooth import _shown
+    return _shown(window, widget)
 
 
 def _as_drawn_afresh(window):
@@ -449,10 +676,16 @@ def test_on_the_card(w, tmp_path):
         w.select_tool("callout")
         start = page(w, 300, 300)
         click(w, start)
+        _quiet(w, repaint=False)             # (what the page does once idle, done)
         drawn.clear()
-        for i in range(20):
-            move(w, QPointF(start.x() + 10 * i, start.y() - 6 * i))
-            pump()
+        seen = _Seen(w, [vp(w)])
+        try:
+            for i in range(20):
+                move(w, QPointF(start.x() + 10 * i, start.y() - 6 * i))
+                pump()
+                time.sleep(0.012)
+        finally:
+            seen.stop()
         following = list(drawn)
         click(w, QPointF(start.x() + 200, start.y() - 120))
         QTest.keyClicks(QApplication.focusWidget() or vp(w), "Weld")
@@ -474,6 +707,10 @@ def test_on_the_card(w, tmp_path):
         cardsurface.CardSurface.to_draw = plain
     assert following and max(sorted(following)[:len(following) * 9 // 10]) < 0.5, \
         f"the leader followed with whole frames drawn: {following}"
+    # one frame to the screen for each move: a frame of its own for the
+    # pointer's place in the status bar, between the canvas's, was one more
+    # wait for the card's next refresh
+    assert seen.frames <= 20 + 1, f"{seen.frames} frames for 20 moves of the pointer"
     assert typing and max(typing) < 0.5, f"a key typed drew {typing}"
     assert (shown == fresh).all(), "the card left something of an earlier frame"
 

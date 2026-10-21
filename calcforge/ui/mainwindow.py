@@ -202,6 +202,8 @@ class CenteredStatusBar(QStatusBar):
         self._dropped: list = []
         self._overflow = None
         self._fitting = False
+        #: the bar as it was last laid out (_as_laid_out)
+        self._laid_out = None
 
     # Every control in the footer used to be fixed, so the footer alone asked
     # for 1174 px and the window could not be made narrower than about 1180 —
@@ -303,14 +305,34 @@ class CenteredStatusBar(QStatusBar):
         if self.after_layout is not None:
             self.after_layout()
 
+    def _as_laid_out(self) -> tuple:
+        """Where each control is and the room it asks for — all that what
+        fits (fit_to_width) and how the bar is painted depend on."""
+        return (self.width(), self.height(), tuple(
+            (type(child).__name__, child.objectName(), child.isHidden(), child.geometry().getRect(),
+             self._natural_width(child), child.sizeHint().height())
+            for child in self.children()
+            if isinstance(child, QWidget) and not child.isWindow()))
+
     def event(self, event) -> bool:
         # a control grew or shrank (the page size or the zoom changed what
         # it says): see again what fits
         if event.type() == QEvent.LayoutRequest:
+            laid_out = self._as_laid_out()
+            if laid_out == self._laid_out:
+                # A control's words changed and nothing else did — the
+                # pointer's place, written as it moves: that control repaints
+                # itself. Laying the bar out again painted every control on it
+                # afresh, and on a canvas drawn with the graphics card that was
+                # a frame of its own between the canvas's (the user,
+                # 2026-10-21: the leader following the pointer laggy).
+                return True
             self.fit_to_width()
         done = super().event(event)
-        if event.type() == QEvent.LayoutRequest and self.after_layout is not None:
-            self.after_layout()
+        if event.type() == QEvent.LayoutRequest:
+            self._laid_out = self._as_laid_out()
+            if self.after_layout is not None:
+                self.after_layout()
         return done
 
     def set_center_widget(self, widget: QWidget) -> None:
@@ -12205,16 +12227,34 @@ class MainWindow(QMainWindow):
     def _show_position(self, point: QPointF) -> None:
         """The pointer's place in the status bar, at most every 30 ms: set on
         every mouse move it laid the status bar out again under a pan or a
-        drag, many times a frame."""
+        drag, many times a frame.
+
+        Written by the move itself once 30 ms have gone by, so it goes to the
+        screen in the same frame as the canvas the move repaints; the timer,
+        started again by every move, writes only the last place, once the
+        pointer has stopped. Written by the timer alone, between moves, it
+        was a frame of its own — on a canvas drawn with the graphics card,
+        one more frame to wait for while the leader of a call-out followed
+        the pointer (the user, 2026-10-21)."""
+        import time
         self._position_wanted = QPointF(point)
         timer = getattr(self, "_position_timer", None)
         if timer is None:
             timer = self._position_timer = QTimer(self)
             timer.setSingleShot(True)
             timer.setInterval(30)
-            timer.timeout.connect(lambda: self._write_position(self._position_wanted))
-        if not timer.isActive():
+            timer.timeout.connect(self._write_wanted_position)
+        now = time.monotonic()
+        if now - getattr(self, "_position_written", -1.0) >= 0.030:
+            timer.stop()
+            self._write_wanted_position()
+        else:
             timer.start()
+
+    def _write_wanted_position(self) -> None:
+        import time
+        self._position_written = time.monotonic()
+        self._write_position(self._position_wanted)
 
     def _write_position(self, point: QPointF) -> None:
         scale = self.current_page().scale

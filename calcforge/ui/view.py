@@ -259,6 +259,9 @@ class _SizeEdit(QLineEdit):
 _CLEAR_OF_THE_PANELS = [0]
 _BUTTON_EVENTS = (QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
                   QEvent.MouseButtonDblClick)
+#: how many buttons, keys and catch-ups have been handled: what is read once
+#: for the moves of the pointer between two of them (PageView._markup_boxes)
+_STEPS_TAKEN = [0]
 
 
 class clear_of_the_panels:
@@ -276,11 +279,31 @@ class clear_of_the_panels:
 
     def __exit__(self, *exc):
         _CLEAR_OF_THE_PANELS[0] -= 1
+        _STEPS_TAKEN[0] += 1
         return False
 
 
 def is_clear_of_the_panels() -> bool:
     return _CLEAR_OF_THE_PANELS[0] > 0
+
+
+class _KeptSides(dict):
+    """{markup or line work: PageView.sides_of it} for one page, kept by the
+    page with what PageView._nearby_snap_items read of it last."""
+
+    def __init__(self, frame):
+        super().__init__()
+        self.frame = frame
+
+    def __missing__(self, item):
+        held = self.frame.__dict__.get(
+            "_line_work_boxes" if item.__dict__.get("line_work") else "_snap_boxes")
+        store = held[2] if held is not None else {}
+        sides = store.get(item)
+        if sides is None:
+            sides = store[item] = PageView.sides_of(item)
+        self[item] = sides
+        return sides
 
 
 _CLOUD_CURSOR = None
@@ -2060,12 +2083,76 @@ class PageView(QGraphicsView):
 
     @staticmethod
     def _nearby_snap_items(frame, point, reach):
-        # Keep page order (including equal-distance snap tie-breaking). This
-        # list lives for one pointer event only, so edits/undo/page rotation
-        # never need to invalidate cached geometry.
-        return [item for item in frame.markups() + frame.pdf_snap_items(point, reach) if item.isVisible()
-                and item.sceneBoundingRect().adjusted(
-                    -reach, -reach, reach, reach).contains(point)]
+        # Keep page order (including equal-distance snap tie-breaking). The
+        # page's markups and where they are are read once for as long as none
+        # of them changes (_markup_boxes); the list itself lives for one
+        # pointer event only.
+        near = [item for item, box in PageView._markup_boxes(frame)
+                if box.adjusted(-reach, -reach, reach, reach).contains(point)]
+        line_work = frame.pdf_snap_items(point, reach)
+        if line_work:
+            boxes = PageView._line_work_boxes(frame)
+            for item in line_work:
+                box = boxes.get(item)
+                if box is None:
+                    box = boxes[item] = item.sceneBoundingRect()
+                if item.isVisible() and box.adjusted(-reach, -reach, reach, reach).contains(point):
+                    near.append(item)
+        return near
+
+    @staticmethod
+    def _line_work_boxes(frame) -> dict:
+        """{line work of the page's file: its box on the canvas} — read once
+        each: the line work is never edited, and is read again when the page
+        is (scene.PageFrame._load_pdf_snap) or the page moves."""
+        transform = frame.sceneTransform()
+        key = (getattr(frame, "_pdf_snap_key", None), id(getattr(frame, "_pdf_snap_group", None)),
+               (transform.m11(), transform.m12(), transform.m21(), transform.m22(),
+                transform.dx(), transform.dy()))
+        kept = frame.__dict__.get("_line_work_boxes")
+        if kept is None or kept[0] != key:
+            kept = frame._line_work_boxes = (key, {}, {})
+        return kept[1]
+
+    @staticmethod
+    def _markup_boxes(frame) -> list:
+        """(markup, its box on the canvas) for each visible markup of the
+        page, in page order — the same until a markup of the page changes
+        (its layer counts every change), comes or goes, or the page moves.
+        Asked of every markup on every move of the pointer, it was a call
+        into Python per markup and most of the snapping of a move on a busy
+        sheet (the user, 2026-10-21: the leader following the pointer
+        laggy). Read again after every click and key too: a few ways of
+        resizing a markup only repaint the view."""
+        layer = getattr(frame, "layer", None)
+        generation = getattr(layer, "generation", None)
+        if generation is None:
+            return [(item, item.sceneBoundingRect()) for item in frame.markups()
+                    if item.isVisible()]
+        transform = frame.sceneTransform()
+        scene = frame.scene()
+        # a picked-out markup's box takes in its handles, whose room goes
+        # with the zoom: neither is a change to the markup itself
+        from ..items.base import _CHROME_ZOOM
+        key = (generation, _STEPS_TAKEN[0], len(frame.childItems()),
+               (transform.m11(), transform.m12(), transform.m21(), transform.m22(),
+                transform.dx(), transform.dy()), _CHROME_ZOOM[0],
+               tuple(id(item) for item in scene.selectedItems()) if scene is not None else ())
+        kept = frame.__dict__.get("_snap_boxes")
+        if kept is not None and kept[0] == key:
+            return kept[1]
+        boxes = [(item, item.sceneBoundingRect()) for item in frame.markups()
+                 if item.isVisible()]
+        frame._snap_boxes = (key, boxes, {})
+        return boxes
+
+    @staticmethod
+    def _kept_sides(frame) -> "_KeptSides":
+        """Each markup's straight runs (sides_of), read once while the page
+        stays as it is — for the moves of the pointer straight after its
+        nearby markups were found (_nearby_snap_items), which keeps what is
+        read here in step with the page."""
+        return _KeptSides(frame)
 
     def named_snap_targets(self, frame, ignore=(), near=None, reach=0.0,
                            _nearby=None) -> list:
@@ -2120,7 +2207,7 @@ class PageView(QGraphicsView):
         return list(zip(corners, corners[1:])) + [(corners[-1], corners[0])]
 
     def crossings_near(self, frame, scene_pos: QPointF, reach: float,
-                       ignore=(), _nearby=None) -> list:
+                       ignore=(), _nearby=None, _sides=None) -> list:
         """Where drawn lines cross each other, close to the pointer.
 
         The point a drawing is most often aimed at and the one there is no
@@ -2142,7 +2229,7 @@ class PageView(QGraphicsView):
                     continue
             elif not settings.snap_to_items:
                 continue
-            for start, end in self.sides_of(item):
+            for start, end in (_sides[item] if _sides is not None else self.sides_of(item)):
                 if _passes_near(start, end, scene_pos, reach):
                     near.append((start, end, item))
                     if len(near) >= MOST_CROSSING_SIDES:
@@ -2289,7 +2376,8 @@ class PageView(QGraphicsView):
         best_distance = reach
         nearby = self._nearby_snap_items(frame, scene_pos, reach)
         candidates = self.named_snap_targets(frame, ignore, scene_pos, reach, nearby)
-        candidates += self.crossings_near(frame, scene_pos, reach, ignore, nearby)
+        sides = self._kept_sides(frame)  # each markup's runs, read once for both
+        candidates += self.crossings_near(frame, scene_pos, reach, ignore, nearby, sides)
         # The body of an edge is a target too, not just its corners and middle.
         # Project onto the segment in scene coordinates so rotated callouts
         # behave the same way as upright ones.
@@ -2300,7 +2388,7 @@ class PageView(QGraphicsView):
                 continue
             if self.is_drawing(item) or not settings.snap_to_items:
                 continue
-            for start, end in self.sides_of(item):
+            for start, end in sides[item]:
                 delta = end - start
                 length2 = delta.x() ** 2 + delta.y() ** 2
                 if length2 <= 1e-12:
@@ -6025,27 +6113,30 @@ class PageView(QGraphicsView):
     def _pending_callout(self):
         """The call-out that would land if the click came now.
 
-        Made and thrown away every time the pointer moves, which costs
-        nothing and means the preview cannot drift out of step with what is
+        Made as it will be placed — the toolbar's look, its kind's saved
+        default, a Tool Chest tool's or a markup style's — once, and kept
+        while none of those changes; each move only puts it where the
+        pointer is and aims it, which is all a move changes. Making it afresh
+        for every move (its style applied twice over, its words measured)
+        was most of what following the pointer cost (the user, 2026-10-21:
+        the leader laggy while the box is being placed). It is still the
+        real thing, so the preview cannot drift out of step with what is
         actually placed.
         """
-        from ..items.text import CalloutItem
-
         anchor = self._pending_anchor
         if anchor is None:
             return None
         box = self._pending_callout_box()
         if box is None:
             return None
-        item = CalloutItem("")
-        self.window.apply_default_style(item)
-        if self._pending_properties:
-            # as it will be placed: a Tool Chest tool's or a markup style's look
-            from . import toolsets
-            toolsets.apply_properties(item, self._pending_properties)
-        item.set_local_rect(QRectF(0, 0, box.width(), box.height()))
+        cloud = bool(self._pending_cloud)
+        item = self._callout_as_placed(cloud)
+        size = (box.width(), box.height())
+        if item.__dict__.get("_asked_size") != size:
+            item.set_local_rect(QRectF(0, 0, box.width(), box.height()))
+            item._asked_size = size
         item.setPos(box.topLeft())
-        if self._pending_cloud:
+        if cloud:
             # A cloud call-out: the cloud is what points, so no arrow head,
             # and the line runs to the cloud rather than to a tip.
             item.leaders = []
@@ -6053,6 +6144,28 @@ class PageView(QGraphicsView):
                             for corner in self._pending_cloud])
         else:
             item.tip = item.mapFromScene(anchor)
+        return item
+
+    def _callout_as_placed(self, cloud: bool):
+        """A call-out wearing the look the next one will land with — the one
+        made for the last move while that look is unchanged."""
+        from . import toolsets
+
+        window = self.window
+        look = (cloud, self._pending_properties, repr(window.default_style),
+                getattr(window, "default_cloud_size", None),
+                toolsets.defaults_as_written(), preferences.current().author)
+        kept = self.__dict__.get("_callout_kept")
+        if kept is not None and kept[0] == look:
+            return kept[1]
+        item = CalloutItem("")
+        window.apply_default_style(item)
+        if self._pending_properties:
+            # as it will be placed: a Tool Chest tool's or a markup style's look
+            toolsets.apply_properties(item, self._pending_properties)
+        if cloud:
+            item.leaders = []
+        self._callout_kept = ((cloud, deepcopy(self._pending_properties)) + look[2:], item)
         return item
 
     def _pending_callout_box(self) -> Optional[QRectF]:
