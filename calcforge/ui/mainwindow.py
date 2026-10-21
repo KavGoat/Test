@@ -5537,7 +5537,12 @@ class MainWindow(QMainWindow):
         it (none floats otherwise: they are not floatable)."""
         drags = getattr(self, "_toolbar_drags", None)
         if drags is not None and drags.held is not None:
-            return True
+            if QApplication.mouseButtons() & Qt.LeftButton:
+                return True
+            # let go somewhere the toolbar never heard of (a press on it that
+            # opened a menu, or a release over another window): not held, or
+            # the toolbars were never arranged again in this window
+            drags.held = None
         return any(bar.isFloating() for bar in getattr(self, "toolbars", ()))
 
     def _after_toolbar_drag(self) -> None:

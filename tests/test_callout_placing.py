@@ -679,13 +679,19 @@ def test_on_the_card(w, tmp_path):
         _quiet(w, repaint=False)             # (what the page does once idle, done)
         drawn.clear()
         seen = _Seen(w, [vp(w)])
+        when = []
         try:
             for i in range(20):
+                when.append(time.perf_counter())
                 move(w, QPointF(start.x() + 10 * i, start.y() - 6 * i))
                 pump()
                 time.sleep(0.012)
         finally:
             seen.stop()
+        # a pause longer than the status bar's 30 ms between two moves (a
+        # loaded machine) has the pointer's last place written when the
+        # pointer has stopped, as it should be: a frame of its own then
+        stopped = sum(1 for a, b in zip(when, when[1:]) if b - a > 0.03)
         following = list(drawn)
         click(w, QPointF(start.x() + 200, start.y() - 120))
         QTest.keyClicks(QApplication.focusWidget() or vp(w), "Weld")
@@ -710,7 +716,8 @@ def test_on_the_card(w, tmp_path):
     # one frame to the screen for each move: a frame of its own for the
     # pointer's place in the status bar, between the canvas's, was one more
     # wait for the card's next refresh
-    assert seen.frames <= 20 + 1, f"{seen.frames} frames for 20 moves of the pointer"
+    assert seen.frames <= 20 + 1 + stopped, (
+        f"{seen.frames} frames for 20 moves of the pointer ({stopped} pauses)")
     assert typing and max(typing) < 0.5, f"a key typed drew {typing}"
     assert (shown == fresh).all(), "the card left something of an earlier frame"
 
