@@ -4634,8 +4634,9 @@ def test_the_markup_menu_offers_the_whole_of_bluebeams(window):
 
 
 def test_align_is_offered_but_dead_until_there_are_two(window):
-    """Revu's: with one markup, Centre in Document and the flips are there
-    to use; lining up and sizing wait for a second (tests/test_alignment.py)."""
+    """Revu's: with one markup, Centre in Document is there to use (and the
+    flips, for one Revu flips — not a rectangle); lining up and sizing wait
+    for a second (tests/test_alignment.py)."""
     rect = _a_rectangle(window)
     rect.setSelected(True)
     menu = window.build_context_menu(rect, QPointF(150, 150))
@@ -4643,7 +4644,8 @@ def test_align_is_offered_but_dead_until_there_are_two(window):
     assert align.isEnabled()
     entries = {a.text(): a for a in align.menu().actions() if a.text()}
     assert not entries["Align Left"].isEnabled() and not entries["Align Size"].isEnabled()
-    assert entries["Centre in Document"].isEnabled() and entries["Flip Vertical"].isEnabled()
+    assert entries["Centre in Document"].isEnabled()
+    assert not entries["Flip Vertical"].isEnabled(), "a rectangle is not one Revu flips"
 
     other = _a_rectangle(window, 300, 120, 380, 200)
     rect.setSelected(True)

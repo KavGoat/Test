@@ -112,8 +112,25 @@ def drawn_icon(draw, width: int, height: int = 0) -> QIcon:
     height = height or width
     made = QIcon()
     for scale in _scales():
-        made.addPixmap(_render(draw, width, height, scale))
+        picture = _render(draw, width, height, scale)
+        made.addPixmap(picture)
+        made.addPixmap(_faded(picture), QIcon.Disabled)
     return made
+
+
+def _faded(picture: QPixmap) -> QPixmap:
+    """*picture* as a command that cannot be used now shows it: a third of
+    its strength. Qt's own greyed copy of a light icon on dark mode's bar,
+    or of a dark one on the light bar, was hardly lighter than the icon (the
+    user, 2026-10-21: the Alignment buttons did not look greyed)."""
+    faded = QPixmap(picture.size())
+    faded.setDevicePixelRatio(picture.devicePixelRatio())
+    faded.fill(Qt.transparent)
+    painter = QPainter(faded)
+    painter.setOpacity(0.32)
+    painter.drawPixmap(0, 0, picture)
+    painter.end()
+    return faded
 
 
 def _pen(painter: QPainter, colour: str, width: float = 1.6,

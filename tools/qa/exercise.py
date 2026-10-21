@@ -103,8 +103,9 @@ def norm(text: str, mnemonics: bool = False) -> str:
 
 
 #: Revu's Align Markups (ui/alignment.py): three markups picked, enough for
-#: every one of them (Distribute wants three)
-ALIGNMENT_STATE = "three_rects"
+#: every one of them (Distribute wants three; a flip wants one it can turn
+#: over, the polyline)
+ALIGNMENT_STATE = "three_markups"
 ALIGNMENT_NAMES = ("align width", "align height", "align size", "distribute horizontally",
                    "distribute vertically", "centre in document", "flip horizontal",
                    "flip vertical", "align middle", "align top", "align bottom")
@@ -518,9 +519,10 @@ def build_commands(path: str) -> list[dict]:
                     state = "pages_copied"
                 if "Alignment" in path_parts[:-1] or label == "Alignment":
                     state = ALIGNMENT_STATE
-                    if label.startswith("Distribute"):
-                        # two picked in the equation, block and table states:
-                        # Distribute wants three, and says so greyed
+                    if label.startswith(("Distribute", "Flip")):
+                        # two picked in the equation, block and table states,
+                        # none of them flippable: Distribute wants three, a
+                        # flip one it can turn over, and each says so greyed
                         for entry in entries[1:]:
                             entry["expect_disabled"] = True
                 if label in ("Clear Filter",):
@@ -1938,9 +1940,10 @@ def fx_two_rects(win):
     return dict(item=first[0], items=first + second, point=centre_of(first[0]))
 
 
-def fx_three_rects(win):
+def fx_three_markups(win):
+    """Two rectangles and a polyline, picked."""
     ctx = fx_two_rects(win)
-    third = draw(win, "rect", (140, 260), (240, 330))
+    third = draw(win, "polyline", (140, 260), (240, 330))
     pick(win, ctx["items"] + third)
     return dict(item=ctx["item"], items=ctx["items"] + third, point=ctx["point"])
 
@@ -2428,7 +2431,7 @@ FIXTURES = {
     "length": _one("measure_length", (100, 300), (320, 300)),
     "note": fx_note,
     "two_rects": fx_two_rects,
-    "three_rects": fx_three_rects,
+    "three_markups": fx_three_markups,
     "group": fx_group,
     "hidden": fx_hidden,
     "flattened": fx_flattened,

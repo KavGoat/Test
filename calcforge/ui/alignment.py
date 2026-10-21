@@ -10,9 +10,14 @@ toolbar; a selection's right-click ▸ Alignment).
 - Distribute Horizontally and Vertically (three or more): the centres
   equally spaced between the two outermost, which stay.
 - Centre in Document (one or more): each markup's centre to its page's.
-- Flip Horizontal and Vertical (one or more): each about its own centre —
-  images, stamps, polylines, polygons, clouds, pen and highlighter ink, and
-  groups of them (a group is flipped as one, about its middle).
+- Flip Horizontal and Vertical (one or more that flip): each about its own
+  centre — images, snapshots, stamps, polylines, polygons, clouds, pen and
+  highlighter ink, and groups of them (a group is flipped as one, about its
+  middle). A callout's box goes to the other side of its leader, the words
+  still readable; a text box does not flip.
+
+Each command is greyed until enough is picked (refresh, on every change of
+the selection).
 
 A group is one thing to align, as in Revu, and a calculation block takes the
 equations in it along. Each command is one undo step.
@@ -61,7 +66,8 @@ ORDER = ("align_left", "align_hcenter", "align_right", "align_top", "align_vcent
 #: Each command's icon (ui/icons.py).
 ICONS = {key: key for key in COMMANDS}
 
-FLIPPABLE = "images, stamps, polylines, polygons, clouds, pen and highlighter ink"
+FLIPPABLE = ("images, snapshots, stamps, callouts, polylines, polygons, clouds, pen and "
+             "highlighter ink")
 
 
 def needs(count: int) -> str:
@@ -140,8 +146,9 @@ def units(window) -> list:
     return found
 
 
-def unit_count(window) -> int:
-    """How many things are picked, cheaply (the actions' state)."""
+def unit_count(window, flippable: bool = False) -> int:
+    """How many things are picked, cheaply (the actions' state); with
+    *flippable*, how many of them a flip would turn over."""
     scene = window.view.scene()
     if scene is None:
         return 0
@@ -150,6 +157,8 @@ def unit_count(window) -> int:
     for item in scene.selectedItems():
         if not isinstance(item, MarkupItem) or getattr(item, "SHEET_RUN", False) \
                 or not view.editable(item):
+            continue
+        if flippable and not _flippable(item):
             continue
         if item.group:
             if item.group in names:
@@ -164,14 +173,21 @@ def refresh(window) -> None:
     wants when not (the actions on the toolbar, Edit ▸ Alignment and the
     right-click menu are the same)."""
     count = unit_count(window)
+    flips = unit_count(window, flippable=True)
     for key, (label, tip, least) in COMMANDS.items():
         action = getattr(window, f"act_{key}", None)
         if action is None:
             continue
-        enough = count >= least
-        action.setEnabled(enough)
-        words = f"{label} — {tip}" if enough else \
-            f"{label} — select {needs(least)} first. {tip}"
+        flip = key.startswith("flip_")
+        enough = (flips if flip else count) >= least
+        if action.isEnabled() != enough:
+            action.setEnabled(enough)
+        if enough:
+            words = f"{label} — {tip}"
+        elif flip and count:
+            words = f"{label} — only {FLIPPABLE} flip; text boxes do not. {tip}"
+        else:
+            words = f"{label} — select {needs(least)} first. {tip}"
         if least >= 2 and enough:
             words += " (the primary: the first picked, yellow points; click a "\
                      "green-pointed one to make it the primary)"
@@ -326,9 +342,14 @@ def _same_size(window, found: list, which: str) -> None:
 
 # -- flips -----------------------------------------------------------------------
 def _flippable(item) -> bool:
+    """Revu's: images, snapshots, stamps, callouts (their words stay
+    readable), polylines, polygons, clouds, pen and highlighter ink. Not a
+    text box."""
     kind = getattr(item, "TYPE", "")
-    if kind in ("image", "stamp"):
+    if kind in ("image", "stamp", "snapshot"):
         return True
+    if kind == "callout":
+        return bool(getattr(item, "leaders", None))
     points = getattr(item, "points", None)
     return kind == "poly" and isinstance(points, list) and len(points) >= 2
 
@@ -404,6 +425,50 @@ def _mirror_picture(window, item, across: bool) -> None:
     item.update()
 
 
+def _turn_callout(item, across: bool) -> None:
+    """A callout as Revu flips one: the box goes to the other side of its
+    leaders and the leaders are mirrored, but the words are not — they stay
+    readable."""
+    box = item.local_rect().normalized()
+    xs, ys = [box.left(), box.right()], [box.top(), box.bottom()]
+    for leader in item.leaders:
+        for point in [leader.tip] + list(leader.cloud):
+            xs.append(point.x())
+            ys.append(point.y())
+    # the middle of the box and its leaders together, which stays put
+    centre = QPointF((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+
+    def mirrored(p: QPointF) -> QPointF:
+        return QPointF(2 * centre.x() - p.x(), p.y()) if across else \
+            QPointF(p.x(), 2 * centre.y() - p.y())
+    item.prepareGeometryChange()
+    for leader in item.leaders:
+        leader.tip = mirrored(leader.tip)
+        leader.cloud = [mirrored(p) for p in leader.cloud]
+        swaps = {"left": "right", "right": "left"} if across else \
+            {"top": "bottom", "bottom": "top"}
+        leader.side = swaps.get(leader.side, leader.side)
+    item.set_local_rect(QRectF(mirrored(box.topLeft()), mirrored(box.bottomRight()))
+                        .normalized())
+    item.touch()
+    signal = getattr(item, "geometryChanged", None)
+    if signal is not None:
+        signal.emit()
+    item.update()
+
+
+def _mirror_snapshot(item, across: bool) -> None:
+    """A snapshot's drawing mirrored in its box (items/snapshot.py keeps
+    which way it is turned, and draws, prints and exports it so)."""
+    centre = item.local_rect().normalized().center()
+    before = item.mapToScene(centre)
+    item.mirror(across)
+    if item.rotation():
+        item.setRotation(-item.rotation())
+        _keep_centre(item, centre, before)
+    item.touch()
+
+
 def _flip(window, found: list, across: bool) -> int:
     """Flip what can be; how many were."""
     done = 0
@@ -413,8 +478,13 @@ def _flip(window, found: list, across: bool) -> int:
             continue
         middle = unit.scene_rect().center()
         for member in members:
-            if getattr(member, "TYPE", "") == "image":
+            kind = getattr(member, "TYPE", "")
+            if kind == "image":
                 _mirror_picture(window, member, across)
+            elif kind == "callout":
+                _turn_callout(member, across)
+            elif kind == "snapshot":
+                _mirror_snapshot(member, across)
             else:
                 _mirror_local(member, across)
         if len(unit.members) > 1:

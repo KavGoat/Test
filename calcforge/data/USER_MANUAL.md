@@ -426,13 +426,18 @@ measurement extras too: cut-outs, Units, Caption and Totals.
     centres equally spaced between the two outermost, which stay.
   - **Centre in Document** (one or more): each markup's centre on its page's
     centre.
-  - **Flip Horizontal**, **Flip Vertical** (one or more): each mirrored about its
-    own centre — images, stamps, polylines, polygons, clouds, pen and highlighter
-    ink, and groups (a group turns over as one).
+  - **Flip Horizontal**, **Flip Vertical** (one or more that flip): each mirrored
+    about its own centre — images, snapshots, stamps, polylines, polygons,
+    clouds, pen and highlighter ink, and groups (a group turns over as one). A
+    callout flips as in Revu: its box goes to the other side of its leader and
+    the leader is mirrored, but the words stay readable. A text box does not
+    flip; picked with others, it is left as it is.
 
   A group counts as one markup and a calculation block takes its equations with
   it; equations, tables and markups align together. Each is one undo step. A
-  command needing more than is selected is greyed, and its tip says what it
+  command is greyed — on the toolbar, in both menus and for its key — until
+  enough is picked (two for the aligns and sizes, three to distribute, one for
+  Centre in Document, one that flips for a flip), and its tip says what it
   needs. None has a key out of the box — Revu's (`Ctrl+Alt+L`, `E`, `R`, `T`, `M`,
   `B`, `H`, `V`) are CalcForge's symbol and Paste Here keys — but any key can be
   given to each in Keyboard Shortcuts (group **Alignment**).
@@ -2342,6 +2347,10 @@ drawn on it keeps its own colours.
 - **Tools ▸ Toolbars**: show or hide Main, Calculation, Measure, Tools, Markup
   Styles, Properties and Alignment (hidden at first, as Revu's); **Lock Toolbars**; **Customise Toolbars…** picks which
   markup tools are on the toolbar (a tool taken off stays on its menu and key).
+- Drag a toolbar by its handle to any edge of the window. On the left or right
+  it stands on end in a column of its own at the window's edge, outside the
+  panel strip, so the panels still open between the strip and the page; the
+  Properties and Markup Styles toolbars go top or bottom only.
 - Panels: open and close them from the edge strips or **Window ▸ Panels**; drag an
   icon to the other side; pin, float or roll up a panel from its title bar.
   **Window ▸ Pin Panels** pins them all; **Reset Layout** puts every panel and
