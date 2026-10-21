@@ -38,11 +38,12 @@ tests/calc/test_brackets_and_calls.py::test_sum_with_a_variable_still_iterates
 tests/calc/test_brackets_and_calls.py::test_built_ins_take_their_arities[lg(100)=-2]
 tests/calc/test_brackets_and_calls.py::test_built_ins_take_their_arities[lg(1000)=-3]
 tests/calc/test_calcforge_window.py::test_placeholder_is_centred_on_the_equals_sign
-tests/calc/test_calcforge_window.py::test_calculation_solve
-tests/calc/test_calcforge_window.py::test_context_menu_options_match_site[1234.5678=-path2-1235]
-tests/calc/test_calcforge_window.py::test_display_input_and_disable_evaluation
-tests/calc/test_calcforge_window.py::test_default_rounding_is_half_to_even_on_the_binary_value
-tests/calc/test_calcforge_window.py::test_delete_key_in_the_unit_box_through_the_window
+tests/calc/test_calcforge_window.py::test_copy_paste_regions
+tests/calc/test_calcforge_window.py::test_shift_selection_grows_out_of_a_box
+tests/calc/test_calcforge_window.py::test_word_jumps_and_word_selection
+tests/calc/test_calcforge_window.py::test_autocomplete_lists_units_first
+tests/calc/test_calcforge_window.py::test_drag_region_by_its_frame_while_editing
+tests/calc/test_calcforge_window.py::test_shift_wheel_scrolls_sideways
 tests/calc/test_cursor_fuzz.py::test_arrows_walk_every_equation[0]
 tests/calc/test_cursor_fuzz.py::test_arrows_walk_every_equation[1]
 tests/calc/test_cursor_fuzz.py::test_arrows_walk_every_equation[2]
@@ -140,18 +141,18 @@ tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[0]
 tests/calc/test_recalc_fuzz.py::test_unit_change_alone_is_passed_on
 tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[10]
 tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[11]
+tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[14]
+tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[15]
+tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[18]
 tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[19]
 tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[1]
 tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[20]
 tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[21]
 tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[22]
+tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[23]
 tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[24]
+tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[26]
 tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[28]
-tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[31]
-tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[32]
-tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[33]
-tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[37]
-tests/calc/test_recalc_fuzz.py::test_incremental_equals_full_recalculation[38]
 tests/calc/test_record.py::test_a_plot_keeps_its_view
 tests/calc/test_record.py::test_every_example_region_survives_its_record[Beam.sm]
 tests/calc/test_record.py::test_random_typing_survives_its_record[0]
@@ -217,7 +218,7 @@ tests/calc/test_symbolic_sympy.py::test_errors_instead_of_guesses[lim(floor(x),x
 tests/calc/test_symbolic_sympy.py::test_errors_instead_of_guesses[lim(sin(1/x),x,0)-limit does not exist]
 tests/calc/test_symbolic_sympy.py::test_errors_instead_of_guesses[solve(x^2+1\u2261x^2,x)-No solution]
 tests/calc/test_symbolic_sympy.py::test_errors_instead_of_guesses[x,"sideways"-mode must be]
-tests/calc/test_symbolic_sympy.py::test_formulas[2*a+3*a-5*a]
+tests/calc/test_symbolic_sympy.py::test_formulas[(x^2-1)/(x-1)-x+1]
 tests/calc/test_verify.py::test_correct_sheet_agrees
 tests/calc/test_verify.py::test_smath_examples_double_check[Beam.sm]
 tests/calc/test_verify.py::test_stale_definition_is_caught
@@ -236,9 +237,11 @@ tests/calc/test_verify.py::test_smath_examples_double_check[LegendrePolynomials.
 tests/calc/test_verify.py::test_smath_examples_double_check[MaclaurinSeries.sm]
 tests/calc/test_websmath_reference.py::test_the_same_keystrokes_make_the_same_equation_as_websmath[def_edit_number]
 tests/calc/test_websmath_reference.py::test_the_caret_on_an_empty_slot_stands_clear_of_its_square
-tests/calc/test_websmath_reference.py::test_the_same_keystrokes_make_the_same_equation_as_websmath[fraction]
-tests/calc/test_websmath_reference.py::test_the_same_keystrokes_make_the_same_equation_as_websmath[back_and_edit]
-tests/calc/test_websmath_reference.py::test_the_same_keystrokes_make_the_same_equation_as_websmath[reopen_name]
+tests/calc/test_websmath_reference.py::test_the_same_keystrokes_make_the_same_equation_as_websmath[def_edit_unit]
+tests/calc/test_websmath_reference.py::test_the_same_keystrokes_make_the_same_equation_as_websmath[fraction_nav]
+tests/calc/test_websmath_reference.py::test_the_same_keystrokes_make_the_same_equation_as_websmath[function]
+tests/calc/test_websmath_reference.py::test_the_same_keystrokes_make_the_same_equation_as_websmath[matrix_eval]
+tests/calc/test_websmath_reference.py::test_the_same_keystrokes_make_the_same_equation_as_websmath[error_then_fix]
 tests/sheet/test_chartdata.py::test_a_series_reads_its_cells_in_their_units
 tests/sheet/test_chartdata.py::test_axes_are_scaled_as_excel_scales_them[-12-30-expect3]
 tests/sheet/test_chartdata.py::test_error_bars_as_excel_draws_them
@@ -417,16 +420,18 @@ tests/sheet/test_workbook.py::test_deleting_rows_shrinks_ranges_and_breaks_lost_
 tests/sheet/test_workbook.py::test_document_variables_are_read_by_name
 tests/sheet/test_workbook.py::test_inserting_and_deleting_columns
 tests/sheet/test_workbook.py::test_inserting_rows_moves_cells_and_references
-tests/test_alignment.py::test_centre_in_document_puts_each_on_the_middle_of_its_page
-tests/test_alignment.py::test_flip_mirrors_an_images_picture_and_a_stamp
 tests/test_alignment.py::test_equations_tables_and_markups_align_together
+tests/test_alignment.py::test_too_few_picked_leaves_a_command_off_and_says_why
+tests/test_alignment.py::test_flip_mirrors_a_polygon_about_its_centre
+tests/test_alignment.py::test_a_callout_flips_its_box_and_leader_but_not_its_words
+tests/test_alignment.py::test_a_key_does_nothing_while_its_command_is_greyed
 tests/test_app.py::test_preferences_survive_being_saved_and_read_back
-tests/test_app.py::test_page_scale_change_updates_measurements
-tests/test_app.py::test_bound_tool_letter_selects_its_tool
-tests/test_app.py::test_the_desk_behind_the_paper_is_actually_painted
-tests/test_app.py::test_the_import_dialog_previews_the_page_it_will_bring_in
-tests/test_app.py::test_applying_redactions_with_none_present_explains_itself
-tests/test_app.py::test_autosave_writes_and_clears_a_recovery_copy
+tests/test_app.py::test_polygon_tools_create_a_markup[measure_volume]
+tests/test_app.py::test_drag_tools_create_a_markup[measure_length]
+tests/test_app.py::test_an_inserted_pdf_page_carries_the_drawing
+tests/test_app.py::test_sticky_tool_keeps_drawing
+tests/test_app.py::test_every_markup_tool_is_reachable_from_the_toolbar
+tests/test_app.py::test_page_setup_defaults_to_a4
 tests/test_big_pdf_smooth.py::test_a_preview_asked_for_on_screen_jumps_the_queue
 tests/test_big_pdf_smooth.py::test_previews_wait_behind_what_the_screen_wants
 tests/test_big_pdf_smooth.py::test_squares_of_pages_left_behind_are_given_up_but_not_their_pictures
@@ -447,98 +452,107 @@ tests/test_btx.py::test_a_labels_colour_comes_across_from_either_place
 tests/test_btx.py::test_a_labels_words_are_lined_up_the_way_bluebeam_lined_them_up
 tests/test_btx.py::test_a_legend_keeps_its_heading_and_the_space_between_its_entries
 tests/test_btx.py::test_a_markup_bluebeam_turned_comes_back_turned
-tests/test_bughunt_round1.py::test_function_keys_belong_to_the_box_being_typed_in[dimension words]
-tests/test_bughunt_round1.py::test_closing_the_app_hands_back_the_error_hook_and_the_crash_dump
-tests/test_bughunt_round1.py::test_the_kept_headings_pick_a_row_without_scrolling_the_sheet[calc-True]
+tests/test_bughunt_round1.py::test_the_kept_headings_pick_a_row_without_scrolling_the_sheet[markup-False]
 tests/test_bughunt_round1.py::test_right_clicking_a_closed_sheets_row_number_gives_the_row_menu[calc]
+tests/test_bughunt_round1.py::test_closing_the_app_hands_back_the_error_hook_and_the_crash_dump
+tests/test_bughunt_round1.py::test_function_keys_belong_to_the_box_being_typed_in[typed size]
 tests/test_bughunt_round1.py::test_a_sheet_pages_row_numbers_pick_rows_before_any_cell_is_clicked[calc]
+tests/test_calc_blocks.py::test_one_click_on_a_blocks_equation_selects_the_block
+tests/test_calc_blocks.py::test_an_equation_has_no_markup_pen_in_properties
 tests/test_calc_blocks.py::test_arrow_keys_nudge_the_block_and_its_equations
 tests/test_calc_blocks.py::test_a_block_says_when_its_box_takes_in_more_than_was_selected
-tests/test_calc_blocks.py::test_deleting_the_block_deletes_its_equations_and_undo_brings_them_back
-tests/test_calc_dialogs_real.py::test_double_check_shows_its_findings
-tests/test_calc_dialogs_real.py::test_insert_function_from_the_list
+tests/test_calc_blocks.py::test_double_click_opens_the_block_to_edit_an_equation_in_it
 tests/test_calc_dialogs_real.py::test_a_unit_from_the_list
-tests/test_calc_dialogs_real.py::test_insert_matrix_of_the_size_asked
+tests/test_calc_dialogs_real.py::test_a_constant_by_double_click
+tests/test_calc_dialogs_real.py::test_cancel_inserts_nothing
 tests/test_calc_dialogs_real.py::test_an_operator_from_the_tree
-tests/test_calc_editing.py::test_a_locked_equation_is_neither_moved_nor_opened
-tests/test_calc_editing.py::test_an_equation_left_empty_disappears
-tests/test_calc_editing.py::test_tab_and_up_down_step_through_the_reading_order
-tests/test_calc_editing.py::test_a_click_on_an_equation_puts_the_cursor_in_it
-tests/test_calc_editing.py::test_ctrl_0_is_smaths_at_least_inside_an_equation
-tests/test_calc_editing.py::test_one_undo_history_for_keystrokes_and_the_document
+tests/test_calc_dialogs_real.py::test_double_check_shows_its_findings
+tests/test_calc_editing.py::test_equations_stay_out_of_the_markups_list_and_the_annotations
+tests/test_calc_editing.py::test_a_snapshot_copies_an_equation_as_line_work
+tests/test_calc_editing.py::test_arrow_keys_nudge_a_selected_equation_by_a_grid_step
+tests/test_calc_editing.py::test_flatten_leaves_equations_alone
+tests/test_calc_editing.py::test_the_cross_and_equations_sit_on_smaths_grid
+tests/test_calc_editing.py::test_crop_removes_equations_it_cuts_away_and_undo_brings_them_back
+tests/test_calc_modes.py::test_ctrl_shift_d_is_the_double_check_in_an_equation
 tests/test_calc_modes.py::test_a_second_ticking_over_while_the_words_are_open_makes_no_undo_step
-tests/test_calc_modes.py::test_ctrl_1_is_transpose_in_an_equation_and_fit_width_outside
-tests/test_calc_modes.py::test_symbol_keys_type_their_maths_meaning_in_an_equation
-tests/test_calc_modes.py::test_f9_calculates_and_ctrl_m_inserts_a_matrix
-tests/test_calc_modes.py::test_markup_mode_keeps_calcforges_tool_keys
+tests/test_calc_modes.py::test_ctrl_a_in_an_equation_selects_every_equation
+tests/test_calc_modes.py::test_the_mode_switch_is_on_the_menu_bar_not_in_a_toolbar
+tests/test_calc_modes.py::test_ctrl_e_inserts_a_function_in_an_equation
+tests/test_calc_modes.py::test_the_status_bar_shows_the_mode_and_f12_switches_it
+tests/test_calc_pages.py::test_reading_order_is_top_to_bottom_then_the_next_page
 tests/test_calc_pages.py::test_an_equation_is_not_a_markup_in_the_pdf_sense
-tests/test_calc_pages.py::test_removing_an_equation_undefines_what_it_defined
-tests/test_calc_pages.py::test_deleting_a_page_takes_its_equations_out_of_the_calculation
 tests/test_calc_pages.py::test_reordering_pages_changes_the_order
-tests/test_calc_pages.py::test_a_variable_on_page_one_is_known_on_page_two
+tests/test_calc_pages.py::test_removing_an_equation_undefines_what_it_defined
+tests/test_calc_pages.py::test_an_equation_always_lands_on_smaths_grid
+tests/test_calc_pages.py::test_a_page_restored_from_its_record_calculates_again
 tests/test_calc_panels.py::test_plain_text_of_equations
-tests/test_calc_panels.py::test_new_equations_take_the_preferred_size_and_colour
-tests/test_calc_panels.py::test_program_blocks_on_the_toolbar[For-for]
+tests/test_calc_panels.py::test_go_to_definition
+tests/test_calc_panels.py::test_plot_settings_from_the_menu
+tests/test_calc_panels.py::test_the_plot_corner_resizes_it
+tests/test_calc_panels.py::test_decimal_places_from_the_right_click_menu_and_undo
 tests/test_calc_panels.py::test_calculation_text_is_spell_checked
-tests/test_calc_panels.py::test_panel_sections_fold_away
-tests/test_calc_panels.py::test_search_finds_equations_by_what_was_typed_and_what_they_show
-tests/test_calc_saving.py::test_pages_deleted_elsewhere_warn_which_variables_went
-tests/test_calc_saving.py::test_pages_reordered_elsewhere_carry_their_equations
-tests/test_calc_saving.py::test_extracted_pages_carry_their_equations_live
-tests/test_calc_saving.py::test_a_drawing_with_equations_reopens_on_its_own_page
+tests/test_calc_panels.py::test_the_maths_panel_is_on_the_rail_with_smaths_sections
+tests/test_calc_saving.py::test_the_saved_page_looks_like_the_screen
+tests/test_calc_saving.py::test_autosave_writes_the_same_format
+tests/test_calc_saving.py::test_an_exported_page_looks_like_the_screen_at_any_resolution
 tests/test_calc_saving.py::test_a_missing_record_opens_as_a_plain_pdf_and_says_so
-tests/test_calc_saving.py::test_reopening_rebuilds_live_equations_and_takes_the_layer_off
-tests/test_calc_sections.py::test_the_break_is_saved_shown_and_named
+tests/test_calc_saving.py::test_a_drawing_with_equations_reopens_on_its_own_page
+tests/test_calc_sections.py::test_a_section_break_starts_the_calculation_afresh
 tests/test_calc_sections.py::test_tables_are_reset_too_unless_their_cells_are_global
-tests/test_calc_sections.py::test_a_global_equation_carries_on_past_the_break
-tests/test_calc_sections.py::test_a_sheet_reads_another_only_where_it_is_global
 tests/test_calc_sections.py::test_the_variables_panel_shows_sections_and_makes_variables_global
+tests/test_calc_sections.py::test_a_global_equation_carries_on_past_the_break
+tests/test_calc_sections.py::test_the_break_is_saved_shown_and_named
 tests/test_calc_toolsets.py::test_a_kept_equation_has_a_picture_of_itself
+tests/test_calc_toolsets.py::test_a_kept_block_comes_back_with_its_equations_ungrouped
 tests/test_calc_toolsets.py::test_a_kept_equation_calculates_where_it_is_put_down
 tests/test_callout_placing.py::test_a_line_style_sample_is_drawn_once
+tests/test_callout_placing.py::test_on_the_card
 tests/test_callout_placing.py::test_a_clicked_cloud_plus_follows_its_corners[enter]
-tests/test_callout_placing.py::test_a_cloud_plus_from_a_tool_set_is_drawn_with_the_cloud_plus_tool
+tests/test_callout_placing.py::test_the_preview_is_the_call_out_that_lands
+tests/test_callout_placing.py::test_a_dragged_cloud_plus_is_a_cloud_of_that_size
 tests/test_callout_placing.py::test_a_drawn_cloud_closes_on_its_first_corner_too
-tests/test_callout_placing.py::test_a_dragged_cloud_plus_is_saved_and_exported_as_it_was
-tests/test_canvas.py::test_rail_click_keeps_one_panel_open_per_side
-tests/test_canvas.py::test_the_canvas_covers_every_page
-tests/test_canvas.py::test_the_icon_opens_and_closes_its_panel
-tests/test_canvas.py::test_every_page_is_on_the_one_canvas
 tests/test_canvas.py::test_the_shadow_falls_outside_the_paper
-tests/test_canvas.py::test_arrows_do_not_scroll_when_nothing_is_selected
+tests/test_canvas.py::test_a_page_is_drawn_with_an_edge_and_a_shadow
+tests/test_canvas.py::test_closing_a_panel_any_other_way_unlights_its_icon
+tests/test_canvas.py::test_scrolling_onto_another_page_makes_it_the_current_one
+tests/test_canvas.py::test_a_panel_dragged_to_the_other_rail_opens_on_that_side
+tests/test_canvas.py::test_zoom_stays_within_its_limits
 tests/test_cell_unit_typing.py::test_where_the_units_are
-tests/test_cell_unit_typing.py::test_a_cell_takes_a_unit_as_an_equation_does
+tests/test_cell_unit_typing.py::test_a_hashes_cell_still_has_its_unit_box
+tests/test_cell_unit_typing.py::test_the_result_unit_box_on_the_selected_cell
 tests/test_cell_unit_typing.py::test_custom_units_are_offered_and_written_smaths_way
 tests/test_cell_unit_typing.py::test_escape_closes_the_list_and_keeps_the_typing
-tests/test_cell_unit_typing.py::test_the_result_unit_box_on_the_selected_cell
+tests/test_cell_unit_typing.py::test_a_cell_takes_a_unit_as_an_equation_does
 tests/test_cell_units.py::test_a_custom_unit_from_the_hook
 tests/test_cell_units.py::test_smaths_apostrophe_marks_a_unit_and_is_not_shown
-tests/test_cell_units.py::test_a_cell_typed_before_its_unit_is_defined_is_read_again
 tests/test_cell_units.py::test_a_formula_uses_a_custom_unit_written_smaths_way
 tests/test_cell_units.py::test_cells_use_the_documents_custom_units_and_the_unit_box
+tests/test_cell_units.py::test_a_cell_typed_before_its_unit_is_defined_is_read_again
 tests/test_cell_units_display.py::test_from_engine_picks_the_equations_unit
 tests/test_cell_units_display.py::test_powers_are_raised_and_products_dotted
-tests/test_cell_units_display.py::test_copied_text_keeps_the_unit_plain
-tests/test_cell_units_display.py::test_hashes_measure_the_drawn_unit
-tests/test_cell_units_display.py::test_the_formula_bars_unit_box_refuses_it_too
+tests/test_cell_units_display.py::test_an_output_unit_of_another_kind_is_refused_and_said_why
 tests/test_cell_units_display.py::test_the_unit_box_sits_on_the_drawn_unit
-tests/test_cell_units_display.py::test_printed_cells_look_as_on_screen
-tests/test_change_multiple_colors.py::test_the_source_list_is_the_colours_the_selection_uses
-tests/test_change_multiple_colors.py::test_the_right_click_menu_and_the_properties_panel_offer_it
+tests/test_cell_units_display.py::test_hashes_measure_the_drawn_unit
+tests/test_cell_units_display.py::test_copied_text_keeps_the_unit_plain
+tests/test_cell_units_display.py::test_the_formula_bars_unit_box_refuses_it_too
 tests/test_change_multiple_colors.py::test_one_colour_becomes_another_wherever_it_is_used_in_one_undo
-tests/test_charts.py::test_charts_are_saved_and_printed_with_the_page
+tests/test_change_multiple_colors.py::test_the_right_click_menu_and_the_properties_panel_offer_it
+tests/test_change_multiple_colors.py::test_the_source_list_is_the_colours_the_selection_uses
+tests/test_charts.py::test_column_and_line_charts_use_categories
+tests/test_charts.py::test_double_click_opens_the_chart_dialog
+tests/test_charts.py::test_a_chart_on_a_sheet_page_sits_over_the_cells_and_moves_with_them
 tests/test_charts.py::test_insert_chart_reads_the_selection_as_excel_does
 tests/test_charts.py::test_a_chart_follows_its_cells
-tests/test_charts.py::test_column_and_line_charts_use_categories
 tests/test_checkbox_markup.py::test_rows_are_about_one_and_a_half_text_heights_apart
 tests/test_checkbox_markup.py::test_shapes_and_marks_draw[cross-circle]
 tests/test_checkbox_markup.py::test_the_tick_runs_out_past_its_box
 tests/test_checkbox_markup.py::test_ticks_follow_their_words
-tests/test_checkbox_markup.py::test_saved_and_reopened_it_is_the_same_checkbox
-tests/test_checkbox_markup.py::test_checked_column_and_properties_show_the_ticked_options
-tests/test_checkbox_markup.py::test_a_box_in_a_group_still_ticks
+tests/test_checkbox_markup.py::test_a_markup_style_keeps_shape_mark_and_multiple
+tests/test_checkbox_markup.py::test_single_selection_unticks_the_others
+tests/test_checkbox_markup.py::test_a_click_places_one_option_ready_to_type_over
 tests/test_checkbox_markup.py::test_the_properties_toolbar_sets_shape_mark_and_multiple
 tests/test_checkbox_markup.py::test_shapes_and_marks_draw[cross-diamond]
+tests/test_checkbox_markup.py::test_shapes_and_marks_draw[cross-rounded]
 tests/test_cloud_size.py::test_invert_turns_the_scallops_inward_and_is_kept
 tests/test_cloud_size.py::test_a_cloud_saved_before_size_looks_the_same
 tests/test_cloud_size.py::test_a_clouds_intensity_comes_in_as_its_size
@@ -552,7 +566,7 @@ tests/test_color_processing.py::test_photos_colorize_and_mask
 tests/test_color_processing.py::test_the_colours_a_page_sets_are_listed
 tests/test_color_processing.py::test_color_processing_in_the_window_changes_the_pages_pdf_and_undoes
 tests/test_color_processing.py::test_the_red_cross_goes_when_something_is_picked
-tests/test_color_processing.py::test_a_new_canvas_has_the_desk_of_the_theme_in_use
+tests/test_color_processing.py::test_a_photo_has_colorize_and_mask_only
 tests/test_color_processing_big.py::test_only_the_colours_this_page_draws_are_listed
 tests/test_color_processing_big.py::test_strings_inline_images_and_comments_are_not_read_as_colours
 tests/test_color_processing_big.py::test_the_work_is_done_off_the_window_and_comes_back
@@ -563,94 +577,127 @@ tests/test_colour_picker.py::test_revus_palette_no_color_and_the_eyedropper
 tests/test_colour_picker.py::test_the_eyedropper_reaches_every_screen_and_a_scaled_one
 tests/test_colour_picker.py::test_the_eyedropper_takes_the_colour_under_the_pointer
 tests/test_colour_picker.py::test_the_picker_swatches_are_drawn_at_the_screens_own_pixels
-tests/test_colour_picker.py::test_a_colour_button_gone_while_its_picker_was_open_is_left_alone
 tests/test_colour_picker.py::test_the_eyedropper_works_over_a_modal_dialog_and_from_our_own_windows
 tests/test_colour_picker.py::test_every_colour_button_uses_it
-tests/test_command_families.py::test_unflatten_is_wherever_flatten_is
+tests/test_colour_picker.py::test_a_colour_button_gone_while_its_picker_was_open_is_left_alone
+tests/test_command_families.py::test_edit_and_the_markup_menu_group_the_same_families_alike
+tests/test_command_families.py::test_the_status_bar_says_when_a_page_has_no_scale
+tests/test_command_families.py::test_revus_keys_and_the_moved_ones
+tests/test_command_families.py::test_the_page_menu_has_the_document_menus_page_commands
 tests/test_command_families.py::test_window_panels_are_alphabetical_with_revus_keys
-tests/test_command_families.py::test_the_two_table_buttons_are_one_command
-tests/test_command_families.py::test_every_insert_is_offered_before_or_after_everywhere
-tests/test_command_families.py::test_set_scale_has_one_name
-tests/test_command_families.py::test_the_page_panel_is_not_called_page_setup
+tests/test_command_families.py::test_every_tool_name_is_title_case
+tests/test_command_families.py::test_the_key_list_is_still_complete
 tests/test_consistency.py::test_places_and_significant_figures_of_a_number_format
-tests/test_consistency.py::test_f2_is_on_the_edit_menu_and_bindable
-tests/test_consistency.py::test_a_tables_and_a_charts_panel_buttons_say_what_their_menus_say
-tests/test_consistency.py::test_calculation_text_and_a_block_show_theirs[True]
-tests/test_consistency.py::test_decimal_places_from_the_cells_menu_is_one_undo_step
-tests/test_consistency.py::test_a_blocks_panel_offers_its_menus_commands_in_its_words
+tests/test_consistency.py::test_significant_figures_survive_saving
+tests/test_consistency.py::test_an_equation_clicked_shows_its_properties[False]
+tests/test_consistency.py::test_the_cells_section_changes_the_cells_one_step_each
+tests/test_consistency.py::test_significant_figures_from_the_cells_menu
+tests/test_consistency.py::test_significant_figures_in_format_cells
+tests/test_consistency.py::test_a_table_shows_its_properties_and_its_cells[True]
 tests/test_context_menus.py::test_tidy_strips_separators_and_empty_submenus
-tests/test_context_menus.py::test_the_markup_menu_is_in_revus_order
+tests/test_context_menus.py::test_a_sheets_headings_add_insert_page_break_and_it_works
 tests/test_context_menus.py::test_insert_page_break_from_a_real_right_click_on_a_sheet_cell
-tests/test_context_menus.py::test_calc_modes_page_menu_has_smaths_inserts
+tests/test_context_menus.py::test_a_two_point_line_cannot_be_rounded_or_arced
 tests/test_context_menus.py::test_a_closed_table_offers_edit_table_and_no_outline
-tests/test_crop_image.py::test_crop_image_keeps_the_dragged_part_and_undo_brings_back_the_rest
+tests/test_context_menus.py::test_no_menu_has_a_stray_separator_or_a_lower_case_word_first
 tests/test_crop_image.py::test_crop_image_is_a_tool_and_on_the_image_menu
+tests/test_crop_image.py::test_crop_image_keeps_the_dragged_part_and_undo_brings_back_the_rest
 tests/test_crop_image.py::test_a_second_crop_is_of_what_is_shown
-tests/test_cursor_check.py::test_a_tables_cells_headings_tab_and_edges
 tests/test_cursor_check.py::test_an_equation_shows_websmaths_pointers
-tests/test_cursor_check.py::test_a_sheets_print_area_and_its_cells
-tests/test_cursor_check.py::test_the_size_arrows_turn_with_a_turned_markup
-tests/test_data_tools_session.py::test_paste_special_transpose
-tests/test_data_tools_session.py::test_rules_manager_orders_moves_and_deletes
-tests/test_data_tools_session.py::test_text_date_and_formula_rules
-tests/test_data_tools_session.py::test_text_to_columns
+tests/test_cursor_check.py::test_words_being_typed_take_the_i_beam
+tests/test_cursor_check.py::test_a_tables_cells_headings_tab_and_edges
+tests/test_cursor_check.py::test_moving_copying_and_a_locked_markup
+tests/test_cursor_check.py::test_shift_alt_or_ctrl_over_a_selected_outline_says_what_a_click_does
+tests/test_cursor_contrast.py::test_every_drawn_pointer_reads_on_the_white_page_and_on_dark
+tests/test_cursor_contrast.py::test_the_cloud_tools_pointer_is_dark_on_the_page_in_the_dark_theme
 tests/test_data_tools_session.py::test_the_rules_manager_is_excels
+tests/test_data_tools_session.py::test_filter_dropdown_sort_and_clear_filter
+tests/test_data_tools_session.py::test_goal_seek_says_when_it_cannot
+tests/test_data_tools_session.py::test_remove_duplicates_as_excel
+tests/test_data_tools_session.py::test_text_to_columns
 tests/test_definition_order_window.py::test_a_table_dragged_above_the_equation_defines_its_names
 tests/test_definition_order_window.py::test_a_cell_reads_the_latest_equation_above_it
+tests/test_definition_order_window.py::test_the_name_box_names_the_cell_too
+tests/test_deleted_elsewhere.py::test_after_saving_there_is_nothing_left_to_restore
 tests/test_deleted_elsewhere.py::test_a_drawing_calcforge_holds_comes_back_only_when_ticked
 tests/test_deleted_elsewhere.py::test_a_page_with_only_markups_is_restored_only_when_asked
-tests/test_deleted_elsewhere.py::test_a_deleted_page_with_a_table_is_named_and_can_be_restored
-tests/test_document_lifecycle.py::test_undo_of_a_page_change_returns_the_view[delete_page]
-tests/test_document_lifecycle.py::test_undo_reselects[nudge]
-tests/test_document_lifecycle.py::test_duplicate_of_a_markup_steps_down_and_right
-tests/test_document_lifecycle.py::test_duplicate_of_an_equation_is_readable
-tests/test_document_lifecycle.py::test_page_setup_ok_with_no_change_is_no_step
+tests/test_deleted_elsewhere.py::test_a_spreadsheets_first_page_deleted_elsewhere_keeps_every_cell
+tests/test_deleted_elsewhere.py::test_a_spreadsheets_middle_page_deleted_elsewhere_keeps_every_cell_and_says_so
+tests/test_document_lifecycle.py::test_nothing_under_way_survives_new_pdf[crop]
+tests/test_document_lifecycle.py::test_undo_of_a_page_change_returns_the_view[insert_page]
+tests/test_document_lifecycle.py::test_offset_then_another_tab_then_a_drag_draws
+tests/test_document_lifecycle.py::test_undo_reselects[duplicate]
+tests/test_document_lifecycle.py::test_search_marks_go_with_their_document[new_pdf]
 tests/test_editing_performance.py::test_style_snapshots_preserve_values_and_detach_custom_dashes
-tests/test_editing_performance.py::test_pointer_snapping_tracks_movement_rotation_visibility_and_undo
 tests/test_editing_performance.py::test_nudge_undo_redo_keeps_state_selection_and_panels
+tests/test_editing_performance.py::test_pointer_snapping_tracks_movement_rotation_visibility_and_undo
 tests/test_editing_performance.py::test_bulk_restore_publishes_only_the_finished_page
-tests/test_engineer_session.py::test_a_spreadsheets_headings_stay_in_view_and_select_whole_columns
-tests/test_engineer_session.py::test_tab_then_enter_goes_back_under_where_the_tabs_began
-tests/test_engineer_session.py::test_tables_and_charts_show_their_own_properties
 tests/test_engineer_session.py::test_search_finds_words_on_a_spreadsheet_page
-tests/test_engineer_session.py::test_a_duplicated_page_gets_its_own_tables
-tests/test_equation_errors.py::test_an_evaluation_error_shows_without_being_selected_and_prints
+tests/test_engineer_session.py::test_the_pointer_is_excels_over_cells_and_lets_go_of_them
+tests/test_engineer_session.py::test_ctrl_drag_box_selects_markups_over_a_spreadsheet
+tests/test_engineer_session.py::test_tab_then_enter_goes_back_under_where_the_tabs_began
+tests/test_engineer_session.py::test_equation_autocomplete_and_the_variables_panel_know_the_tables
 tests/test_equation_errors.py::test_a_good_equation_has_no_note
 tests/test_equation_errors.py::test_a_definition_with_a_name_not_defined_says_so_in_red
-tests/test_equation_rules.py::test_rules_set_colour_bold_and_underline_too
+tests/test_equation_errors.py::test_an_evaluation_error_shows_without_being_selected_and_prints
 tests/test_equation_rules.py::test_the_menu_dialog
-tests/test_equation_rules.py::test_the_document_rules_dialog
 tests/test_equation_rules.py::test_results_with_units_never_match
+tests/test_equation_rules.py::test_a_definition_follows_the_value_it_defines
 tests/test_equation_rules.py::test_rules_are_saved_and_copied
+tests/test_equation_rules.py::test_rules_set_colour_bold_and_underline_too
+tests/test_escape_recovery.py::test_escape_in_dialog_preserves_the_canvas_tool
 tests/test_escape_recovery.py::test_escape_from_inline_panel_editor_cancels_callout
 tests/test_escape_recovery.py::test_escape_releases_a_stale_scene_mouse_grab
-tests/test_escape_recovery.py::test_escape_in_dialog_preserves_the_canvas_tool
+tests/test_every_command.py::test_every_command[D0043#0-context-Apply to Pages \u2014 pagedialogs.py:ApplyToP]
+tests/test_every_command.py::test_every_command[D0043#1-context-Apply to Pages \u2014 pagedialogs.py:ApplyToP]
+tests/test_every_command.py::test_every_command[D0047#0-menu-Insert Blank Page \u2014 pagedialogs.py:Inser]
+tests/test_every_command.py::test_every_command[D0047#1-menu-Insert Blank Page \u2014 pagedialogs.py:Inser]
 tests/test_every_command.py::test_every_command[D0065#0-menu-Restore Pages \u2014 mainwindow.py:restore_de]
 tests/test_every_command.py::test_every_command[D0066#0-context-Rename Page Label \u2014 mainwindow.py:rename]
 tests/test_every_command.py::test_every_command[D0066#1-context-Rename Page Label \u2014 mainwindow.py:rename]
 tests/test_every_command.py::test_every_command[D0069#0-menu-Find a Tool \u2014 mainwindow.py:find_a_tool(]
+tests/test_every_command.py::test_every_command[D0085#0-menu-Import Excel workbook \u2014 xlsximport.py:__]
 tests/test_every_command.py::test_every_command[K0001#0-key-Start text]
+tests/test_every_command.py::test_every_command[K0002#0-key-Start note]
+tests/test_every_command.py::test_every_command[K0003#0-key-Start callout]
 tests/test_every_command.py::test_every_command[K0004#0-key-Calc/Markup mode]
 tests/test_every_command.py::test_every_command[K0005#0-key-Start equation]
+tests/test_every_command.py::test_every_command[K0006#0-key-Start Calculation text]
 tests/test_every_command.py::test_every_command[K0007#0-key-Insert plot]
 tests/test_every_command.py::test_every_command[K0008#0-key-Boolean equals \u2261]
 tests/test_every_command.py::test_every_command[K0009#0-key-Not equal \u2260]
 tests/test_every_command.py::test_every_command[K0010#0-key-At most \u2264]
 tests/test_every_command.py::test_every_command[K0011#0-key-At least \u2265]
 tests/test_every_command.py::test_every_command[K0012#0-key-N-th root]
+tests/test_every_command.py::test_every_command[K0013#0-key-Transpose]
 tests/test_every_command.py::test_every_command[K0014#0-key-Cross product \xd7]
+tests/test_every_command.py::test_every_command[K0015#0-key-Element (index)]
+tests/test_every_command.py::test_every_command[K0019#0-key-Select all equations]
 tests/test_every_command.py::test_every_command[K0020#0-key-Select]
 tests/test_every_command.py::test_every_command[K0021#0-key-Snapshot]
 tests/test_every_command.py::test_every_command[K0022#0-key-Pan]
+tests/test_every_command.py::test_every_command[K0023#0-key-Pen]
+tests/test_every_command.py::test_every_command[K0024#0-key-Highlight]
 tests/test_every_command.py::test_every_command[K0025#0-key-Eraser]
 tests/test_every_command.py::test_every_command[K0026#0-key-Line]
 tests/test_every_command.py::test_every_command[K0027#0-key-Arrow]
+tests/test_every_command.py::test_every_command[K0028#0-key-Arc]
+tests/test_every_command.py::test_every_command[K0029#0-key-Polyline]
+tests/test_every_command.py::test_every_command[K0030#0-key-Rectangle]
+tests/test_every_command.py::test_every_command[K0031#0-key-Ellipse]
+tests/test_every_command.py::test_every_command[K0032#0-key-Polygon]
+tests/test_every_command.py::test_every_command[K0033#0-key-Cloud]
+tests/test_every_command.py::test_every_command[K0034#0-key-Highlight Area]
 tests/test_every_command.py::test_every_command[K0035#0-nokey-Mark for Redaction]
 tests/test_every_command.py::test_every_command[K0036#0-nokey-Hyperlink]
 tests/test_every_command.py::test_every_command[K0037#0-nokey-Crop]
 tests/test_every_command.py::test_every_command[K0038#0-nokey-Whiteout]
+tests/test_every_command.py::test_every_command[K0039#0-key-Text Box]
+tests/test_every_command.py::test_every_command[K0040#0-key-Callout]
+tests/test_every_command.py::test_every_command[K0041#0-key-Cloud+]
 tests/test_every_command.py::test_every_command[K0042#0-nokey-Checkbox]
 tests/test_every_command.py::test_every_command[K0043#0-nokey-Note]
+tests/test_every_command.py::test_every_command[K0044#0-key-Stamp]
 tests/test_every_command.py::test_every_command[K0045#0-key-Flag]
 tests/test_every_command.py::test_every_command[K0046#0-nokey-Image]
 tests/test_every_command.py::test_every_command[K0047#0-nokey-Crop Image]
@@ -667,9 +714,35 @@ tests/test_every_command.py::test_every_command[K0066#0-key-Select (Revu's key)]
 tests/test_every_command.py::test_every_command[K0067#0-key-Fit Page]
 tests/test_every_command.py::test_every_command[K0068#0-key-Fit Width]
 tests/test_every_command.py::test_every_command[K0069#0-nokey-Renumber counts]
+tests/test_every_command.py::test_every_command[K0070#0-key-Edit the cell]
+tests/test_every_command.py::test_every_command[K0070#1-key-Edit the cell]
+tests/test_every_command.py::test_every_command[K0071#1-key-Select all cells]
+tests/test_every_command.py::test_every_command[K0072#0-key-Select whole column]
+tests/test_every_command.py::test_every_command[K0073#0-key-Select whole row]
+tests/test_every_command.py::test_every_command[K0073#1-key-Select whole row]
+tests/test_every_command.py::test_every_command[K0074#0-key-Copy cells]
+tests/test_every_command.py::test_every_command[K0074#1-key-Copy cells]
+tests/test_every_command.py::test_every_command[K0075#0-key-Cut cells]
+tests/test_every_command.py::test_every_command[K0075#1-key-Cut cells]
+tests/test_every_command.py::test_every_command[K0076#0-key-Paste cells]
+tests/test_every_command.py::test_every_command[K0076#1-key-Paste cells]
+tests/test_every_command.py::test_every_command[K0077#0-key-Paste values]
 tests/test_every_command.py::test_every_command[K0078#0-nokey-Paste formulas]
 tests/test_every_command.py::test_every_command[K0079#0-nokey-Paste formats]
 tests/test_every_command.py::test_every_command[K0080#0-nokey-Paste transposed]
+tests/test_every_command.py::test_every_command[K0081#0-key-Fill down]
+tests/test_every_command.py::test_every_command[K0082#0-key-Fill right]
+tests/test_every_command.py::test_every_command[K0083#0-key-AutoSum]
+tests/test_every_command.py::test_every_command[K0084#0-key-Insert today's date]
+tests/test_every_command.py::test_every_command[K0086#0-key-Open the cell's list]
+tests/test_every_command.py::test_every_command[K0088#0-key-Bold]
+tests/test_every_command.py::test_every_command[K0091#0-key-Strikethrough]
+tests/test_every_command.py::test_every_command[K0094#0-key-Currency format]
+tests/test_every_command.py::test_every_command[K0095#0-key-Percent format]
+tests/test_every_command.py::test_every_command[K0097#0-key-Date format]
+tests/test_every_command.py::test_every_command[K0098#0-key-Time format]
+tests/test_every_command.py::test_every_command[K0099#0-key-Outline border]
+tests/test_every_command.py::test_every_command[K0100#0-key-No borders]
 tests/test_every_command.py::test_every_command[K0101#0-nokey-All borders]
 tests/test_every_command.py::test_every_command[K0102#0-nokey-Merge && Centre]
 tests/test_every_command.py::test_every_command[K0103#0-nokey-Unmerge cells]
@@ -677,6 +750,11 @@ tests/test_every_command.py::test_every_command[K0106#0-nokey-Insert rows above]
 tests/test_every_command.py::test_every_command[K0107#0-nokey-Insert columns to the left]
 tests/test_every_command.py::test_every_command[K0108#0-nokey-Delete rows]
 tests/test_every_command.py::test_every_command[K0109#0-nokey-Delete columns]
+tests/test_every_command.py::test_every_command[K0111#0-key-Unhide rows]
+tests/test_every_command.py::test_every_command[K0111#1-key-Unhide rows]
+tests/test_every_command.py::test_every_command[K0112#0-key-Hide columns]
+tests/test_every_command.py::test_every_command[K0113#0-key-Unhide columns]
+tests/test_every_command.py::test_every_command[K0113#1-key-Unhide columns]
 tests/test_every_command.py::test_every_command[K0114#0-nokey-AutoFit column width]
 tests/test_every_command.py::test_every_command[K0115#0-nokey-AutoFit row height]
 tests/test_every_command.py::test_every_command[K0116#0-nokey-Clear contents]
@@ -730,76 +808,34 @@ tests/test_every_command.py::test_every_command[K0196#0-nokey-Insert Field \u25b
 tests/test_every_command.py::test_every_command[K0197#0-nokey-Insert Field \u25b8 Description]
 tests/test_every_command.py::test_every_command[K0198#0-nokey-Insert Field \u25b8 Revision]
 tests/test_every_command.py::test_every_command[K0199#0-nokey-Insert Field \u25b8 Document id]
-tests/test_every_command.py::test_every_command[K0200#0-nokey-Insert Field \u25b8 File name]
-tests/test_every_command.py::test_every_command[K0201#0-nokey-Insert Field \u25b8 Page number]
-tests/test_every_command.py::test_every_command[K0202#0-nokey-Insert Field \u25b8 Page number, 0001]
-tests/test_every_command.py::test_every_command[K0203#0-nokey-Insert Field \u25b8 Number of pages]
-tests/test_every_command.py::test_every_command[K0204#0-nokey-Insert Field \u25b8 Page n of m]
-tests/test_every_command.py::test_every_command[K0205#0-nokey-Insert Field \u25b8 Date, DD.MM.YYYY]
-tests/test_every_command.py::test_every_command[K0206#0-nokey-Insert Field \u25b8 Date, DD/MM/YYYY]
-tests/test_every_command.py::test_every_command[K0207#0-nokey-Insert Field \u25b8 Date, YYYY-MM-DD]
-tests/test_every_command.py::test_every_command[K0208#0-nokey-Insert Field \u25b8 Date, DD MMMM YYYY]
-tests/test_every_command.py::test_every_command[K0209#0-nokey-Insert Field \u25b8 Time, HH:mm]
-tests/test_every_command.py::test_every_command[K0210#0-nokey-Insert Field \u25b8 Time, hh:mm tt]
-tests/test_every_command.py::test_every_command[K0211#0-nokey-Add Arrow Leader]
-tests/test_every_command.py::test_every_command[K0212#0-nokey-Add Cloud Leader]
-tests/test_every_command.py::test_every_command[K0213#0-nokey-Remove Leader]
-tests/test_every_command.py::test_every_command[K0214#0-nokey-Inline Text (measurement)]
-tests/test_every_command.py::test_every_command[K0215#0-nokey-Change Colours]
-tests/test_every_command.py::test_every_command[K0216#0-nokey-Edit Table]
-tests/test_every_command.py::test_every_command[K0217#0-nokey-Rename Table (closed)]
-tests/test_every_command.py::test_every_command[K0218#0-nokey-Insert Here \u25b8 Equation]
-tests/test_every_command.py::test_every_command[K0219#0-nokey-Insert Here \u25b8 Calc Text]
-tests/test_every_command.py::test_every_command[K0220#0-nokey-Insert Here \u25b8 Calculation Block]
-tests/test_every_command.py::test_every_command[K0221#0-nokey-Insert Here \u25b8 Plot]
-tests/test_every_command.py::test_every_command[K0222#0-nokey-Equation Global (Read by Later Calc Sect]
-tests/test_every_command.py::test_every_command[K0223#0-nokey-Equation \u25b8 Display Input Data]
-tests/test_every_command.py::test_every_command[K0224#0-nokey-Equation \u25b8 Go to Definition]
-tests/test_every_command.py::test_every_command[K0225#0-nokey-Equation \u25b8 Show Description]
-tests/test_every_command.py::test_every_command[K0226#0-nokey-Equation \u25b8 Disable Evaluation]
-tests/test_every_command.py::test_every_command[K0227#0-nokey-Equation \u25b8 Ignore Units]
-tests/test_every_command.py::test_every_command[K0228#0-nokey-Equation \u25b8 Optimization \u25b8 Symbolic]
-tests/test_every_command.py::test_every_command[K0229#0-nokey-Equation \u25b8 Optimization \u25b8 Numeric]
-tests/test_every_command.py::test_every_command[K0230#0-nokey-Equation \u25b8 Optimization \u25b8 None]
-tests/test_every_command.py::test_every_command[K0231#0-nokey-Decimal Places \u25b8 Trailing Zeros]
-tests/test_every_command.py::test_every_command[K0232#0-nokey-Significant Figures]
-tests/test_every_command.py::test_every_command[K0233#0-nokey-Decimal Places \u25b8 0]
-tests/test_every_command.py::test_every_command[K0234#0-nokey-Decimal Places \u25b8 1]
-tests/test_every_command.py::test_every_command[K0235#0-nokey-Decimal Places \u25b8 2]
-tests/test_every_command.py::test_every_command[K0236#0-nokey-Decimal Places \u25b8 3]
-tests/test_every_command.py::test_every_command[K0237#0-nokey-Decimal Places \u25b8 4]
-tests/test_every_command.py::test_every_command[K0238#0-nokey-Decimal Places \u25b8 5]
-tests/test_every_command.py::test_every_command[K0239#0-nokey-Decimal Places \u25b8 6]
-tests/test_every_command.py::test_every_command[K0240#0-nokey-Decimal Places \u25b8 7]
-tests/test_every_command.py::test_every_command[K0241#0-nokey-Decimal Places \u25b8 8]
-tests/test_every_command.py::test_every_command[K0242#0-nokey-Decimal Places \u25b8 9]
-tests/test_every_command.py::test_every_command[K0243#0-nokey-Decimal Places \u25b8 10]
-tests/test_every_command.py::test_every_command[K0244#0-nokey-Decimal Places \u25b8 11]
-tests/test_every_command.py::test_every_command[K0245#0-nokey-Decimal Places \u25b8 12]
-tests/test_every_command.py::test_every_command[K0246#0-nokey-Decimal Places \u25b8 13]
-tests/test_every_command.py::test_every_command[K0247#0-nokey-Decimal Places \u25b8 14]
-tests/test_every_command.py::test_every_command[K0248#0-nokey-Decimal Places \u25b8 15]
-tests/test_every_command.py::test_every_command[K0249#0-nokey-Equation \u25b8 Exponential Threshold \u25b8 0]
-tests/test_every_command.py::test_every_command[K0250#0-nokey-Equation \u25b8 Exponential Threshold \u25b8 1]
-tests/test_every_command.py::test_every_command[K0251#0-nokey-Equation \u25b8 Exponential Threshold \u25b8 2]
-tests/test_every_command.py::test_every_command[K0252#0-nokey-Equation \u25b8 Exponential Threshold \u25b8 3]
-tests/test_every_command.py::test_every_command[K0253#0-nokey-Equation \u25b8 Exponential Threshold \u25b8 4]
-tests/test_every_command.py::test_every_command[K0254#0-nokey-Equation \u25b8 Exponential Threshold \u25b8 5]
 tests/test_every_command_is_bindable.py::test_every_listed_command_has_a_category_and_a_place
+tests/test_every_command_is_bindable.py::test_a_key_already_in_use_can_be_reassigned_or_left
 tests/test_exercise_round1_undo.py::test_a_markup_snippet_starts_on_a_whole_word
 tests/test_exercise_round1_undo.py::test_dark_greyed_words_read_on_charcoal
+tests/test_exercise_round1_undo.py::test_alt_and_a_menu_letter_opens_the_menu_while_an_equation_is_typed
+tests/test_exercise_round1_undo.py::test_about_says_which_version
+tests/test_exercise_round1_undo.py::test_conditional_formatting_cancel_changes_nothing_and_ok_is_one_undo
 tests/test_exercise_round1_undo.py::test_the_choose_values_filter_has_select_all
-tests/test_exercise_round1_undo.py::test_whiteout_and_crop_bars_wear_no_style
+tests/test_exercise_round1_undo.py::test_a_definitions_menu_starts_with_its_variable_settings
 tests/test_filter_dim.py::test_the_preference_is_in_preferences
+tests/test_filter_dim.py::test_dimming_is_not_saved_exported_or_printed
 tests/test_format.py::test_a_pdf_that_is_not_a_document_is_not_opened_as_one
 tests/test_format.py::test_documents_written_before_the_format_was_a_pdf_still_open
-tests/test_format.py::test_saving_a_repaired_drawing_writes_a_file_that_is_sound
-tests/test_format.py::test_a_turned_page_comes_in_as_the_sheet_it_is_drawn_as
+tests/test_format.py::test_opening_a_pdf_is_opening_a_document_not_converting_one
+tests/test_format.py::test_saving_leaves_the_markups_movable_in_another_editor
+tests/test_format.py::test_a_markup_on_a_turned_page_is_saved_where_it_was_put
+tests/test_format.py::test_every_markup_comes_back_as_what_it_went_out_as
+tests/test_format.py::test_only_the_sheets_that_came_in_keep_their_bookmarks
 tests/test_formula_autocomplete.py::test_arguments_read_from_the_functions
-tests/test_formula_autocomplete.py::test_nothing_offered_in_text_numbers_or_plain_entries
+tests/test_formula_autocomplete.py::test_a_function_without_arguments_has_a_tip_too
 tests/test_formula_autocomplete.py::test_the_formula_bar_offers_the_same
-tests/test_insertion_marks.py::test_calc_mode_cross_goes_when_any_tool_puts_something_down[polyline]
+tests/test_formula_autocomplete.py::test_nothing_offered_in_text_numbers_or_plain_entries
+tests/test_formula_autocomplete.py::test_typing_lists_choosing_inserts_and_the_tip_follows
+tests/test_insertion_marks.py::test_calc_mode_cross_goes_when_a_rectangle_is_drawn_elsewhere[True]
+tests/test_insertion_marks.py::test_calc_mode_cross_goes_when_any_tool_puts_something_down[count]
 tests/test_insertion_marks.py::test_cross_from_calc_mode_does_not_come_back_after_markup_work
+tests/test_insertion_marks.py::test_panning_keeps_the_marks
+tests/test_insertion_marks.py::test_a_markup_mode_click_clears_an_old_cross
 tests/test_items.py::test_a_dimensions_value_carries_a_control_dot
 tests/test_items.py::test_a_highlighter_stroke_is_one_even_band
 tests/test_items.py::test_angle_measurement
@@ -814,10 +850,12 @@ tests/test_items.py::test_measurement_uses_the_page_scale
 tests/test_items.py::test_measurement_without_a_label_has_a_tight_rect
 tests/test_items.py::test_polyline_vertex_editing
 tests/test_items.py::test_serialisation_round_trip
-tests/test_layout.py::test_there_is_one_shortcuts_window_not_two
-tests/test_layout.py::test_rail_icons_can_be_reordered_top_to_bottom
-tests/test_layout.py::test_show_panels_brings_back_one_default_on_each_side
-tests/test_layout.py::test_preferences_and_shortcuts_live_under_the_revu_menu
+tests/test_layout.py::test_hiding_a_panel_schedules_a_save
+tests/test_layout.py::test_a_direct_layout_save_consumes_the_pending_timer
+tests/test_layout.py::test_a_rebound_key_is_saved_the_moment_it_changes
+tests/test_layout.py::test_a_toolbar_has_a_grip_to_pick_it_up_by
+tests/test_layout.py::test_page_navigation_and_label_are_centred_in_the_footer
+tests/test_layout.py::test_pinning_a_floating_panel_brings_it_home
 tests/test_manual_findings.py::test_a_custom_unit_counts_in_double_check
 tests/test_manual_findings.py::test_a_custom_unit_follows_its_definition
 tests/test_manual_findings.py::test_a_custom_unit_is_written_with_the_apostrophe_in_equations
@@ -831,34 +869,39 @@ tests/test_manual_findings.py::test_round_takes_smaths_rounding_modes[round(-2.5
 tests/test_manual_findings.py::test_the_files_are_named_only_never_a_path
 tests/test_manual_findings.py::test_vectorize_applies_the_expression_element_by_element
 tests/test_manual_findings.py::test_wfile_rfile_and_dfile_keep_a_value_in_the_data_folder
-tests/test_manual_findings.py::test_round_takes_smaths_rounding_modes[round(0.125,2,"te")=-0.12]
-tests/test_manual_findings.py::test_round_takes_smaths_rounding_modes[round(2.25'm,1,"te")=-2.2 m]
-tests/test_manual_findings.py::test_round_takes_smaths_rounding_modes[round(2.5,0,"TE")=-2]
-tests/test_markup_interaction_round6.py::test_shift_or_ctrl_click_picks_a_second_equation_too[KeyboardModifier.ShiftModifier-markup]
+tests/test_manual_findings.py::test_ctrl_wheel_does_the_other_thing_from_the_setting
+tests/test_markup_interaction_round6.py::test_a_dragged_text_box_is_ready_to_type_in
+tests/test_markup_interaction_round6.py::test_a_handle_takes_the_press_only_inside_the_square_it_is_drawn_in
+tests/test_markup_interaction_round6.py::test_the_area_value_is_not_covered_by_its_handles[0.5]
+tests/test_markup_interaction_round6.py::test_every_measurement_asks_for_a_scale_and_cancel_keeps_it[measure_perimeter]
 tests/test_markup_interaction_round6.py::test_a_rectangle_never_asks_for_a_scale
-tests/test_markup_layer.py::test_a_square_put_right_in_part_draws_nothing_outside_that_part
 tests/test_markup_layer.py::test_a_markups_size_follows_it
-tests/test_markup_styles.py::test_digits_still_type_into_a_text_box
+tests/test_markup_layer.py::test_a_picked_out_markup_in_the_squares_shows_its_handles
+tests/test_markup_layer.py::test_a_few_markups_stay_sharp_while_their_squares_are_coming
+tests/test_markup_styles.py::test_the_preferences_dialog_has_the_tick
 tests/test_markup_styles.py::test_a_style_can_be_dragged_along_the_bar
-tests/test_markup_styles.py::test_the_toolbar_is_in_tools_toolbars
+tests/test_markup_styles.py::test_rename_update_remove_and_reorder
+tests/test_markup_styles.py::test_style_previews_read_in_both_themes
 tests/test_markups_csv.py::test_link_markups_show_on_screen_and_come_back_after_saving
-tests/test_markups_csv.py::test_every_markup_one_row_and_excel_reads_the_symbols
 tests/test_markups_csv.py::test_link_markups_work_in_the_exported_pdf
-tests/test_markups_list_editing.py::test_read_only_columns_refuse[Value]
-tests/test_markups_list_editing.py::test_typing_in_the_cell_fires_no_shortcut
-tests/test_markups_list_editing.py::test_the_headings_are_drawn_without_qts_own_arrow
-tests/test_markups_list_editing.py::test_a_counts_value_is_read_only_but_its_subject_edits
+tests/test_markups_csv.py::test_every_markup_one_row_and_excel_reads_the_symbols
+tests/test_markups_list_editing.py::test_escape_leaves_the_cell_as_it_was
+tests/test_markups_list_editing.py::test_the_arrow_sits_after_the_title_and_the_button_at_the_right_edge
+tests/test_markups_list_editing.py::test_title_sort_arrow_and_filter_never_overlap[9]
+tests/test_markups_list_editing.py::test_double_click_a_subject_type_enter_and_one_undo
+tests/test_markups_list_editing.py::test_f2_edits_the_label_with_the_keyboard
 tests/test_markups_list_handle.py::test_dragging_the_bar_sizes_the_list_and_does_not_toggle_it
 tests/test_markups_list_handle.py::test_the_bar_is_blue_under_the_pointer
-tests/test_markups_list_handle.py::test_a_double_click_ends_where_it_started
-tests/test_measure_variables.py::test_the_properties_panel_names_it
-tests/test_measure_variables.py::test_the_label_draws_the_subscript_smaller_and_lower
-tests/test_measure_variables.py::test_l_underscore_beam_becomes_smaths_l_dot_beam
+tests/test_measure_variables.py::test_right_click_on_an_area_offers_its_variable_first
 tests/test_measure_variables.py::test_deleting_it_says_what_is_no_longer_defined
+tests/test_measure_variables.py::test_the_name_is_saved_with_it
+tests/test_measure_variables.py::test_l_underscore_beam_becomes_smaths_l_dot_beam
+tests/test_measure_variables.py::test_scaling_a_group_with_a_measurement_updates_what_it_measures
+tests/test_measure_variables.py::test_dragging_it_into_a_viewport_takes_the_viewports_scale
 tests/test_menu_button_arrows.py::test_the_arrow_part_opens_the_menu
 tests/test_menu_button_arrows.py::test_the_first_row_still_fits_1280_at_125_percent
-tests/test_name_tags.py::test_a_sheet_prints_its_name_on_its_first_page_and_its_named_cells
 tests/test_name_tags.py::test_a_table_and_its_named_cells_print_their_names
+tests/test_name_tags.py::test_a_sheet_prints_its_name_on_its_first_page_and_its_named_cells
 tests/test_native_frame.py::test_an_empty_part_of_the_title_row_is_the_caption
 tests/test_native_frame.py::test_below_the_title_row_is_the_client_and_outside_it_is_windows_border
 tests/test_native_frame.py::test_caption_button_bounds_come_into_the_client_area_the_same_maximised[100%]
@@ -869,38 +912,53 @@ tests/test_native_frame.py::test_the_buttons_are_found_maximised_exactly_as_rest
 tests/test_native_frame.py::test_the_menus_and_the_search_box_are_the_client
 tests/test_native_frame.py::test_the_native_frame_imports_without_windows
 tests/test_native_frame.py::test_the_top_edge_resizes
-tests/test_native_frame.py::test_split_and_unsplit_keep_the_ordinary_frame
-tests/test_native_frame.py::test_caption_button_bounds_come_into_the_client_area_the_same_maximised[125%]
-tests/test_native_frame.py::test_caption_button_bounds_come_into_the_client_area_the_same_maximised[150%]
+tests/test_native_frame.py::test_a_press_let_go_elsewhere_does_nothing[100%]
+tests/test_native_frame.py::test_hovering_the_buttons_is_dwms_and_never_defwindowprocs[150%]
 tests/test_no_leaks.py::test_a_document_still_open_in_another_tab_is_kept
 tests/test_no_stray_windows.py::test_set_scale_keeps_its_unused_boxes_as_its_own
 tests/test_offset.py::test_a_line_moves_to_the_side_the_pointer_is
 tests/test_offset.py::test_a_rectangle_and_an_ellipse_offset_by_their_box
 tests/test_offset.py::test_a_sharp_corner_is_cut_off_past_the_miter_limit
 tests/test_offset.py::test_a_square_grows_and_shrinks_by_the_distance
-tests/test_offset.py::test_offset_asks_for_something_it_can_offset
 tests/test_offset.py::test_offset_on_the_page_is_one_undo_and_can_replace
+tests/test_offset.py::test_offset_asks_for_something_it_can_offset
 tests/test_open_as_written.py::test_hiding_an_annotation_never_rebuilds_its_appearance
+tests/test_open_as_written.py::test_a_call_out_with_no_border_keeps_its_leader
+tests/test_open_as_written.py::test_on_the_graphics_card_an_untouched_highlighter_is_drawn_with_the_page
 tests/test_open_as_written.py::test_a_three_stroke_ink_note_is_drawn_once
-tests/test_open_as_written.py::test_picking_one_out_changes_nothing
-tests/test_open_as_written.py::test_a_three_stroke_ink_note_prints_as_its_file_draws_it
-tests/test_open_as_written.py::test_opening_a_text_box_and_leaving_it_unchanged_leaves_it_as_written
-tests/test_output.py::test_markup_text_reaches_the_page
-tests/test_output.py::test_an_exported_markup_carries_who_made_it_and_what_it_says
+tests/test_open_as_written.py::test_opening_converts_nothing
+tests/test_open_as_written.py::test_a_bluebeam_picture_keeps_its_picture_when_taken_over
+tests/test_output.py::test_a_logo_never_spills_past_the_margin
+tests/test_output.py::test_a_contents_line_is_a_working_link_in_the_exported_pdf
+tests/test_output.py::test_the_logo_height_is_what_was_asked_for
+tests/test_output.py::test_a_bookmark_lands_where_on_the_page_it_points
+tests/test_output.py::test_a_landscape_a3_page_prints_at_a3
+tests/test_output.py::test_every_page_of_the_document_is_printed
 tests/test_page_drag.py::test_the_drag_shows_a_small_sheet_not_the_page
-tests/test_page_drag.py::test_a_dragged_page_lands_where_the_line_was
+tests/test_page_drag.py::test_dragging_pages_along_the_strip_is_allowed
 tests/test_page_drag.py::test_a_run_of_pages_moves_together
-tests/test_page_layouts.py::test_single_page_shows_one_page_and_the_wheel_turns_at_its_end
+tests/test_page_drag.py::test_pages_picked_here_and_there_gather_where_they_are_dropped
+tests/test_page_drag.py::test_a_dragged_page_lands_where_the_line_was
+tests/test_page_layouts.py::test_side_by_side_shows_one_spread_at_a_time
+tests/test_page_layouts.py::test_single_page_zoomed_out_shows_one_page_only
 tests/test_page_layouts.py::test_single_page_zoomed_in_scrolls_within_the_page_then_turns
 tests/test_page_layouts.py::test_the_wheel_preferences_are_in_the_dialog_and_persist
+tests/test_page_layouts.py::test_side_by_side_scrolls_then_turns_a_spread
+tests/test_page_layouts.py::test_preferences_page_wheel_always_scrolls
+tests/test_panel_edges.py::test_a_double_click_on_the_edge_ends_where_it_started[right]
+tests/test_panel_edges.py::test_dragging_out_from_the_thin_edge_brings_the_column_back[left]
 tests/test_panel_edges.py::test_a_drag_on_the_edge_resizes_and_does_not_hide[right]
+tests/test_panel_edges.py::test_the_edge_is_blue_under_the_pointer[right]
 tests/test_panel_edges.py::test_dragging_out_from_the_thin_edge_brings_the_column_back[right]
+tests/test_panel_sides.py::test_the_float_button_still_floats_a_panel
 tests/test_panel_sides.py::test_a_saved_arrangement_with_a_panel_on_top_puts_it_on_its_side
-tests/test_panel_sides.py::test_a_dragged_panel_ends_on_a_side[top]
-tests/test_panels_keep_place.py::test_the_properties_panel_stays_put_for_every_kind[measure_area]
-tests/test_panels_keep_place.py::test_colour_processing_keeps_the_focus_on_what_is_changed
-tests/test_panels_keep_place.py::test_bookmarks_stay_put_as_one_low_in_them_is_deleted
-tests/test_panels_keep_place.py::test_the_properties_panel_stays_put_for_every_kind[equation]
+tests/test_panel_sides.py::test_no_panel_may_dock_along_the_top_or_bottom
+tests/test_panel_sides.py::test_toolbars_keep_their_own_side_columns
+tests/test_panels_keep_place.py::test_the_properties_panel_stays_put_for_every_kind[polygon]
+tests/test_panels_keep_place.py::test_the_maths_panel_stays_put_as_a_button_low_in_it_is_used
+tests/test_panels_keep_place.py::test_the_page_panel_stays_put
+tests/test_panels_keep_place.py::test_the_thumbnails_stay_put_as_a_page_low_in_them_is_picked
+tests/test_panels_keep_place.py::test_the_preferences_dialog_stays_put
 tests/test_pdf_engine.py::test_a_colour_reads_the_same_whichever_space_it_was_written_in
 tests/test_pdf_engine.py::test_a_file_that_is_not_a_pdf_is_refused
 tests/test_pdf_engine.py::test_a_file_with_a_broken_cross_reference_is_still_opened
@@ -918,33 +976,43 @@ tests/test_pdf_engine.py::test_a_region_off_the_page_draws_nothing_rather_than_f
 tests/test_pdf_engine.py::test_a_save_survives_a_scratch_file_that_will_not_delete
 tests/test_pdf_engine.py::test_a_zoom_gives_up_on_the_zoom_before_it
 tests/test_pdf_parallel.py::test_centre_tiles_are_first_out_of_the_worker_stack
+tests/test_pdf_parallel.py::test_child_exit_recovers_and_shutdown_leaves_no_renderer
 tests/test_pdf_parallel.py::test_forget_drops_queued_results_instead_of_resurrecting_a_pdf
 tests/test_pdf_parallel.py::test_pan_cancels_old_tiles_but_keeps_the_other_view
-tests/test_pdf_parallel.py::test_parallel_tiles_match_serial_pixels_and_own_their_buffers[90]
+tests/test_pdf_parallel.py::test_parallel_tiles_match_serial_pixels_and_own_their_buffers[0]
+tests/test_pdf_parallel.py::test_reference_pdf_matches_at_overview_and_detail_zooms
 tests/test_pdf_parallel.py::test_render_failure_keeps_fallback_and_retries_without_busy_loop
 tests/test_pdf_parallel.py::test_renderer_annotation_variants_and_lru_do_not_leak_flags
-tests/test_pdf_parallel.py::test_child_exit_recovers_and_shutdown_leaves_no_renderer
-tests/test_pdf_parallel.py::test_reference_pdf_matches_at_overview_and_detail_zooms
 tests/test_pdf_parallel.py::test_a_renderer_dies_with_the_application_even_mid_page
+tests/test_pdf_parallel.py::test_parallel_tiles_match_serial_pixels_and_own_their_buffers[90]
+tests/test_picture_resize.py::test_a_picture_corner_keeps_its_proportions_and_shift_frees_them[scale_se]
+tests/test_picture_resize.py::test_a_picture_edge_stretches_it_one_way[e]
+tests/test_picture_resize.py::test_a_snapshot_corner_keeps_its_proportions_and_shift_frees_them
 tests/test_picture_resize.py::test_a_turned_picture_resized_comes_back_where_it_was_after_undo_redo_and_reopen
-tests/test_picture_resize.py::test_a_picture_edge_stretches_it_one_way[w]
+tests/test_picture_resize.py::test_the_rotation_handle_of_a_picture_turns_freely
+tests/test_picture_resize.py::test_the_opposite_corner_stays_put_on_a_turned_page_and_a_turned_view
 tests/test_print_dialog.py::test_placement_rules
-tests/test_print_dialog.py::test_dim_filtered_markups
-tests/test_print_dialog.py::test_get_window_esc_goes_back_unchanged
-tests/test_print_dialog.py::test_defaults_menu_save_restore_and_factory
-tests/test_propbar_gaps.py::test_the_bars_number_boxes_show_their_widest_value
-tests/test_propbar_gaps.py::test_only_sketch_to_scale_shapes_show_a_size_box_while_placed[polygon]
-tests/test_propbar_gaps.py::test_the_bar_fits_1280_for_each_kind[length]
-tests/test_propbar_per_kind.py::test_closed_shapes_and_pens_have_no_line_ends[highlighter]
-tests/test_propbar_per_kind.py::test_the_next_arrow_takes_the_bars_line_end_colour
-tests/test_propbar_per_kind.py::test_each_kinds_bar_and_panel_are_revus[line]
-tests/test_propbar_per_kind.py::test_the_highlighter_and_a_line_still_multiply_whole
-tests/test_propbar_per_kind.py::test_the_size_and_style_lists_tick_the_current_one_and_cut_no_name_short
+tests/test_print_dialog.py::test_page_scaling_really_scales
+tests/test_print_dialog.py::test_the_per_page_and_per_markup_print_ticks_are_honoured
+tests/test_print_dialog.py::test_nothing_to_print_says_so
+tests/test_print_dialog.py::test_print_visible_hyperlinks
+tests/test_propbar_gaps.py::test_the_bar_fits_1280_for_each_kind[area]
+tests/test_propbar_gaps.py::test_only_sketch_to_scale_shapes_show_a_size_box_while_placed[arrow]
+tests/test_propbar_gaps.py::test_a_run_of_words_is_struck_through_on_its_own
+tests/test_propbar_gaps.py::test_the_properties_panel_has_revus_auto_beside_the_size
+tests/test_propbar_gaps.py::test_a_measurement_variable_keeps_its_value_whatever_it_is_shown_in
+tests/test_propbar_per_kind.py::test_each_kinds_bar_and_panel_are_revus[note]
+tests/test_propbar_per_kind.py::test_closed_shapes_and_pens_have_no_line_ends[measure_volume]
+tests/test_propbar_per_kind.py::test_line_end_colour_set_as_default_and_kept_in_the_tool_chest
+tests/test_propbar_per_kind.py::test_a_cut_out_from_a_sketch_to_scale_shapes_bar
+tests/test_propbar_per_kind.py::test_an_areas_centroid_and_segments_and_its_caption_tick
+tests/test_propbar_per_kind.py::test_each_kinds_bar_and_panel_are_revus[stamp]
 tests/test_properties_fields.py::test_field_formats_as_smaths_insert_field_dialog
 tests/test_properties_fields.py::test_fields
 tests/test_properties_fields.py::test_the_merged_properties_are_fields_too
+tests/test_properties_fields.py::test_an_exported_pdf_has_them_too
 tests/test_properties_fields.py::test_the_header_prints_its_fields
-tests/test_properties_fields.py::test_insert_field_goes_into_the_slot_typed_in_last
+tests/test_properties_fields.py::test_identity_is_kept_and_each_save_is_a_revision
 tests/test_properties_fields.py::test_one_properties_dialog_with_calcforges_and_smaths_fields
 tests/test_real_session.py::test_session
 tests/test_references_follow.py::test_a_formula_reading_a_cell_a_block_lands_on_gives_ref_as_in_excel
@@ -952,41 +1020,57 @@ tests/test_references_follow.py::test_a_heading_two_columns_share_is_not_followe
 tests/test_references_follow.py::test_a_sheets_own_name_of_the_same_spelling_is_another_name
 tests/test_references_follow.py::test_renaming_a_defined_name_renames_it_in_every_formula
 tests/test_references_follow.py::test_retyping_a_tables_heading_renames_its_structured_references
+tests/test_references_follow.py::test_retyping_a_heading_renames_the_column_in_the_equations
+tests/test_references_follow.py::test_renaming_a_table_renames_it_in_the_equations_and_undo_puts_it_back
 tests/test_references_follow.py::test_inserting_and_deleting_rows_moves_what_the_equations_read
-tests/test_reshape_click.py::test_the_pointer_shows_revus_sign_for_what_a_click_does[16777251-KeyboardModifier.AltModifier-side-curve]
-tests/test_reshape_click.py::test_alt_dragging_the_outline_only_moves_it[corner]
-tests/test_reshape_click.py::test_ctrl_dragging_the_outline_copies_it_and_adds_no_point[side]
+tests/test_reshape_click.py::test_alt_dragging_the_outline_only_moves_it[side]
+tests/test_reshape_click.py::test_the_pointer_shows_revus_sign_for_what_a_click_does[16777251-KeyboardModifier.AltModifier-corner-curve]
+tests/test_reshape_click.py::test_alt_after_an_alt_click_does_not_take_the_keyboard_to_the_menus
+tests/test_reshape_click.py::test_ctrl_click_reshapes_nothing_and_keeps_the_selection[corner]
+tests/test_reshape_click.py::test_a_rectangle_reshaped_by_a_click_but_resized_in_proportion_by_a_shift_drag
 tests/test_review_findings.py::test_the_author_preference_starts_as_the_login_name
-tests/test_review_findings.py::test_the_formula_bar_shows_while_a_sheet_or_table_is_in_use
+tests/test_review_findings.py::test_properties_let_go_when_escape_does
+tests/test_review_findings.py::test_escape_lets_go_of_an_equation_too
+tests/test_review_findings.py::test_restyling_a_picked_markup_leaves_the_next_one_alone
 tests/test_review_findings.py::test_slow_downs_are_recorded_with_what_was_running
+tests/test_review_findings.py::test_the_formula_bar_shows_while_a_sheet_or_table_is_in_use
 tests/test_review_regressions.py::test_page_tiles_land_on_whole_pixels_without_resampling
 tests/test_review_regressions.py::test_pdf_thumbnail_cache_has_a_memory_ceiling
 tests/test_review_regressions.py::test_two_pdf_views_do_not_cancel_each_others_resolution
 tests/test_review_regressions.py::test_zoomed_out_hairlines_are_not_faded
-tests/test_review_regressions.py::test_switching_tools_abandons_half_placed_callout
-tests/test_review_regressions.py::test_snapshot_failure_can_be_followed_by_a_fresh_capture
+tests/test_review_regressions.py::test_whiteout_preserves_searchable_rotated_labels[90]
+tests/test_review_regressions.py::test_exported_text_snapshot_matches_its_source_in_another_viewer
+tests/test_review_regressions.py::test_format_painter_stops_when_another_tool_is_chosen
+tests/test_review_regressions.py::test_snapshot_recolour_undo_does_not_change_other_copies
 tests/test_revu_clouds.py::test_a_cloud_leader_ends_on_the_clouds_edge[2.0-1.0-above left]
-tests/test_revu_clouds.py::test_a_polygon_clouds_scallops_start_at_each_corner
-tests/test_revu_clouds.py::test_invert_turns_the_arcs_inward_on_the_same_cusps
-tests/test_revu_clouds.py::test_scallops_stand_on_each_side_corner_to_corner[rect0-0.5-0.5]
-tests/test_revu_clouds.py::test_the_callout_line_written_to_the_pdf_ends_on_the_cloud
+tests/test_revu_clouds.py::test_a_scallop_on_every_corner_and_the_rest_even[160x90-1.0-1.0]
+tests/test_revu_clouds.py::test_invert_turns_the_scallops_inward_round_the_same_outline
+tests/test_revu_clouds.py::test_the_outline_is_clean_at_corners_and_where_it_closes[inverted-notched-1.0-1.0]
 tests/test_revu_clouds.py::test_a_drawn_cloud_is_stroked_with_round_joins_at_its_line_width
+tests/test_revu_clouds.py::test_the_callout_line_written_to_the_pdf_ends_on_the_cloud
+tests/test_revu_clouds.py::test_an_added_cloud_leader_is_saved_and_exported
+tests/test_revu_clouds.py::test_escape_puts_add_cloud_leader_down_with_nothing_changed
 tests/test_revu_flatten_scale.py::test_old_files_without_fractions_still_open
-tests/test_revu_flatten_scale.py::test_preset_1_100_on_the_current_page_only
-tests/test_revu_flatten_scale.py::test_add_preset_saves_one_that_is_at_the_top_next_time
-tests/test_revu_flatten_scale.py::test_precision_changes_the_measurement_text
+tests/test_revu_flatten_scale.py::test_allow_markup_recovery_on_can_be_unflattened
+tests/test_revu_flatten_scale.py::test_flatten_markups_is_laid_out_as_revus
+tests/test_revu_flatten_scale.py::test_right_click_flatten_is_at_once_and_recoverable
+tests/test_revu_flatten_scale.py::test_allow_markup_recovery_off_cannot_be_unflattened
+tests/test_revu_flatten_scale.py::test_exclude_filtered_markups_leaves_what_the_list_hides
 tests/test_revu_hatches.py::test_diagonal_down_and_up_lean_as_revus
 tests/test_revu_hatches.py::test_each_new_hatch_is_drawn_inside_its_shape_only[10% dots]
 tests/test_revu_hatches.py::test_old_keys_open_looking_the_same
 tests/test_revu_hatches.py::test_revus_names_in_a_tool_set_come_in_as_these
 tests/test_revu_hatches.py::test_the_dots_grow_denser_as_named
-tests/test_revu_hatches.py::test_the_bars_list_is_revus_order_then_ours
 tests/test_revu_hatches.py::test_the_properties_panel_hatch_row_is_the_same_list
+tests/test_revu_hatches.py::test_the_bars_list_is_revus_order_then_ours
 tests/test_revu_hatches.py::test_each_new_hatch_is_drawn_inside_its_shape_only[20% dots]
+tests/test_revu_hatches.py::test_each_new_hatch_is_drawn_inside_its_shape_only[30% dots]
+tests/test_revu_hatches.py::test_each_new_hatch_is_drawn_inside_its_shape_only[brick]
+tests/test_revu_hatches.py::test_each_new_hatch_is_drawn_inside_its_shape_only[diagonal brick]
 tests/test_revu_keys.py::test_home_and_end_at_a_small_zoom_keep_the_page_box_honest
-tests/test_revu_keys.py::test_ctrl_right_in_an_equation_stays_in_the_equation
-tests/test_revu_keys.py::test_ctrl_right_and_left_turn_the_page
-tests/test_revu_keys.py::test_v_types_a_v_in_a_text_box
+tests/test_revu_keys.py::test_a_second_key_can_be_changed_like_any_other
+tests/test_revu_keys.py::test_ctrl_page_down_and_up_still_turn_the_page
+tests/test_revu_keys.py::test_home_brings_back_the_top_of_the_first_page
 tests/test_revu_line_styles.py::test_a_complex_line_grows_with_its_width
 tests/test_revu_line_styles.py::test_drawn_inside_its_box_when_zoomed_in[double]
 tests/test_revu_line_styles.py::test_each_complex_style_is_drawn_and_stays_inside_the_box[arc-double]
@@ -994,104 +1078,133 @@ tests/test_revu_line_styles.py::test_old_keys_still_load_as_they_were
 tests/test_revu_line_styles.py::test_revus_names_in_a_tool_set_come_in_as_these_styles
 tests/test_revu_line_styles.py::test_no_name_is_cut_short_and_the_one_in_use_is_ticked
 tests/test_revu_line_styles.py::test_the_properties_panel_style_row_is_the_same_list
-tests/test_revu_line_styles.py::test_drawn_inside_its_box_when_zoomed_in[gas]
-tests/test_revu_line_styles.py::test_drawn_inside_its_box_when_zoomed_in[insulation]
-tests/test_revu_line_styles.py::test_drawn_inside_its_box_when_zoomed_in[tracks]
+tests/test_revu_line_styles.py::test_the_bars_list_is_revus_order_then_ours
 tests/test_revu_page_dialogs.py::test_pages_control_reads_all_current_selected_and_custom
-tests/test_revu_page_dialogs.py::test_check_spelling_has_revus_buttons
-tests/test_revu_page_dialogs.py::test_rename_page_label_edits_in_place
-tests/test_revu_page_dialogs.py::test_ignore_once_asks_again_and_ignore_all_does_not
 tests/test_revu_page_dialogs.py::test_dialog_titles_are_revus_in_title_case
-tests/test_revu_page_setup.py::test_ok_with_nothing_changed_adds_no_step
+tests/test_revu_page_dialogs.py::test_check_spelling_has_revus_buttons
+tests/test_revu_page_dialogs.py::test_delete_pages_deletes_the_chosen_pages_in_one_undo
+tests/test_revu_page_dialogs.py::test_delete_pages_refuses_every_page
+tests/test_revu_page_dialogs.py::test_extract_as_separate_files_named_by_label_then_deleted
+tests/test_revu_page_dialogs.py::test_extract_open_files_after_extraction
 tests/test_revu_page_setup.py::test_a_page_turned_in_its_file_resizes_the_way_it_shows
+tests/test_revu_page_setup.py::test_a_picture_page_is_drawn_again_onto_its_new_paper
+tests/test_revu_page_setup.py::test_ok_with_nothing_changed_adds_no_step
+tests/test_revu_page_setup.py::test_going_to_a_page_after_a_zoom_still_picks_it_alone
 tests/test_revu_ui.py::test_bluebeam_tool_set_line_ends_come_in_as_drawn
-tests/test_revu_ui.py::test_line_ends_are_revus_and_go_out_as_the_pdfs
-tests/test_revu_ui.py::test_properties_panel_has_revus_sections_and_names
+tests/test_revu_ui.py::test_the_scale_box_scales_in_proportion_and_shift_frees_it
+tests/test_revu_ui.py::test_hatch_patterns_import_a_pat_file_and_are_kept
+tests/test_revu_ui.py::test_the_tool_chest_fills_its_panel_and_shows_every_tool
 tests/test_revu_ui.py::test_manage_tool_sets_shows_hides_orders_and_renames
-tests/test_rotated_save.py::test_a_table_on_a_turned_page_reopens_where_it_was
+tests/test_revu_ui.py::test_a_scaled_tool_keeps_its_real_size_on_a_page_of_another_scale
 tests/test_rotated_save.py::test_a_turned_rectangle_converts_to_a_polygon_in_place
-tests/test_round7_exercise.py::test_the_set_scale_prompt_is_for_measuring[sketch_rect-True]
+tests/test_rotated_save.py::test_a_turned_pages_markups_reopen_where_they_were[1]
+tests/test_rotated_save.py::test_a_markup_already_turned_turns_with_its_page
+tests/test_rotated_save.py::test_equations_on_a_turned_page_reopen_where_they_were
+tests/test_round7_exercise.py::test_a_locked_markup_shows_it_is_selected[rect]
+tests/test_round7_exercise.py::test_the_set_scale_prompt_is_for_measuring[rect-False]
 tests/test_round7_exercise.py::test_apply_to_pages_copies_the_whole_group
-tests/test_round7_shapes.py::test_sketch_to_scale_in_customise_toolbars_and_the_key_list
-tests/test_round7_shapes.py::test_a_plain_rectangle_is_sized_on_the_paper_even_on_a_scaled_page
+tests/test_round7_exercise.py::test_a_text_box_left_empty_leaves_no_step
+tests/test_round7_exercise.py::test_add_cloud_leader_is_drawn_by_hand
+tests/test_round7_shapes.py::test_every_selected_markup_paints_its_own_control_points
+tests/test_round7_shapes.py::test_a_group_still_has_its_box
+tests/test_round7_shapes.py::test_a_click_with_the_text_box_tool_places_nothing_and_a_drag_does
+tests/test_round7_shapes.py::test_a_sketch_to_scale_rectangle_goes_to_the_tool_chest_and_back
+tests/test_round7_shapes.py::test_sketch_to_scale_on_the_measure_toolbar_with_its_own_icons
 tests/test_roundtrip.py::test_a_markup_deleted_elsewhere_is_gone
+tests/test_roundtrip.py::test_a_file_rewritten_whole_by_another_program_still_opens_live
 tests/test_roundtrip.py::test_a_page_deleted_elsewhere_takes_its_markups_and_equations
-tests/test_selection_chrome.py::test_a_selected_markup_paints_inside_itself_at_any_zoom[measure_angle]
+tests/test_roundtrip.py::test_pages_reordered_elsewhere_keep_their_markups
+tests/test_roundtrip.py::test_a_markup_restyled_or_retyped_elsewhere_opens_as_they_left_it
+tests/test_selection_chrome.py::test_a_selected_markup_paints_inside_itself_at_any_zoom[count]
 tests/test_selection_chrome.py::test_the_handles_room_does_not_count_as_what_a_markup_covers
 tests/test_selection_chrome.py::test_a_selected_markup_paints_inside_itself_at_any_zoom[cutout_ellipse]
-tests/test_selection_chrome.py::test_a_selected_markup_paints_inside_itself_at_any_zoom[measure_diameter]
-tests/test_selection_chrome.py::test_a_selected_markup_paints_inside_itself_at_any_zoom[flag]
+tests/test_selection_chrome.py::test_a_selected_markup_paints_inside_itself_at_any_zoom[highlight]
+tests/test_selection_chrome.py::test_a_selected_markup_paints_inside_itself_at_any_zoom[highlighter]
 tests/test_september17_review.py::test_second_line_point_snaps_to_alignment_and_clears_guides
+tests/test_september17_review.py::test_stamp_text_and_corners_are_editable_but_flag_has_no_false_dash
 tests/test_september17_review.py::test_font_controls_show_the_font_actually_used_on_this_system
-tests/test_september17_review.py::test_snapshot_saved_outline_default_is_used
-tests/test_september17_review.py::test_imported_drawing_offers_only_effective_opacity
-tests/test_september17_review.py::test_second_point_does_not_snap_to_previous_draft_endpoint
+tests/test_september17_review.py::test_pdf_snap_reaches_vectors_after_the_import_limit
+tests/test_september17_review.py::test_break_controls_persist
+tests/test_september17_review.py::test_flag_opacity_applies_to_pole_as_well_as_flag
 tests/test_settings_migration.py::test_it_happens_once
 tests/test_settings_migration.py::test_no_markforge_settings_is_fine
 tests/test_settings_migration.py::test_the_names_are_calcforges
 tests/test_settings_migration.py::test_what_calcforge_already_has_is_kept
 tests/test_settings_migration.py::test_what_the_person_set_up_comes_across
-tests/test_settings_migration.py::test_the_window_starts_with_them
 tests/test_settings_migration.py::test_calcforge_opens_a_pdf_named_on_the_command_line
+tests/test_settings_migration.py::test_the_window_starts_with_them
+tests/test_sheet_errors_explained.py::test_a_quantity_keeps_its_unit_and_loses_decimals
 tests/test_sheet_errors_explained.py::test_a_date_formula_gives_a_general_cell_a_date_format
 tests/test_sheet_errors_explained.py::test_a_row_dragged_to_nothing_is_hidden_and_unhides
 tests/test_sheet_errors_explained.py::test_hashes_stay_for_a_set_format_and_a_column_too_narrow
-tests/test_sheet_errors_explained.py::test_var_reads_the_equation_variable_though_a_cell_has_its_name
 tests/test_sheet_gone.py::test_its_pages_deleted_from_the_thumbnail_menu
-tests/test_sheet_gone.py::test_its_sheet_tab_deleted
-tests/test_sheet_gone.py::test_its_pages_deleted_by_the_delete_pages_dialog
 tests/test_sheet_gone.py::test_its_insert_undone
-tests/test_sheet_pages.py::test_a_taller_row_pushes_the_markups_below_it_down
-tests/test_sheet_pages.py::test_nothing_goes_between_the_pages_of_a_run
-tests/test_sheet_pages.py::test_turning_a_page_turns_the_whole_run_and_reflows_the_breaks
-tests/test_sheet_pages.py::test_a_break_takes_back_the_page_it_made
-tests/test_sheet_qa_round1.py::test_the_format_box_names_the_format_the_keys_give[keys1-Time]
+tests/test_sheet_gone.py::test_its_pages_deleted_by_the_delete_pages_dialog
+tests/test_sheet_gone.py::test_its_sheet_tab_deleted
+tests/test_sheet_pages.py::test_sheet_tabs_go_to_every_sheet_and_not_tables
+tests/test_sheet_pages.py::test_pages_across_sit_side_by_side_and_print_their_own_columns
+tests/test_sheet_pages.py::test_page_layout_dialog_sets_the_options
+tests/test_sheet_pages.py::test_an_equation_dragged_onto_a_sheet_page_goes_back_and_can_be_picked
+tests/test_sheet_pages.py::test_save_and_reopen_keep_the_run_its_cells_and_its_markups
+tests/test_sheet_qa_round1.py::test_the_format_box_names_the_format_the_keys_give[keys0-General]
+tests/test_sheet_qa_round1.py::test_a_row_edge_drag_in_a_table_shows_a_guide_and_sizes_on_release
+tests/test_sheet_qa_round1.py::test_ctrl_plus_on_cells_asks_and_shifts_them_right_or_down
+tests/test_sheet_qa_round1.py::test_insert_page_break_at_b2_makes_excels_four_pages
 tests/test_sheet_qa_round1.py::test_the_unit_box_goes_when_another_cell_or_the_page_is_clicked
-tests/test_sheet_qa_round1.py::test_pasting_over_a_cell_left_with_equals_replaces_it
-tests/test_sheet_rows.py::test_the_insert_and_delete_dialogs_take_whole_rows_too
 tests/test_sheet_rows.py::test_down_and_enter_on_the_last_row_add_one_row_each
+tests/test_sheet_rows.py::test_the_insert_and_delete_dialogs_take_whole_rows_too
 tests/test_sheet_speed.py::test_running_totals_are_ordered_without_walking_their_blocks
 tests/test_sheet_speed.py::test_the_quick_sum_reads_as_the_slow_one_does
-tests/test_sheet_speed.py::test_a_column_edge_drag_redraws_no_rows_until_let_go
-tests/test_sheet_speed.py::test_a_key_typed_is_well_under_a_frame_and_does_only_its_own_work[table]
+tests/test_sheet_speed.py::test_typing_a_formula_redraws_only_the_cells_it_outlines
+tests/test_sheet_speed.py::test_picking_cells_in_a_table_markup_redraws_only_around_them
+tests/test_sheet_speed.py::test_a_key_typed_into_a_table_markup_redraws_only_the_cell
+tests/test_sheet_speed.py::test_a_cell_being_typed_in_does_not_repaint_the_canvas_without_end
+tests/test_smath_examples_in_window.py::test_an_smath_example_calculates_the_same_on_a_calcforge_page[10_2.sm]
+tests/test_smath_examples_in_window.py::test_an_smath_example_calculates_the_same_on_a_calcforge_page[contents.sm]
 tests/test_smath_examples_in_window.py::test_an_smath_example_calculates_the_same_on_a_calcforge_page[1_2.sm]
-tests/test_smath_examples_in_window.py::test_an_smath_example_calculates_the_same_on_a_calcforge_page[10_1.sm]
-tests/test_smath_examples_in_window.py::test_an_smath_example_calculates_the_same_on_a_calcforge_page[10.sm]
 tests/test_smath_name_boxes.py::test_only_a_name_goes_in
 tests/test_smath_name_boxes.py::test_the_box_draws_the_name_with_its_subscript
-tests/test_smath_name_boxes.py::test_greek_comes_from_the_greek_keys
+tests/test_smath_name_boxes.py::test_the_name_is_centred_full_size_and_never_clipped
+tests/test_smath_name_boxes.py::test_a_cells_variable_is_typed_as_smath_does
 tests/test_smath_name_boxes.py::test_a_measurements_variable_is_typed_as_smath_does
 tests/test_snapshot_fidelity.py::test_a_box_running_off_the_page_takes_what_is_on_it
-tests/test_split_sync.py::test_document_sync_choosing_it_moves_nothing_and_off_unlinks
-tests/test_split_sync.py::test_sync_off_resizing_the_split_leaves_the_other_view_where_it_was[one document]
-tests/test_split_tabs.py::test_presentation_shows_only_the_view_in_hand
+tests/test_snapshot_fidelity.py::test_equations_in_a_snapshot_stay_as_they_were
+tests/test_split_sync.py::test_document_sync_zoom_and_scroll_are_repeated_by_the_same_amount[one document]
+tests/test_split_sync.py::test_document_sync_single_page_mode_and_a_tab_switch
+tests/test_split_sync.py::test_document_sync_works_from_either_view_and_with_commands
+tests/test_split_tabs.py::test_dragging_a_tab_straight_across_moves_the_dragged_document
 tests/test_split_tabs.py::test_file_open_opens_a_tab_and_reopening_goes_to_it
-tests/test_tab_drag_windows.py::test_a_tab_dragged_out_to_nowhere_still_makes_a_window
-tests/test_table_data.py::test_document_search_finds_and_replaces_cells
+tests/test_split_tabs.py::test_file_open_keeps_worked_on_untitled
+tests/test_tab_drag_windows.py::test_two_copies_of_one_file_are_both_kept_not_merged[neither]
 tests/test_table_data.py::test_ctrl_f_in_an_open_table_is_its_find
+tests/test_table_data.py::test_validation_list_and_stop
+tests/test_table_data.py::test_sort_and_filter
+tests/test_table_data.py::test_comments
+tests/test_table_data.py::test_find_and_replace_in_tables
 tests/test_table_dialog_lifetimes.py::test_a_dialog_run_modally_stays_its_parents
 tests/test_table_equations.py::test_a_table_reads_variables_defined_before_it
-tests/test_table_equations.py::test_a_table_below_is_not_defined_above_it
 tests/test_table_equations.py::test_a_table_value_change_recalculates_the_equations
-tests/test_table_keyboard.py::test_editing_keys
+tests/test_table_equations.py::test_a_table_below_is_not_defined_above_it
 tests/test_table_keyboard.py::test_moving_and_selecting
 tests/test_table_keyboard.py::test_dialog_shortcuts
-tests/test_table_keyboard.py::test_format_hide_insert_delete_and_undo
+tests/test_table_keyboard.py::test_editing_keys
 tests/test_table_menu.py::test_every_spreadsheet_page_command
-tests/test_table_names.py::test_a_spilled_block_shows_in_its_table
-tests/test_table_names.py::test_names_are_saved_with_their_table
+tests/test_table_names.py::test_create_from_selection_uses_the_headings
 tests/test_table_names.py::test_equations_read_a_named_block_as_a_vector
+tests/test_table_names.py::test_names_are_saved_with_their_table
 tests/test_table_names.py::test_name_manager_new_edit_delete_with_scope_and_comment
 tests/test_table_names.py::test_a_lambda_name_in_the_name_manager_variables_and_cells
-tests/test_tables.py::test_fill_handle_copies_formulas_relatively
-tests/test_tables.py::test_markup_mode_click_selects_and_double_click_opens
+tests/test_tables.py::test_tab_and_arrows_move_like_excel
 tests/test_tables.py::test_a_table_prints
-tests/test_tables.py::test_dragging_the_corner_adds_rows_and_columns
-tests/test_tables.py::test_a_picked_up_table_shows_in_the_panels_and_copies
-tests/test_tabs_shared_document.py::test_split_view_in_one_of_two_tabs_of_a_document
-tests/test_text_fields.py::test_the_properties_panel_has_the_bookmark_box
+tests/test_tables.py::test_dragging_a_heading_border_resizes_and_double_click_fits
+tests/test_tables.py::test_dragging_the_selection_border_moves_cells
+tests/test_tables.py::test_format_cells_dialog
+tests/test_tabs_shared_document.py::test_moving_a_tab_onto_a_window_with_its_document_adds_a_second_view
+tests/test_text_fields.py::test_fields_show_their_values_and_the_codes_while_typing
 tests/test_text_fields.py::test_a_variable_field_follows_its_equation
 tests/test_text_fields.py::test_the_right_click_menu_offers_both
+tests/test_text_fields.py::test_a_text_box_bookmark_follows_its_box_to_another_page
+tests/test_text_fields.py::test_the_properties_panel_has_the_bookmark_box
 tests/test_text_flicker.py::test_on_the_card[0.75]
 tests/test_text_flicker.py::test_on_the_card[1.0]
 tests/test_text_flicker.py::test_on_the_card[1.237]
@@ -1104,29 +1217,28 @@ tests/test_text_spacing.py::test_bluebeam_line_heights_scale_with_the_spacing
 tests/test_text_spacing.py::test_line_spacing_sets_the_drawn_line_pitch[CalloutItem]
 tests/test_text_spacing.py::test_margins_move_the_words_and_the_fit
 tests/test_text_spacing.py::test_words_are_set_by_the_fonts_own_widths_and_never_fitted_to_pixels
+tests/test_text_spacing.py::test_circled_words_keep_their_square_in_rd
+tests/test_text_spacing.py::test_a_bluebeam_free_text_with_margins_and_line_height
 tests/test_text_spacing.py::test_spacing_and_margins_are_saved_and_read_back
-tests/test_text_spacing.py::test_alt_z_fits_the_spaced_lines[TextItem]
-tests/test_text_spacing.py::test_alt_z_fits_the_spaced_lines[TypewriterItem]
-tests/test_text_spacing.py::test_line_spacing_sets_the_drawn_line_pitch[TextItem]
 tests/test_text_steady.py::test_words_in_markups_do_not_move_or_resize_when_they_go_live_and_back[1.0]
-tests/test_thumbnails_look.py::test_larger_and_smaller_thumbnails_from_the_menu
-tests/test_thumbnails_look.py::test_every_row_holds_as_many_pages_as_fit[1.45]
-tests/test_thumbnails_look.py::test_three_pages_share_the_row_they_fit_in
 tests/test_thumbnails_look.py::test_the_rows_follow_pages_coming_and_going
-tests/test_title_row_and_panels.py::test_two_panels_on_one_side_are_tabs_not_stacked
+tests/test_thumbnails_look.py::test_ctrl_wheel_zoom_reflows_the_rows
+tests/test_thumbnails_look.py::test_three_pages_share_the_row_they_fit_in
+tests/test_thumbnails_look.py::test_rename_page_label_edits_over_the_number_not_the_page
+tests/test_title_row_and_panels.py::test_a_layout_saved_with_stacked_panels_is_tabbed_when_restored
 tests/test_title_row_and_panels.py::test_a_panel_dropped_on_the_other_side_joins_its_tabs
-tests/test_title_row_and_panels.py::test_the_properties_bar_fits_1280_with_one_row_and_no_overflow[callout]
+tests/test_title_row_and_panels.py::test_the_right_edge_works_the_same_way
+tests/test_title_row_and_panels.py::test_the_properties_bar_fits_1280_with_one_row_and_no_overflow[area]
+tests/test_toolbar_docking.py::test_a_saved_layout_with_a_toolbar_inside_the_rail_is_put_outside
+tests/test_toolbar_docking.py::test_the_alignment_toolbar_goes_to_a_side_with_its_panels_closed[left]
 tests/test_ui_fixes.py::test_a_hatch_is_drawn_at_its_own_opacity
-tests/test_ui_fixes.py::test_the_style_bars_number_boxes_fit_their_numbers_and_no_more
+tests/test_ui_fixes.py::test_the_autocomplete_list_opens_under_the_cursor[400-700]
+tests/test_ui_fixes.py::test_the_maths_panel_flexes_with_its_width
 tests/test_ui_fixes.py::test_line_and_hatch_pickers_show_only_their_sample
-tests/test_ui_fixes.py::test_equals_and_define_type_after_any_name[m]
-tests/test_ui_fixes.py::test_no_panel_scrolls_sideways_when_narrow
 tests/test_undo_redo_sequences.py::test_a_markup_drawn_after_a_page_is_added_comes_back_with_redo[on the new page]
 tests/test_undo_redo_sequences.py::test_markups_on_an_existing_and_a_new_page_both_come_back
-tests/test_undo_redo_sequences.py::test_a_markup_drawn_after_a_page_is_added_comes_back_with_redo[above the new page]
 tests/test_unit_filler.py::test_where_smaths_placeholder_goes
 tests/test_unit_filler.py::test_format_cells_show_quantities_in
-tests/test_unit_filler.py::test_the_formula_bars_unit_box
 tests/test_unit_filler.py::test_the_unit_box_after_the_cells_result
 tests/test_units.py::test_a_label_rounds_exactly_as_an_equation_does
 tests/test_units.py::test_a_scale_round_trips
@@ -1146,92 +1258,86 @@ tests/test_units.py::test_labels_are_written_with_a_dot_and_superscripts[1-kN/m^
 tests/test_units.py::test_labels_are_written_with_a_dot_and_superscripts[1000-mm-2-1000.00 mm]
 tests/test_usability.py::test_an_annotation_on_a_cropped_sheet_opens_where_it_is_drawn[0]
 tests/test_usability.py::test_cloud_and_cloud_plus_are_named_where_the_drawing_choice_is_explained
-tests/test_usability.py::test_an_image_offers_border_style_but_not_hatch
-tests/test_usability.py::test_a_point_goes_into_the_side_the_pointer_is_on
-tests/test_usability.py::test_flattened_markup_lets_the_pointer_through_to_what_is_behind
-tests/test_usability.py::test_hatch_scale_has_no_practical_limit
-tests/test_usability.py::test_letter_keys_pick_their_tool[a-arrow]
-tests/test_usability.py::test_recover_restores_a_recoverably_flattened_item
-tests/test_usability.py::test_rounding_a_rectangles_corner_makes_it_a_polygon
-tests/test_usability.py::test_taking_a_point_out_of_a_rectangle_leaves_a_triangle
-tests/test_usability.py::test_the_middle_of_a_polygon_side_can_be_caught
-tests/test_usability.py::test_a_bare_letter_types_rather_than_picking_a_tool
-tests/test_usability.py::test_a_cloud_drawn_as_a_box_has_an_outline_too
-tests/test_usability.py::test_a_dashed_line_from_a_toolset_comes_in_dashed
-tests/test_usability.py::test_a_paste_lands_under_the_pointer
-tests/test_usability.py::test_align_to_pdf_lines_up_with_the_drawing
-tests/test_usability.py::test_ctrl_b_emboldens_a_selected_text_box_rather_than_bookmarking
-tests/test_usability.py::test_current_page_commands_are_reachable_from_the_menu_bar
-tests/test_usability.py::test_freehand_snaps_only_its_start_and_end[highlighter]
-tests/test_usability.py::test_holding_ctrl_lets_a_point_go_where_it_is_put
-tests/test_usability.py::test_modifier_shortcuts_are_bound_where_asked
-tests/test_usability.py::test_recoverable_flattening_is_in_flatten_markups_not_preferences
-tests/test_usability.py::test_the_outline_menu_shows_up_in_the_middle_of_a_shape_too
-tests/test_usability.py::test_the_wheel_zooms_about_the_point_under_the_pointer
-tests/test_usability.py::test_turning_the_view_changes_nothing_about_the_document
-tests/test_usability.py::test_what_a_corner_carries_moves_with_it
-tests/test_usability.py::test_zooming_from_the_menu_holds_the_middle_of_the_view
-tests/test_usability.py::test_a_tool_chord_works_again_once_the_edit_is_over
-tests/test_usability.py::test_callout_properties_has_no_user_facing_multiply_control
-tests/test_usability.py::test_every_drawing_tool_has_a_drawing_cursor
-tests/test_usability.py::test_nothing_is_drawn_where_the_page_was_clicked
-tests/test_usability.py::test_preferences_exposes_the_optional_insertion_point
-tests/test_usability.py::test_saving_settles_the_markup_being_typed
-tests/test_usability.py::test_shift_and_the_space_bar_asks_for_a_text_box
-tests/test_usability.py::test_starting_another_markup_settles_the_first
-tests/test_usability.py::test_symbol_keys_are_live_while_you_type
-tests/test_usability.py::test_the_arrows_never_scroll_the_page_on_their_own
-tests/test_usability.py::test_the_menu_and_the_page_bar_agree_about_snapping
-tests/test_usability.py::test_a_markup_drawn_on_an_opened_pdf_can_be_picked_up_and_moved
-tests/test_usability.py::test_a_measure_tool_no_longer_invents_a_measurement
-tests/test_usability.py::test_a_menu_over_a_markup_being_typed_does_not_close_it
-tests/test_usability.py::test_a_plain_shape_never_prompts_for_a_scale[ellipse]
-tests/test_usability.py::test_a_turned_rectangle_goes_out_as_its_outline
+tests/test_usability.py::test_cloud_tool_supports_dragged_and_point_by_point_clouds
+tests/test_usability.py::test_letter_keys_pick_their_tool[h-highlighter]
+tests/test_usability.py::test_the_modifier_tools_are_reachable_from_their_actions
+tests/test_usability.py::test_a_scale_turns_the_paper_size_into_a_real_one
 tests/test_usability.py::test_active_drawing_gestures_carry_their_tool_on_the_cursor
-tests/test_usability.py::test_arrowheads_go_out_filled_and_a_freehand_arrow_keeps_them
-tests/test_usability.py::test_cancelling_the_note_dialog_leaves_it_as_it_was
-tests/test_usability.py::test_choosing_to_pick_points_starts_the_calibrate_tool
-tests/test_usability.py::test_ctrl_dragging_a_copy_still_snaps
-tests/test_usability.py::test_every_tool_and_application_action_is_reachable_from_the_menu_bar
-tests/test_usability.py::test_finding_a_tool_picks_it_up
-tests/test_usability.py::test_flattening_takes_a_markup_out_of_reach
-tests/test_usability.py::test_one_ellipse_diameter_makes_a_circle_and_escape_cancels
-tests/test_usability.py::test_pasting_with_nothing_copied_says_so
-tests/test_usability.py::test_selecting_something_draws_its_box_straight_away
-tests/test_usability.py::test_the_format_painter_carries_a_paint_roller
+tests/test_usability.py::test_modifier_shortcuts_are_bound_where_asked
+tests/test_usability.py::test_no_size_dialog_pops_up_once_a_rectangle_is_placed
+tests/test_usability.py::test_an_exact_size_can_be_asked_for_from_the_right_click_menu
+tests/test_usability.py::test_hovering_a_markup_changes_the_cursor
+tests/test_usability.py::test_dragging_moves_a_markup
+tests/test_usability.py::test_every_arrow_moves_the_insertion_point
+tests/test_usability.py::test_one_idea_has_one_name_in_the_properties_panel
+tests/test_usability.py::test_the_elbow_leaves_the_box_square_on
+tests/test_usability.py::test_a_note_can_be_placed_without_a_dialog_getting_in_the_way
+tests/test_usability.py::test_escape_abandons_a_half_drawn_callout
+tests/test_usability.py::test_nudging_a_callout_leaves_its_arrow_alone
+tests/test_usability.py::test_the_arrows_never_scroll_the_page_on_their_own
+tests/test_usability.py::test_a_grouped_shape_shows_no_control_points_of_its_own
+tests/test_usability.py::test_colorize_keeps_the_light_and_shade
+tests/test_usability.py::test_one_escape_goes_all_the_way_back_to_nothing
+tests/test_usability.py::test_rotating_can_be_undone
+tests/test_usability.py::test_the_outline_menu_offers_all_four
+tests/test_usability.py::test_two_clicks_and_a_length_set_the_scale
 tests/test_usability.py::test_two_documents_open_in_tabs_without_reaching_into_each_other
-tests/test_usability.py::test_a_page_can_be_left_out_of_the_header_and_footer
-tests/test_usability.py::test_a_photos_optional_border_is_offered_and_starts_disabled
-tests/test_usability.py::test_a_tool_can_be_switched_between_the_two_modes
-tests/test_usability.py::test_double_clicking_a_note_opens_what_it_says
-tests/test_usability.py::test_every_key_the_application_answers_to_is_in_the_shortcut_list
-tests/test_usability.py::test_hidden_markups_go_away_and_come_back
-tests/test_usability.py::test_irreversible_flattening_keeps_only_a_vector_recording
-tests/test_usability.py::test_markups_on_a_turned_or_cropped_sheet_export_where_they_are[0-30]
-tests/test_usability.py::test_several_pages_are_deleted_together
+tests/test_usability.py::test_a_cancelled_image_insert_changes_nothing
+tests/test_usability.py::test_a_colour_can_be_masked_within_a_tolerance
+tests/test_usability.py::test_a_kept_cloud_uses_its_bottom_left_as_the_anchor
+tests/test_usability.py::test_a_lasso_takes_only_what_is_wholly_inside
+tests/test_usability.py::test_a_paste_lands_under_the_pointer
+tests/test_usability.py::test_clicking_the_first_corner_again_closes_the_polygon
+tests/test_usability.py::test_copying_a_group_makes_a_group_of_its_own
+tests/test_usability.py::test_duplicate_along_an_offset
+tests/test_usability.py::test_escape_puts_the_count_tool_down_at_once
+tests/test_usability.py::test_flatten_dialog_type_choices_follow_real_clicks
+tests/test_usability.py::test_placing_a_cloud_leader_shows_a_cloud_on_the_pointer
+tests/test_usability.py::test_reordered_document_tabs_keep_their_documents
+tests/test_usability.py::test_shift_click_adds_to_the_selection
+tests/test_usability.py::test_the_radius_handle_sets_how_round_a_corner_is
+tests/test_usability.py::test_a_dimension_carries_its_own_text
+tests/test_usability.py::test_a_symbol_bound_to_a_bare_key_still_types_itself
+tests/test_usability.py::test_arrow_tool_places_an_arrow_and_hides_handles_until_selected
+tests/test_usability.py::test_cancelling_the_note_dialog_leaves_it_as_it_was
+tests/test_usability.py::test_click_selects_and_click_away_deselects
+tests/test_usability.py::test_grouping_can_be_undone
+tests/test_usability.py::test_the_calibration_length_prompt_accepts_joined_or_spaced_units[10 mm]
+tests/test_usability.py::test_the_first_scaled_tool_click_prompts_before_drawing[measure_perimeter]
+tests/test_usability.py::test_the_size_entry_stays_upright_whichever_way_the_page_is_turned
+tests/test_usability.py::test_the_style_toolbar_stays_put
+tests/test_usability.py::test_a_cloud_leader_being_placed_joins_the_box_where_it_will
+tests/test_usability.py::test_a_default_can_be_forgotten
+tests/test_usability.py::test_a_default_never_carries_the_contents_across
+tests/test_usability.py::test_a_markup_is_removed_from_the_page_it_is_actually_on
+tests/test_usability.py::test_a_number_key_does_nothing_while_you_are_typing
+tests/test_usability.py::test_a_page_set_to_a_real_one_to_one_is_not_an_unscaled_page
+tests/test_usability.py::test_a_right_click_closes_a_shape_being_clicked_out
+tests/test_usability.py::test_arrows_nudge_a_selected_markup
+tests/test_usability.py::test_cancelling_the_first_scale_prompt_still_draws_the_measurement
+tests/test_usability.py::test_flattened_markup_lets_the_pointer_through_to_what_is_behind
+tests/test_usability.py::test_one_ellipse_diameter_makes_a_circle_and_escape_cancels
+tests/test_usability.py::test_right_click_offers_a_menu_for_the_item_under_it
 tests/test_usability.py::test_an_annotation_on_a_cropped_sheet_opens_where_it_is_drawn[270]
 tests/test_user_manual.py::test_every_markup_tool_is_described_in_part_1
 tests/test_user_manual.py::test_the_manual_ships_inside_the_package
 tests/test_user_manual.py::test_it_follows_the_theme[True]
 tests/test_user_manual.py::test_every_function_preference_and_key_is_in_the_manual
-tests/test_user_manual.py::test_it_opens_at_a_heading_and_remembers_its_size
-tests/test_user_manual.py::test_the_manual_is_up_to_date_with_the_program
-tests/test_user_manual.py::test_help_user_manual_opens_by_mouse_with_the_three_parts
-tests/test_variables_panel.py::test_clicking_a_row_goes_to_the_equation
-tests/test_variables_panel.py::test_it_lists_value_unit_page_and_error
+tests/test_user_manual.py::test_help_user_manual_opens_by_its_key_and_by_the_menu_keys
 tests/test_variables_panel.py::test_the_variables_panel_is_on_the_rail
+tests/test_variables_panel.py::test_it_lists_value_unit_page_and_error
 tests/test_variables_panel.py::test_it_follows_the_calculation
 tests/test_view_workspace.py::test_full_screen_comes_and_goes
 tests/test_view_workspace.py::test_presentation_shows_the_page_alone_and_esc_puts_everything_back
 tests/test_view_workspace.py::test_undo_history_lists_what_was_done_and_goes_back_to_any_of_it
-tests/test_view_workspace.py::test_the_full_screen_crosshair_meets_at_the_pointer
-tests/test_walkthrough.py::test_escape_gets_out_of_whatever_was_started[callout]
-tests/test_walkthrough.py::test_a_letter_still_picks_its_tool_when_nothing_is_being_typed
+tests/test_view_workspace.py::test_open_recent_save_all_and_close_all
+tests/test_walkthrough.py::test_no_letter_on_bare_paper_leaves_anything_behind
 tests/test_walkthrough.py::test_tool_letters_fall_silent_inside_explicit_text_entry
+tests/test_walkthrough.py::test_escape_gets_out_of_whatever_was_started[callout]
 tests/test_window_layout.py::test_a_cloud_closes_without_a_hook[rect0]
 tests/test_window_layout.py::test_a_clouds_scallops_are_evenly_spaced
 tests/test_window_layout.py::test_the_caption_buttons_room_stays_on_the_menu_row
-tests/test_window_layout.py::test_a_sheet_page_does_not_hold_the_window_wide
+tests/test_window_layout.py::test_a_narrow_window_wraps_toolbar_rows_and_unwraps_them
 tests/test_window_layout.py::test_wrapping_keeps_locking_and_remembered_rows
 tests/test_window_layout.py::test_a_cloud_closes_without_a_hook[rect1]
 tests/test_window_layout.py::test_a_cloud_closes_without_a_hook[rect2]
@@ -1246,12 +1352,16 @@ tests/test_workbook_names.py::test_a_differing_formula_is_no_longer_reported_on_
 tests/test_workbook_names.py::test_where_excel_takes_one_cell_of_a_block[-s_x--@s_x]
 tests/test_workbook_names.py::test_where_excel_takes_one_cell_of_a_block[@s_x+1-@s_x+1]
 tests/test_workbook_names.py::test_where_excel_takes_one_cell_of_a_block[A1:A3*2-@A1:A3*2]
+tests/test_workbook_names.py::test_where_excel_takes_one_cell_of_a_block[ABS(single)-ABS(single)]
+tests/test_workbook_names.py::test_where_excel_takes_one_cell_of_a_block[COUNTIF(s_x,">0")-COUNTIF(s_x,">0")]
+tests/test_workbook_names.py::test_where_excel_takes_one_cell_of_a_block[IF(s_x>0,w,0)-IF(@s_x>0,@w,0)]
 tests/test_workbook_self_contained.py::test_a_cell_reads_its_workbooks_name_first_then_the_equation_variable
 tests/test_workbook_self_contained.py::test_the_workbook_and_its_setting_are_saved_with_each_sheet
 tests/test_workbook_self_contained.py::test_two_self_contained_workbooks_with_the_same_names_stay_apart
 tests/test_workbook_self_contained.py::test_the_properties_panel_ticks_it_by_mouse
-tests/test_workbook_self_contained.py::test_variables_panel_and_name_manager_show_the_workbook
-tests/test_workbook_self_contained.py::test_a_second_import_of_the_same_workbook_is_another_workbook
+tests/test_workbook_self_contained.py::test_renamed_with_a_prefix_its_formulas_follow
+tests/test_workbook_self_contained.py::test_go_ahead_reading_order_decides
+tests/test_workbook_self_contained.py::test_unticking_later_with_clashes_asks_first
 tests/test_workbook_speed.py::test_a_compiled_formula_gives_what_walking_its_tree_gives[="5"+1]
 tests/test_workbook_speed.py::test_an_edit_works_out_only_what_it_changes
 tests/test_workbook_speed.py::test_an_input_of_a_big_workbook_recalculates_fast
@@ -1260,7 +1370,6 @@ tests/test_workbook_speed.py::test_a_compiled_formula_gives_what_walking_its_tre
 tests/test_workbook_speed.py::test_a_compiled_formula_gives_what_walking_its_tree_gives[=-A1]
 tests/test_workbook_speed.py::test_a_compiled_formula_gives_what_walking_its_tree_gives[=-D1]
 tests/test_workbook_speed.py::test_a_compiled_formula_gives_what_walking_its_tree_gives[=-E1]
-tests/test_workbook_speed.py::test_a_compiled_formula_gives_what_walking_its_tree_gives[=0.1+0.2=0.3]
 tests/test_xlsx_open.py::test_a_worksheet_named_like_a_sheet_already_here_is_renamed
 tests/test_xlsx_open.py::test_charts_and_pictures_are_left_out_and_said
 tests/test_xlsx_open.py::test_excels_newer_validations_come_across_without_a_warning
@@ -1269,8 +1378,7 @@ tests/test_xlsx_open.py::test_only_the_worksheets_chosen_come_in
 tests/test_xlsx_open.py::test_the_reader_brings_cells_formats_and_layout
 tests/test_xlsx_open.py::test_the_sheet_chooser_ticks_them_all_to_start
 tests/test_xlsx_open.py::test_the_sheet_chooser_warns_of_a_sheet_read_but_left_out
-tests/test_xlsx_open.py::test_an_excel_workbook_can_go_before_or_after_a_page
-tests/test_xlsx_open.py::test_insert_excel_puts_the_worksheets_after_the_page_as_one_undo_step
+tests/test_xlsx_open.py::test_an_engineers_check_sheet_opens_as_excel_shows_it
 tests/test_zoom_edges.py::test_zooming_by_wheel_and_commands_leaves_no_artefacts_at_page_edges[1.0]
 tests/test_zoom_smooth.py::test_a_markup_preview_is_made_for_its_own_box
 tests/test_zoom_smooth.py::test_a_sharp_idle_screen_is_drawn_ahead_at_twice_the_zoom
@@ -1281,13 +1389,12 @@ tests/test_zoom_smooth.py::test_nothing_is_drawn_ahead_while_a_zoom_moves
 tests/test_zoom_smooth.py::test_nothing_new_is_asked_for_while_a_zoom_is_moving
 tests/test_zoom_smooth.py::test_the_index_follows_the_cache_out
 tests/test_zoom_smooth.py::test_the_screen_goes_sharp_all_at_once
-tests/test_zoom_smooth.py::test_a_burst_of_notches_asks_for_the_zoom_it_stops_at_only
-tests/test_zoomed_out_legible.py::test_a_sloping_hairline_is_unbroken_and_a_red_one_stays_red[0.25]
-tests/test_zoomed_out_legible.py::test_a_zoomed_out_hairline_is_one_dark_pixel_wherever_it_falls[0.25]
-tests/test_zoomed_out_legible.py::test_from_a_hundred_per_cent_up_line_work_is_smoothed_as_before
+tests/test_zoom_smooth.py::test_markups_off_screen_have_their_look_made_ahead
+tests/test_zoom_smooth.py::test_a_zoom_has_where_it_is_going_drawn_while_it_moves
+tests/test_zoomed_out_legible.py::test_a_markup_pen_off_screen_is_its_own_width
+tests/test_zoomed_out_legible.py::test_a_sloping_hairline_is_unbroken_and_smooth_and_a_red_one_stays_red[0.25]
+tests/test_zoomed_out_legible.py::test_a_zoomed_out_hairline_is_dark_wherever_it_falls_with_soft_edges[0.25]
+tests/test_zoomed_out_legible.py::test_from_a_hundred_per_cent_up_line_work_is_as_before
 tests/test_zoomed_out_legible.py::test_the_rule_is_for_the_screen_only
 tests/test_zoomed_out_legible.py::test_words_stay_smoothed_zoomed_out[0.25]
-tests/test_zoomed_out_legible.py::test_the_window_shows_crisp_hairlines_zoomed_out
-tests/test_zoomed_out_legible.py::test_a_sloping_hairline_is_unbroken_and_a_red_one_stays_red[0.5]
-tests/test_zoomed_out_legible.py::test_a_zoomed_out_hairline_is_one_dark_pixel_wherever_it_falls[0.37]
-tests/test_zoomed_out_legible.py::test_a_zoomed_out_hairline_is_one_dark_pixel_wherever_it_falls[0.5]
+tests/test_zoomed_out_legible.py::test_at_a_hundred_per_cent_markup_lines_are_as_before

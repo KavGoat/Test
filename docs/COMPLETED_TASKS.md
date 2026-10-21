@@ -3,6 +3,15 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-21 (later) — toolbar crash and docking, alignment greying, flips, cursors in dark mode, the leader keeping up, zoomed out (pushed at 08b795e)
+
+- Full test run passed at 08b795e (`-n 3`, every-command tests included); 14/14 planted bugs caught. An earlier run at e0849b1 failed five tests: three from a toolbar "held" state that never cleared, one frame-count test that didn't allow for the pointer pausing under load, and the big-set scrolling budget (16.4 ms against 16 under load; it passed alone); fixed at 08b795e.
+- Dragging a toolbar to a side no longer crashes; side toolbars go outside the panel bar.
+- Alignment commands grey when they don't apply; greyed icons are clearly fainter. Text boxes don't flip; callouts flip as in Revu; snapshots flip; a selected snapshot has one outline.
+- Every cursor CalcForge draws reads on the white page and on dark, in both themes.
+- Placing a callout: the leader follows with the preview kept, snapping cached and the status bar written in the same frame.
+- Zoomed out, lines no thinner than 1.4 screen pixels with smooth edges, for the drawing and markups alike.
+
 ## 2026-10-21 — the white pointer, the 14 October cloud with clean corners, callout placing (pushed at 7115f15, 47f99c7 and after)
 
 - Quick gate passed at 7115f15 and 47f99c7. Full run at 7ce9b7c: every test passed but one, which pinned undo rebuilding every markup (now kept when unchanged); the test now rebuilds from an emptied page and passes; 14/14 planted bugs caught.
