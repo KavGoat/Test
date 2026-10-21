@@ -36,6 +36,15 @@ Now the call-out is kept while its look is the same, the page's snapping
 targets are read once while it does not change, the status bar's place is
 written in the move's own frame and the rulers repaint only their marks.
 
+And it was jittery (the user, 2026-10-21): the box was drawn under the
+pointer while the words' click snapped — on a marked-up sheet the marker
+hopped between line ends every few pixels and the box jumped to it as the
+click went down — and the leader flipped from one side of the box to the
+other and back as the pointer wavered along the diagonal where two sides face
+its target equally. The words now go where the pointer is (on the grid when
+it is snapped to), shown and placed alike, and the leader holds its side
+until another is clearly better.
+
 Cloud+ is Revu's: press and drag for a rectangular cloud of that size, or
 click its corners for a free-form one — closed by a double-click, by clicking
 the first corner again, by Enter or by a right-click — and then a click for
@@ -49,7 +58,8 @@ import statistics
 import time
 
 import pytest
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRectF, Qt
+from PySide6.QtGui import QRegion
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -408,6 +418,149 @@ def test_the_preview_is_the_call_out_that_lands(w):
     (placed,) = markups(w, CalloutItem)
     assert placed.style.stroke == previews[3].style.stroke
     assert placed.mapToScene(placed.tip) == previews[3].mapToScene(previews[3].tip)
+    key(w, Qt.Key_Escape)
+
+
+class _Regions(QObject):
+    """What each paint of the canvas covered."""
+
+    def __init__(self, viewport):
+        super().__init__()
+        self.viewport = viewport
+        self.regions: list = []
+        viewport.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if watched is self.viewport and event.type() == QEvent.Paint:
+            self.regions.append(QRegion(event.region()))
+        return False
+
+
+def test_the_words_glide_with_the_pointer(w, tmp_path):
+    """While the leader follows the pointer to where the words go, the box is
+    where the pointer is on every move — on a marked-up sheet as on a blank
+    one: not caught by the ends of lines and corners it passes, the marker
+    hopping from one to the next while the box was drawn under the pointer
+    and the click then put it down at the marker, a jump (the user,
+    2026-10-21: "Callout placement still jittery, not smooth"). Each move
+    repaints all of where the preview was and is; the click puts the box
+    down where it was drawn."""
+    _marked_up(w, tmp_path)
+    view = w.view
+    w.select_tool("callout")
+    pump()
+    click(w, page(w, 300, 300))
+    assert view._pending_anchor is not None
+    start = screen(w, page(w, 330, 320))
+    painted = _Regions(vp(w))
+    drawn_before = None
+    try:
+        for i in range(90):
+            painted.regions.clear()
+            at = QPoint(start.x() + 2 * i, start.y() - i + (i % 3))     # a hand's wobble
+            QTest.mouseMove(vp(w), at)
+            QApplication.processEvents()
+            pointer = view.mapToScene(at)
+            preview = view._pending_callout()
+            box = preview.mapRectToScene(preview.local_rect())
+            assert abs(box.left() - pointer.x()) < 0.01 \
+                and abs(box.center().y() - pointer.y()) < 0.01, \
+                f"move {i}: the box is off the pointer by {box.left() - pointer.x():.1f}, " \
+                f"{box.center().y() - pointer.y():.1f}"
+            assert view._snap_marker is None and not view._snap_guides, \
+                f"move {i}: the words were caught by {view._snap_caught}"
+            drawn = [view.mapFromScene(piece).boundingRect()
+                     for piece in view._callout_pieces(preview)]
+            if drawn_before is not None and drawn != drawn_before:
+                covered = QRegion()
+                for region in painted.regions:
+                    covered += region
+                need = QRegion()
+                for rect in drawn + drawn_before:
+                    if (rect in drawn) != (rect in drawn_before):     # (the rest stays)
+                        need += rect.adjusted(1, 1, -1, -1)
+                missing = need.intersected(QRegion(vp(w).rect())).subtracted(covered)
+                assert missing.isEmpty(), \
+                    f"move {i}: the repaint missed {missing.boundingRect()} of the preview"
+            drawn_before = drawn
+    finally:
+        painted.viewport.removeEventFilter(painted)
+    side = preview.side()
+    QTest.mouseClick(vp(w), Qt.LeftButton, Qt.NoModifier, at)
+    pump()
+    placed = view.editing_item()
+    assert isinstance(placed, CalloutItem)
+    lands = placed.mapRectToScene(placed.local_rect())
+    assert abs(lands.left() - box.left()) < 0.01 and abs(lands.top() - box.top()) < 0.01, \
+        "the box jumped as the click put it down"
+    assert placed.side() == side
+    assert _held(w) == _as_drawn_afresh(w), "the preview left a piece of itself behind"
+    key(w, Qt.Key_Escape)
+
+
+def test_the_words_go_on_the_grid_when_it_is_snapped_to(w):
+    """With the grid snapped to, the box steps from one grid point to the
+    next as it follows the pointer — and lands on the one it showed."""
+    from calcforge.ui.calcedit import GRID_PT
+
+    w.document.settings.snap_to_grid = True
+    view = w.view
+    w.select_tool("callout")
+    pump()
+    click(w, page(w, 200, 300))
+    frame = w.document.pages[0].frame
+    for x in (331, 333, 338, 341):
+        move(w, page(w, x, 207))
+        pump()
+        box = frame.mapRectFromScene(view._pending_callout().mapRectToScene(
+            view._pending_callout().local_rect()))
+        for value in (box.left(), box.center().y()):
+            assert abs(value / GRID_PT - round(value / GRID_PT)) < 1e-6, \
+                f"the box at {box.left()}, {box.center().y()} is off the grid"
+    shown = view._pending_callout().mapRectToScene(view._pending_callout().local_rect())
+    click(w, page(w, 341, 207))
+    placed = view.editing_item()
+    lands = placed.mapRectToScene(placed.local_rect())
+    assert abs(lands.left() - shown.left()) < 0.01 and abs(lands.top() - shown.top()) < 0.01
+    key(w, Qt.Key_Escape)
+
+
+def test_the_leader_holds_its_side_near_the_diagonal(w):
+    """Where two sides of the box face what the leader points at about as
+    squarely, the leader keeps leaving by the side it was leaving by as the
+    pointer wavers — the hinge used to jump across the box and back at every
+    pixel — and moves over once another side is clearly better. The callout
+    lands with the side it was drawn with."""
+    view = w.view
+    width, height = view.WORDS_SIZE
+    w.select_tool("callout")
+    pump()
+    aim = QPointF(300, 400)
+    click(w, page(w, aim.x(), aim.y()))
+
+    def at(across: float, down: float) -> QPointF:
+        # the pointer where the aim is *across* half-widths left of the box's
+        # middle and *down* half-heights below it
+        return QPointF(aim.x() - width / 2 + across * width / 2, aim.y() - down * height / 2)
+
+    def side_after(point: QPointF) -> str:
+        move(w, page(w, point.x(), point.y()))
+        pump()
+        return view._pending_callout().side()
+
+    assert side_after(at(3.0, 1.5)) == "left"
+    sides = [side_after(at(2.0 + (0.08 if i % 2 else -0.08), 2.0)) for i in range(24)]
+    flips = sum(1 for a, b in zip(sides, sides[1:]) if a != b)
+    assert flips == 0, f"the leader flipped sides {flips} times: {sides}"
+    assert side_after(at(1.5, 3.0)) == "bottom", "a clearly better side is taken"
+    sides = [side_after(at(2.0 + (0.08 if i % 2 else -0.08), 2.0)) for i in range(24)]
+    assert set(sides) == {"bottom"}, f"the leader flipped back: {sides}"
+    shown = view._pending_callout().mapToScene(view._pending_callout().elbow())
+    point = at(2.08, 2.0)
+    click(w, page(w, point.x(), point.y()))
+    placed = view.editing_item()
+    assert placed.side() == "bottom" and placed.mapToScene(placed.elbow()) == shown, \
+        "the leader landed on another side than the one it was drawn on"
     key(w, Qt.Key_Escape)
 
 
