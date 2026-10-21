@@ -8,7 +8,10 @@ Between them and the equations (docs/SPREADSHEET_DESIGN.md):
 * a table or sheet reads the document variables defined before it in
   reading order (its top-left corner is its place);
 * the equations read a table's values four ways:
-    - a named cell:            W_total            (Formulas ▸ Define Name)
+    - a named cell:            W_total            (the cell's Variable box: a
+                                                   CalcForge variable)
+                               Loads.W_total      (a spreadsheet's own name:
+                                                   Define Name, the Name Box...)
     - a cell of a table:       Loads.D12
     - a column by its heading: Loads.Load         (the values under the heading, as a vector)
     - the table as a lookup:   bolts(d, "A")      (first column searched, interpolated)
@@ -116,7 +119,7 @@ class DocumentBook:
             return
         self._parked[uid] = sheet
         from .store import name_key, names_homed_on
-        for name, _refers, local, _comment in names_homed_on(sheet):
+        for name, _refers, local, *_rest in names_homed_on(sheet):
             self.workbook.names.pop(name_key(sheet, name, local), None)
             self.workbook._name_dirty(name.lower())
         if sheet in self.workbook.sheets:
@@ -276,18 +279,23 @@ class DocumentBook:
     def _named(self, name: str, at_key=None):
         """(sheet, RefValue or value) for a name the equations use, or None.
 
-        A bare name is a document name, or a name of an imported workbook
-        that isn't self-contained (the latest before *at_key* in reading
-        order); a self-contained workbook's names are read only qualified:
+        A bare name is a CalcForge variable named cell (DefinedName.variable),
+        or a name of an imported workbook that isn't self-contained (the
+        latest before *at_key* in reading order). A spreadsheet's own names
+        are its sheets' (the user, 2026-10-21: "not a variable name I can
+        access outside by itself, only Sheet.name"), read only qualified:
         ``Sheet.Name`` (the name as that sheet's cells read it: the sheet's
-        own, then its workbook's) or ``Book.Name`` (the workbook's). A
-        sheet's cell is ``Sheet.H44``; a table's column ``Table.Heading``.
+        own, then its workbook's, then a name kept with that sheet) or
+        ``Book.Name`` (a self-contained workbook's). A sheet's cell is
+        ``Sheet.H44``; a table's column ``Table.Heading``.
         Sheets are written as their names, or with each run of spaces and
         other characters an equation can't hold as one _ (Seismic Actions:
         Seismic_Actions)."""
         wb = self.workbook
         lower = name.lower()
         dn = wb.names.get((lower, None))
+        if dn is not None and not dn.variable:
+            dn = None                    # a spreadsheet's own name: Sheet.Name
         other = wb.open_book_name(lower, None, at_key) if wb.books else None
         if other is not None and (dn is None or self._later(other, dn, at_key)):
             dn = other                   # (both: the latest before the equation)
@@ -302,9 +310,7 @@ class DocumentBook:
                 ref = parse_cell(rest)
                 if ref is not None and not ref.row_abs and not ref.col_abs:
                     return sheet, RefValue(sheet, ref.row, ref.col, ref.row, ref.col)
-                local = wb.names.get((rest.lower(), sheet.id))
-                if local is None and sheet.book is not None:
-                    local = wb.names.get((rest.lower(), sheet.book))
+                local = self._sheets_name(sheet, rest)
                 if local is not None:
                     return self._name_value(local)
                 column = self._column(sheet, rest)
@@ -316,6 +322,86 @@ class DocumentBook:
                 if own is not None:
                     return self._name_value(own)
         return None
+
+    def _sheets_name(self, sheet: Sheet, name: str):
+        """The defined name *Sheet.name* means: the sheet's own (local)
+        name, its workbook's, or a document name kept with the sheet (the
+        one whose cells it names, or where it was made); None."""
+        wb = self.workbook
+        lower = name.lower()
+        found = wb.names.get((lower, sheet.id))
+        if found is None and sheet.book is not None:
+            found = wb.names.get((lower, sheet.book))
+        if found is None:
+            dn = wb.names.get((lower, None))
+            if dn is not None and self._kept_on(dn) is sheet:
+                found = dn
+        return found
+
+    def _kept_on(self, dn) -> Optional[Sheet]:
+        """The sheet a document name is its spreadsheet's own name on: the
+        one whose cells it names, else the one it was made on."""
+        wb = self.workbook
+        return wb._first_sheet_read(dn.refers_to) or \
+            (wb.sheet_by_id(dn.home) if dn.home is not None else None)
+
+    # -- names recorded before they had two kinds ---------------------------------------------
+    def settle_old_names(self) -> None:
+        """Names loaded from a record made before a name was either a
+        spreadsheet's own or a CalcForge variable (store.load_sheet): each
+        is a CalcForge variable when an equation of the document reads it
+        bare, as one name of its own (so it goes on being read, and is
+        tagged), else the spreadsheet's own. Settled once and kept: the next
+        save records which it is."""
+        from dataclasses import replace
+
+        wb = self.workbook
+        keys, wb.unsettled_names = wb.unsettled_names, set()
+        if not keys:
+            return
+        bare = self._bare_in_equations()
+        for key in keys:
+            dn = wb.names.get(key)
+            if dn is not None and not dn.variable and key[0] in bare:
+                wb._put_name(key, replace(dn, variable=True))
+
+    def _bare_in_equations(self) -> set:
+        """Every name the document's equations read on its own (lower
+        case): the equations calculated so far, those on pages built but not
+        yet calculated, and those on pages still to be built."""
+        from calcforge.calc.engine.model import walk_rows
+        from calcforge.calc.engine.parser import lex
+        from calcforge.calc.record import row_from_data
+
+        roots = []
+        for region in self._calc().worksheet.regions:
+            if region.editor is not None and region.editor.kind == "math":
+                roots.append(region.editor.root)
+
+        def saved(data):
+            if isinstance(data, dict) and data.get("kind", "math") == "math":
+                try:
+                    roots.append(row_from_data(data.get("root", [])))
+                except Exception:  # noqa: BLE001 - a record that can't be read uses nothing
+                    pass
+        for page in getattr(self.document, "pages", ()) or ():
+            frame = getattr(page, "frame", None)
+            for item in (frame.markups() if frame is not None else ()):
+                if getattr(item, "region", None) is None:
+                    saved(getattr(item, "_data", None))
+            for payload in getattr(page, "_pending_items", ()) or ():
+                if isinstance(payload, dict):
+                    saved(payload.get("calc"))
+        out = set()
+        for root in roots:
+            for row in walk_rows(root):
+                toks = lex(row) or []
+                for k, tok in enumerate(toks):
+                    after = toks[k + 1] if k + 1 < len(toks) else None
+                    defines = after is not None and after.kind == "op" and after.value == "≔"
+                    if tok.kind == "ident" and not defines:
+                        out.add(str(tok.value).lower())
+        return out
 
     def _later(self, a, b, at_key) -> bool:
         """Whether defined name *a* is defined after *b* (where their sheets
@@ -492,18 +578,23 @@ class DocumentBook:
         return look
 
     def written_as(self, dn) -> str:
-        """How an equation writes a defined name: bare (a document name, or
-        a name of a workbook that isn't self-contained), Book.Name (a
-        self-contained workbook's), Sheet.Name (a sheet's own); "" for a
-        sheet's own name on a sheet or table made here (Excel's scope only)."""
+        """How an equation writes a defined name: bare (a CalcForge variable,
+        or a name of a workbook that isn't self-contained), Book.Name (a
+        self-contained workbook's), Sheet.Name (a spreadsheet's own name, of
+        the sheet it is kept with, or a sheet's local name on an imported
+        sheet); "" for a sheet's local name on a sheet or table made here
+        (Excel's scope only)."""
         wb = self.workbook
         if dn.sheet is not None:
             home = wb.sheet_by_id(dn.sheet)
             return f"{sheet_ident(home.name)}.{dn.name}" if home is not None and home.book else ""
         book = wb.books.get(dn.book) if dn.book else None
-        if book is not None and book.self_contained:
-            return f"{book.name}.{dn.name}"
-        return dn.name
+        if book is not None:
+            return f"{book.name}.{dn.name}" if book.self_contained else dn.name
+        if dn.variable:
+            return dn.name
+        home = self._kept_on(dn)
+        return f"{sheet_ident(home.name)}.{dn.name}" if home is not None else ""
 
     def names(self) -> set:
         out = {self.written_as(dn) for dn in self.workbook.names.values()} - {""}
@@ -583,8 +674,7 @@ class DocumentBook:
             if call or not dot or rest != was or sheet_named(wb, table) is not sheet:
                 return None
             # Sheet.Name is the sheet's own defined name before its column
-            if wb.names.get((rest.lower(), sheet.id)) is not None or (
-                    sheet.book is not None and wb.names.get((rest.lower(), sheet.book)) is not None):
+            if self._sheets_name(sheet, rest) is not None:
                 return None
             return f"{table}.{now}"
         return follow

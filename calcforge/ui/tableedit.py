@@ -3036,9 +3036,10 @@ class TableEditing:
         menu.addAction("Properties", window.show_properties_panel)
         return menutidy.tidy(menu)
 
-    def selection_name(self):
-        """The defined name that refers to exactly the selected cell or
-        block, or None (what the right-click's Variable box shows)."""
+    def selection_name(self, variable: bool = True):
+        """The CalcForge variable (DefinedName.variable) that refers to
+        exactly the selected cell or block, or None: what the right-click's
+        Variable box shows. With *variable* False, any defined name."""
         item = self.item
         if item is None or item.sheet is None:
             return None
@@ -3050,13 +3051,14 @@ class TableEditing:
         def plain(text):
             return text.lstrip("=").replace("$", "").replace("'", "").lower()
         for dn in item.sheet.workbook.names.values():
-            if plain(dn.refers_to) == plain(wanted):
+            if plain(dn.refers_to) == plain(wanted) and (dn.variable or not variable):
                 return dn
         return None
 
     def name_selection(self, text: str) -> bool:
-        """The Variable box: name the selection *text* (Excel's defined
-        name, through the Name Manager's own define and delete), rename it,
+        """The Variable box: name the selection *text* as a CalcForge
+        variable (a defined name the equations read bare, and tagged on the
+        cells; through the Name Manager's own define and delete), rename it,
         or with nothing typed take its name away. One undo step."""
         from . import names
         text = text.strip()
@@ -3074,7 +3076,7 @@ class TableEditing:
             ref = f"{quote_sheet(item.name)}!${col_letters(l)}${t + 1}"
             if (t, l) != (b, r):
                 ref += f":${col_letters(r)}${b + 1}"
-            problem = names.define(self, text, ref, replacing=old)
+            problem = names.define(self, text, ref, replacing=old, variable=True)
         if problem:
             self.view.statusMessage.emit(problem)
             return False
@@ -3099,9 +3101,10 @@ class TableEditing:
         field = SMathNameEdit(named.name if named is not None else "")
         field.setObjectName("cellVariable")
         field.setPlaceholderText("name")
-        field.setToolTip("Name these cells for the equations and formulas, as in an equation: "
-                         "W . total gives W with a subscript (a defined name, in the Name "
-                         "Manager); empty for none · Enter to set")
+        field.setToolTip("Name these cells as a CalcForge variable, read bare by the equations "
+                         "and formulas and tagged on the cells, as in an equation: W . total "
+                         "gives W with a subscript (in the Name Manager); empty for none · "
+                         "Enter to set")
         field.setMinimumWidth(110)
         row.addWidget(field, 1)
         action = QWidgetAction(menu)
@@ -3265,6 +3268,7 @@ class TableEditing:
     def _ask_name(self) -> None:
         from PySide6.QtWidgets import QInputDialog
         name, ok = QInputDialog.getText(self.view, "Define Name",
-                                        "Name (equations and formulas can then use it):")
+                                        "Name (the sheet's own: formulas use it, and "
+                                        "equations as Sheet.name):")
         if ok and name.strip():
             self.define_name(name.strip())

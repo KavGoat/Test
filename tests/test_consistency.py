@@ -401,9 +401,13 @@ def test_the_cells_unit_in_the_panel_is_the_formula_bars(win):
     type_into(child(win, QLineEdit, "cellsUnit"), "kN")
     assert shown(the_table(win), "B2") == "2.5 kN"
     assert win.formula_bar.unit.text() == "kN"
-    # a unit of another kind is refused, and the cells keep theirs
+    # a unit of another kind is taken as SMath takes it: the units still
+    # needed go before it (the user, 2026-10-21)
     type_into(child(win, QLineEdit, "cellsUnit"), "m")
-    assert shown(the_table(win), "B2") == "2.5 kN"
+    assert shown(the_table(win), "B2") == "2.5 kN/m\u2009m"
+    # a name that is no unit is refused, and the cells keep theirs
+    type_into(child(win, QLineEdit, "cellsUnit"), "frobs")
+    assert shown(the_table(win), "B2") == "2.5 kN/m\u2009m"
 
 
 def test_the_cells_menus_properties_opens_the_panel_on_the_cells(win):

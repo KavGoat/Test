@@ -67,6 +67,12 @@ class DefinedName:
     comment: str = ""
     home: Optional[int] = None           # the sheet it is saved with, when it names no cells
     book: Optional[str] = None           # the imported workbook it belongs to (Book.id)
+    # A CalcForge variable (named with the cell's Variable box): the
+    # equations read it bare, and its cells carry a name tag. Any other name
+    # is the spreadsheet's own (Define Name, the Name Box, the Name Manager,
+    # Create from Selection, an Excel file's): the equations and other
+    # sheets read it only as Sheet.Name (the user, 2026-10-21).
+    variable: bool = False
 
     @property
     def key(self) -> tuple:
@@ -401,6 +407,9 @@ class Workbook:
         #   ("name", old DefinedName, new DefinedName)  a defined name renamed
         #   ("heading", sheet, old text, new text)      a column's heading retyped
         self.on_references: Optional[Callable[[tuple], None]] = None
+        # document names loaded from a record made before names had two
+        # kinds (store.load_sheet): keys, until DocumentBook settles them
+        self.unsettled_names: set = set()
         # formulas naming a sheet or table that isn't there (yet): learnt again
         # when one comes, so they follow it from then on
         self._unresolved: set = set()
@@ -598,10 +607,12 @@ class Workbook:
 
     # -- defined names ----------------------------------------------------------------
     def define_name(self, name: str, refers_to: str, sheet: Optional[Sheet] = None,
-                    comment: str = "", home: Optional[Sheet] = None) -> None:
+                    comment: str = "", home: Optional[Sheet] = None,
+                    variable: bool = False) -> None:
         """Name a cell, block or constant: define_name("W_total", "Loads!$D$12").
         *sheet* makes it local to that sheet; *home* is the sheet it is saved
-        with when it names no cells (g = 9.81)."""
+        with when it names no cells (g = 9.81); *variable* makes it a
+        CalcForge variable (DefinedName.variable)."""
         problem = defined_name_problem(name)
         if problem:
             raise ValueError(problem)
@@ -613,7 +624,7 @@ class Workbook:
         # a new name in Excel is the workbook's)
         book = None if sheet is not None or where is None else where.book
         dn = DefinedName(name, refers_to, sheet.id if sheet else None, comment,
-                         where.id if where else None, book)
+                         where.id if where else None, book, variable)
         with self.transaction("Define name"):
             self._set_name(dn.key, dn)
 

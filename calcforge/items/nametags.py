@@ -3,6 +3,11 @@
 A named cell or block, a table and a sheet carry a small tag with the name
 at their top-left corner, on screen and on paper, so a printed page says
 what each thing is. View ▸ Name tags hides them (a document setting).
+
+Only cells named as CalcForge variables (the cell's Variable box,
+DefinedName.variable) carry one: a spreadsheet's own names (Define Name,
+the Name Box, the Name Manager, an Excel file's) are the sheet's, read as
+Sheet.Name, and are not tagged (the user, 2026-10-21).
 """
 from __future__ import annotations
 
@@ -51,13 +56,14 @@ def draw_tag(painter: QPainter, at: QPointF, text: str, points: float,
 
 def _signature(wb) -> tuple:
     # (a scope is a sheet id, an imported workbook's id or None: sorted as text)
-    return tuple(sorted(((key[0], str(key[1])), dn.refers_to) for key, dn in wb.names.items())), \
+    return tuple(sorted(((key[0], str(key[1])), dn.refers_to, dn.variable)
+                        for key, dn in wb.names.items())), \
         tuple((s.id, s.name) for s in wb.sheets)
 
 
 def named_blocks(sheet) -> list:
-    """The defined names that name cells of *sheet*: [(name, (t, l, b, r))],
-    first come first (top to bottom, left to right)."""
+    """The CalcForge variables that name cells of *sheet*: [(name, (t, l,
+    b, r))], first come first (top to bottom, left to right)."""
     wb = sheet.workbook
     sig = _signature(wb)
     memo = getattr(wb, "_name_tag_memo", None)
@@ -73,6 +79,8 @@ def _resolve(wb) -> dict:
 
     out: dict = {}
     for dn in wb.names.values():
+        if not dn.variable:
+            continue                 # a spreadsheet's own name: no tag
         home = wb.sheet_by_id(dn.sheet) if dn.sheet else \
             (wb.sheet_by_id(dn.home) if dn.home else (wb.sheets[0] if wb.sheets else None))
         if home is None:

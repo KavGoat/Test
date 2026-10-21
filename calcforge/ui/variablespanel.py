@@ -183,6 +183,10 @@ def table_rows(document) -> list:
         elif book is not None and book.self_contained:
             name = f"{book.name}.{dn.name}"                  # the workbook's: Book.Name
             group = book.name
+        elif book is None and home is None and not dn.variable:
+            written = docbook.written_as(dn)
+            if written:
+                name = written                               # a spreadsheet's own: Sheet.Name
         made = VariableRow(name, text, unit, page, f"Page {page}" if page else "",
                            error, -1, "Workbook" if group else "Table", cells,
                            **placed(sheet, cells),

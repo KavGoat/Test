@@ -214,15 +214,28 @@ def test_renaming_a_defined_name_in_the_name_manager_renames_it_in_the_equations
 
     table = table_at(v, 18, [["9"]], "T")
     wb = table.sheet.workbook
-    equation(v, 200, "w:W_total*2")
+    # a spreadsheet's own name, read as Sheet.Name
+    equation(v, 200, "w:T.W_total*2")
     equation(v, 240, "w=")
+    # a CalcForge variable named cell, read bare
+    equation(v, 280, "u:P*3")
+    equation(v, 320, "u=")
     tables = editing(v, table, (0, 0))
     assert names.define(tables, "W_total", "T!$A$1") is None
-    assert equations(v)["w="] == "18"
+    assert names.define(tables, "P", "T!$A$1", variable=True) is None
+    assert equations(v)["w="] == "18" and equations(v)["u="] == "27"
     dn = wb.names[("w_total", None)]
     assert names.define(tables, "W_sum", "T!$A$1", replacing=dn) is None
     got = equations(v)
-    assert "w≔W_sum*2" in got and got["w="] == "18"
+    assert "w≔T.W_sum*2" in got and got["w="] == "18"
+    assert names.define(tables, "P_k", "T!$A$1", replacing=wb.names[("p", None)]) is None
+    got = equations(v)
+    assert "u≔P_k*3" in got and got["u="] == "27"
+    assert wb.names[("p_k", None)].variable, "still a CalcForge variable"
+    # the sheet renamed: Sheet.Name follows it
+    tables._change("Rename", lambda wb, sheet: wb.rename_sheet(sheet, "Beam"))
+    got = equations(v)
+    assert "w≔Beam.W_sum*2" in got and got["w="] == "18"
 
 
 def test_retyping_a_heading_renames_the_column_in_the_equations(v):

@@ -206,7 +206,7 @@ def _unit_parts(text: str, custom):
                 if made is None:
                     raise UnitTextError(name)
                 tokens.append(("c", (float(made[0]), tuple(made[1]))))
-        if pos < len(text) and text[pos] == " " and tokens[-1][0] in ("u", ")", "^"):
+        if pos < len(text) and text[pos] in " \u2009" and tokens[-1][0] in ("u", ")", "^"):
             # a space between two units multiplies them: "kg m"
             rest = text[pos:].lstrip()
             if rest and rest[0] not in "*·⋅/^)⁰¹²³⁴⁵⁶⁷⁸⁹⁻":

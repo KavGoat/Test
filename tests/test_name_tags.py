@@ -1,6 +1,8 @@
 """Name tags (2026-10-14): a named cell or block, a table and a sheet carry
 a small tag with the name at their top-left corner, printed too, so a
-printed page says what each is; View ▸ Name Tags hides them."""
+printed page says what each is; View ▸ Name Tags hides them. Only cells
+named as CalcForge variables are tagged; a spreadsheet's own names are the
+sheet's (Sheet.Name) and carry none (the user, 2026-10-21)."""
 from __future__ import annotations
 
 import pytest
@@ -36,8 +38,9 @@ def test_a_table_and_its_named_cells_print_their_names(w, monkeypatch):
     put(table, "A1", "Load")
     put(table, "B2", "10")
     wb = table.sheet.workbook
-    wb.define_name("W_dead", f"{table.name}!$B$2")
-    wb.define_name("Spans", f"{table.name}!$A$3:$C$3")
+    wb.define_name("W_dead", f"{table.name}!$B$2", variable=True)
+    wb.define_name("Spans", f"{table.name}!$A$3:$C$3", variable=True)
+    wb.define_name("Excel_only", f"{table.name}!$C$2")
     assert [n for n, _b in nametags.named_blocks(table.sheet)] == ["W_dead", "Spans"]
     w.view.tables.close()
     pump()
@@ -45,6 +48,7 @@ def test_a_table_and_its_named_cells_print_their_names(w, monkeypatch):
     page = frame(w)
     before = paper(page)
     assert {table.name, "W_dead", "Spans"} <= set(seen)
+    assert "Excel_only" not in seen, "a spreadsheet's own name has no tag"
     # the table's tag sits just above its top-left corner, on the paper
     box = table.mapRectToParent(table.local_rect()).toRect()
     ink = sum(1 for x in range(box.left(), box.left() + 30) for y in range(box.top() - 9, box.top() - 1)
@@ -65,11 +69,12 @@ def test_a_sheet_prints_its_name_on_its_first_page_and_its_named_cells(w, monkey
     run = sheet_page(w)
     wb = run.sheet.workbook
     wb.set_input(run.sheet, 4, 1, "25")
-    wb.define_name("fck", f"'{run.sheet.name}'!$B$5")
+    wb.define_name("fck", f"'{run.sheet.name}'!$B$5", variable=True)
+    wb.define_name("fyk", f"'{run.sheet.name}'!$B$6")
     pump()
     seen = drawn(monkeypatch)
     paper(run.run_frames()[0])
-    assert run.sheet.name in seen and "fck" in seen
+    assert run.sheet.name in seen and "fck" in seen and "fyk" not in seen
     # on screen too
     seen.clear()
     w.view.viewport().repaint()

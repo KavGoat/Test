@@ -85,7 +85,7 @@ def test_equations_read_cells_names_columns_and_lookups(v):
     sheet_for(v.window.document).recalculate()
     equation(v, 200, "x:bolts.B2")
     equation(v, 240, "x=")
-    equation(v, 280, "y:A_big")
+    equation(v, 280, "y:bolts.A_big")
     equation(v, 320, "y=")
     equation(v, 360, "s:sum(bolts.A)")
     equation(v, 400, "s=")

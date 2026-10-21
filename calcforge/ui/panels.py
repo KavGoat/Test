@@ -4697,7 +4697,7 @@ class PropertiesPanel(QScrollArea):
         import re
 
         from ..calc.engine.units import is_unit
-        text = box.text().strip()
+        text = box.unit_text()
         if self._building or self._unit_words(items[0].region.editor.unit) == text:
             return
         # as a unit comes into SMath's box from its list: 'kN, a unit's name
@@ -5824,7 +5824,7 @@ class PropertiesPanel(QScrollArea):
         unit.setToolTip("Unit (SMath's unit box): the selected cells' quantities are shown "
                         "in it. Blank: as typed")
         unit.editingFinished.connect(lambda: self._cells_do(
-            lambda: controls.set_unit(unit.text().strip(), unit)))
+            lambda: controls.set_unit(unit.unit_text(), unit)))
         form.addRow("Unit:", unit)
         font = QFontComboBox()
         font.setObjectName("cellsFont")
@@ -5937,7 +5937,7 @@ class PropertiesPanel(QScrollArea):
             cells["places"].setValue(-1 if places is None else places)
             cells["significant"].setChecked(bool(st.significant))
             if not cells["unit"].hasFocus():
-                cells["unit"].setText(st.unit or "")
+                cells["unit"].set_unit_text(st.unit)
             cells["font"].setCurrentFont(QFont(st.font or "Calibri"))
             cells["size"].setValue(st.size or 11)
             cells["styles"]["bold"].setChecked(bool(st.bold))

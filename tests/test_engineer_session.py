@@ -138,10 +138,11 @@ def test_equation_autocomplete_and_the_variables_panel_know_the_tables(w):
     panel = w.variables_panel
     panel.refresh()
     rows = {r.name: (r.value, r.unit) for r in panel.rows}
-    assert rows["W_total"] == ("5, 7", "kN")
+    # a spreadsheet's own name, written as the equations read it: Sheet.Name
+    assert rows[f"{table.name}.W_total"] == ("5, 7", "kN")
     assert rows[f"{table.name}.Load"] == ("5, 7", "kN")
     node = next(panel.tree.topLevelItem(i) for i in range(panel.tree.topLevelItemCount())
-                if panel.tree.topLevelItem(i).text(0) == "W_total")
+                if panel.tree.topLevelItem(i).text(0) == f"{table.name}.W_total")
     panel.go_to(node)
     pump()
     assert w.view.tables.item is table and w.view.tables.selection() == (1, 0, 2, 0)
@@ -151,10 +152,10 @@ def test_equation_autocomplete_and_the_variables_panel_know_the_tables(w):
     w.view.centerOn(p)
     pump()
     click_at(w.view, p.x(), p.y())
-    typed(w, "s:W_t")
+    typed(w, "s:Table1.W_t")
     suggestions = w.view.calc.suggestions
     assert suggestions.isVisible()
-    assert suggestions.item(0).text() == "W_total"
+    assert suggestions.item(0).text() == "Table1.W_total"
     press_key(w.view, Qt.Key_Escape)
     typed(w, "+Table1.Lo")
     assert suggestions.item(0).text() == "Table1.Load"
