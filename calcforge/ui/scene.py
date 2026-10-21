@@ -527,20 +527,46 @@ class PageFrame(QGraphicsObject):
 
     def markups_may_have_moved(self) -> None:
         """A markup on this page is changing: until it has been still a
-        moment, Qt goes through this page's markups as it always did."""
+        moment, the page looks again before every paint whether its markups
+        still stay inside it (say_whether_markups_stay_in) — and one moved
+        or put down off the page has it stop saying so at once
+        (markup_may_be_outside).
+
+        It used to stop saying so for every change, and say so again a
+        moment later: each of the two had Qt draw the whole page again — for
+        every markup put down, typed into, picked up or let go, though nearly
+        all of them never leave the page (the user, 2026-10-21: placing a
+        call-out laggy)."""
+        if getattr(self, "_reading_line_work", False):
+            return
         self._markups_settle_at = time.monotonic() + 0.5
-        if self._says_markups_inside:
+
+    def markup_may_be_outside(self, item) -> None:
+        """*item* has just moved, or come onto the page: if any of it is now
+        off the page, the page no longer says its markups stay inside it —
+        straight away, so a click out there finds it before the next paint.
+        Only the one markup is measured (a drag moves hundreds)."""
+        if not self._says_markups_inside or getattr(self, "_reading_line_work", False):
+            return
+        try:
+            box = self.mapRectFromItem(item, item.boundingRect() | item.childrenBoundingRect())
+        except RuntimeError:
+            return
+        inner = self.page_rect().adjusted(-1, -1, SHADOW_DEPTH + 1, SHADOW_DEPTH + 1)
+        if not inner.contains(box):
+            self._markups_settle_at = time.monotonic() + 0.5
             self._says_markups_inside = False
             self.setFlag(QGraphicsItem.ItemContainsChildrenInShape, False)
 
     def say_whether_markups_stay_in(self, now: float) -> None:
         """Tell Qt whether this page keeps its markups inside it, if that has
-        changed: when a markup on it has been still a moment, and every
-        quarter of a second besides (PageView.paintEvent). Said only when it
-        changes: telling Qt has it go through every markup of the page."""
-        if now < self._markups_settle_at:
-            return
-        if now - self._markups_checked_at < 0.25 and self._markups_checked_at >= self._markups_settle_at:
+        changed: before every paint while a markup on it is changing, and
+        every quarter of a second besides (PageView.paintEvent). Said only
+        when it changes: telling Qt has it go through every markup of the
+        page, and draw it whole."""
+        changing = now < self._markups_settle_at
+        if not changing and now - self._markups_checked_at < 0.25 \
+                and self._markups_checked_at >= self._markups_settle_at:
             return
         self._markups_checked_at = now
         inside = self.keeps_its_markups_in()
@@ -549,8 +575,13 @@ class PageFrame(QGraphicsObject):
             self.setFlag(QGraphicsItem.ItemContainsChildrenInShape, inside)
 
     def itemChange(self, change, value):
-        if change in (QGraphicsItem.ItemChildAddedChange, QGraphicsItem.ItemChildRemovedChange):
+        if change in (QGraphicsItem.ItemChildAddedChange, QGraphicsItem.ItemChildRemovedChange) \
+                and isinstance(value, MarkupItem):
+            # (a markup: the page's PDF line work read for snapping to is a
+            # group of its own, never drawn)
             self.markups_may_have_moved()
+            if change == QGraphicsItem.ItemChildAddedChange:
+                self.markup_may_be_outside(value)
         return super().itemChange(change, value)
 
     def shape(self):
@@ -1332,6 +1363,13 @@ class PageFrame(QGraphicsObject):
         self._pdf_snap_broad = []
         self._pdf_snap_group = QGraphicsItemGroup(self)
         self._pdf_snap_group.setHandlesChildEvents(False)
+        # Never drawn, and not the page's markups: clipped to the group's
+        # empty shape, Qt leaves them out of the page's box round its
+        # markups — with them in, line work near the page's edge (and its
+        # handles' room) had the page say its markups do not stay inside
+        # it for good, and every frame went through every markup again
+        # (keeps_its_markups_in).
+        self._pdf_snap_group.setFlag(QGraphicsItem.ItemClipsChildrenToShape, True)
         from ..io import pdfio, pdfvector
         data = self.document.asset(self.page.pdf_key)
         if not data:
@@ -1382,10 +1420,17 @@ class PageFrame(QGraphicsObject):
         item = self._pdf_snap_items[index]
         if item is None:
             item = build_item(self._pdf_snap_payloads[index])
-            item.setParentItem(self._pdf_snap_group)
-            item.setFlag(QGraphicsItem.ItemHasNoContents, True)
-            item.setFlag(QGraphicsItem.ItemIsSelectable, False)
-            item.setAcceptedMouseButtons(Qt.NoButton)
+            # line work read to snap to, never drawn: not a markup that may
+            # leave the page (markups_may_have_moved repaints all of it)
+            item.line_work = True
+            self._reading_line_work = True
+            try:
+                item.setParentItem(self._pdf_snap_group)
+                item.setFlag(QGraphicsItem.ItemHasNoContents, True)
+                item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+                item.setAcceptedMouseButtons(Qt.NoButton)
+            finally:
+                self._reading_line_work = False
             self._pdf_snap_items[index] = item
         return item
 
@@ -1445,16 +1490,36 @@ class PageFrame(QGraphicsObject):
             # every cell was read and calculated again, and undoing one
             # typed value in a big workbook took seconds (2026-10-16).
             wanted = {entry.get("uid"): entry for entry in data}
+            # The markups from the bottom of the pile up that are already as
+            # they are to be are left where they are: undoing a markup put
+            # down took every markup on its page apart and made it again
+            # (the user, 2026-10-21). Only from the first that differs on is
+            # anything made again, so what is on top of what stays as it was.
+            current = sorted(self.markups(), key=lambda i: i.zValue())
+            same = 0
+            for item, entry in zip(current, data):
+                if item.uid != entry.get("uid"):
+                    break
+                restore = getattr(item, "restore_in_place", None)
+                if restore is not None:
+                    if not restore(entry):              # (a table: its cells put back)
+                        break
+                elif item.serialize() != entry:
+                    break
+                same += 1
+            untouched = {id(item) for item in current[:same]}
             kept = set()
             for item in self.markups():
+                if id(item) in untouched:
+                    continue
                 restore = getattr(item, "restore_in_place", None)
                 entry = wanted.get(item.uid)
                 if restore is not None and entry is not None and restore(entry):
                     kept.add(item.uid)
             for item in self.markups():
-                if item.uid not in kept:
+                if item.uid not in kept and id(item) not in untouched:
                     self.remove_markup(item)
-            for entry in data:
+            for entry in data[same:]:
                 if entry.get("uid") in kept:
                     kept.discard(entry.get("uid"))          # (once: a uid twice is built)
                     continue

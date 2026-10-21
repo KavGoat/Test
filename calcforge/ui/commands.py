@@ -21,6 +21,36 @@ RUN_OF_EDITS = 0x9E51
 MERGE_PAUSE = 0.9
 
 
+def changed_markups(before: list[dict], after: list[dict]) -> set:
+    """The ids of the markups one state of a page has and the other has not,
+    or has otherwise: what an edit, its undo and its redo change."""
+    was = {entry.get("uid"): entry for entry in before}
+    now = {entry.get("uid"): entry for entry in after}
+    return {uid for uid in set(was) | set(now) if was.get(uid) != now.get(uid)}
+
+
+class telling_what_changed:
+    """While an edit is announced, the document says which markups it changed
+    — {page id: markup ids} — so the Markups List puts just those rows in
+    again (MarkupsPanel._patch). Said only while the announcement lasts: a
+    change announced without it is read in full, as before."""
+
+    def __init__(self, document, changed: Optional[dict]):
+        self.document = document
+        self.changed = changed
+
+    def __enter__(self):
+        if self.document is not None:
+            self._before = getattr(self.document, "markups_changed", None)
+            self.document.markups_changed = self.changed
+        return self
+
+    def __exit__(self, *exc):
+        if self.document is not None:
+            self.document.markups_changed = self._before
+        return False
+
+
 class PageEditCommand(QUndoCommand):
     """Restore one page's markup list to its state before or after an edit."""
 
@@ -78,7 +108,16 @@ class PageEditCommand(QUndoCommand):
         self.after = other.after
         self.stamp = other.stamp
         self.selected_after = other.selected_after
+        self._changed = None
         return True
+
+    _changed = None
+
+    def changed(self) -> set:
+        """The markups this step changes (changed_markups), worked out once."""
+        if self._changed is None:
+            self._changed = changed_markups(self.before, self.after)
+        return self._changed
 
     def _live_frame(self):
         if self.find_frame is not None and self.page_uid is not None:
@@ -104,7 +143,9 @@ class PageEditCommand(QUndoCommand):
             if item.uid in selected and item.isVisible():
                 item.setSelected(True)
         if self.on_apply is not None:
-            self.on_apply()
+            told = {self.page_uid: self.changed()} if self.page_uid else None
+            with telling_what_changed(getattr(self.frame, "document", None), told):
+                self.on_apply()
 
     def redo(self) -> None:
         # The first redo happens as the command is pushed, when the edit has

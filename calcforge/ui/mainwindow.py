@@ -8319,7 +8319,9 @@ class MainWindow(QMainWindow):
         if document is not None and document.isUndoAvailable():
             document.undo()
         elif self.undo_stack.canUndo():
-            self.undo_stack.undo()
+            from .view import clear_of_the_panels
+            with clear_of_the_panels():       # (Undo is no control of a panel's)
+                self.undo_stack.undo()
         self._refresh_undo_actions()
 
     def redo_something(self) -> None:
@@ -8330,7 +8332,9 @@ class MainWindow(QMainWindow):
         if document is not None and document.isRedoAvailable():
             document.redo()
         elif self.undo_stack.canRedo():
-            self.undo_stack.redo()
+            from .view import clear_of_the_panels
+            with clear_of_the_panels():       # (Redo is no control of a panel's)
+                self.undo_stack.redo()
         self._refresh_undo_actions()
 
     def _refresh_undo_actions(self, *_args) -> None:
@@ -9211,7 +9215,9 @@ class MainWindow(QMainWindow):
                 (self.properties_panel._cells is not None)
             if len(shown) != len(wanted) or any(a is not b for a, b in zip(shown, wanted)) \
                     or cells:
-                self._selection_changed_on_the_canvas()
+                from .view import clear_of_the_panels
+                with clear_of_the_panels():             # (from the event loop: see there)
+                    self._selection_changed_on_the_canvas()
         QTimer.singleShot(0, check)
 
     def refresh_selection(self) -> None:
@@ -9232,12 +9238,14 @@ class MainWindow(QMainWindow):
         panel = getattr(self, "variables_panel", None)
         if panel is not None:
             panel.selection_changed()
-        # The box round a group and the handles are painted over the canvas
-        # rather than by the items, and Qt only repaints the part of the
-        # canvas that changed. Selecting something changed no part of it, so
-        # nothing was redrawn and the selection had nothing round it until a
-        # menu opening forced the whole viewport to be painted again.
-        self.view.viewport().update()
+        # The box round a group is painted over the canvas rather than by the
+        # items, and Qt only repaints the part of the canvas that changed.
+        # Selecting something changed no part of it, so nothing was redrawn
+        # and the selection had nothing round it until a menu opening forced
+        # the whole viewport to be painted again. Where the boxes were and
+        # are is drawn again — not the whole canvas, every time anything was
+        # picked or let go (the user, 2026-10-21: placing a call-out laggy).
+        self.view.update_group_boxes()
 
     def delete_selection(self) -> None:
         if self.view.tables.is_open():
@@ -10962,7 +10970,10 @@ class MainWindow(QMainWindow):
         timer = getattr(self, "_lists_timer", None)
         if timer is not None:
             timer.stop()
-        self.markups_panel.refresh(self.document)
+        # what an edit says it changed: the Markups List puts in those rows
+        # (and builds itself again if it finds it was not in step)
+        self.markups_panel.refresh(self.document,
+                                   getattr(self.document, "markups_changed", None))
         self.sync_text_bookmarks()
         self.bookmarks_panel.rebuild(self.document)
         self.variables_panel.watch(self.document)

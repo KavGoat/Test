@@ -12,24 +12,43 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QLayout, QAbstractSpinBox, Q
 from .icons import colour_icon, drawn_icon
 
 
+#: each line end's picture, drawn once for its ink (arrow_combo): the
+#: Properties panel makes its End list again for every markup picked or placed
+_ARROW_ICONS: dict = {}
+
+
+def _arrow_icon(kind: str, colour: QColor) -> QIcon:
+    from ..items.base import FILLED_HEADS, arrow_path
+    from .icons import _scales
+    key = (kind, colour.name(QColor.HexArgb), tuple(_scales()))
+    kept = _ARROW_ICONS.get(key)
+    if kept is not None:
+        return kept
+
+    def draw(painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(colour, 1.3)
+        pen.setJoinStyle(Qt.MiterJoin)
+        pen.setMiterLimit(8)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(3, 10), QPointF(31, 10))
+        painter.setBrush(colour if kind in FILLED_HEADS else Qt.NoBrush)
+        painter.drawPath(arrow_path(QPointF(31, 10), 0, 11, kind))
+    if len(_ARROW_ICONS) > 256:
+        _ARROW_ICONS.clear()
+    made = _ARROW_ICONS[key] = drawn_icon(draw, 42, 20)
+    return made
+
+
 def arrow_combo() -> QComboBox:
     """Line ends as Bluebeam lists them (None, Open, Closed, …), each drawn
     with the same geometry used on the drawing; the item's data is its key."""
-    from ..items.base import ARROW_HEADS, ARROW_NAMES, FILLED_HEADS, arrow_path
+    from ..items.base import ARROW_HEADS, ARROW_NAMES
     combo = QComboBox()
     combo.setIconSize(QSize(42, 20))
+    colour = QColor(combo.palette().text().color())
     for kind in ARROW_HEADS:
-        def draw(painter: QPainter, kind=kind) -> None:
-            painter.setRenderHint(QPainter.Antialiasing)
-            colour = combo.palette().text().color()
-            pen = QPen(colour, 1.3)
-            pen.setJoinStyle(Qt.MiterJoin)
-            pen.setMiterLimit(8)
-            painter.setPen(pen)
-            painter.drawLine(QPointF(3, 10), QPointF(31, 10))
-            painter.setBrush(colour if kind in FILLED_HEADS else Qt.NoBrush)
-            painter.drawPath(arrow_path(QPointF(31, 10), 0, 11, kind))
-        combo.addItem(drawn_icon(draw, 42, 20), ARROW_NAMES.get(kind, kind), kind)
+        combo.addItem(_arrow_icon(kind, colour), ARROW_NAMES.get(kind, kind), kind)
         combo.setItemData(combo.count() - 1, ARROW_NAMES.get(kind, kind), Qt.ToolTipRole)
     checked_list(combo, pictures=True, picture=QSize(42, 20))
     return combo

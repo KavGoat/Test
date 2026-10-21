@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import functools
+import shiboken6
 
 from PySide6.QtCore import (QByteArray, QEvent, QMimeData, QPoint, QPointF, QRect, QRectF, QSize,
                             QTimer, Qt, Signal)
@@ -1885,6 +1886,8 @@ class MarkupsPanel(QWidget):
         # straight back out and fight whatever set it.
         self._echoing = False
         self._items: dict = {}
+        #: each row's node, by (page index, markup id)
+        self._nodes: dict = {}
         #: what the list was last built from (rebuild)
         self._shown_before = None
         #: Revu dims on the page the markups the filter leaves out: a moment
@@ -1968,20 +1971,35 @@ class MarkupsPanel(QWidget):
 
     def _what_is_shown(self, document, found) -> tuple:
         """Everything the list's rows are made from, to tell whether
-        building them again would change them."""
+        building them again would change them: how it is filtered and
+        grouped, and each page's rows in reading order."""
+        pages: dict = {}
+        for index, item, row in found:
+            pages.setdefault(index, []).append(self._signed(item, row))
+        return (self._heading_of_what_is_shown(document),
+                {index: tuple(rows) for index, rows in pages.items()})
+
+    def _heading_of_what_is_shown(self, document) -> tuple:
         return (self.filter.text().strip().lower(), self.group_by.currentData() or "Page",
                 tuple(sorted((column, tuple(sorted(allowed)))
                              for column, allowed in self.active_filters().items())),
                 tuple(index for index, page in enumerate(document.pages)
-                      if page.frame is not None),
-                tuple((index, item.uid, item.locked, _icon_for(item), tuple(row))
-                      for index, item, row in found))
+                      if page.frame is not None))
 
-    def refresh(self, document) -> None:
+    @staticmethod
+    def _signed(item, row) -> tuple:
+        return (item.uid, item.locked, _icon_for(item), tuple(row))
+
+    def refresh(self, document, told: Optional[dict] = None) -> None:
         """The markups were edited: the list is built again only if that
         changed a row of it. A nudge or a drag moves markups without changing
         a word of their rows, and building four hundred rows again for it was
-        a tenth of a second of every press of an arrow (QA, 2026-10-15)."""
+        a tenth of a second of every press of an arrow (QA, 2026-10-15).
+
+        *told*: which markups the edit changed, {page id: markup ids} — just
+        their rows are put in again (_patch)."""
+        if told is not None and self._patch(document, told):
+            return
         found = self.all_rows(document)
         if self._what_is_shown(document, found) != self._shown_before:
             self.rebuild(document)
@@ -2019,8 +2037,8 @@ class MarkupsPanel(QWidget):
         self.tree.setSortingEnabled(False)
         self.tree.clear()
         self._items = {}
+        self._nodes = {}
         rows = []
-        empty = [""] * len(self.COLUMNS)
         column = self.COLUMNS.index(grouping) if grouping in self.COLUMNS else None
         groups: dict = {}
         order: list = []
@@ -2031,17 +2049,9 @@ class MarkupsPanel(QWidget):
         for index, item, row in found:
             if not self._shown(row, needle):
                 continue
-            node = _MarkupRow(row)
-            node.setData(0, Qt.UserRole, (index, item.uid))
-            node.setIcon(1, icon(_icon_for(item), 16))
-            node.setFlags(node.flags() | Qt.ItemIsEditable)
-            for place, colour in ((self.COLUMNS.index("Colour"), item.style.stroke),
-                                  (self.COLUMNS.index("Fill"), item.style.fill)):
-                if colour:
-                    node.setIcon(place, _swatch(colour))
-            if item.locked:
-                node.setForeground(1, QColor("#8b93a1"))
+            node = self._node_for(index, item, row)
             self._items[(index, item.uid)] = item
+            self._nodes[(index, item.uid)] = node
             if column is None:
                 self.tree.addTopLevelItem(node)
             else:
@@ -2054,11 +2064,9 @@ class MarkupsPanel(QWidget):
             children = groups.get(key, [])
             if not children:
                 continue           # a page with no markups is not listed (Revu)
-            parent = _MarkupRow([key] + empty[1:])
-            font = parent.font(0)
-            font.setBold(True)
-            parent.setFont(0, font)
-            parent.setFlags(parent.flags() & ~Qt.ItemIsSelectable)
+            parent = self._heading(key)
+            if grouping == "Page":
+                parent.setData(0, self.PAGE_ROLE, int(key.split()[-1]) - 1)
             parent.addChildren(children)
             self.tree.addTopLevelItem(parent)
             parent.setExpanded(True)
@@ -2070,6 +2078,196 @@ class MarkupsPanel(QWidget):
         self._echoing = False
         self.follow_the_canvas()
         self._dim_soon()
+
+    #: where a page heading keeps the index of its page
+    PAGE_ROLE = Qt.UserRole + 1
+    #: most markups one change may touch and still be put in row by row
+    PATCH_MOST = 60
+
+    def _node_for(self, index: int, item, row: list) -> "_MarkupRow":
+        node = _MarkupRow(row)
+        node.row = row
+        node.setData(0, Qt.UserRole, (index, item.uid))
+        node.setIcon(1, icon(_icon_for(item), 16))
+        node.setFlags(node.flags() | Qt.ItemIsEditable)
+        for place, colour in ((self.COLUMNS.index("Colour"), item.style.stroke),
+                              (self.COLUMNS.index("Fill"), item.style.fill)):
+            if colour:
+                node.setIcon(place, _swatch(colour))
+        if item.locked:
+            node.setForeground(1, QColor("#8b93a1"))
+        return node
+
+    def _heading(self, key: str) -> "_MarkupRow":
+        parent = _MarkupRow([key] + [""] * (len(self.COLUMNS) - 1))
+        font = parent.font(0)
+        font.setBold(True)
+        parent.setFont(0, font)
+        parent.setFlags(parent.flags() & ~Qt.ItemIsSelectable)
+        return parent
+
+    def _patch(self, document, told: dict) -> bool:
+        """Put the markups an edit changed into the list as they are now,
+        row by row — {page id: markup ids}, from the edit's undo step.
+
+        Building the list again, or reading every markup's row to find that
+        nothing else changed, is in proportion to every markup in the file:
+        on a set of a thousand that was a tenth of a second of every markup
+        placed, every Escape and every undo (the user, 2026-10-21). False when
+        the list is better built again: grouped by a column, more than a few
+        rows, never built yet — or not in step with the pages before the edit
+        (markups come or gone that the edit does not account for).
+        """
+        shown = self._shown_before
+        if shown is None or not getattr(self, "_nodes", None) and not shown[1]:
+            return False
+        if shown[0] != self._heading_of_what_is_shown(document):
+            return False
+        if sum(len(uids) for uids in told.values()) > self.PATCH_MOST:
+            return False
+        grouping = self.group_by.currentData() or "Page"
+        if grouping not in ("Page", "None"):
+            return False
+        pages = {page.uid: index for index, page in enumerate(document.pages)}
+        if any(uid not in pages or document.pages[pages[uid]].frame is None for uid in told):
+            return False
+        changed = {pages[uid]: set(uids) for uid, uids in told.items()}
+        # in step: each page has the markups the list last read of it, but
+        # for those the edit says it changed (counted, for the other pages —
+        # nothing of their rows is read)
+        orders = {}
+        for index, page in enumerate(document.pages):
+            if page.frame is None:
+                continue
+            listed = shown[1].get(index, ())
+            if index not in changed:
+                count = sum(1 for item in page.frame.markups()
+                            if not getattr(item, "from_drawing", False)
+                            and not getattr(item, "IS_CALC", False))
+                if count != len(listed):
+                    return False
+                continue
+            order = {}
+            for item in page.frame.ordered_markups():
+                if not getattr(item, "from_drawing", False) \
+                        and not getattr(item, "IS_CALC", False):
+                    order[item.uid] = (len(order), item)
+            if not (set(order) ^ {entry[0] for entry in listed}) <= changed[index]:
+                return False
+            orders[index] = order
+        if not told:
+            # announced again, with nothing more changed
+            self.totals.setText(self._totals_text(document))
+            self.follow_the_canvas()
+            return True
+        needle = self.filter.text().strip().lower()
+        sorting = self.tree.isSortingEnabled()
+        column = self.tree.sortColumn() if sorting else 0
+        descending = sorting and self.tree.header().sortIndicatorOrder() == Qt.DescendingOrder
+        self._echoing = True
+        try:
+            for index, uids in changed.items():
+                order = orders[index]
+                rows = {}
+                for uid in uids:
+                    rows[uid] = self._patch_row(index, uid, order, needle, grouping,
+                                                column, sorting, descending)
+                # this page's rows as a reading of the whole list would give
+                # them: those changed afresh, the rest as they were
+                before = {entry[0]: entry for entry in shown[1].get(index, ())}
+                signed = []
+                for uid, (_reading, item) in order.items():
+                    entry = before.get(uid) if uid not in rows else None
+                    if entry is None:
+                        row = rows.get(uid) or self.row_for(index, item)
+                        entry = self._signed(item, row)
+                    signed.append(entry)
+                if signed:
+                    shown[1][index] = tuple(signed)
+                else:
+                    shown[1].pop(index, None)
+            if grouping == "Page":
+                for position in reversed(range(self.tree.topLevelItemCount())):
+                    if not self.tree.topLevelItem(position).childCount():
+                        self.tree.takeTopLevelItem(position)   # (Revu lists no empty page)
+            for place in range(len(self.COLUMNS)):
+                self.tree.resizeColumnToContents(place)
+            self._rows = [node.row for node in self._nodes.values()]
+        finally:
+            self._echoing = False
+        self._shown_before = shown
+        self.totals.setText(self._totals_text(document))
+        self.follow_the_canvas()
+        self._dim_soon()
+        return True
+
+    def _patch_row(self, index, uid, order, needle, grouping, column, sorting,
+                   descending) -> None:
+        """One markup's row taken out, and put back as it is now."""
+        key = (index, uid)
+        old = self._nodes.pop(key, None)
+        self._items.pop(key, None)
+        if old is not None:
+            holder = old.parent()
+            if holder is not None:
+                holder.removeChild(old)
+            else:
+                self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(old))
+        found = order.get(uid)
+        if found is None:
+            return None                                # gone
+        reading, item = found
+        row = self.row_for(index, item)
+        if not self._shown(row, needle):
+            return row
+        node = self._node_for(index, item, row)
+        self._items[key] = item
+        self._nodes[key] = node
+        wanted = _natural_key(row[column])
+
+        def before(other) -> bool:
+            # where a fresh build puts it: by the sorted column, and in
+            # reading order among rows that sort alike
+            data = other.data(0, Qt.UserRole)
+            theirs = _natural_key(other.text(column))
+            if sorting and theirs != wanted:
+                return theirs > wanted if descending else theirs < wanted
+            if not data:
+                return False
+            if data[0] != index:
+                return data[0] < index
+            mine = order.get(data[1])
+            return mine is not None and mine[0] < reading
+
+        if grouping == "None":
+            place = sum(1 for at in range(self.tree.topLevelItemCount())
+                        if before(self.tree.topLevelItem(at)))
+            self.tree.insertTopLevelItem(place, node)
+            return row
+        heading = None
+        for at in range(self.tree.topLevelItemCount()):
+            top = self.tree.topLevelItem(at)
+            if top.data(0, self.PAGE_ROLE) == index:
+                heading = top
+                break
+        if heading is None:
+            heading = self._heading(f"Page {index + 1}")
+            heading.setData(0, self.PAGE_ROLE, index)
+            wanted_heading = _natural_key(heading.text(column))
+
+            def heading_before(other) -> bool:
+                theirs = _natural_key(other.text(column))
+                if sorting and theirs != wanted_heading:
+                    return theirs > wanted_heading if descending else theirs < wanted_heading
+                page = other.data(0, self.PAGE_ROLE)
+                return page is not None and page < index
+            place = sum(1 for at in range(self.tree.topLevelItemCount())
+                        if heading_before(self.tree.topLevelItem(at)))
+            self.tree.insertTopLevelItem(place, heading)
+            heading.setExpanded(True)
+        place = sum(1 for at in range(heading.childCount()) if before(heading.child(at)))
+        heading.insertChild(place, node)
+        return row
 
     # -- column filters ----------------------------------------------------
     def filter_menu(self, column: int, where=None):
@@ -2278,6 +2476,8 @@ class MarkupsPanel(QWidget):
         wanted = {item.uid for item in scene.selectedItems()} if scene else set()
         self._echoing = True
         try:
+            if self._nodes and self._follow_only_the_changes(wanted):
+                return
             first = None
             for index in range(self.tree.topLevelItemCount()):
                 top = self.tree.topLevelItem(index)
@@ -2302,6 +2502,38 @@ class MarkupsPanel(QWidget):
                 self.tree.horizontalScrollBar().setValue(across)
         finally:
             self._echoing = False
+
+    def _follow_only_the_changes(self, wanted: set) -> bool:
+        """Pick out and let go of only the rows whose picking changes —
+        found by the markup, not by going through every row of the list (a
+        thousand rows, twice for every markup placed or picked)."""
+        nodes = {key[1]: node for key, node in self._nodes.items()}
+        if any(uid in wanted and node.treeWidget() is not self.tree
+               for uid, node in nodes.items()):
+            return False
+        picked = set()
+        for node in self.tree.selectedItems():
+            data = node.data(0, Qt.UserRole)
+            if not data:
+                return False                       # (a heading picked: read it all)
+            picked.add(data[1])
+        for uid in wanted ^ picked:
+            node = nodes.get(uid)
+            if node is not None:
+                node.setSelected(uid in wanted)
+        chosen = [nodes[uid] for uid in wanted if uid in nodes]
+        if chosen:
+            first = min(chosen, key=self._place_in_the_list)
+            across = self.tree.horizontalScrollBar().value()
+            self.tree.scrollToItem(first)
+            self.tree.horizontalScrollBar().setValue(across)
+        return True
+
+    def _place_in_the_list(self, node) -> tuple:
+        parent = node.parent()
+        if parent is None:
+            return (self.tree.indexOfTopLevelItem(node), -1)
+        return (self.tree.indexOfTopLevelItem(parent), parent.indexOfChild(node))
 
     # -- changing several at once -------------------------------------------
     def _row_menu(self, point) -> QMenu:
@@ -3686,6 +3918,7 @@ class PropertiesPanel(QScrollArea):
             # (the call within; or presenting, whose own key filter must keep
             # its place in front of the window's)
             self._show_items(items, style_edit)
+            self._drop_the_unused_font_list()
             return
         filters = [watcher for watcher in (
             window if getattr(window, "_filters_the_application", False) else None,
@@ -3695,6 +3928,7 @@ class PropertiesPanel(QScrollArea):
         self._filters_aside = True
         try:
             self._show_items(items, style_edit)
+            self._drop_the_unused_font_list()
         finally:
             self._filters_aside = False
             for watcher in filters:
@@ -3720,18 +3954,31 @@ class PropertiesPanel(QScrollArea):
                 self.show_items([item], style_edit=changed)
                 return
         self._style_edit = style_edit
+        at_once = not self._building and self._may_take_apart_at_once()
+        self._keep_the_font_list(at_once)
         self._building = True
         self._cells = None
         while self.layout.count():
             child = self.layout.takeAt(0)
             widget = child.widget()
             if widget is not None:
+                widget.hide()
+                if at_once:
+                    # Built again for a click or a key on the canvas: nothing
+                    # of the old panel is part way through anything, so it is
+                    # taken apart now. Given no parent first, every control
+                    # in it had the application's style sheet worked out
+                    # again — half the time of building the panel, on every
+                    # markup placed or picked (the user, 2026-10-21).
+                    shiboken6.delete(widget)
+                    continue
                 # Hide before unparenting, then unparent before deleting:
                 # deleteLater() only runs on the next trip through the event
                 # loop, so until then an old child would keep painting over its
                 # replacement — and a *visible* widget given no parent becomes a
-                # floating top-level window.
-                widget.hide()
+                # floating top-level window. (A control of the old panel may
+                # be the one whose change is being shown: it has to outlive
+                # the change.)
                 widget.setParent(None)
                 widget.deleteLater()
         if not self._items:
@@ -3840,6 +4087,55 @@ class PropertiesPanel(QScrollArea):
         self.layout.addStretch(1)
         self._settle()
         self._building = False
+
+    #: the Font list of the panel as last built, and what it was connected to
+    _font_in_use = None
+    #: that list, kept for the next panel (_keep_the_font_list)
+    _font_kept = None
+
+    def _keep_the_font_list(self, at_once: bool) -> None:
+        """Take the Font list out of the panel about to be taken apart, to be
+        used again: a font list reads every font on the computer as it is
+        made — on a Windows machine with hundreds, the slowest control of
+        the panel, made again for every markup picked or placed. Only when
+        the panel is taken apart at once: otherwise its change may be what
+        is being shown, and it goes with the rest."""
+        held, self._font_in_use = self._font_in_use, None
+        self._font_kept = None
+        if held is None:
+            return
+        family, slot = held
+        if not at_once or not shiboken6.isValid(family):
+            return
+        try:
+            family.currentFontChanged.disconnect(slot)
+        except (RuntimeError, TypeError):
+            return
+        family.hide()
+        family.setParent(self)
+        self._font_kept = family
+
+    def _drop_the_unused_font_list(self) -> None:
+        """A kept Font list the new panel had no use for goes now."""
+        family, self._font_kept = self._font_kept, None
+        if family is not None and shiboken6.isValid(family):
+            shiboken6.delete(family)
+
+    def _font_list(self) -> QFontComboBox:
+        family, self._font_kept = self._font_kept, None
+        if family is not None and shiboken6.isValid(family):
+            family.show()
+            return family
+        return QFontComboBox()
+
+    @staticmethod
+    def _may_take_apart_at_once() -> bool:
+        """Whether the panel's old controls can be deleted now: only while
+        the canvas is handling a button or a key, or the window catches up of
+        its own accord (view.clear_of_the_panels) — never from a control of
+        the panel's own, still busy saying what changed."""
+        from .view import is_clear_of_the_panels
+        return is_clear_of_the_panels()
 
     def _add_style_sections(self, first) -> None:
         """Appearance, line ends and text: what a markup style is made of."""
@@ -4555,11 +4851,14 @@ class PropertiesPanel(QScrollArea):
         and its size, Font Colour, Alignment, Font Style, Margin."""
         form = self._group("Appearance")
         style = first.style
-        family = QFontComboBox()
+        family = self._font_list()
         family.setObjectName("fontFamily")
         family.setCurrentFont(QFont(QFontInfo(style.font()).family()))
-        family.currentFontChanged.connect(lambda font: self._apply(
-            lambda i: setattr(i.style, "font_family", font.family()), "Font"))
+
+        def font_chosen(font) -> None:
+            self._apply(lambda i: setattr(i.style, "font_family", font.family()), "Font")
+        family.currentFontChanged.connect(font_chosen)
+        self._font_in_use = (family, font_chosen)
         form.addRow("Font:", family)
 
         size = _spin(style.font_size, 1.0, 144.0, 1, 0.5)    # Revu: 1 to 144

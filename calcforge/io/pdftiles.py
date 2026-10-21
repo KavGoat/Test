@@ -458,6 +458,15 @@ class _AheadSquares(set):
     def of(self, page_key) -> set:
         return self._by_page.get(page_key, set())
 
+    def of_page(self, source: str, index: int) -> list:
+        """Every square of the page *index* of *source*, whatever it is
+        drawn with or without."""
+        found: list = []
+        for page_key, keys in self._by_page.items():
+            if page_key[0] == "page" and page_key[1] == source and page_key[2] == index:
+                found.extend(keys)
+        return found
+
     def add(self, key) -> None:
         super().add(key)
         self._by_page.setdefault(_page_of(key), set()).add(key)
@@ -508,8 +517,11 @@ class TileCache(QObject):
         # Shared with the worker, which reads it to decide whether a job it is
         # about to start is still worth doing. A set of immutable keys, added
         # to and discarded from on this thread only, so the worker never sees
-        # half a change.
-        self._waiting: set = set()
+        # half a change. Filed by page as well (_AheadSquares): a page drawn
+        # asks which of its own squares are waiting, and going through every
+        # square waiting for every page was a millisecond of every paint of
+        # a set (2026-10-21).
+        self._waiting: set = _AheadSquares()
         self._held = 0
         self._failures = {}
         self._sheet_bytes = 0
@@ -1127,7 +1139,7 @@ class TileCache(QObject):
             self._consumers.setdefault(consumer, {})[(source, index)] = request
             retained.extend(requests[(source, index)] for requests in self._consumers.values()
                             if (source, index) in requests)
-        stale = [key for key in self._waiting
+        stale = [key for key in self._waiting.of_page(source, index)
                  if isinstance(key, TileKey) and key not in self._ahead
                  and key.source == source
                  and key.index == index

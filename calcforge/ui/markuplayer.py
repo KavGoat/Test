@@ -466,6 +466,9 @@ class MarkupLayer:
                 self.pending.discard(item)
                 self.members.add(item)
                 self._bake(item)
+                # and on screen too: drawn live until now, from the squares
+                # from now (see _bake_what_is_drawn)
+                self.frame.update(self.boxes[item])
         else:
             # a crowd (a page opened, a paste): drawn into the squares while
             # the window is idle, each staying live until its squares are in
@@ -835,6 +838,7 @@ class MarkupLayer:
 
     def _bake_what_is_drawn(self, step: float, region: QRectF) -> None:
         squares = self.tiles.get(step, {})
+        baked = QRectF()
         for item in list(self.pending):
             if not _valid(item):
                 self.pending.discard(item)
@@ -845,6 +849,14 @@ class MarkupLayer:
                 self.pending.discard(item)
                 self.members.add(item)
                 self._bake(item)
+                whole = self.boxes.get(item, QRectF())
+                baked = whole if baked.isEmpty() else baked.united(whole)
+        if not baked.isEmpty():
+            # where it was drawn live, drawn now from the squares: a canvas
+            # that repaints only what changes (on the graphics card too)
+            # kept it as drawn live, and a drag past it then showed half of
+            # one and half of the other
+            self.frame.update(baked)
 
     def _drawn_in(self, area: QRectF) -> list:
         """Members and pending markups in *area*, in stacking order."""

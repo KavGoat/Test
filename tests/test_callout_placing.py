@@ -13,6 +13,19 @@ repainted where it was and where it is, and nothing else; the Properties
 panel, rebuilt for the markup just placed, no longer draws its line-style
 samples afresh each time.
 
+And the rest of the gesture (the user, 2026-10-21: "still laggy", on a
+canvas drawn with the graphics card): the click that placed the call-out, the
+Escape that finished it and every change of selection repainted the whole
+canvas; on the graphics card every frame was drawn whole, whatever changed;
+the Markups List was built again (or every markup's row read again) for each
+markup placed, finished or undone — a tenth of a second on a set of a
+thousand; undo took every markup of the page apart and made it again; and the
+Properties panel gave each old control a new parent before deleting it, which
+had the style sheet worked out again for every one. Now each step repaints
+what changed, on the card too (ui/cardsurface.py), the list puts in just the
+rows that changed, undo makes again only what differs, and the panel's old
+controls go at once.
+
 Cloud+ is Revu's: press and drag for a rectangular cloud of that size, or
 click its corners for a free-form one — closed by a double-click, by clicking
 the first corner again, by Enter or by a right-click — and then a click for
@@ -21,6 +34,7 @@ and it is saved and exported as it was.
 """
 from __future__ import annotations
 
+import os
 import statistics
 import time
 
@@ -81,9 +95,43 @@ def _marked_up(w, tmp_path):
     w.open_from_command_line(_heavy_set(tmp_path / "set.pdf", pages=2))
     w.view.set_zoom(1.0)
     w.view.centerOn(page(w, 400, 380))
-    for _ in range(20):
-        pump()
-        time.sleep(0.01)
+    from tests.test_big_pdf_smooth import _settle
+    _settle(QApplication.instance(), w.view)        # every square of it drawn
+    # the pointer has been over the page with a tool in hand: its line work
+    # has been read to snap to (once, the first time)
+    w.select_tool("line")
+    for x in range(200, 420, 20):
+        move(w, page(w, x, 300))
+    w.select_tool("select")
+    _quiet(w)
+
+
+def _quiet(w, seconds: float = 0.5, limit: float = 15.0, repaint: bool = True) -> None:
+    """Until nothing has been painted for *seconds*: the page's markups put
+    into its squares (markuplayer.py) once the window is idle repaint the
+    squares as they go, and that is not what is being measured."""
+    if repaint:
+        # (and once its markups have been still a moment, a page tells Qt
+        # they stay inside it — on its next paint, which is then drawn whole)
+        time.sleep(0.6)
+        vp(w).repaint()
+    painted = _Painted(vp(w))
+    deadline = time.monotonic() + limit
+    still = time.monotonic()
+    try:
+        while time.monotonic() < deadline:
+            seen = len(painted.shares)
+            QApplication.processEvents()
+            time.sleep(0.01)
+            layers = [getattr(frame, "layer", None) for frame in w.view.scene().frames]
+            settling = any(layer is not None and (layer.hot or layer.pending)
+                           for layer in layers)
+            if len(painted.shares) != seen or settling:
+                still = time.monotonic()
+            elif time.monotonic() - still > seconds:
+                return
+    finally:
+        painted.viewport.removeEventFilter(painted)
 
 
 def _moves(w, tool: str) -> tuple[list, dict]:
@@ -172,6 +220,290 @@ def test_a_line_style_sample_is_drawn_once():
     assert _line_style_icon("dashed", "#0000ff", 1.0).cacheKey() != first.cacheKey()
     assert _line_style_icon("dashed", "#ff0000", 1.0, cloud=True).cacheKey() \
         != first.cacheKey()
+
+
+# -- the whole gesture: the click, the words, finishing, undo -------------------
+
+class _Steps:
+    """The Callout gesture driven step by step as the user makes it, with
+    what each step cost the window and what it repainted."""
+
+    def __init__(self, w):
+        self.w = w
+        self.app = QApplication.instance()
+        self.work: dict = {}
+        self.shares: dict = {}
+
+    def step(self, name: str, action) -> None:
+        painted = _Painted(vp(self.w))
+        took = _work(self.app, action)
+        self.app.processEvents()
+        painted.viewport.removeEventFilter(painted)
+        self.work.setdefault(name, []).append(took)
+        self.shares.setdefault(name, []).extend(painted.shares)
+
+    def callout(self, at: QPointF, words: str = "Check this weld") -> None:
+        w = self.w
+        w.select_tool("callout")
+        pump()
+        self.step("point", lambda: click(w, at))
+        for i in range(12):
+            self.step("follow", lambda i=i: move(w, QPointF(at.x() + 12 * i, at.y() - 8 * i)))
+        where = QPointF(at.x() + 150, at.y() - 100)
+        self.step("place", lambda: click(w, where))
+        for letter in words:
+            self.step("type", lambda letter=letter: QTest.keyClick(
+                QApplication.focusWidget() or vp(w), letter))
+        self.step("finish", lambda: key(w, Qt.Key_Escape))
+
+    def undo_and_redo(self) -> None:
+        w = self.w
+        self.step("undo", lambda: QTest.keyClick(vp(w), Qt.Key_Z, Qt.ControlModifier))
+        self.step("redo", lambda: QTest.keyClick(vp(w), Qt.Key_Y, Qt.ControlModifier))
+
+
+def _held(window):
+    """The canvas as the window holds it — its pixels as last painted,
+    partial repaints and all, not a fresh paint as a grab is."""
+    from tests.test_big_pdf_smooth import _shown
+    return _shown(window, window.view.viewport())
+
+
+def _as_drawn_afresh(window):
+    viewport = window.view.viewport()
+    viewport.repaint()
+    QApplication.processEvents()
+    return _held(window)
+
+
+def test_the_whole_callout_gesture_repaints_only_what_changes(w, tmp_path):
+    """Pointing, placing, typing, finishing, undoing and redoing a call-out on
+    a marked-up sheet each repaint a small part of the canvas — the call-out
+    and the preview — not all of it, as the click, Escape, a selection
+    changing and the pointer leaving used to; and what is left on the canvas
+    is what a fresh paint of it draws."""
+    _marked_up(w, tmp_path)
+    steps = _Steps(w)
+    steps.callout(page(w, 300, 300))
+    steps.undo_and_redo()
+    for name, covered in steps.shares.items():
+        assert covered, f"{name}: nothing was repainted"
+        assert max(covered) < 0.5, (
+            f"{name}: a paint covered {max(covered):.0%} of the canvas")
+    assert _held(w) == _as_drawn_afresh(w), "a piece of an earlier frame was left"
+
+    typed = sorted(steps.work["type"])
+    assert statistics.median(typed) < MEDIAN_BUDGET, \
+        f"a key typed into the call-out is {statistics.median(typed):.1f} ms of work"
+
+
+@pytest.mark.parametrize("tool", ["callout", "cloud_callout"])
+def test_nothing_is_left_on_the_canvas_by_any_step(w, tool):
+    """After each step of the gesture the canvas the window holds is the
+    canvas drawn afresh: repainting less never leaves a leader, a cloud, a
+    preview box, a caret or a selection behind."""
+    w.select_tool(tool)
+    point = page(w, 200, 300)
+    if tool == "cloud_callout":
+        drag(w, point, page(w, 260, 350))
+    else:
+        click(w, point)
+    checks = []
+    for i in range(12):
+        move(w, page(w, 260 + 15 * i, 260 - 9 * i))
+        pump()
+    checks.append(("following", _held(w), _as_drawn_afresh(w)))
+    click(w, page(w, 430, 160))
+    pump()
+    checks.append(("placed", _held(w), _as_drawn_afresh(w)))
+    QTest.keyClicks(QApplication.focusWidget() or vp(w), "Weld")
+    pump()
+    checks.append(("typed", _held(w), _as_drawn_afresh(w)))
+    key(w, Qt.Key_Escape)
+    checks.append(("finished", _held(w), _as_drawn_afresh(w)))
+    QTest.keyClick(vp(w), Qt.Key_Z, Qt.ControlModifier)
+    pump()
+    checks.append(("undone", _held(w), _as_drawn_afresh(w)))
+    for name, held, fresh in checks:
+        assert held == fresh, f"{name}: something was left on the canvas"
+
+
+def test_the_markups_list_puts_in_only_the_rows_that_change(w, tmp_path):
+    """Placing, finishing, undoing and redoing a call-out put its row into the
+    Markups List and take it out again — the list is not built again, nor
+    every markup's row read, on a set of any size — and what it shows is what
+    building it afresh shows, in every order and grouping."""
+    _marked_up(w, tmp_path)
+    panel = w.markups_panel
+    QApplication.processEvents()
+    built = []
+    plain = panel.rebuild
+    panel.rebuild = lambda document: (built.append(1), plain(document))
+
+    def state():
+        tree = panel.tree
+        rows = []
+        for at in range(tree.topLevelItemCount()):
+            top = tree.topLevelItem(at)
+            rows.append((tuple(top.text(c) for c in range(tree.columnCount())),
+                         tuple(tuple(top.child(k).text(c) for c in range(tree.columnCount()))
+                               for k in range(top.childCount())),
+                         top.isSelected()))
+            rows.extend((None, tuple(top.child(k).text(c) for c in range(tree.columnCount())),
+                         top.child(k).isSelected()) for k in range(top.childCount()))
+        return rows
+
+    def as_built_afresh():
+        shown = state()
+        signed = panel._shown_before
+        plain(w.document)
+        assert shown == state(), "the list as put together is not the list built afresh"
+        assert signed == panel._shown_before, "nor is its reading of what it shows"
+
+    steps = _Steps(w)
+    steps.callout(page(w, 300, 300))
+    steps.undo_and_redo()
+    assert not built, "the list was built again for a markup placed, finished or undone"
+    as_built_afresh()
+
+    # sorted by another column, the other way, and in no groups
+    panel.tree.sortByColumn(2, Qt.DescendingOrder)
+    panel.group_by.setCurrentIndex(panel.group_by.findData("None"))
+    QApplication.processEvents()
+    built.clear()
+    steps.callout(page(w, 520, 420), words="Second")
+    steps.undo_and_redo()
+    assert not built
+    as_built_afresh()
+
+
+def test_undoing_a_placed_callout_leaves_the_rest_of_the_page_alone(w, tmp_path):
+    """Undo takes the call-out away and keeps every other markup of the page
+    as it is — the same markups, not each one taken apart and made again."""
+    _marked_up(w, tmp_path)
+    frame = w.document.pages[0].frame
+    others = {item.uid: item for item in frame.markups()}
+    steps = _Steps(w)
+    steps.callout(page(w, 300, 300))
+    QTest.keyClick(vp(w), Qt.Key_Z, Qt.ControlModifier)
+    pump()
+    after = {item.uid: item for item in frame.markups()}
+    assert set(after) == set(others), "only the call-out went"
+    assert all(after[uid] is others[uid] for uid in others), "the others were made again"
+    QTest.keyClick(vp(w), Qt.Key_Y, Qt.ControlModifier)
+    pump()
+    (callout,) = [i for i in frame.markups() if isinstance(i, CalloutItem)]
+    assert callout.text() == "Check this weld"
+
+
+def test_the_properties_panel_is_taken_apart_at_once_after_a_click(w):
+    """The Properties panel built again for a markup placed or picked on the
+    canvas takes its old controls apart there and then — giving each a new
+    parent first had the application's style sheet worked out again for
+    every control, half the time of building the panel."""
+    import shiboken6
+    from PySide6.QtWidgets import QWidget
+
+    w.select_tool("callout")
+    click(w, page(w, 200, 300))
+    click(w, page(w, 350, 200))
+    panel = w.properties_panel
+    old = [panel.layout.itemAt(i).widget() for i in range(panel.layout.count())]
+    old = [widget for widget in old if isinstance(widget, QWidget)]
+    assert old
+    key(w, Qt.Key_Escape)
+    click(w, page(w, 360, 205))            # the call-out picked again
+    QApplication.processEvents()
+    assert not any(shiboken6.isValid(widget) for widget in old), \
+        "the old panel's controls were left for later"
+    font = panel.body.findChild(QWidget, "fontFamily")
+    assert font is not None and font.isVisible(), "the Font list is back in its place"
+
+
+# -- on the graphics card ----------------------------------------------------------
+
+#: set in the child process that draws with the graphics card
+CARD = "CALCFORGE_CALLOUT_ON_THE_CARD"
+
+
+@pytest.mark.skipif(not os.environ.get(CARD), reason="run in its own process, on the card")
+def test_on_the_card(w, tmp_path):
+    """Drawn with OpenGL, each step repaints only what changed — the card
+    used to draw the whole canvas for every move of the pointer — and the
+    window shows what a fresh paint of the canvas shows."""
+    from calcforge.ui import cardsurface
+    from tests.test_text_flicker import _on_screen
+
+    assert w.view.gpu, "drawing with the graphics card"
+    _marked_up(w, tmp_path)
+    drawn = []
+    plain = cardsurface.CardSurface.to_draw
+
+    def to_draw(surface, *args, **kwargs):
+        region = plain(surface, *args, **kwargs)
+        whole = surface.width() * surface.height()
+        drawn.append(1.0 if region is None else cardsurface._area(region) / whole)
+        return region
+    cardsurface.CardSurface.to_draw = to_draw
+    try:
+        w.select_tool("callout")
+        start = page(w, 300, 300)
+        click(w, start)
+        drawn.clear()
+        for i in range(20):
+            move(w, QPointF(start.x() + 10 * i, start.y() - 6 * i))
+            pump()
+        following = list(drawn)
+        click(w, QPointF(start.x() + 200, start.y() - 120))
+        QTest.keyClicks(QApplication.focusWidget() or vp(w), "Weld")
+        pump()
+        drawn.clear()
+        QTest.keyClicks(QApplication.focusWidget() or vp(w), "s")
+        pump()
+        typing = list(drawn)
+        key(w, Qt.Key_Escape)                # (the caret blinks: finished first)
+        _quiet(w, repaint=False)             # (what the page does once idle, done)
+        shown = _on_screen(w)
+        w.view.viewport().ask_all()
+        w.view.viewport().update()
+        for _ in range(5):
+            pump()
+            time.sleep(0.02)
+        fresh = _on_screen(w)
+    finally:
+        cardsurface.CardSurface.to_draw = plain
+    assert following and max(sorted(following)[:len(following) * 9 // 10]) < 0.5, \
+        f"the leader followed with whole frames drawn: {following}"
+    assert typing and max(typing) < 0.5, f"a key typed drew {typing}"
+    assert (shown == fresh).all(), "the card left something of an earlier frame"
+
+
+def _opengl_under_x() -> bool:
+    from tests.test_text_flicker import _opengl_under_x as probe
+    return probe()
+
+
+@pytest.mark.skipif(bool(os.environ.get(CARD)), reason="the child itself")
+def test_placing_a_callout_on_the_graphics_card():
+    """The same, in a window drawn with OpenGL (Preferences ▸ Draw with the
+    graphics card, on by default), under a virtual X display."""
+    import subprocess
+    import sys
+
+    if not _opengl_under_x():
+        pytest.skip("no X display with OpenGL to draw on")
+    env = dict(os.environ, QT_QPA_PLATFORM="xcb", **{CARD: "1"})
+    done = subprocess.run(
+        ["xvfb-run", "-a", "-s", "-screen 0 1600x1000x24", sys.executable, "-m", "pytest",
+         "-p", "no:cacheprovider", "-q", "-rA", "-x", os.path.abspath(__file__),
+         "-k", "test_on_the_card"],
+        env=env, capture_output=True, text=True, timeout=600,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    tail = "\n".join(line for line in done.stdout.splitlines()
+                     if "PASSED" in line or "FAILED" in line or "Error" in line
+                     or "assert" in line)
+    assert done.returncode == 0, tail
+    assert done.stdout.count("PASSED ") == 1, tail
 
 
 # -- Cloud+, drawn as Revu draws it ---------------------------------------------

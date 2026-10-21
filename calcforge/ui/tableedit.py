@@ -510,8 +510,29 @@ class TableEditing:
     def is_open(self) -> bool:
         return self.item is not None
 
+    def _tables_under(self, scene_pos: QPointF) -> list:
+        """The tables that could be under *scene_pos*, the topmost first.
+
+        Asked of the canvas, every markup on every page was asked for its
+        bounds (the canvas keeps no index), on every move of the pointer and
+        every key let go: a twentieth of a second on a set of a thousand
+        markups (2026-10-21). The pages' tables are few, and found directly."""
+        scene = self.view.scene()
+        frames = getattr(scene, "frames", None)
+        if frames is None:
+            return list(scene.items(scene_pos))
+        found = []
+        for frame in frames:
+            children = frame.childItems()
+            for order, item in enumerate(children):
+                if isinstance(item, TableItem) and item.isVisible() \
+                        and item.sceneBoundingRect().contains(scene_pos):
+                    found.append((frame.zValue(), item.zValue(), order, item))
+        found.sort(key=lambda entry: entry[:3], reverse=True)
+        return [entry[3] for entry in found]
+
     def table_at(self, scene_pos: QPointF, chrome: bool = False) -> Optional[TableItem]:
-        for item in self.view.scene().items(scene_pos):
+        for item in self._tables_under(scene_pos):
             if isinstance(item, TableItem):
                 local = item.mapFromScene(scene_pos)
                 box = item.chrome_rect() if (chrome and item.opened) else item.local_rect()

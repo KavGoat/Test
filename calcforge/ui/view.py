@@ -255,6 +255,34 @@ class _SizeEdit(QLineEdit):
         self.selectAll()
 
 
+#: how deep the window is in a moment clear of the panels (clear_of_the_panels)
+_CLEAR_OF_THE_PANELS = [0]
+_BUTTON_EVENTS = (QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
+                  QEvent.MouseButtonDblClick)
+
+
+class clear_of_the_panels:
+    """While a button or a key on the canvas is being handled, or the window
+    catches up on its own once the event loop is free.
+
+    Nothing in a panel is part way through anything then — no control of one
+    is in the middle of saying it changed — so a panel built again for what
+    happened may take its old controls apart at once rather than later
+    (PropertiesPanel._show_items)."""
+
+    def __enter__(self):
+        _CLEAR_OF_THE_PANELS[0] += 1
+        return self
+
+    def __exit__(self, *exc):
+        _CLEAR_OF_THE_PANELS[0] -= 1
+        return False
+
+
+def is_clear_of_the_panels() -> bool:
+    return _CLEAR_OF_THE_PANELS[0] > 0
+
+
 _CLOUD_CURSOR = None
 
 
@@ -911,7 +939,12 @@ class PageView(QGraphicsView):
                                               selected_after=picked_after))
         if len(changed) > 1:
             stack.endMacro()
-        self.documentEdited.emit()
+        from .commands import changed_markups, telling_what_changed
+        told = {frame.page.uid: changed_markups(before, after)
+                for frame, before, after in changed if getattr(frame.page, "uid", None)}
+        with telling_what_changed(self.window.document,
+                                  told if len(told) == len(changed) else None):
+            self.documentEdited.emit()
 
     # ------------------------------------------------------------------
     # tools
@@ -1117,6 +1150,7 @@ class PageView(QGraphicsView):
             except (RuntimeError, TypeError):
                 pass
         super().setScene(scene)
+        self._watch_scene_changes()
         if scene is not None and scene is not previous and isinstance(scene, DocumentScene):
             scene.sceneRectChanged.connect(self._canvas_relaid)
         self._update_desk_margin(keep_centre=scene is previous)
@@ -1640,19 +1674,21 @@ class PageView(QGraphicsView):
             probe = QOpenGLContext()
             if not probe.create():
                 return False
-            from PySide6.QtOpenGLWidgets import QOpenGLWidget
-            surface = QOpenGLWidget()
+            from .cardsurface import CardSurface
+            surface = CardSurface()
             shape = QSurfaceFormat()
             shape.setSamples(4)                       # smooth markup edges
             surface.setFormat(shape)
             self.setViewport(surface)
-            # GL repaints the whole view each frame: there is no scroll blit
-            self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+            # Qt does not scroll a texture by moving its pixels — a scroll is
+            # drawn whole — but a change is drawn where it is (CardSurface)
+            self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)
             self.gpu = True
         else:
             self.setViewport(QWidget())
             self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)
             self.gpu = False
+        self._watch_scene_changes()
         viewport = self.viewport()
         viewport.setMouseTracking(True)
         viewport.setAcceptDrops(self.acceptDrops())
@@ -1665,7 +1701,51 @@ class PageView(QGraphicsView):
         now = time.monotonic()
         for frame in getattr(self.scene(), "frames", None) or ():
             frame.say_whether_markups_stay_in(now)
+        surface = self.viewport()
+        if self.gpu and hasattr(surface, "to_draw"):
+            # on the graphics card, only what changed (cardsurface.py) — but
+            # all of it while the size box rides the pointer: it ignores the
+            # zoom, and the scene's word for where it was is not the screen's
+            region = surface.to_draw(self.viewportTransform(), self.scene(),
+                                     whole=self._size_proxy is not None)
+            if region is not None:
+                surface.paint_only(region, super().paintEvent)
+                return
         super().paintEvent(event)
+
+    _watched_scene = None
+
+    def _watch_scene_changes(self) -> None:
+        """On the graphics card, hear what the scene changes, so a paint can
+        draw just that (cardsurface.py). Not otherwise: Qt then has no list
+        of changes to make and hand over."""
+        scene = self.scene() if self.gpu else None
+        if scene is self._watched_scene:
+            return
+        if self._watched_scene is not None:
+            try:
+                self._watched_scene.changed.disconnect(self._scene_changed)
+            except (RuntimeError, TypeError):
+                pass
+        self._watched_scene = scene
+        if scene is not None:
+            scene.changed.connect(self._scene_changed)
+        surface = self.viewport()
+        if hasattr(surface, "ask_all"):
+            surface.ask_all()
+
+    def _scene_changed(self, rects) -> None:
+        surface = self.viewport()
+        if not hasattr(surface, "ask_for"):
+            return
+        if len(rects) > 200:
+            surface.ask_all()
+            return
+        onto = self.viewportTransform()
+        for rect in rects:
+            # Qt's own margin for antialiasing is two pixels round the box,
+            # rounded out; one more for the card's smoothing of edges
+            surface.ask_for(QRegion(onto.mapRect(rect).toAlignedRect().adjusted(-3, -3, 3, 3)))
 
     #: (across, down, when): which way the view last scrolled, each -1, 0 or
     #: 1 (down and right positive), and when (time.monotonic)
@@ -2120,6 +2200,20 @@ class PageView(QGraphicsView):
         settings = self.document().settings
         if not (settings.snap_to_items and settings.snap_to_alignment):
             return ([], [])
+        # The same for every move of the pointer until a markup of the page
+        # changes (its layer counts every change) or the page moves: worked
+        # out again for each move, it was most of the snapping of a move on
+        # a marked-up sheet (2026-10-21).
+        layer = getattr(frame, "layer", None)
+        transform = frame.sceneTransform()
+        key = None if layer is None else (
+            id(frame), getattr(layer, "generation", None), len(frame.childItems()),
+            tuple(sorted(id(item) for item in ignore)),
+            (transform.m11(), transform.m12(), transform.m21(), transform.m22(),
+             transform.dx(), transform.dy()))
+        kept = self.__dict__.get("_alignment_kept")
+        if key is not None and kept is not None and kept[0] == key:
+            return (list(kept[1]), list(kept[2]))
         across: list = []
         down: list = []
         skip = set(ignore)
@@ -2129,6 +2223,8 @@ class PageView(QGraphicsView):
             for point, _what in self.named_points_of(item):
                 across.append(point.y())
                 down.append(point.x())
+        if key is not None:
+            self._alignment_kept = (key, tuple(across), tuple(down))
         return (across, down)
 
     def snap_moved(self, items: list, delta: QPointF) -> QPointF:
@@ -2807,7 +2903,7 @@ class PageView(QGraphicsView):
                 self._pending_anchor = QPointF(point)
                 self.statusMessage.emit(
                     f"{tool.label}: now click where the words go · Esc to start again")
-                self.viewport().update()
+                self._update_pointer_previews()       # the leader appears
                 event.accept()
                 return
             self.place_callout(tool, point)
@@ -3050,8 +3146,11 @@ class PageView(QGraphicsView):
             from .markuplayer import busy
             busy()
         if kind == QEvent.Leave:
-            self.forget_snap()
-            self.viewport().update()
+            self.forget_snap()                  # (its marker repaints its own pixels)
+            self._update_pointer_previews()
+        if kind in _BUTTON_EVENTS:
+            with clear_of_the_panels():
+                return super().viewportEvent(event)
         return super().viewportEvent(event)
 
     def escape_everything(self, quiet: bool = False) -> str:
@@ -3067,6 +3166,7 @@ class PageView(QGraphicsView):
         """
         undone = []
         self.forget_snap()
+        crossed = self.calc.cross is not None
         if self.calc.editing():
             self.calc.leave()
             undone.append("the equation")
@@ -3131,12 +3231,33 @@ class PageView(QGraphicsView):
         grabber = QWidget.mouseGrabber()
         if grabber is self or (grabber is not None and self.isAncestorOf(grabber)):
             grabber.releaseMouse()
-        self.viewport().update()
+        if not crossed and set(undone) <= self.ESCAPED_IN_PLACE:
+            # words finished, a selection let go, a call-out or a leader not
+            # placed: they repaint themselves, or are the pointer's previews
+            self._update_pointer_previews()
+            self.update_group_boxes()
+        else:
+            self.viewport().update()
         message = "Back to nothing selected" if not undone else (
             "Cancelled " + ", ".join(undone))
         if not quiet:
             self.statusMessage.emit(message)
         return message
+
+    #: what an Escape puts down that repaints itself, or is a preview that
+    #: follows the pointer (escape_everything)
+    ESCAPED_IN_PLACE = frozenset({"the words being typed", "the selection", "the call-out",
+                                  "the arrow leader", "the cloud leader"})
+
+    def _nothing_left_over_the_page(self) -> bool:
+        """Whether, as a button comes up, nothing drawn over the page but the
+        pointer's previews can need drawing again: no box being dragged, no
+        held tool or look, no equation's cross, and a click that was putting
+        something down or into words rather than picking."""
+        if self._mode != "idle" or self._marquee or self._pending_stamp is not None \
+                or self.calc.calc_mode() or self.window.holding_a_format():
+            return False
+        return self.tool_key not in ("select", "pan") or self._editing_item is not None
 
     def _back_at_the_first_corner(self, *points: QPointF) -> bool:
         """Whether a click at any of *points* is on the first corner of the
@@ -3645,7 +3766,15 @@ class PageView(QGraphicsView):
     def _mouse_release(self, event: QMouseEvent) -> None:
         scene_pos = self.mapToScene(event.position().toPoint())
         self.forget_snap()
-        self.viewport().update()
+        if self._nothing_left_over_the_page():
+            # A click that put something down or into words: what floats over
+            # the page is the pointer's previews, repainted where they were
+            # and are (the markups repaint themselves). The whole canvas was
+            # drawn again for every such click (the user, 2026-10-21: placing
+            # a call-out "still laggy").
+            self._update_pointer_previews()
+        else:
+            self.viewport().update()
 
         if self._editing_item is not None and self._mode == "idle":
             super().mouseReleaseEvent(event)
@@ -5014,11 +5143,19 @@ class PageView(QGraphicsView):
         elif self._is_empty(item):
             detach(item)
         placed, self._placed_step = getattr(self, "_placed_step", None), None
+        from .commands import telling_what_changed
         if placed is not None and self._join_the_placing(*placed):
-            self.documentEdited.emit()
+            # the placing's step now has the words: those of its markups
+            # changed (or the box went, put down and left empty)
+            added = placed[0]
+            told = {added.page_uid: added.changed() | {item.uid}} if added.page_uid else None
+            with telling_what_changed(self.window.document, told):
+                self.documentEdited.emit()
             return
         self.commit_snapshot("Edit text")
-        self.documentEdited.emit()
+        # (what changed, the step just recorded has said: nothing more)
+        with telling_what_changed(self.window.document, {}):
+            self.documentEdited.emit()
 
     def _join_the_placing(self, added, index: int) -> bool:
         """The words typed into a box just put down belong to the step that
@@ -5415,10 +5552,18 @@ class PageView(QGraphicsView):
             return
         if not now and not drawn:
             return
+        # a piece drawn in the same place before and now (a Cloud+'s cloud,
+        # while its words are placed) is as it was: not drawn again
+        def where(rect) -> tuple:
+            return tuple(round(value, 2) for value in rect.getRect())
+        same = {where(rect) for rect in drawn} & {where(rect) for rect in now}
         region = QRegion()
+        onto = self.viewportTransform()
         for rect in drawn + now:
-            region += self.mapFromScene(rect).boundingRect().adjusted(-3, -3, 3, 3)
-        viewport.update(region)
+            if where(rect) not in same:
+                region += onto.mapRect(rect).toAlignedRect().adjusted(-3, -3, 3, 3)
+        if not region.isEmpty():
+            viewport.update(region)
 
     def _pointer_preview_rects(self) -> Optional[list]:
         """The scene rectangles the previews that follow the pointer are
@@ -5431,7 +5576,7 @@ class PageView(QGraphicsView):
             if self._pending_anchor is not None:
                 preview = self._kept("callout", self._pending_callout, keep=True)
                 if preview is not None:
-                    rects.append(preview.mapRectToScene(preview.boundingRect()))
+                    rects.extend(self._callout_pieces(preview))
             for found in (self._kept("arrow", self._arrow_leader_preview, keep=True),
                           self._kept("cloud", self._cloud_leader_preview, keep=True)):
                 if found is not None:
@@ -5444,6 +5589,37 @@ class PageView(QGraphicsView):
         except (RuntimeError, AttributeError):
             return None
         return rects
+
+    #: how long a stretch of a leader is repainted as one box, in the page's units
+    LEADER_STRETCH = 48.0
+
+    def _callout_pieces(self, preview) -> list:
+        """Where a call-out being placed is drawn, in the scene: its box, its
+        cloud and its leader a stretch at a time — not the one box round all
+        of them, which from a cloud to the far end of a long leader is most of
+        the canvas, and every markup in it drawn again for every move."""
+        from ..items.complexlines import reach
+        style = preview.style
+        margin = (style.width + HANDLE_SIZE + 12 + reach(style)
+                  + max(style.width * 4.5, 8.0) * max(style.arrow_size, 0.1))
+        radius = preview.cloud_radius
+        box = margin + (radius if preview.shape_kind == "cloud" else 0.0)
+        pieces = [preview.local_rect().normalized().adjusted(-box, -box, box, box)]
+        for leader in preview.leaders:
+            points = [preview.tip_of(leader), preview.elbow_of(leader),
+                      preview.side_point_of(leader)]
+            for start, end in zip(points, points[1:]):
+                length = math.hypot(end.x() - start.x(), end.y() - start.y())
+                stretches = max(1, int(length // self.LEADER_STRETCH) + 1)
+                for k in range(stretches):
+                    a = start + (end - start) * (k / stretches)
+                    b = start + (end - start) * ((k + 1) / stretches)
+                    pieces.append(QRectF(a, b).normalized().adjusted(
+                        -margin, -margin, margin, margin))
+            if leader.clouds():
+                around = margin + radius
+                pieces.append(leader.cloud_box().adjusted(-around, -around, around, around))
+        return [preview.mapRectToScene(piece) for piece in pieces]
 
     #: previews made to say where they will be drawn, kept for the paint
     #: that follows: {name: (what they were made from, preview)}
@@ -5647,13 +5823,8 @@ class PageView(QGraphicsView):
             painter.drawPolygon(polygon)
         painter.restore()
 
-    def _draw_group_boxes(self, painter: QPainter) -> None:
-        """One box around each selected group, rather than one per member.
-
-        A group is one thing to click and move, so it should look like one
-        thing when it is picked up; the members' own outlines say nothing that
-        the group's does not.
-        """
+    def _group_boxes(self) -> list:
+        """The box round each selected group, in the scene."""
         families: dict = {}
         scene = self.scene()
         # Several markups selected get no box round them all (Revu): each
@@ -5662,7 +5833,47 @@ class PageView(QGraphicsView):
             name = getattr(item, "group", "")
             if name:
                 families.setdefault(name, []).append(item)
-        if not families:
+        boxes = []
+        for members in families.values():
+            box = self.markup_box(members[0])
+            for item in members[1:]:
+                box = box.united(self.markup_box(item))
+            boxes.append(box)
+        return boxes
+
+    #: the group boxes last drawn or asked to be drawn, in the scene
+    _group_boxes_shown: list = []
+
+    def update_group_boxes(self) -> None:
+        """Repaint where the selected groups' boxes were and are now.
+
+        They are painted over the canvas rather than by the markups, so a
+        selection that changes does not repaint them by itself; the whole
+        canvas used to be drawn again for it, every time anything was picked
+        or let go (MainWindow.refresh_selection)."""
+        boxes = self._group_boxes()
+        region = QRegion()
+        reach = (5.0 + HANDLE_SCREEN_PX + 1.5) / max(self._zoom, 0.05)
+        for box in list(self._group_boxes_shown) + boxes:
+            region += self.mapFromScene(box.adjusted(-reach, -reach, reach, reach)) \
+                .boundingRect().adjusted(-3, -3, 3, 3)
+        self._group_boxes_shown = boxes
+        if not region.isEmpty():
+            self.viewport().update(region)
+
+    def _draw_group_boxes(self, painter: QPainter) -> None:
+        """One box around each selected group, rather than one per member.
+
+        A group is one thing to click and move, so it should look like one
+        thing when it is picked up; the members' own outlines say nothing that
+        the group's does not.
+        """
+        boxes = self._group_boxes()
+        if boxes != self._group_boxes_shown:
+            # (a box that moved since it was asked for: both places are
+            # cleared the next time)
+            self._group_boxes_shown = (list(self._group_boxes_shown) + boxes)[-16:]
+        if not boxes:
             return
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -5673,10 +5884,7 @@ class PageView(QGraphicsView):
         painter.setBrush(QColor(11, 107, 203, 12))
         margin = 5.0 / max(self._zoom, 0.05)
         half = (HANDLE_SCREEN_PX + 1.5) / max(self._zoom, 0.05) / 2
-        for members in families.values():
-            box = self.markup_box(members[0])
-            for item in members[1:]:
-                box = box.united(self.markup_box(item))
+        for box in boxes:
             painter.drawRect(box.adjusted(-margin, -margin, margin, margin))
             painter.setBrush(QColor("#ffffff"))
             for point in (box.topLeft(), box.topRight(),
@@ -5991,6 +6199,12 @@ class PageView(QGraphicsView):
         actually being typed into; otherwise it moves the focus as it always
         did.
         """
+        if event.type() in (QEvent.KeyPress, QEvent.KeyRelease):
+            with clear_of_the_panels():
+                return self._event(event)
+        return self._event(event)
+
+    def _event(self, event) -> bool:
         if event.type() == QEvent.ShortcutOverride and self.tables.wants_shortcut(event):
             event.accept()
             return True
@@ -6041,8 +6255,10 @@ class PageView(QGraphicsView):
         modifiers = event.modifiers()
         if key == Qt.Key_Control:
             self._control_held = True
+            # Ctrl lets go of what the pointer caught: its marker goes (only
+            # its own pixels are drawn again, not the canvas)
+            self._invalidate_snap_overlay(self._snap_marker)
             self._snap_marker = None
-            self.viewport().update()
         if key == Qt.Key_Shift:
             self._shift_held = True
         if key == Qt.Key_Alt:

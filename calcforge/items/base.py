@@ -686,6 +686,12 @@ def cursor_for_handle(key: str):
 _PICTURES_READ: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 #: What changes how a markup looks on its page, before it happens.
+#: what moves a markup, once it has (MarkupItem.itemChange)
+_MOVES_THAT_HAVE_HAPPENED = (QGraphicsItem.ItemPositionHasChanged,
+                             QGraphicsItem.ItemTransformHasChanged,
+                             QGraphicsItem.ItemRotationHasChanged,
+                             QGraphicsItem.ItemScaleHasChanged)
+
 _CHANGES_THAT_SHOW = (QGraphicsItem.ItemPositionChange, QGraphicsItem.ItemTransformChange,
                       QGraphicsItem.ItemRotationChange, QGraphicsItem.ItemScaleChange,
                       QGraphicsItem.ItemTransformOriginPointChange,
@@ -792,9 +798,18 @@ class MarkupItem(QGraphicsObject):
             layer.touched(self)
         self._may_leave_its_page()
 
+    def _page_holder(self):
+        holder = self.parentItem()
+        while holder is not None and not hasattr(holder, "markups_may_have_moved"):
+            holder = holder.parentItem()
+        return holder
+
     def _may_leave_its_page(self) -> None:
         """Its page stops telling Qt its markups all stay inside it, until
-        this one has been still a moment (PageFrame.markups_may_have_moved)."""
+        this one has been still a moment (PageFrame.markups_may_have_moved).
+        Not the page's line work read for snapping to (never drawn)."""
+        if self.__dict__.get("line_work"):
+            return
         holder = self.parentItem()
         while holder is not None and not hasattr(holder, "markups_may_have_moved"):
             holder = holder.parentItem()
@@ -1722,6 +1737,12 @@ class MarkupItem(QGraphicsObject):
                       QGraphicsItem.ItemTransformHasChanged) \
                 and (self.still_theirs or self.split_theirs) and not self._still_arriving:
             self.make_it_ours()
+        if change in _MOVES_THAT_HAVE_HAPPENED and not self.__dict__.get("line_work"):
+            # moved: if it is now off its page, the page says so at once — a
+            # click there finds it (PageFrame.markup_may_be_outside)
+            holder = self._page_holder()
+            if holder is not None:
+                holder.markup_may_be_outside(self)
         return super().itemChange(change, value)
 
     @property
