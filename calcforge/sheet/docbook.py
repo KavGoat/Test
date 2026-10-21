@@ -345,6 +345,64 @@ class DocumentBook:
         return wb._first_sheet_read(dn.refers_to) or \
             (wb.sheet_by_id(dn.home) if dn.home is not None else None)
 
+    # -- names recorded before they had two kinds ---------------------------------------------
+    def settle_old_names(self) -> None:
+        """Names loaded from a record made before a name was either a
+        spreadsheet's own or a CalcForge variable (store.load_sheet): each
+        is a CalcForge variable when an equation of the document reads it
+        bare, as one name of its own (so it goes on being read, and is
+        tagged), else the spreadsheet's own. Settled once and kept: the next
+        save records which it is."""
+        from dataclasses import replace
+
+        wb = self.workbook
+        keys, wb.unsettled_names = wb.unsettled_names, set()
+        if not keys:
+            return
+        bare = self._bare_in_equations()
+        for key in keys:
+            dn = wb.names.get(key)
+            if dn is not None and not dn.variable and key[0] in bare:
+                wb._put_name(key, replace(dn, variable=True))
+
+    def _bare_in_equations(self) -> set:
+        """Every name the document's equations read on its own (lower
+        case): the equations calculated so far, those on pages built but not
+        yet calculated, and those on pages still to be built."""
+        from calcforge.calc.engine.model import walk_rows
+        from calcforge.calc.engine.parser import lex
+        from calcforge.calc.record import row_from_data
+
+        roots = []
+        for region in self._calc().worksheet.regions:
+            if region.editor is not None and region.editor.kind == "math":
+                roots.append(region.editor.root)
+
+        def saved(data):
+            if isinstance(data, dict) and data.get("kind", "math") == "math":
+                try:
+                    roots.append(row_from_data(data.get("root", [])))
+                except Exception:  # noqa: BLE001 - a record that can't be read uses nothing
+                    pass
+        for page in getattr(self.document, "pages", ()) or ():
+            frame = getattr(page, "frame", None)
+            for item in (frame.markups() if frame is not None else ()):
+                if getattr(item, "region", None) is None:
+                    saved(getattr(item, "_data", None))
+            for payload in getattr(page, "_pending_items", ()) or ():
+                if isinstance(payload, dict):
+                    saved(payload.get("calc"))
+        out = set()
+        for root in roots:
+            for row in walk_rows(root):
+                toks = lex(row) or []
+                for k, tok in enumerate(toks):
+                    after = toks[k + 1] if k + 1 < len(toks) else None
+                    defines = after is not None and after.kind == "op" and after.value == "≔"
+                    if tok.kind == "ident" and not defines:
+                        out.add(str(tok.value).lower())
+        return out
+
     def _later(self, a, b, at_key) -> bool:
         """Whether defined name *a* is defined after *b* (where their sheets
         are) and still before *at_key*: the one an equation there reads."""

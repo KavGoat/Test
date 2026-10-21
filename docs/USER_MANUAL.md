@@ -1526,7 +1526,10 @@ A **name** stands for a cell, a block or a constant (`W_total`,
   name is tagged on the cells (View ▸ Name Tags).
 
 The Name Manager lists both; its Scope says *Workbook (CalcForge variable)* for a
-variable. Editing a name there keeps its kind.
+variable. Editing a name there keeps its kind. In a document saved before names had
+two kinds, a name an equation reads bare (`W_total` on its own) opens as a CalcForge
+variable, so those equations go on calculating; any other opens as the
+spreadsheet's own. It is saved that way from then on.
 
 - **Define Name…** (right-click ▸ Names), the **Name Box** (select the cells, type
   the name, `Enter`), **Name Manager…** (`Ctrl+F3`: every name, to add, edit or

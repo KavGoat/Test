@@ -861,7 +861,7 @@ def _names(wb, sheets: list, renames: dict, renamed, left_out: list) -> None:
             home = sheets[0] if sheets and not local else None
         if home is None:
             continue
-        home.data["names"].append([name, text, local is not None, ""])
+        home.data["names"].append([name, text, local is not None, "", False])
 
 
 _ERRORS = ("#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A", "#SPILL!", "#CALC!")

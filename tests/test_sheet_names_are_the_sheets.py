@@ -130,3 +130,46 @@ def test_the_kind_of_name_is_saved(w, tmp_path):
     got = again.sheet.workbook.names
     assert not got[("x_sheet", None)].variable and got[("x_calc", None)].variable
     assert [n for n, _b in nametags.named_blocks(again.sheet)] == ["x_calc"]
+
+
+def test_names_saved_before_they_had_two_kinds(w, tmp_path, monkeypatch):
+    """A document saved before a name was either kind (four fields to a
+    name): a name an equation reads bare comes back a CalcForge variable,
+    so it goes on calculating and is tagged; a name no equation reads bare
+    comes back the spreadsheet's own, with no tag. Settled once, at load,
+    and saved that way from then on."""
+    from calcforge.items.calc import CalcItem
+    from calcforge.items.table import TableItem
+    from calcforge.sheet import store
+    from tests.test_calc_saving import answer, reopen, write_lines
+
+    table = make_table(w, width=48 * 3, height=15 * 4)
+    tables = w.view.tables
+    wb = table.sheet.workbook
+    wb.set_input(table.sheet, 0, 0, "4")
+    wb.set_input(table.sheet, 1, 0, "5")
+    tables.select((0, 0))
+    assert tables.name_selection("x")
+    tables.select((1, 0))
+    assert tables.name_selection("z")
+    tables.close()
+    write_lines(w, ["y:x*2", "y=", f"{table.name}.z+1="], y=400)
+    assert answer(w, "y=") == "8" and answer(w, f"{table.name}.z+1=") == "6"
+    real = store.names_homed_on
+    monkeypatch.setattr(store, "names_homed_on", lambda sheet: [e[:4] for e in real(sheet)])
+    path = str(tmp_path / "old.pdf")
+    w.document.path = path
+    assert w.save_document()
+    monkeypatch.setattr(store, "names_homed_on", real)
+    reopen(w, path)
+    QApplication.instance().processEvents()
+    (again,) = [t for t in w.view.scene().items() if isinstance(t, TableItem)]
+    got = again.sheet.workbook.names
+    assert got[("x", None)].variable, "read bare by y:x*2: a CalcForge variable"
+    assert not got[("z", None)].variable, "read only as Table1.z: the spreadsheet's own"
+    assert [n for n, _b in nametags.named_blocks(again.sheet)] == ["x"]
+    assert answer(w, "y=") == "8" and answer(w, f"{table.name}.z+1=") == "6"
+    assert not again.sheet.workbook.unsettled_names
+    # saved again, the kind is written down
+    assert [e[4] for e in sorted(store.names_homed_on(again.sheet))] == [True, False]
+    assert sum(isinstance(i, CalcItem) for i in w.view.scene().items()) == 3

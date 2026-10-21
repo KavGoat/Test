@@ -77,8 +77,9 @@ def sheet_to_dict(sheet) -> dict:
 def names_homed_on(sheet) -> list:
     """The defined names kept, saved and undone with this sheet: those whose
     cells are on it, and those naming no cells that were made here.
-    Each: [name, refers to, local to this sheet, comment], then True for
-    a CalcForge variable (DefinedName.variable)."""
+    Each: [name, refers to, local to this sheet, comment, a CalcForge
+    variable (DefinedName.variable)]. Recorded before names had two kinds,
+    an entry has four: load_sheet leaves those for DocumentBook to settle."""
     from . import formula as F
 
     out = []
@@ -102,8 +103,8 @@ def names_homed_on(sheet) -> list:
         else:
             homed = (dn.home if dn.home is not None else dn.sheet) == sheet.id
         if homed:
-            out.append([dn.name, dn.refers_to, dn.sheet == sheet.id, dn.comment] +
-                       ([True] if dn.variable else []))
+            out.append([dn.name, dn.refers_to, dn.sheet == sheet.id, dn.comment,
+                        bool(dn.variable)])
     return out
 
 
@@ -161,6 +162,11 @@ def load_sheet(sheet, data: dict) -> None:
                     wb.names[key] = DefinedName(name, refers_to, sheet.id if local else None,
                                                 comment or "", sheet.id,
                                                 None if local else sheet.book, variable)
+                    if len(entry) <= 4 and key[1] is None:
+                        # recorded before names had two kinds: which it is
+                        # is settled once the equations are known
+                        # (DocumentBook.settle_old_names)
+                        wb.unsettled_names.add(key)
                     wb._name_dirty(key[0])
     finally:
         wb.journal = journal

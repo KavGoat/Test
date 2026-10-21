@@ -307,6 +307,7 @@ class TableItem(MarkupItem):
         self.sheet = sheet
         if data is not None:
             load_sheet(sheet, data)
+            book.settle_old_names()
             wanted = data.get("name")
             if wanted and wanted != sheet.name and book.workbook.sheet(wanted) is None:
                 sheet.name = wanted

@@ -407,6 +407,9 @@ class Workbook:
         #   ("name", old DefinedName, new DefinedName)  a defined name renamed
         #   ("heading", sheet, old text, new text)      a column's heading retyped
         self.on_references: Optional[Callable[[tuple], None]] = None
+        # document names loaded from a record made before names had two
+        # kinds (store.load_sheet): keys, until DocumentBook settles them
+        self.unsettled_names: set = set()
         # formulas naming a sheet or table that isn't there (yet): learnt again
         # when one comes, so they follow it from then on
         self._unresolved: set = set()
