@@ -3,6 +3,13 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-21 — the white pointer, the 14 October cloud with clean corners, callout placing (pushed at 7115f15, 47f99c7 and after)
+
+- Quick gate passed at 7115f15 and 47f99c7. Full run at 7ce9b7c: every test passed but one, which pinned undo rebuilding every markup (now kept when unchanged); the test now rebuilds from an emptied page and passes; 14/14 planted bugs caught.
+- The pointer's arrow is the system's white one, with Revu's small sign added.
+- Clouds as the 14 October one (the user's choice), with a scallop on each corner and clean closing joins.
+- Placing a callout repaints only what changes, on the graphics card too; the Markups List, undo and the Properties panel do only their own work.
+
 ## 2026-10-20 (later) — steady words, crisp zoomed out, Revu's clouds, alignment, panels that stay put, Revu's cursors (pushed at 803db9d)
 
 - Full test run at 803db9d: every test passed but one timing check (dimming a thousand markups, 233 ms against 200 under the run's load; 89–94 ms alone, against 83–87 ms before); 14/14 planted bugs caught. An earlier run at faebaaa failed three tests (callout placing budget; two handle-colour tests), fixed at 4193b1e.
