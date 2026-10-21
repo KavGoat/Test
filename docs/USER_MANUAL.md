@@ -875,11 +875,13 @@ cells' own Find and Replace — see Part 3.)
   moving, the drawing already made stands in, scaled; once you stop, the page
   is drawn sharp at exactly the zoom on screen, the same as before. Scrolling
   draws ahead in the direction you are going. Nothing needs setting.
-- **Crisp when zoomed out.** Below 100 % the drawing's line work is drawn onto
-  the screen's pixels, as in Revu: every hairline is one solid, dark pixel wide
-  wherever it falls, double lines stay apart and coloured lines keep their
-  colour, instead of thin lines coming out as pale grey pairs of pixels. Words
-  stay smoothed, and from 100 % up lines are smoothed as before. Only the screen
+- **Clear when zoomed out.** Below 100 % no line of the drawing, and no line of
+  a markup, is drawn thinner than a pixel and a bit, still with smooth edges, as
+  in Revu: every hairline comes out dark wherever it falls, lines of one weight
+  look the same weight, coloured lines keep their colour, and a markup's thin
+  line is as clear as the drawing's beside it, instead of thin lines coming out
+  as pale grey pairs of pixels or faint threads. Words stay as they are, and
+  from 100 % up lines are drawn at their own width as before. Only the screen
   changes; prints, exports and the PDF are not affected.
 - **Moving about**: `Page Up` / `Page Down` move a screenful; `Home` and `End` go
   to the first and last page; `Ctrl+Left` / `Ctrl+Right` (and `Ctrl+Page Up` /

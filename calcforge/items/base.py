@@ -265,7 +265,16 @@ class Style:
             if len(_PENS) > 512:
                 _PENS.clear()
             _PENS[key] = made
-        return QPen(made)
+        pen = QPen(made)
+        floor = _THINNEST[0]
+        width = pen.widthF()
+        if floor > width and self.width > 0:
+            # on screen, zoomed out: no thinner than the drawing's own lines
+            # (ui/markuplayer.thinnest_line), its dashes as long as they were
+            pen.setWidthF(floor)
+            if pen.style() == Qt.CustomDashLine:
+                pen.setDashPattern([step * width / floor for step in pen.dashPattern()])
+        return pen
 
     def _make_pen(self, scale: float) -> QPen:
         colour = QColor(self.stroke or "#000000")
@@ -1416,8 +1425,18 @@ class MarkupItem(QGraphicsObject):
             self._paint_handles_as_picked(painter)
             return
         painter.save()
-        from ..ui.markuplayer import align_with_squares
+        from ..ui.markuplayer import align_with_squares, thinnest_line
         align_with_squares(painter, self)
+        held = _THINNEST[0]
+        _THINNEST[0] = thinnest_line(painter, self)
+        try:
+            self._paint_own(painter, frame)
+        finally:
+            _THINNEST[0] = held
+        painter.restore()
+        self._paint_handles_as_picked(painter)
+
+    def _paint_own(self, painter: QPainter, frame) -> None:
         if not (self.split_theirs and (not getattr(frame, "print_mode", True)
                                        or self.split_from in getattr(frame, "file_drew_split", ()))):
             if self.multiplies_inside_only():
@@ -1431,8 +1450,6 @@ class MarkupItem(QGraphicsObject):
             else:
                 self.apply_blend(painter)
                 self.paint_visible(painter)      # nothing while it is still theirs
-        painter.restore()
-        self._paint_handles_as_picked(painter)
 
     def _paint_handles_as_picked(self, painter: QPainter) -> None:
         """The handles, with the control points green when several are
@@ -2082,6 +2099,9 @@ def cloud_path(polygon: QPolygonF, radius: float, closed: bool = True,
 #: repaint and into every square it crosses.
 _CLOUDS: dict = {}
 _PENS: dict = {}
+#: the thinnest a markup's line is drawn just now, in its own units: set while
+#: it paints on screen zoomed out (MarkupItem.paint), else nothing
+_THINNEST = [0.0]
 
 
 #: A PDF reader's cloudy border (Apache PDFBox's CloudyBorder, after

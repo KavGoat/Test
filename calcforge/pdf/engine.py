@@ -55,29 +55,29 @@ pymupdf.TOOLS.mupdf_display_warnings(False)
 MIN_LINE_PIXELS = 1.0
 pymupdf.TOOLS.set_graphics_min_line_width(MIN_LINE_PIXELS)
 
-# And on screen, zoomed out — fewer pixels than points — line work is drawn
-# onto the pixels rather than smoothed across them. Smoothed, a hairline a
-# pixel wide that fell half way between two rows of pixels came out as two
-# rows of half grey: the same sheet's lines were black or pale grey by where
-# they happened to fall, double lines ran together into a grey band and
+# And on screen, zoomed out — fewer pixels than points — no line is drawn
+# thinner than ZOOMED_OUT_LINE_PIXELS, still smoothed. At one pixel, a
+# hairline that fell half way between two rows of pixels came out as two rows
+# of mid grey, and one that fell on a row as one row of black: the same
+# sheet's lines were black or pale by where they happened to fall, and
 # coloured lines went pastel (the user, 2026-10-20: "Fuzzy is not good
 # enough ... Bluebeam looks better in zoomed out mode and more legible").
-# MuPDF's centre-of-pixel rule (graphics anti-aliasing level 9) gives each
-# line exactly the row of pixels its middle crosses, solid, as Bluebeam
-# draws a zoomed-out sheet, with no gaps along a sloping line. Words stay
-# smoothed (their own level), and so does everything from the zoom at which
-# a point is a pixel up, where lines are wide enough for smoothing to be
-# worth having. It is quicker to draw than smoothing, and changes only the
-# pixels on screen, never a print, an export or the PDF.
-CRISP_BELOW = 1.0
-SMOOTH_LINES = 8
-CRISP_LINES = 9
+# Drawn onto the pixels instead (MuPDF's centre-of-pixel rule) every line was
+# one hard row — stair-stepped on a slope, hatching in moiré — "too contrasty"
+# (the user, 2026-10-21). A pixel and a bit, smoothed, is the middle: wherever
+# a hairline falls its darkest row is three-quarters dark or more, its edges
+# stay soft, and every line of a weight looks the same weight. Markups drawn
+# on screen keep to the same width (ui/markuplayer.thinnest_line), so a
+# markup's line and the drawing's look alike. From 100 % up, and in a print,
+# an export or the PDF, lines are as they were.
+ZOOMED_OUT_LINE_PIXELS = 1.4
+ZOOMED_OUT_BELOW = 1.0
 
 
-def line_art_level(scale: float) -> int:
-    """The anti-aliasing level line work is drawn at, *scale* pixels to the
-    point, on screen."""
-    return CRISP_LINES if scale < CRISP_BELOW - 1e-9 else SMOOTH_LINES
+def thinnest_line(scale: float) -> float:
+    """The thinnest a line is drawn on screen, in device pixels, at *scale*
+    pixels to the point."""
+    return ZOOMED_OUT_LINE_PIXELS if scale < ZOOMED_OUT_BELOW - 1e-9 else MIN_LINE_PIXELS
 
 
 def drain_messages() -> str:
@@ -552,25 +552,25 @@ def raster_from(drawing, region: tuple[float, float, float, float],
                 scale: float, alpha: bool = False) -> Optional[Raster]:
     """Part of an already-parsed page, at *scale* pixels to the display point
     (*alpha*: on a clear background, for an annotation drawn on its own), for
-    the screen: zoomed out, its line work on the pixels (line_art_level)."""
+    the screen: zoomed out, no line thinner than thinnest_line."""
     from pymupdf import mupdf
 
-    level = line_art_level(scale)
-    before = mupdf.fz_graphics_aa_level()
+    width = thinnest_line(scale)
+    before = mupdf.fz_graphics_min_line_width()
     try:
         clip = pymupdf.Rect(*region).normalize()
         if clip.is_empty:
             return None
-        if level != before:
-            mupdf.fz_set_graphics_aa_level(level)
+        if width != before:
+            mupdf.fz_set_graphics_min_line_width(width)
         pixmap = drawing.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
                                     clip=clip, alpha=alpha)
     except Exception:                                  # noqa: BLE001
         drain_messages()
         return None
     finally:
-        if level != before:
-            mupdf.fz_set_graphics_aa_level(before)
+        if width != before:
+            mupdf.fz_set_graphics_min_line_width(before)
     return _raster_of(pixmap)
 
 
