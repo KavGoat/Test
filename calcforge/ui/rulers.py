@@ -91,7 +91,14 @@ class Ruler(QWidget):
         at = self.view.mapFromScene(scene)
         return float(at.x() if self.across else at.y())
 
-    def paintEvent(self, _event) -> None:
+    def pointer_strip(self, pointer: Optional[QPointF]) -> QRect:
+        """Where this ruler marks *pointer*: a few pixels across its width."""
+        if pointer is None:
+            return QRect()
+        at = int(math.floor(self._along(pointer)))
+        return QRect(at - 3, 0, 7, THICK) if self.across else QRect(0, at - 3, THICK, 7)
+
+    def paintEvent(self, event) -> None:
         t = _theme()
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor(t["bg"]))
@@ -112,8 +119,15 @@ class Ruler(QWidget):
             points, _name = UNITS[self.rulers.unit]
             per_unit = points * zoom                       # pixels in one unit
             step, ticks = _step(per_unit)
-            first = math.floor((0 - origin) / (per_unit * step)) - 1
-            last = math.ceil((length - origin) / (per_unit * step)) + 1
+            # only the figures and ticks that reach what is being painted:
+            # the pointer's mark moving repaints a few pixels, not the ruler
+            # (a figure is written up to 63 px past its tick)
+            shown = event.rect()
+            low, high = ((shown.left(), shown.right()) if self.across
+                         else (shown.top(), shown.bottom()))
+            low, high = max(0, low - 64), min(length, high + 1)
+            first = math.floor((low - origin) / (per_unit * step)) - 1
+            last = math.ceil((high - origin) / (per_unit * step)) + 1
             painter.setPen(QPen(QColor(t["ink"]), 1))
             font = QFont(self.font())
             font.setPointSizeF(7.0)
@@ -169,6 +183,8 @@ class Rulers:
         from ..items.shapes import set_paper_unit
         set_paper_unit(self.unit)          # paper sizes are in the rulers' unit
         self.pointer: Optional[QPointF] = None
+        #: the page and the picked-out boxes as the last move found them
+        self._shown = None
         self.top = Ruler(view, self, True)
         self.left = Ruler(view, self, False)
         self.corner = QWidget(view)
@@ -235,8 +251,26 @@ class Rulers:
             self.left.update()
 
     def follow(self, scene_pos: QPointF) -> None:
-        self.pointer = QPointF(scene_pos)
-        self.refresh()
+        """The pointer's mark moves: where it was and where it is are
+        painted again, not both rulers whole — on every move of the pointer
+        that was every tick and figure written out twice over."""
+        was, self.pointer = self.pointer, QPointF(scene_pos)
+        from shiboken6 import isValid
+        if not (self.on and isValid(self.corner)):
+            return
+        # what else they show — the page, what is picked out — is read too:
+        # a markup dragged along carries its band on the rulers with it
+        page = self.page_rect()
+        shown = (None if page is None else page.getRect(),
+                 tuple(rect.getRect() for rect in self.selected_rects()))
+        ground = f"background: {_theme()['bg']};"
+        if self.corner.styleSheet() != ground or shown != self._shown:
+            self._shown = shown
+            self.refresh()
+            return
+        for ruler in (self.top, self.left):
+            ruler.update(ruler.pointer_strip(was))
+            ruler.update(ruler.pointer_strip(self.pointer))
 
     # -- what the rulers measure from ----------------------------------------------------------
     def page_rect(self) -> Optional[QRectF]:

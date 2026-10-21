@@ -94,8 +94,14 @@ def apply_properties(item, properties: dict) -> None:
 # defaults
 # ---------------------------------------------------------------------------
 
+def defaults_as_written():
+    """The saved defaults as they are kept, unread: the same until one is
+    saved or forgotten — for telling cheaply whether they have changed."""
+    return _settings().value(DEFAULTS_KEY, "")
+
+
 def load_defaults() -> dict:
-    stored = _settings().value(DEFAULTS_KEY, "")
+    stored = defaults_as_written()
     try:
         return json.loads(stored) if stored else {}
     except (ValueError, TypeError):
