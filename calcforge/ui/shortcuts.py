@@ -219,6 +219,7 @@ SHEET_KEYS: list[tuple[str, str, str]] = [
     ("goal_seek",        "Goal Seek…",                 ""),
     ("insert_chart",     "Insert chart",               "Alt+F1"),
     ("rename",           "Rename the table or sheet…", ""),
+    ("new_sheet",        "Insert worksheet",           "Shift+F11"),
     ("page_layout",      "Sheet page layout…",         ""),
     ("print_area",       "Set print area",             ""),
     ("page_break",       "Insert page break",          ""),

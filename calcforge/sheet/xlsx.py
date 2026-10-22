@@ -577,6 +577,26 @@ def _page_options(ws, renamed) -> dict:
             out["fit_tall"] = tall
     elif setup is not None and setup.scale and int(setup.scale) != 100:
         out["scale"] = int(setup.scale)          # Adjust to N% normal size
+    # the workbook's split between its sheet tabs and the scroll bar
+    # (workbookView/@tabRatio, in thousandths; Excel starts at 600)
+    try:
+        views = getattr(ws.parent, "views", None) or []
+        ratio = getattr(views[0], "tabRatio", None) if views else None
+        if ratio is not None and int(ratio) != 600:
+            out["tab_ratio"] = max(0.0, min(1.0, int(ratio) / 1000.0))
+    except (TypeError, ValueError, IndexError):
+        pass
+    # Freeze Panes: the rows above and the columns left of the cell named
+    frozen = getattr(ws, "freeze_panes", None)
+    if frozen:
+        from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
+        try:
+            letters, row = coordinate_from_string(str(frozen))
+            rows, cols = int(row) - 1, column_index_from_string(letters) - 1
+            if rows > 0 or cols > 0:
+                out["freeze"] = [rows, cols]
+        except ValueError:
+            pass
     po = ws.print_options
     if po is not None:
         if po.horizontalCentered:

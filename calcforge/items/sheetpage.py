@@ -205,6 +205,15 @@ class SheetRunItem(TableItem):
         return paging.slices[-1][1] + 1 if paging is not None and paging.slices else DEFAULT_ROWS
 
     @property
+    def normal_view(self) -> bool:
+        """Shown alone in Excel's Normal view (not its Page Break Preview):
+        all white, the page breaks thin grey lines that are not dragged."""
+        if not self.alone:
+            return False
+        from ..ui.sheetview import BREAK_PREVIEW, sheet_mode
+        return sheet_mode(self) != BREAK_PREVIEW
+
+    @property
     def alone(self) -> bool:
         """Whether this sheet is shown alone, filling the canvas (Excel's
         Normal view: ui/sheetview.py) rather than on its pages."""
@@ -493,8 +502,8 @@ class SheetRunItem(TableItem):
         # for any edit (the user's seismic workbook, 2026-10-19)
         rules = _looks_in(sheet, a, b, self.size[1] - 1) if sheet.cond_rules else None
         from .nametags import named_blocks, shown
-        tags = (shown(self), tuple(named_blocks(sheet)), self.alone, self._page_numbers(),
-                self.sheet_rows)
+        tags = (shown(self), tuple(named_blocks(sheet)), self.alone, self.normal_view,
+                self._page_numbers(), self.sheet_rows)
         return (tuple(xs), tuple(ys[a:b + 2]), content, [tuple(m) for m in sheet.merges], tags,
                 paging.first_col, paging.last_col, paging.print_rows, tuple(paging.slices),
                 tuple(paging.groups),
@@ -647,12 +656,14 @@ class SheetRunItem(TableItem):
         c0, c1 = self._printed_cols()
         area = paging.print_rows
         band = QRectF(0, ys[r0], xs[-1], ys[r1 + 1] - ys[r0])
-        painter.fillRect(band, QColor("white") if self.alone else SCRATCH)
+        # Page Break Preview, like the pages: white where it prints, grey round it
+        normal = self.normal_view
+        painter.fillRect(band, QColor("white") if normal else SCRATCH)
         top = ys[area[0]] if area else 0.0
         last = self.sheet_rows
         bottom = ys[min(area[1] + 1, len(ys) - 1)] if area else ys[min(last, len(ys) - 1)]
         printed = QRectF(xs[c0], top, xs[c1 + 1] - xs[c0], bottom - top)
-        if not self.alone:
+        if not normal:
             painter.fillRect(printed.intersected(band), QColor("white"))
         font = QFont(page_font("", 40.0, True))
         painter.setFont(font)
@@ -681,7 +692,7 @@ class SheetRunItem(TableItem):
         c0, c1 = self._printed_cols()
         painter.setRenderHint(QPainter.Antialiasing, False)
         area = paging.print_rows
-        if self.alone:
+        if self.normal_view:
             # Excel's Normal view: a set print area outlined in a thin solid
             # line, the pages' breaks thin and dashed (one put there by
             # hand solid), never the Page Break Preview's blue

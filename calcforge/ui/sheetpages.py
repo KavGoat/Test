@@ -373,12 +373,15 @@ def new_sheet_record(setup, book: Optional[dict] = None) -> tuple:
     return item.uid, record
 
 
-def new_sheet_in(window, section: Section) -> None:
-    """The sheet tabs' +: a new sheet at the end of the workbook in view —
-    one of the Excel workbook's sheets when it is one (sharing its names),
-    its paper the last sheet's, with Excel's Normal margins."""
+def new_sheet_in(window, section: Section, before: Optional[str] = None) -> None:
+    """The sheet tabs' ⊕: a new sheet at the end of the workbook in view —
+    or before sheet *before* (Shift+F11, Excel's) — one of the Excel
+    workbook's sheets when it is one (sharing its names), its paper the
+    last sheet's, with Excel's Normal margins."""
     document = window.document
     target = section.last + 1
+    if before is not None and run_pages(document, before):
+        target = run_pages(document, before)[0]
     setup = PageSetup.from_dict(document.pages[section.last].setup.to_dict())
     (setup.margin_left, setup.margin_top, setup.margin_right,
      setup.margin_bottom) = EXCEL_MARGINS_MM

@@ -29,6 +29,7 @@ pytest.importorskip("openpyxl")
 
 from calcforge.items.sheetpage import SheetRunItem  # noqa: E402
 from calcforge.ui import sheetpages  # noqa: E402
+from calcforge.ui.sheetview import EXCEL_SCALE  # noqa: E402
 from tests.test_tables import cell_scene, click, enter, type_text  # noqa: E402
 from tests.test_workbook_sections import (bar_shown, pump, sheet_pages, w,  # noqa: E402,F401
                                           with_loads)
@@ -153,7 +154,9 @@ def test_the_close_button_goes_back_to_the_page_you_came_from(w, wb):
     before = (view.zoom(), view.horizontalScrollBar().value(),
               view.verticalScrollBar().value(), w.current_index)
     click_thumbnail(w, wb.first)
-    assert shown(w) is not None and view.zoom() == pytest.approx(1.0)
+    # Excel's 100 % (the user, H1): cells drawn at 96 px an inch
+    assert shown(w) is not None and view.zoom() == pytest.approx(EXCEL_SCALE)
+    assert w.zoom_combo.currentText() == "100%"
     QTest.mouseClick(w.sheet_tabs.close_button, Qt.LeftButton)
     pump()
     assert shown(w) is None and w.sheet_tabs.isHidden() and not bar_shown(w)
@@ -211,10 +214,10 @@ def test_each_workbook_keeps_its_zoom(w, wb):
     view = w.view
     view.set_zoom(0.7)
     click_thumbnail(w, wb.first)
-    assert view.zoom() == pytest.approx(1.0)
+    assert view.zoom() == pytest.approx(EXCEL_SCALE)
     wheel(w, 2)
     zoomed = view.zoom()
-    assert zoomed > 1.0
+    assert zoomed > EXCEL_SCALE
     assert not others_in_sight(w)
     click_thumbnail(w, 0)                       # out: the pages' own zoom
     assert shown(w) is None and view.zoom() == pytest.approx(0.7)

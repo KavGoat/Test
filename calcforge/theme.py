@@ -362,6 +362,34 @@ QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar#sheetRowScroll:horizontal {{ height: 24px; }}
 QScrollBar#sheetRowScroll::handle:horizontal {{ margin: 6px 2px; }}
 #sheetTabs QTabBar::tab {{ padding: 3px 10px; }}
+/* Excel's sheet tab in use: white, its name green and bold, a green line under it */
+#sheetTabs QTabBar::tab:selected {{
+    background: #ffffff; color: #217346; font-weight: bold;
+    border-bottom: 2px solid #217346;
+}}
+/* the workbook view's scroll bars: Excel's (Windows') arrows at their ends */
+QScrollBar[sheetView="true"]:vertical {{ width: 16px; margin: 16px 0; }}
+QScrollBar[sheetView="true"]:horizontal {{ margin: 0 16px; }}
+QScrollBar[sheetView="true"]::handle:vertical {{ margin: 2px 3px; min-height: 18px; }}
+QScrollBar[sheetView="true"]::add-line:vertical {{
+    height: 16px; width: 16px; subcontrol-position: bottom; subcontrol-origin: margin;
+}}
+QScrollBar[sheetView="true"]::sub-line:vertical {{
+    height: 16px; width: 16px; subcontrol-position: top; subcontrol-origin: margin;
+}}
+QScrollBar[sheetView="true"]::add-line:horizontal {{
+    width: 16px; subcontrol-position: right; subcontrol-origin: margin;
+}}
+QScrollBar[sheetView="true"]::sub-line:horizontal {{
+    width: 16px; subcontrol-position: left; subcontrol-origin: margin;
+}}
+QScrollBar[sheetView="true"]::up-arrow {{ image: url("{arrow_up}"); width: 8px; height: 8px; }}
+QScrollBar[sheetView="true"]::down-arrow {{ image: url("{arrow_down}"); width: 8px; height: 8px; }}
+QScrollBar[sheetView="true"]::left-arrow {{ image: url("{arrow_left}"); width: 8px; height: 8px; }}
+QScrollBar[sheetView="true"]::right-arrow {{ image: url("{arrow_right}"); width: 8px; height: 8px; }}
+QScrollBar[sheetView="true"]::add-line:hover, QScrollBar[sheetView="true"]::sub-line:hover {{
+    background: {accent_soft};
+}}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 
 QSplitter::handle {{ background: {chrome_edge}; }}
@@ -463,7 +491,8 @@ def _arrow_files(ink: str, name: str) -> dict:
     import tempfile
 
     folder = os.path.join(tempfile.gettempdir(), "calcforge-theme")
-    shapes = {"up": "1,7 5,2 9,7", "down": "1,3 5,8 9,3"}
+    shapes = {"up": "1,7 5,2 9,7", "down": "1,3 5,8 9,3",
+              "left": "7,1 2,5 7,9", "right": "3,1 8,5 3,9"}
     paths = {}
     drawings = {way: ('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" '
                       f'viewBox="0 0 10 10"><polygon points="{points}" '

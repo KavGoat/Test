@@ -55,6 +55,14 @@ def open_at(w, run, a1):
     assert w.view.tables.item is run
 
 
+def break_preview(w):
+    """Excel's Page Break Preview, where the breaks and the print area's
+    edges are dragged (in Normal view they are only lines: the Excel
+    audit's B1)."""
+    w.act_sheet_break_preview.trigger()
+    pump()
+
+
 def put(w, run, row, col, text):
     w.view.tables.select((row, col))
     type_text(w, text)
@@ -343,6 +351,7 @@ def test_manual_breaks_and_a_dragged_automatic_break(w):
     assert run.paging.slices[0] == (0, 47)          # Excel's 48 rows on A4
     # drag the automatic break at row 49 up to row 41: a manual break there
     open_at(w, run, "A1")
+    break_preview(w)
     xs, ys = run.edges()
     start = run.mapToScene(QPointF(xs[2], ys[48]))
     end = run.mapToScene(QPointF(xs[2], ys[40] + 2))
@@ -590,15 +599,16 @@ def test_the_print_area_is_dragged_by_its_edges(w):
     from tests.test_usability import drag
     run = sheet_page(w)
     open_at(w, run, "A1")
+    break_preview(w)
     put(w, run, 0, 0, "1")
     put(w, run, 9, 0, "2")
     (run,) = runs(w)
     last = run.paging.last_col
     assert last > 4
     xs, ys = run.edges()
-    # the pointer over the paper's right edge: a column edge's
+    # the pointer over the paper's right edge: Excel's plain double arrow
     edge = run.mapToScene(QPointF(xs[last + 1], ys[3]))
-    assert w.view.tables.hover_cursor(edge).shape() == Qt.SplitHCursor
+    assert w.view.tables.hover_cursor(edge).shape() == Qt.SizeHorCursor
     end = run.mapToScene(QPointF(xs[4] + 2, ys[3]))
     drag(w.view, edge.x(), edge.y(), end.x(), end.y())
     pump()
@@ -838,6 +848,7 @@ def test_pages_across_sit_side_by_side_and_print_their_own_columns(w):
 def test_a_vertical_page_break_from_the_active_cell(w):
     run = sheet_page(w)
     open_at(w, run, "D1")
+    break_preview(w)
     from calcforge.ui.tableedit import SHEET_COMMANDS
     SHEET_COMMANDS["page_break"](w.view.tables)            # Excel's Insert Page Break
     pump()
@@ -851,7 +862,7 @@ def test_a_vertical_page_break_from_the_active_cell(w):
     from tests.test_usability import drag
     xs, ys = run.edges()
     start = run.mapToScene(QPointF(xs[3], ys[5]))
-    assert w.view.tables.hover_cursor(start).shape() == Qt.SplitHCursor
+    assert w.view.tables.hover_cursor(start).shape() == Qt.SizeHorCursor
     end = run.mapToScene(QPointF(xs[4] + 2, ys[5]))
     drag(w.view, start.x(), start.y(), end.x(), end.y())
     pump()

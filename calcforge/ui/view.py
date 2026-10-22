@@ -111,10 +111,14 @@ def excel_cursor(kind: str) -> QCursor:
     """Excel's own pointers over cells: the fat white plus over a cell
     ("cell"), the black arrow down a column heading ("col") and across a row
     heading ("row")."""
-    key = "excel_" + kind
+    from .cursors import screen_ratio
+    ratio = max(1.0, screen_ratio())
+    # drawn for the screen's scale, crisp on a 125-200 % display (B6)
+    key = "excel_" + kind + ("" if ratio == 1.0 else f"@{ratio:g}")
     if key in _DRAWING_CURSORS:
         return _DRAWING_CURSORS[key]
-    pixmap = QPixmap(32, 32)
+    pixmap = QPixmap(round(32 * ratio), round(32 * ratio))
+    pixmap.setDevicePixelRatio(ratio)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing, False)
@@ -1546,7 +1550,10 @@ class PageView(QGraphicsView):
             if delta:
                 # Where the wheel was turned is where the zoom happens; the
                 # event knows, so it does not have to be asked for again.
-                self.wheel_zoom(1.0015 ** delta, event.position())
+                # (The workbook view: Excel's steps of 15 %.)
+                from . import sheetview
+                step = sheetview.wheel_zoom_factor(self, delta) if pixels.isNull() else None
+                self.wheel_zoom(step if step is not None else 1.0015 ** delta, event.position())
             event.accept()
             return
         if paged:
@@ -1561,7 +1568,10 @@ class PageView(QGraphicsView):
             event.accept()
             return
         if notches:
-            self.wheel_scroll(self.verticalScrollBar(), -notches * WHEEL_SCROLL_FACTOR)
+            from . import sheetview
+            rows = sheetview.wheel_pixels(self)        # the workbook view: three rows a notch
+            self.wheel_scroll(self.verticalScrollBar(), -notches * (
+                rows / 120.0 if rows is not None else WHEEL_SCROLL_FACTOR))
         event.accept()
 
     def _scroll_in_the_page(self, pixels, notches: int) -> None:
@@ -3902,9 +3912,10 @@ class PageView(QGraphicsView):
         headings = getattr(self, "sheet_headings", None)
         hit = headings.hit(self.mapFromScene(scene_pos)) if headings is not None else None
         if hit is not None:
-            # down a column, across a row; the select-all corner the plain arrow
-            self.setCursor(excel_cursor(hit[1][0]) if hit[1][0] != "corner"
-                           else QCursor(Qt.ArrowCursor))
+            # Excel's, as on the sheet's own headings: down a column, across a
+            # row, the split arrows on their edges, the white cross on the corner
+            from .tableedit import _cursor_for
+            self.setCursor(_cursor_for(hit[1]) or QCursor(Qt.ArrowCursor))
             return
         if getattr(self.window, "_held_style", None) is not None:
             # A format is held: the brush stays in hand wherever it goes.

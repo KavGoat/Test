@@ -43,6 +43,10 @@ ALIASES: dict[str, str] = {
     "page.insert_image_page.after": "command.insert_image_page",
     "page.insert_excel_workbook.before": "insert.insert_workbook.before",
     "page.insert_excel_workbook.after": "command.insert_workbook",
+    # the workbook view's footer: Excel's view buttons (sheetstatus.py)
+    "status.normal": "command.sheet_normal_view",
+    "status.page_layout": "command.sheet_page_layout_view",
+    "status.page_break_preview": "command.sheet_break_preview",
     # the Thumbnails panel's buttons
     "thumbnails.add_page": "command.quick_add_page",
     "page.add_page": "command.quick_add_page",

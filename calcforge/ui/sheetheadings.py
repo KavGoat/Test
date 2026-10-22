@@ -85,8 +85,10 @@ class SheetHeadings(QWidget):
         self.setGeometry(viewport.geometry())
         strips = []
         k = self._scale()
-        head_h = max(14, int(round(HEADING_H * k)))
-        num_w = max(24, int(round(ROWNUM_W * k)))
+        # the sheet's own heading sizes at the zoom: they never jump as they
+        # come away from the grid (H2)
+        head_h = max(1, int(round(HEADING_H * k)))
+        num_w = max(1, int(round(ROWNUM_W * k)))
         for run in self._runs():
             grid = run.local_rect()
             top_left = view.mapFromScene(run.mapToScene(grid.topLeft()))
@@ -119,6 +121,9 @@ class SheetHeadings(QWidget):
         self.setMask(region)
         self.show()
         self.raise_()
+        frozen = getattr(view, "_frozen_panes", None)
+        if frozen is not None and frozen.isVisible():
+            frozen.raise_()                # the frozen cells' own headings over these
         self.update()
 
     def hit(self, viewport_pos) -> Optional[tuple]:
@@ -134,9 +139,17 @@ class SheetHeadings(QWidget):
             scene = self.view.mapToScene(point.toPoint())
             local = run.mapFromScene(scene)
             xs, ys = run.edges()
+            # an edge, as on the sheet's own headings: dragged, it sizes (B2)
+            tol = 3.0 / self._scale()
             if kind == "col":
+                edge = _edge_at(xs, local.x(), tol)
+                if edge is not None:
+                    return run, ("col_edge", edge)
                 c = max(0, min(bisect.bisect_right(xs, local.x()) - 1, len(xs) - 2))
                 return run, ("col", c)
+            edge = _edge_at(ys, local.y(), tol)
+            if edge is not None:
+                return run, ("row_edge", edge)
             r = max(0, min(bisect.bisect_right(ys, local.y()) - 1, len(ys) - 2))
             return run, ("row", r)
         return None
@@ -147,7 +160,7 @@ class SheetHeadings(QWidget):
         view = self.view
         k = self._scale()
         font = QFont(self.font())
-        font.setPixelSize(max(9, min(14, int(round(8 * k * 1.33)))))
+        font.setPixelSize(max(1, int(round(8 * k * 96 / 72))))   # the sheet's own
         painter.setFont(font)
         grid = QPen(QColor("#bdbdbd"), 1)
         for run, kind, rect in self._strips:
@@ -200,3 +213,13 @@ class SheetHeadings(QWidget):
                     painter.drawText(cell, Qt.AlignCenter, str(r + 1))
             painter.restore()
         painter.end()
+
+
+def _edge_at(edges: list, at: float, tol: float) -> Optional[int]:
+    """The column (row) whose right (bottom) edge is within *tol* of *at*:
+    tableedit's rule (hidden ones included), over the few edges near it."""
+    from .tableedit import _edge_near
+    k = bisect.bisect_left(edges, at - tol)
+    first = max(0, k - 2)
+    found = _edge_near(edges[first:k + 3], at, tol)
+    return None if found is None else found + first

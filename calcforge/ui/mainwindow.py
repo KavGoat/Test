@@ -870,7 +870,10 @@ _SHORTCUT_GROUPS = {
     "rotate_pages_cw": "Pages", "rotate_pages_acw": "Pages",
     "insert_page_break": "Spreadsheet", "remove_page_break": "Spreadsheet",
     "reset_page_breaks": "Spreadsheet", "set_print_area": "Spreadsheet",
-    "clear_print_area": "Spreadsheet", "sheet_page_setup": "Spreadsheet",
+    "clear_print_area": "Spreadsheet", "sheet_normal_view": "Spreadsheet",
+    "sheet_page_layout_view": "Spreadsheet", "sheet_break_preview": "Spreadsheet",
+    "freeze_panes": "Spreadsheet", "freeze_top_row": "Spreadsheet",
+    "freeze_first_column": "Spreadsheet", "unfreeze_panes": "Spreadsheet", "sheet_page_setup": "Spreadsheet",
     "replace_text": "Edit", "show_panels": "Window",
     "panel_pages": "Window", "panel_bookmarks": "Window", "panel_toolsets": "Window",
     "panel_properties": "Window", "panel_search": "Window", "panel_page": "Window",
@@ -1829,6 +1832,28 @@ class MainWindow(QMainWindow):
                   tip="Print only the cells picked out")
         self._act("clear_print_area", "Clear Print Area", self.clear_print_area,
                   tip="Print the whole spreadsheet again")
+        # Excel's View tab for a spreadsheet: its three views and its frozen
+        # panes (sheetview.py, sheetfreeze.py; docs/qa/excel_audit.md)
+        from . import sheetfreeze, sheetview
+        self._act("sheet_normal_view", "Normal", lambda: sheetview.set_view(self, "normal"),
+                  name="Normal View", tip="Normal: the spreadsheet alone, as Excel opens it")
+        self._act("sheet_page_layout_view", "Page Layout",
+                  lambda: sheetview.set_view(self, "page_layout"), name="Page Layout View",
+                  tip="Page Layout: the spreadsheet's pages")
+        self._act("sheet_break_preview", "Page Break Preview",
+                  lambda: sheetview.set_view(self, "break_preview"),
+                  tip="Page Break Preview: what prints white, the rest grey, the page breaks "
+                      "in blue to drag")
+        self._act("freeze_panes", "Freeze Panes", lambda: sheetfreeze.freeze_panes(self),
+                  tip="Keep the rows above and the columns left of the active cell in sight "
+                      "(again: Unfreeze Panes)")
+        self._act("freeze_top_row", "Freeze Top Row", lambda: sheetfreeze.freeze_top_row(self),
+                  tip="Keep the first row in sight as the sheet scrolls")
+        self._act("freeze_first_column", "Freeze First Column",
+                  lambda: sheetfreeze.freeze_first_column(self),
+                  tip="Keep the first column in sight as the sheet scrolls")
+        self._act("unfreeze_panes", "Unfreeze Panes", lambda: sheetfreeze.unfreeze_panes(self),
+                  tip="Let the frozen rows and columns scroll again")
         for key, revu in self.REVU_SECOND_KEYS.items():
             self._second_key(key, revu)
 
@@ -2834,6 +2859,13 @@ class MainWindow(QMainWindow):
         rotate_menu.setObjectName("menuRotateView")
         fill(rotate_menu, (self.act_turn_view_cw, self.act_turn_view_acw,
                            self.act_turn_view_reset))
+        # a spreadsheet's views and frozen panes (Excel's View tab)
+        sheet_views = view_menu.addMenu("Spreadsheet")
+        sheet_views.setObjectName("menuSpreadsheetView")
+        fill(sheet_views, (self.act_sheet_normal_view, self.act_sheet_page_layout_view,
+                           self.act_sheet_break_preview, None, self.act_freeze_panes,
+                           self.act_freeze_top_row, self.act_freeze_first_column,
+                           self.act_unfreeze_panes))
         fill(view_menu, (self.act_split_view, self.act_separate_views, None,
                          self.act_rulers, self.act_crosshair, None,
                          self.act_grid, self.act_snap, self.act_snap_content,
@@ -3237,6 +3269,15 @@ class MainWindow(QMainWindow):
                 menu.addAction(f"{self.status_scale.text()}…", self.calibrate_dialog)
             elif widget is self.status_dimmer:
                 menu.addAction(self.act_dim_content)
+            elif widget in self._sheet_footer_parts():
+                if widget is self._sheet_footer_parts()[0]:
+                    menu.addAction("Zoom…", lambda: self.zoom_combo.showPopup())
+                elif widget is self._sheet_footer_parts()[1]:
+                    for action in (self.act_sheet_normal_view, self.act_sheet_page_layout_view,
+                                   self.act_sheet_break_preview):
+                        menu.addAction(action)
+                else:
+                    menu.addAction(self._sheet_status["stats"].text() or "—").setEnabled(False)
             elif widget is self.status_toggles:
                 menu.addSeparator()
                 grid = menu.addAction("Show Grid")
@@ -3246,6 +3287,13 @@ class MainWindow(QMainWindow):
                 for action in (self.act_snap, self.act_snap_content, self.act_snap_items,
                                self.act_sticky):
                     menu.addAction(action)
+
+    def _sheet_footer_parts(self) -> list:
+        """The workbook view's own footer controls (sheetstatus.py) that go
+        when the footer is short of room: the zoom slider, the view buttons
+        and the sums."""
+        made = getattr(self, "_sheet_status", None) or {}
+        return [made[k] for k in ("slider", "views", "stats") if k in made]
 
     def _page_key(self, step: int) -> None:
         from . import sheetview
@@ -12453,11 +12501,15 @@ class MainWindow(QMainWindow):
             self.view.fit_width()
         else:
             try:
-                self.view.set_zoom(float(text.rstrip("%")) / 100.0)
+                # (the workbook view's 100 % is Excel's: sheetview.EXCEL_SCALE)
+                from .sheetview import view_zoom
+                self.view.set_zoom(view_zoom(self.view, float(text.rstrip("%")) / 100.0))
             except ValueError:
                 pass
 
     def _show_zoom(self, factor: float) -> None:
+        from .sheetview import shown_zoom
+        factor = shown_zoom(self.view, factor)
         self.zoom_combo.blockSignals(True)
         self.zoom_combo.setCurrentText(f"{factor * 100:.0f}%")
         self.zoom_combo.blockSignals(False)

@@ -10,23 +10,38 @@ pane changed, a file opened): its own view's canvas is showing a sheet alone
 (``scene.sheet_view``). Nothing else turns it on or off (the user,
 2026-10-22: "I could see workbook tabs when not in a workbook").
 
+Excel's row (docs/qa/excel_audit.md, A1–A2, C1–C4): ◀ ▶ to scroll the
+tabs (Ctrl+click to the first or last, right-click for a list of every
+sheet), the tabs, ⊕ for a new sheet after the last, the × back to the
+pages, and the splitter at the scroll bar's left: the tabs take
+``tab_ratio`` of the row (Excel's TabRatio, 0.6 to start), dragged to give
+the tabs or the scroll bar more room and kept with the workbook (read from
+an Excel file's ``workbookView/@tabRatio``).
+
 A click goes to that sheet, the tab of the sheet shown is the current one,
-a double-click renames, a tab dragged along moves the sheet's run of pages,
-and + adds a new sheet at the end of the workbook. Right-click (or a long
-press, for touch) a tab for its menu: Print, ticked while the sheet prints,
-is Print / Don't Print for the sheet; a sheet that doesn't print has a grey
-tab with a crossed-out printer.
+a double-click renames it on the tab, a tab dragged along moves the sheet's
+run of pages, and ⊕ adds a new sheet at the end of the workbook.
+Right-click (or a long press, for touch) a tab for its menu: Print, ticked
+while the sheet prints, is Print / Don't Print for the sheet; a sheet that
+doesn't print has a grey tab with a crossed-out printer.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QMenu, QTabBar, QToolButton, QWidget
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLineEdit, QMenu, QSizePolicy,
+                               QTabBar, QToolButton, QWidget)
 
 #: How long a press on a tab is held before it opens the tab's menu (touch).
 LONG_PRESS_MS = 550
+
+#: Excel's TabRatio to start with: the tabs 60 % of the row, the scroll bar 40 %.
+TAB_RATIO = 0.6
+
+#: The scroll bar keeps at least this much of the row (px), the tabs their splitter.
+MIN_BAR = 24
 
 
 
@@ -78,6 +93,81 @@ class _TabBar(QTabBar):
         painter.end()
 
 
+class _Clip(QWidget):
+    """The part of the tab bar in sight: the bar laid out whole inside it,
+    moved along by ◀ ▶ (Excel's tabs scroll a tab at a time)."""
+
+    def __init__(self, bar: QTabBar):
+        super().__init__()
+        self.bar = bar
+        bar.setParent(self)
+        self.offset = 0
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+
+    def sizeHint(self) -> QSize:
+        return self.bar.sizeHint()
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, self.bar.sizeHint().height())
+
+    def place(self) -> None:
+        hint = self.bar.sizeHint()
+        self.bar.setGeometry(-self.offset, 0, max(hint.width(), 1), self.height())
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.place()
+
+
+class _Splitter(QWidget):
+    """Excel's splitter between the tabs and the scroll bar: three dots,
+    the double-headed arrow, dragged to share the row out."""
+
+    def __init__(self, owner: "SheetTabs"):
+        super().__init__()
+        self.owner = owner
+        self.setObjectName("sheetTabSplitter")
+        self.setFixedWidth(7)
+        self.setCursor(QCursor(Qt.SplitHCursor))
+        self.setToolTip("Drag to give the sheet tabs or the scroll bar more room")
+        self._dragging = False
+
+    def paintEvent(self, event) -> None:
+        from ..app import current_theme
+        from ..theme import tokens
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(tokens(current_theme())["ink_soft"]))
+        x, y = self.width() / 2.0, self.height() / 2.0
+        for k in (-4, 0, 4):
+            painter.drawEllipse(QPointF(x, y + k), 1.1, 1.1)
+        painter.end()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._dragging = True
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._dragging:
+            self.owner.drag_ratio(event.globalPosition().x())
+            event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._dragging and event.button() == Qt.LeftButton:
+            self._dragging = False
+            self.owner.drag_ratio(event.globalPosition().x())
+            self.owner.keep_ratio()
+            event.accept()
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        # Excel: a double-click puts the split back where it starts
+        self.owner.set_ratio(TAB_RATIO)
+        self.owner.keep_ratio()
+        event.accept()
+
+
 class SheetTabs(QWidget):
     def __init__(self, window):
         super().__init__()
@@ -87,20 +177,33 @@ class SheetTabs(QWidget):
         self.section_key: Optional[str] = None  # the workbook listed (its first run)
         self.showing = False                    # whether a sheet is shown alone
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(2, 0, 4, 0)
+        layout.setContentsMargins(2, 0, 0, 0)
         layout.setSpacing(2)
-        # beside the scroll bar, at most half of it (the rest scrolls)
-        from PySide6.QtWidgets import QSizePolicy
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        # its width is its share of the row (tab_ratio), set as the row is
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self._ratio: Optional[float] = None      # while the splitter is dragged
+        self._row = None                         # the row it shares with the scroll bar
+        # Excel's tab-scroll arrows, at the left, always there
+        self.back = self._arrow(Qt.LeftArrow, "sheetTabsBack",
+                                "Scroll the tabs left (Ctrl+click: the first sheet; "
+                                "right-click: every sheet)", -1)
+        self.forth = self._arrow(Qt.RightArrow, "sheetTabsForth",
+                                 "Scroll the tabs right (Ctrl+click: the last sheet; "
+                                 "right-click: every sheet)", 1)
         self.add = QToolButton()
-        self.add.setText("+")
+        self.add.setObjectName("sheetTabsNew")
+        self.add.setText("⊕")
+        self.add.setAutoRaise(True)
         self.add.setToolTip("New sheet (a spreadsheet page at the end of this workbook)")
-        self.add.clicked.connect(self.new_sheet)
+        self.add.clicked.connect(lambda: self.new_sheet())
         self.bar = _TabBar(self)
         self.bar.setMovable(True)
         self.bar.setDrawBase(False)
         self.bar.setExpanding(False)
-        self.bar.setUsesScrollButtons(True)
+        self.bar.setElideMode(Qt.ElideNone)
+        self.bar.setUsesScrollButtons(False)       # its own ◀ ▶, at the left
+        self.clip = _Clip(self.bar)
+        self.first_shown = 0                       # the first tab in sight
         self.bar.setShape(QTabBar.RoundedSouth)
         self.bar.setContextMenuPolicy(Qt.CustomContextMenu)
         self.bar.tabBarClicked.connect(self._clicked)
@@ -122,11 +225,153 @@ class SheetTabs(QWidget):
         self.close_button.setAutoRaise(True)
         self.close_button.setToolTip("Close Workbook — back to the pages, where you were")
         self.close_button.clicked.connect(self.close_sheet_view)
+        self.splitter = _Splitter(self)
+        self.editor: Optional[QLineEdit] = None    # a tab's name edited on it
+        layout.addWidget(self.back)
+        layout.addWidget(self.forth)
+        layout.addWidget(self.clip)
         layout.addWidget(self.add)
-        layout.addWidget(self.bar, 1)
+        layout.addStretch(1)
         layout.addWidget(self.close_button)
+        layout.addWidget(self.splitter)
         self._moving = False
         self.hide()
+
+    def _arrow(self, kind, name: str, tip: str, step: int) -> QToolButton:
+        button = QToolButton()
+        button.setObjectName(name)
+        button.setArrowType(kind)
+        button.setAutoRaise(True)
+        button.setToolTip(tip)
+        button.setFixedWidth(16)
+        button.clicked.connect(lambda: self._arrow_clicked(step))
+        button.setContextMenuPolicy(Qt.CustomContextMenu)
+        button.customContextMenuRequested.connect(
+            lambda pos, b=button: self._sheet_list(b.mapToGlobal(pos)))
+        return button
+
+    # -- the row shared with the scroll bar (Excel's TabRatio) ---------------------------
+    def ratio(self) -> float:
+        """The tabs' share of the row: as dragged, else the workbook's."""
+        if self._ratio is not None:
+            return self._ratio
+        for uid, _name in self.entries[:1]:
+            item = self._item(uid)
+            page = getattr(getattr(item, "sheet", None), "page", None) or {}
+            try:
+                return max(0.0, min(1.0, float(page.get("tab_ratio", TAB_RATIO))))
+            except (TypeError, ValueError):
+                break
+        return TAB_RATIO
+
+    def _watch_row(self) -> None:
+        row = self.parentWidget()
+        if row is not None and row is not self._row:
+            self._row = row
+            row.installEventFilter(self)
+
+    def fit_row(self) -> None:
+        """Its width: its share of the row, the scroll bar the rest."""
+        self._watch_row()
+        row = self._row
+        if row is None:
+            return
+        total = row.width()
+        width = int(round(total * self.ratio()))
+        width = max(self.splitter.width(), min(width, total - MIN_BAR))
+        if self.width() != width or self.minimumWidth() != width:
+            self.setFixedWidth(max(width, 0))
+            self._show_current()
+
+    def set_ratio(self, ratio: float) -> None:
+        self._ratio = max(0.0, min(1.0, ratio))
+        self.fit_row()
+
+    def drag_ratio(self, global_x: float) -> None:
+        """The splitter dragged to *global_x*: the tabs end there."""
+        row = self._row
+        if row is None or row.width() <= 0:
+            return
+        left = row.mapToGlobal(QPoint(0, 0)).x()
+        self.set_ratio((global_x - left + self.splitter.width() / 2.0) / row.width())
+
+    def keep_ratio(self) -> None:
+        """The split dragged to: kept with the workbook (each of its
+        sheets), saved with the document."""
+        ratio = self._ratio
+        if ratio is None:
+            return
+        changed = False
+        for uid, _name in self.entries:
+            item = self._item(uid)
+            sheet = getattr(item, "sheet", None)
+            if sheet is None:
+                continue
+            if sheet.page is None:
+                sheet.page = {}
+            if sheet.page.get("tab_ratio") != round(ratio, 3):
+                sheet.page["tab_ratio"] = round(ratio, 3)
+                changed = True
+        self._ratio = None
+        if changed:
+            self.window.mark_modified()
+        self.fit_row()
+
+    # -- scrolling the tabs ------------------------------------------------------------------
+    def _arrow_clicked(self, step: int) -> None:
+        count = self.bar.count()
+        if not count:
+            return
+        if QApplication.keyboardModifiers() & Qt.ControlModifier:
+            # Excel: Ctrl+click an arrow goes to the first or last sheet
+            self.go(0 if step < 0 else count - 1)
+            return
+        self.scroll_tabs(self.first_shown + step)
+
+    def scroll_tabs(self, first: int) -> None:
+        """The tabs from tab *first* in sight."""
+        count = self.bar.count()
+        first = max(0, min(first, max(count - 1, 0)))
+        # no further than shows the last tab at the right
+        room = self.clip.width()
+        while first > 0 and self.bar.tabRect(count - 1).right() - \
+                self.bar.tabRect(first - 1).left() < room:
+            first -= 1
+        self.first_shown = first
+        self.clip.offset = self.bar.tabRect(first).left() if count else 0
+        self.clip.place()
+        self.back.setEnabled(first > 0)
+        self.forth.setEnabled(count > 0 and self.bar.tabRect(count - 1).right()
+                              - self.clip.offset >= room)
+
+    def _show_current(self) -> None:
+        """The current tab in sight, scrolled to if it was not."""
+        i = self.bar.currentIndex()
+        if i < 0:
+            self.scroll_tabs(self.first_shown)
+            return
+        rect = self.bar.tabRect(i)
+        room = self.clip.width()
+        first = self.first_shown
+        if rect.left() < self.bar.tabRect(min(first, self.bar.count() - 1)).left():
+            first = i
+        while first < i and rect.right() - self.bar.tabRect(first).left() >= room:
+            first += 1
+        self.scroll_tabs(first)
+
+    def _sheet_list(self, at: QPoint) -> Optional[QMenu]:
+        """Excel's right-click on the tab arrows: every sheet, to go to."""
+        menu = QMenu(self)
+        menu.setProperty("cf_context", "sheetlist")
+        current = self.bar.currentIndex()
+        for i, (_uid, name) in enumerate(self.entries):
+            action = menu.addAction(name, lambda i=i: self.go(i))
+            action.setCheckable(True)
+            action.setChecked(i == current)
+        self.popup = menu
+        menu.aboutToHide.connect(menu.deleteLater)
+        menu.popup(at)
+        return menu
 
     # -- the workbook shown -----------------------------------------------------------
     def _sections(self) -> list:
@@ -176,6 +421,7 @@ class SheetTabs(QWidget):
         self._fill()
         self.setVisible(self.showing)
         self._scroll_row(view, bool(found))
+        self.fit_row()
         self.follow()
         return was != (self.showing, self.section_key)
 
@@ -202,8 +448,10 @@ class SheetTabs(QWidget):
             while self.bar.count():
                 self.bar.removeTab(0)
             for _uid, name in found:
-                self.bar.addTab("▦ " + name)
+                self.bar.addTab(name)              # the bare name, as Excel's
             self.bar.blockSignals(False)
+            self.clip.updateGeometry()
+            self.clip.place()
         self._mark_printing()
 
     def prints(self, index: int) -> bool:
@@ -253,6 +501,13 @@ class SheetTabs(QWidget):
             scroll.style().unpolish(scroll)
             scroll.style().polish(scroll)
             scroll.updateGeometry()
+        # the workbook view's bars: Windows' arrows at their ends (A4)
+        for bar in (scroll, view.verticalScrollBar()):
+            if bool(bar.property("sheetView")) != self.showing:
+                bar.setProperty("sheetView", self.showing)
+                bar.style().unpolish(bar)
+                bar.style().polish(bar)
+                bar.updateGeometry()
 
     def refresh(self) -> None:
         """The strip as its view now is — and every other pane's strip, so
@@ -282,6 +537,7 @@ class SheetTabs(QWidget):
                 self.bar.blockSignals(True)
                 self.bar.setCurrentIndex(i)
                 self.bar.blockSignals(False)
+                self._show_current()
                 return
 
     # -- going there --------------------------------------------------------------------
@@ -313,15 +569,41 @@ class SheetTabs(QWidget):
         item = self._item(uid)
         if item is None:
             return
-        window = self.window
-        if not getattr(window, "interactive_prompts", True):
+        # Excel: the name edited on the tab itself; Enter (or a click away)
+        # keeps it, Esc leaves it as it was
+        self._end_rename(False)
+        if self.bar.currentIndex() != index:
+            self.go(index)
+        editor = self.editor = QLineEdit(self.bar)
+        editor.setObjectName("sheetTabRename")
+        editor.setText(name)
+        editor.selectAll()
+        editor.setFrame(False)
+        editor.setAlignment(Qt.AlignCenter)
+        editor.setGeometry(self.bar.tabRect(index).adjusted(2, 2, -2, -2))
+        editor.setToolTip("The sheet's name: Enter keeps it (formulas that use it follow), "
+                          "Esc leaves it")
+        editor._uid = uid
+        editor.returnPressed.connect(lambda: self._end_rename(True))
+        editor.editingFinished.connect(lambda: self._end_rename(True))
+        editor.installEventFilter(self)
+        editor.show()
+        editor.setFocus(Qt.MouseFocusReason)
+
+    def _end_rename(self, keep: bool) -> None:
+        editor, self.editor = self.editor, None
+        if editor is None:
             return
-        from PySide6.QtWidgets import QInputDialog
-        new, ok = QInputDialog.getText(window, "Rename sheet",
-                                       "Name (formulas that use it follow):", text=name)
-        if ok and new.strip() and new.strip() != name:
-            window.view.tables.rename_to(item, new.strip())
+        uid, new = editor._uid, editor.text().strip()
+        editor.hide()
+        editor.deleteLater()
+        item = self._item(uid)
+        name = next((n for u, n in self.entries if u == uid), None)
+        if keep and item is not None and new and new != name:
+            self.window.view.tables.rename_to(item, new)
+            self.entries = []
             self.refresh()
+        self.window.view.setFocus()
 
     # -- moving a sheet ------------------------------------------------------------------
     def _moved(self, frm: int, to: int) -> None:
@@ -414,6 +696,13 @@ class SheetTabs(QWidget):
         return menu
 
     def eventFilter(self, watched, event) -> bool:
+        if watched is self._row and event.type() == QEvent.Resize:
+            self.fit_row()
+            return False
+        if watched is self.editor and event.type() == QEvent.KeyPress \
+                and event.key() == Qt.Key_Escape:
+            self._end_rename(False)
+            return True
         if watched is self.bar:
             kind = event.type()
             if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
@@ -445,14 +734,17 @@ class SheetTabs(QWidget):
             window.delete_page(pages[0], pages=pages)
             self.refresh()
 
-    def new_sheet(self) -> None:
+    def new_sheet(self, before: bool = False) -> None:
         """A new spreadsheet page, a sheet of its own, at the end of the
-        workbook in view (of the document, when there is none)."""
+        workbook in view (of the document, when there is none) — or, with
+        *before* (Shift+F11), before the sheet shown, as Excel puts it."""
         window = self.window
         from . import sheetpages
         section = self.section()
         if section is not None:
-            sheetpages.new_sheet_in(window, section)
+            from .sheetview import run_shown
+            shown = run_shown(window.scene) if before else None
+            sheetpages.new_sheet_in(window, section, before=shown)
             # and it is the sheet shown (new_sheet_in made it the current page)
             window.go_to_page(window.current_index)
         else:

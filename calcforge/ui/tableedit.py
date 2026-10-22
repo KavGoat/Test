@@ -169,6 +169,43 @@ class CellEditor(UnitText):
         QTimer.singleShot(0, self.tables._focus_left)
 
 
+class _NameGrip(QWidget):
+    """The dots between the Name Box and the formula: dragged, the Name Box
+    is wider or narrower (Excel's)."""
+
+    def __init__(self, bar: "FormulaBar"):
+        super().__init__()
+        self.bar = bar
+        self.setObjectName("nameBoxGrip")
+        self.setFixedWidth(7)
+        self.setCursor(QCursor(Qt.SplitHCursor))
+        self.setToolTip("Drag to widen or narrow the Name Box")
+        self._from = None
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(self.palette().mid())
+        x, y = self.width() / 2.0, self.height() / 2.0
+        for k in (-4, 0, 4):
+            painter.drawEllipse(QPointF(x, y + k), 1.1, 1.1)
+        painter.end()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._from = (event.globalPosition().x(), self.bar.name.width())
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._from is not None:
+            start, width = self._from
+            self.bar.name.setFixedWidth(int(max(60, min(420, width + event.globalPosition().x()
+                                                         - start))))
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._from = None
+
+
 class FormulaBar(QWidget):
     """Excel's name box and formula bar, over the canvas while a table is open."""
 
@@ -194,13 +231,36 @@ class FormulaBar(QWidget):
         names_list.aboutToShow.connect(lambda: self._fill_names(names_list))
         self.names.setMenu(names_list)
         layout.addWidget(self.names)
-        fx = QLabel("fx")
+        # the dots after the Name Box: dragged, it is wider or narrower (Excel's)
+        self.name_grip = _NameGrip(self)
+        layout.insertWidget(layout.indexOf(self.names) + 1, self.name_grip)
+        # Excel's ✗ Cancel and ✓ Enter while a cell is typed in, and fx
+        self.cancel_button = QToolButton()
+        self.cancel_button.setObjectName("formulaCancel")
+        self.cancel_button.setText("✗")
+        self.cancel_button.setAutoRaise(True)
+        self.cancel_button.setToolTip("Cancel (Esc): the cell as it was")
+        self.cancel_button.clicked.connect(lambda: self.tables.cancel())
+        layout.addWidget(self.cancel_button)
+        self.enter_button = QToolButton()
+        self.enter_button.setObjectName("formulaEnter")
+        self.enter_button.setText("✓")
+        self.enter_button.setAutoRaise(True)
+        self.enter_button.setToolTip("Enter: what is typed goes into the cell")
+        self.enter_button.clicked.connect(lambda: self.tables.commit(move=None))
+        layout.addWidget(self.enter_button)
+        fx = QToolButton()
+        fx.setObjectName("formulaInsertFunction")
+        fx.setText("fx")
+        fx.setAutoRaise(True)
         f = fx.font()
         f.setItalic(True)
         f.setBold(True)
         fx.setFont(f)
-        fx.setContentsMargins(4, 0, 4, 0)
+        fx.setToolTip("Insert Function: start a formula, and pick a function from the list")
+        fx.clicked.connect(lambda: self.tables.insert_function())
         layout.addWidget(fx)
+        self.fx = fx
         self.edit = UnitText()
         self.edit.setToolTip("What is typed in the cell: its formula, or its value")
         # through self.tables: in Split View the bar serves whichever view is
@@ -249,10 +309,12 @@ def _excel(kind):
 # handle, the move arrows on the selection's border, black arrows down and
 # across the headings, the split arrows on their edges
 _CURSORS = {"cell": _excel("cell"), "fill": lambda: QCursor(Qt.CrossCursor),
-            "border": lambda: QCursor(Qt.SizeAllCursor), "col": _excel("col"), "row": _excel("row"),
-            "corner": lambda: QCursor(Qt.ArrowCursor), "col_edge": lambda: QCursor(Qt.SplitHCursor),
-            "row_edge": lambda: QCursor(Qt.SplitVCursor), "break": lambda: QCursor(Qt.SplitVCursor),
-            "vbreak": lambda: QCursor(Qt.SplitHCursor),
+            "border": lambda: _border_cursor(), "col": _excel("col"), "row": _excel("row"),
+            "corner": _excel("cell"), "col_edge": lambda: QCursor(Qt.SplitHCursor),
+            # a page break or the print area's edge (Page Break Preview): the
+            # plain double arrow, not a heading edge's split arrow
+            "row_edge": lambda: QCursor(Qt.SplitVCursor), "break": lambda: QCursor(Qt.SizeVerCursor),
+            "vbreak": lambda: QCursor(Qt.SizeHorCursor),
             "grow": lambda: QCursor(Qt.SizeFDiagCursor),
             # the tab picks the whole table up and moves it: Revu's move pointer
             "tab": lambda: _revu_move()}
@@ -261,6 +323,18 @@ _CURSORS = {"cell": _excel("cell"), "fill": lambda: QCursor(Qt.CrossCursor),
 def _revu_move():
     from .cursors import move_cursor
     return move_cursor()
+
+
+#: Seconds a press on a sheet's HYPERLINK cell is held to pick the cell (B7)
+LINK_HOLD = 0.5
+
+
+def _border_cursor():
+    """Excel's on the selection's border: the white arrow with the four-
+    headed move sign; with Ctrl held, the arrow with the small + (a copy)."""
+    from .cursors import copy_cursor, move_cursor
+    return copy_cursor() if QApplication.keyboardModifiers() & Qt.ControlModifier \
+        else move_cursor()
 
 
 def _now(fmt: str) -> str:
@@ -320,6 +394,19 @@ def _layout(te, what: str) -> None:
         window.sheet_page_setup(window.document.index_of(item.parentItem().page))
 
 
+def _select_all(te) -> None:
+    """Ctrl+A, Excel's: inside a block of cells the block first (its
+    current region), pressed again (or from an empty cell) the whole sheet."""
+    from .sheetview import current_region
+    item = te.item
+    whole = ((0, 0), (item.size[0] - 1, item.size[1] - 1))
+    region = current_region(item.sheet, te.active) if item.sheet is not None else None
+    if region is not None and tuple(te.selection()) != region:
+        te.select(region[:2], region[2:], te.active)
+        return
+    te.select(*whole, te.active)
+
+
 def _names(name):
     def run(te):
         from . import names
@@ -330,7 +417,8 @@ def _names(name):
 # What each of the Spreadsheet group's bindings does (shortcuts.SHEET_KEYS).
 SHEET_COMMANDS = {
     "edit_cell": lambda te: te.begin_edit(None, enter_mode=False),
-    "select_all": lambda te: te.select((0, 0), (te.item.size[0] - 1, te.item.size[1] - 1), te.active),
+    "select_all": lambda te: _select_all(te),
+    "new_sheet": lambda te: te.view.window.sheet_tabs.new_sheet(before=True),
     "select_column": lambda te: te.select((0, te.selection()[1]),
                                           (te.item.size[0] - 1, te.selection()[3]), te.active),
     "select_row": lambda te: te.select((te.selection()[0], 0),
@@ -404,8 +492,8 @@ SHEET_COMMANDS = {
 
 
 def _cursor_for(zone) -> Optional[QCursor]:
-    if zone and zone[0] == "area":       # the print area's edge, as a column's or a row's
-        return QCursor(Qt.SplitHCursor if zone[1] in ("left", "right") else Qt.SplitVCursor)
+    if zone and zone[0] == "area":       # the print area's edge: the plain double arrow
+        return QCursor(Qt.SizeHorCursor if zone[1] in ("left", "right") else Qt.SizeVerCursor)
     make = _CURSORS.get(zone[0] if zone else None)
     return make() if make is not None else None
 
@@ -447,6 +535,11 @@ class TableEditing:
         self.copied: Optional[tuple] = None  # (uid, block, cut)
         self.bar: Optional[FormulaBar] = None
         self.highlight_ranges: Optional[list] = None    # outlined blocks (the Rules Manager)
+        # the blocks picked before this one with Ctrl (Excel's multiple
+        # selection): shaded, summed in the footer, cleared and formatted
+        # with it (F2)
+        self.extra_ranges: list = []
+        self._keep_ranges = False
         self.insert_drag: Optional[tuple] = None
 
     # -- which table ------------------------------------------------------------------
@@ -592,7 +685,9 @@ class TableEditing:
         self._refresh_controls()
         self._properties_follow(item)
         view.setFocus()
-        view.statusMessage.emit(f"{item.name}: type into the cells · click outside it or Esc to close it")
+        view.statusMessage.emit(f"{item.name}: type into the cells" if getattr(item, "alone", False)
+                                else f"{item.name}: type into the cells · click outside it or "
+                                     "Esc to close it")
         from . import sheetview
         sheetview.opened(view, item)      # a sheet's cell clicked on its page: the workbook view
 
@@ -627,6 +722,9 @@ class TableEditing:
             bar.edit.setPlaceholderText("click a cell")
         bar.edit.setReadOnly(self.item is None)
         bar.name.setReadOnly(self.item is None)
+        for button in (getattr(bar, "cancel_button", None), getattr(bar, "enter_button", None)):
+            if button is not None:
+                button.setEnabled(self.editor is not None)
         bar.unit.setEnabled(self.item is not None)
         if self.item is None:
             bar.unit.clear()
@@ -681,6 +779,7 @@ class TableEditing:
         self._uid = None
         self.copied = None
         self.held_format = None
+        self.extra_ranges = []
         self.refresh_bar()
         self._refresh_controls()
         self._properties_follow(item)
@@ -731,6 +830,9 @@ class TableEditing:
         self.settle_result_unit()
         if not self._keep_tab:
             self.tab_start = None
+        if self.extra_ranges and self.drag is None and not self._keep_ranges:
+            self.extra_ranges = []           # a block picked afresh: the others go
+            item.update()
         rows, cols = item.size
         if _is_run(item):
             rows += 1                    # one row past the last page: typing there adds a page
@@ -856,10 +958,20 @@ class TableEditing:
         item = self._item
         if item is None or self.drag is not None or self._keep_view:
             return
+        from .sheetfreeze import scroll_to_cell
+        if scroll_to_cell(self.view, item, cell):
+            return                         # panes frozen: kept below and right of them
         rect = item.mapRectToScene(item.cell_rect(*cell))
         self.view.ensureVisible(rect, 8, 8)
 
+    def _status_soon(self) -> None:
+        """Excel's status bar in the workbook view: its mode and the sums
+        of the cells picked (sheetstatus.py)."""
+        from . import sheetstatus
+        sheetstatus.refresh_soon(getattr(self.view, "window", None))
+
     def _update_bar(self) -> None:
+        self._status_soon()
         bar = self.bar
         item = self._item
         if bar is None or item is None or item.sheet is None:
@@ -870,8 +982,11 @@ class TableEditing:
             bar.name.setText(named)
         elif (top, left) == (bottom, right) or item.sheet.merge_at(top, left) == (top, left, bottom, right):
             bar.name.setText(col_letters(self.active[1]) + str(self.active[0] + 1))
-        else:
+        elif self.drag is not None and self.drag[0] in ("select", "cols", "rows"):
+            # Excel: the size of the block only while the mouse picks it
             bar.name.setText(f"{bottom - top + 1}R × {right - left + 1}C")
+        else:
+            bar.name.setText(col_letters(self.active[1]) + str(self.active[0] + 1))
         if self.editor is None and QApplication.focusWidget() is not bar.edit:
             bar.edit.setText(item.sheet.input(*self.active))
             # a spilled cell: its formula, greyed (Excel), from the cell it spills from
@@ -901,11 +1016,13 @@ class TableEditing:
         if handle is not None and handle.adjusted(-tol, -tol, tol, tol).contains(local):
             return ("fill",)
         w, h = xs[-1], ys[-1]
-        if _is_run(item) and item.paging is not None:
+        from .sheetview import breaks_editable
+        breaks = _is_run(item) and item.paging is not None and breaks_editable(item)
+        if breaks:
             side = self._area_edge(item, local, tol)
             if side is not None:
                 return ("area", side)
-        if _is_run(item) and item.paging is not None and 0 <= local.x() < w:
+        if breaks and 0 <= local.x() < w:
             # a page break line: dragged, it becomes a manual break (Excel)
             paging = item.paging
             if xs[paging.first_col] <= local.x() <= xs[paging.last_col + 1]:
@@ -936,7 +1053,8 @@ class TableEditing:
         if item.selection is not None:
             box = item.block_rect(*item.selection)
             outer = box.adjusted(-tol, -tol, tol, tol)
-            inner = box.adjusted(tol, tol, -tol, -tol)
+            px = 2.0 / max(self.view.transform().m11(), 0.05)   # the border's own width
+            inner = box.adjusted(px, px, -px, -px)
             if outer.contains(local) and not inner.contains(local):
                 return ("border",)
         hit = item.cell_at(local)
@@ -1013,6 +1131,15 @@ class TableEditing:
             got = self.link_at(scene_pos)
             if got is not None:
                 self.follow_link(*got)
+                return True
+        if event.button() == Qt.LeftButton and not event.modifiers() \
+                and view.tool_key == "select":
+            got = self.link_at(scene_pos)
+            if got is not None and _is_run(got[0]):
+                # Excel: on a sheet a click follows the link; a press held
+                # (LINK_HOLD) picks the cell instead
+                import time
+                self._link_press = (got, time.monotonic())
                 return True
         # a click anywhere else on the canvas leaves SMath's unit box (the
         # canvas never takes the focus from it, so it stayed, "=" and all,
@@ -1196,6 +1323,19 @@ class TableEditing:
                 return True
             if not self.commit(move=None):
                 return True
+        if kind in ("cell", "col", "row") and ctrl and not shift and _is_run(item):
+            # Excel: Ctrl+click (or drag) adds another block to those picked
+            self.extra_ranges = self.extra_ranges + [tuple(self.selection())]
+            self._keep_ranges = True
+            item.update()
+        try:
+            return self._press_picked(item, zone, kind, shift, rows, cols, scene_pos, event)
+        finally:
+            self._keep_ranges = False
+
+    def _press_picked(self, item, zone, kind, shift, rows, cols, scene_pos, event) -> bool:
+        """The rest of a press on an open table (_press_zone)."""
+        ctrl = bool(event.modifiers() & Qt.ControlModifier)
         if kind == "cell":
             cell = (zone[1], zone[2])
             if shift:
@@ -1433,7 +1573,21 @@ class TableEditing:
             return (t, r + 1, b, col)
         return (t, col, b, l - 1)
 
+    #: a HYPERLINK cell pressed on a sheet: (what link_at said, when)
+    _link_press = None
+
     def mouse_release(self, event, scene_pos: QPointF) -> bool:
+        pressed, self._link_press = self._link_press, None
+        if pressed is not None:
+            import time
+            (table, cell, link), when = pressed
+            if time.monotonic() - when < LINK_HOLD:
+                self.follow_link(table, cell, link)
+            else:
+                if self.item is not table:
+                    self.open(table, cell)
+                self.select(cell)
+            return True
         if self.insert_drag is not None:
             self._finish_insert()
             return True
@@ -1488,6 +1642,13 @@ class TableEditing:
         elif kind == "move" and drag[3] is not None and drag[3] != (0, 0):
             src, (dr, dc) = drag[1], drag[3]
             copy = bool(event.modifiers() & Qt.ControlModifier)
+            if event.modifiers() & Qt.ShiftModifier and not copy:
+                # Excel: Shift + drag cuts the cells and inserts them there,
+                # the cells between closing up behind them
+                moved = self._insert_moved(src, dr, dc)
+                if moved is not None:
+                    self.select(*moved)
+                    return True
             if copy:
                 self._change("Copy cells", lambda wb, sheet: wb.copy_block(
                     sheet, *src, sheet, src[0] + dr, src[1] + dc))
@@ -1501,9 +1662,43 @@ class TableEditing:
                 item.selection is not None and item.active is not None:
             # nothing was drawn for the drag but the selection itself
             item.update(self._selection_area(item, item.selection, item.active))
+            self._update_bar()              # (the Name Box: the active cell again)
         else:
             item.update()
         return True
+
+    def _insert_moved(self, src: tuple, dr: int, dc: int) -> Optional[tuple]:
+        """The block *src* cut and inserted *dr* rows down (or *dc* columns
+        across, whichever is the longer way): one undo step. The
+        (anchor, edge) it is at afterwards, or None (nowhere to go)."""
+        t, l, b, r = src
+        down = abs(dr) >= abs(dc)
+        n = (b - t + 1) if down else (r - l + 1)
+        step = dr if down else dc
+        if step == 0:
+            return None
+        start = t if down else l
+        # where it goes in: before the row (column) the drag reached
+        at = start + step if step < 0 else start + step + n
+        if start <= at <= start + n:
+            return None
+
+        def change(wb, sheet):
+            if down:
+                wb.shift_cells(sheet, at, l, at + n - 1, r, "row", True)
+                old = t + n if at <= t else t
+                wb.move_block(sheet, old, l, old + n - 1, r, sheet, at, l)
+                wb.shift_cells(sheet, old, l, old + n - 1, r, "row", False)
+            else:
+                wb.shift_cells(sheet, t, at, b, at + n - 1, "col", True)
+                old = l + n if at <= l else l
+                wb.move_block(sheet, t, old, b, old + n - 1, sheet, t, at)
+                wb.shift_cells(sheet, t, old, b, old + n - 1, "col", False)
+        self._change("Move cells", change)
+        first = at if at < start else at - n
+        if down:
+            return (first, l), (first + n - 1, r)
+        return (t, first), (b, first + n - 1)
 
     def _paint_held_format(self) -> None:
         """Format Painter: the carried looks go onto the cells picked (as a
@@ -1582,7 +1777,10 @@ class TableEditing:
     def hover_cursor(self, scene_pos: QPointF):
         if self.view.tool_key == "select" and self.link_at(scene_pos) is not None:
             # a HYPERLINK cell: the pointing hand, as Excel's
-            self.view.statusMessage.emit("Ctrl+click to follow the link")
+            table = self.link_at(scene_pos)[0]
+            self.view.statusMessage.emit(
+                "Click to follow the link · click and hold to pick the cell" if _is_run(table)
+                else "Ctrl+click to follow the link")
             return QCursor(Qt.PointingHandCursor)
         item = self.item
         if item is None:
@@ -1700,8 +1898,9 @@ class TableEditing:
         if item is None or editor is None or self.editing_cell is None:
             return
         rect = item.mapRectToScene(item.cell_rect(*self.editing_cell))
-        top_left = self.view.mapFromScene(rect.topLeft())
-        bottom_right = self.view.mapFromScene(rect.bottomRight())
+        from .sheetfreeze import shown_point          # (a frozen cell: where it is drawn)
+        top_left = shown_point(self.view, item, rect.topLeft())
+        bottom_right = shown_point(self.view, item, rect.bottomRight())
         scale = self.view.transform().m11()
         st = item.sheet.workbook.style_of(item.sheet, *self.editing_cell)
         # the cell's font at the zoom it is seen at (a plain font: the page's
@@ -1742,7 +1941,23 @@ class TableEditing:
     #: references of a formula (each outlined in its colour on its cells)
     _drawn_refs = None
 
+    def insert_function(self) -> None:
+        """fx, Excel's Insert Function: a formula started in the active cell
+        (or the one being typed), and the list of functions to pick from."""
+        if self.item is None or self.active is None:
+            return
+        if self.editor is None:
+            self.begin_edit("=", enter_mode=True)
+        elif not self.editor.text().startswith("="):
+            self.editor.setText("=" + self.editor.text())
+            self._typed(self.editor.text())
+        bar = self.bar
+        if bar is not None:
+            bar.edit.setFocus()
+            bar.edit.setCursorPosition(len(bar.edit.text()))
+
     def _typed(self, text: str) -> None:
+        self._status_soon()
         if self.bar is not None and self.bar.edit.text() != text:
             self.bar.edit.setText(text)
         self._place_editor()
@@ -1878,6 +2093,7 @@ class TableEditing:
         editor.hide()
         editor.deleteLater()
         self.view.setFocus()
+        self._status_soon()
         if item is None or cell is None:
             return True
         old = item.sheet.input(*cell)
@@ -1998,6 +2214,7 @@ class TableEditing:
         editor.hide()
         editor.deleteLater()
         self.view.setFocus()
+        self._status_soon()
         self._show_selection()
 
     # point mode: a formula waiting for a reference at the caret
@@ -2119,8 +2336,14 @@ class TableEditing:
                 item.update(strip)         # only the two thin strips are drawn again
         what = "Width" if axis == "col" else "Height"
         pixels = round(size * 96 / 72)
-        tip = (f"{what}: {size:.2f} pt ({pixels} pixels)" if size > 0
-               else f"{what}: 0 (hidden)")
+        if size <= 0:
+            tip = f"{what}: 0 (hidden)"
+        elif axis == "col":
+            # Excel's: characters of the default font's digits (7 px, 5 of padding)
+            chars = max(0.0, (pixels - 5) / 7.0) if pixels > 12 else pixels / 12.0
+            tip = f"Width: {chars:.2f} ({pixels} pixels)"
+        else:
+            tip = f"Height: {size:.2f} ({pixels} pixels)"
         QToolTip.showText(QCursor.pos(), tip, self.view)
         self.view.statusMessage.emit(tip)
 
@@ -2170,6 +2393,11 @@ class TableEditing:
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(box)
+        for block in self.extra_ranges:
+            # the blocks picked before with Ctrl: shaded, as Excel's
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 34))
+            painter.drawRect(item.block_rect(*block))
         for block in self.highlight_ranges or ():
             # the cells a conditional formatting rule picked in the Rules
             # Manager applies to, outlined as Excel outlines them
@@ -2245,12 +2473,14 @@ class TableEditing:
         if key == Qt.Key_F2:
             self.enter_mode = not self.enter_mode
             self.view.statusMessage.emit("Edit" if not self.enter_mode else "Enter")
+            self._status_soon()
             return True
         arrows = {Qt.Key_Up: (-1, 0), Qt.Key_Down: (1, 0), Qt.Key_Left: (0, -1), Qt.Key_Right: (0, 1)}
         if key in arrows:
             dr, dc = arrows[key]
-            if self._pointing():
+            if self._pointing() and self.enter_mode:
                 # point mode: the arrows move the reference being put in
+                # (after F2, Edit mode, they move the caret: Excel's)
                 item = self.item
                 rows, cols = item.size
                 if self.point is None:
@@ -2302,8 +2532,9 @@ class TableEditing:
             if self.copied is not None:
                 self.copied = None
                 item.update()
-            else:
+            elif not getattr(item, "alone", False):
                 self.close()
+            # (the workbook view: there is always an active cell, as in Excel)
             return True
         command = self._bound_command(event)
         if command is not None:
@@ -2336,7 +2567,10 @@ class TableEditing:
             self.move_active(0, -1, within=True, tab=True)
             return True
         if key == Qt.Key_Home:
-            target = (0, 0) if ctrl else (self.active[0], 0)
+            from .sheetfreeze import frozen
+            # (panes frozen: Excel's Home goes to the first cell not frozen)
+            rows, cols = frozen(item) if getattr(item, "alone", False) else (0, 0)
+            target = (rows, cols) if ctrl else (self.active[0], cols)
             self.select(self.anchor if shift else target, target if shift else None,
                         self.active if shift else None)
             return True
@@ -2347,7 +2581,24 @@ class TableEditing:
                         self.active if shift else None)
             return True
         if key == Qt.Key_PageDown or key == Qt.Key_PageUp:
-            step = 10 if key == Qt.Key_PageDown else -10
+            from .sheetview import page_rows
+            rows_seen = page_rows(self.view, item)
+            step = (rows_seen or 10) * (1 if key == Qt.Key_PageDown else -1)
+            if rows_seen and getattr(item, "alone", False):
+                # Excel: a screenful down, the window scrolled with the cell
+                bar = self.view.verticalScrollBar()
+                before = item.mapRectToScene(item.cell_rect(*self.active)).top()
+                self._keep_view = True
+                try:
+                    self.select((self.active[0] + step, self.active[1]))
+                finally:
+                    self._keep_view = False
+                after = item.mapRectToScene(item.cell_rect(*self.active)).top()
+                from . import sheetview
+                sheetview.fill(self.view, extra=item.mapToScene(
+                    item.cell_rect(*self.active).bottomRight()))
+                bar.setValue(bar.value() + int(round((after - before) * self.view.zoom())))
+                return True
             self.select((self.active[0] + step, self.active[1]))
             return True
         if key in (Qt.Key_Delete,) and not ctrl:
@@ -2427,6 +2678,13 @@ class TableEditing:
             nr, nc = nr + dr, nc + dc
         if 0 <= nr < rows and 0 <= nc < cols:
             return nr, nc
+        if getattr(item, "alone", False) and (dr > 0 or dc > 0):
+            # the workbook view: on to Excel's last row (or column), the grid
+            # grown to reach it (F3)
+            from .sheetview import reach
+            last = (1_048_575 if dr > 0 else r, 16_383 if dc > 0 else c)
+            if reach(self.view, item, last):
+                return last
         return (max(0, min(nr - dr, rows - 1)), max(0, min(nc - dc, cols - 1)))
 
     def move_active(self, dr: int, dc: int, within: bool = False, tab: bool = False,
@@ -2500,11 +2758,20 @@ class TableEditing:
         if self.item is not None:
             self._show_selection()
 
+    def picked(self) -> list:
+        """Every block picked: those added with Ctrl, then the selection."""
+        return list(self.extra_ranges) + [tuple(self.selection())]
+
     def clear(self, what: str = "contents", only_active: bool = False) -> None:
-        t, l, b, r = (self.active * 2) if only_active else self.selection()
         if only_active:
-            t, l, b, r = self.active[0], self.active[1], self.active[0], self.active[1]
-        self._change("Clear", lambda wb, sheet: wb.clear(sheet, t, l, b, r, what))
+            blocks = [(self.active[0], self.active[1], self.active[0], self.active[1])]
+        else:
+            blocks = self.picked()
+
+        def change(wb, sheet):
+            for t, l, b, r in blocks:
+                wb.clear(sheet, t, l, b, r, what)
+        self._change("Clear", change)
 
     def toggle(self, field: str) -> None:
         item = self.item
@@ -2517,8 +2784,12 @@ class TableEditing:
         self.format(**{field: new})
 
     def format(self, **fields) -> None:
-        t, l, b, r = self.selection()
-        self._change("Format", lambda wb, sheet: wb.format_block(sheet, t, l, b, r, **fields))
+        blocks = self.picked()
+
+        def change(wb, sheet):
+            for t, l, b, r in blocks:
+                wb.format_block(sheet, t, l, b, r, **fields)
+        self._change("Format", change)
 
     # -- Decimal Places and Significant Figures, as an equation's (2026-10-19) --
     def active_style(self):
@@ -2895,6 +3166,10 @@ class TableEditing:
         if item is None:
             return False
         if self.editor is not None:
+            return False
+        if self.extra_ranges:
+            # Excel's own words
+            self.view.statusMessage.emit("This command cannot be used on multiple selections")
             return False
         block = self.selection()
         mime = QMimeData()
