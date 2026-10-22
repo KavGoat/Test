@@ -42,6 +42,33 @@ from ..sheet.style import Border
 REF_COLOURS = ["#1f6fd1", "#d1281f", "#7b2fb0", "#1d8a3a", "#c76a00", "#008b8b", "#b0306e"]
 
 
+def _spreadsheet_name_cells(sheet, written: str):
+    """(sheet, (top, left, bottom, right)) of the cells a spreadsheet's own
+    name in a formula on *sheet* names (Name, or Sheet!Name, Excel's way),
+    or None: not a name, a CalcForge variable, or a name of no cells."""
+    from ..sheet.evaluate import Ctx, RefValue, ev
+    from ..sheet.refs import unquote_sheet
+    wb = sheet.workbook
+    reader, name = sheet, written
+    if "!" in written:
+        where, _, name = written.rpartition("!")
+        reader = wb.sheet(unquote_sheet(where) or "")
+        if reader is None:
+            return None
+    dn = wb.find_name(name, reader)
+    if dn is None or dn.variable:
+        return None
+    home = wb.sheet_by_id(dn.sheet) if dn.sheet else \
+        (wb.sheet_by_id(dn.home) if dn.home else None) or reader
+    try:
+        got = ev(F.parse(dn.refers_to).tree, Ctx(wb, home, 0, 0))
+    except Exception:  # noqa: BLE001 - a name that is no cells is not outlined
+        return None
+    if not isinstance(got, RefValue) or got.sheet is None:
+        return None
+    return got.sheet, (got.top, got.left, got.bottom, got.right)
+
+
 import weakref
 
 # every open-for-its-cells session, told when a table or sheet leaves its canvas
@@ -107,6 +134,8 @@ class CellEditor(UnitText):
         self.setAttribute(Qt.WA_OpaquePaintEvent)
         self.textEdited.connect(tables._typed)
         self.cursorPositionChanged.connect(lambda *_: tables._caret_moved())
+        self.reference_colours = lambda text: [(a, b, c) for a, b, c, _block
+                                               in tables.formula_marks(text)]
 
     def event(self, event) -> bool:
         if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Tab, Qt.Key_Backtab):
@@ -177,6 +206,9 @@ class FormulaBar(QWidget):
         # through self.tables: in Split View the bar serves whichever view is
         # in hand, and is handed that view's tables
         self.edit.textEdited.connect(lambda text: self.tables._typed_in_bar(text))
+        self.edit.reference_colours = lambda text: [
+            (a, b, c) for a, b, c, _block in (self.tables.formula_marks(text)
+                                              if getattr(self, "tables", None) else ())]
         self.edit.cursorPositionChanged.connect(lambda *_: self.tables._caret_moved())
         self.edit.returnPressed.connect(lambda: self.tables.commit(move=(1, 0), enter=True))
         self.edit.installEventFilter(self)
@@ -1721,7 +1753,7 @@ class TableEditing:
             # most of the time a key took)
             refs = None
             if text.startswith("="):
-                refs = tuple(repr(ref) for _s, _e, ref in F.reference_spans(text[1:]))
+                refs = tuple(self.formula_marks(text))
             if refs != self._drawn_refs:
                 if self._drawn_refs is False:
                     item.update()           # the edit's start: drawn afresh
@@ -1748,19 +1780,53 @@ class TableEditing:
             return area
         scale = max(abs(self.view.transform().m11()) + abs(self.view.transform().m12()), 0.05)
         pad = 4.0 / scale
-        rows, cols = item.size
-        for _s, _e, ref in F.reference_spans(text[1:]):
-            if ref.sheet is not None and ref.sheet.lower() != item.name.lower():
-                continue
-            if isinstance(ref, CellRef):
-                t, l, b, r = ref.row, ref.col, ref.row, ref.col
-            else:
-                t, l, b, r = ref.top, ref.left, ref.bottom, ref.right
-            if t >= rows or l >= cols:
-                continue
-            box = item.block_rect(t, l, min(b, rows - 1), min(r, cols - 1))
-            area = area.united(box.adjusted(-pad, -pad, pad, pad))
+        for _a, _b, _colour, block in self.formula_marks(text, item):
+            if block is not None:
+                area = area.united(item.block_rect(*block).adjusted(-pad, -pad, pad, pad))
         return area
+
+    def formula_marks(self, text: str, item=None) -> list:
+        """What a formula being typed shows, as Excel shows it: each cell
+        reference and each spreadsheet name (Define Name, the Name Box… —
+        not a CalcForge variable, the user, 2026-10-22) in a colour of its
+        own, in order: [(start, end, colour, block)] — where it is in
+        *text* (with its "="), and the block of *item*'s cells it outlines
+        in that colour (None when they are elsewhere)."""
+        item = self.item if item is None else item
+        if not text.startswith("=") or item is None or item.sheet is None:
+            return []
+        try:
+            tokens = F.tokenize(text[1:])
+        except F.FormulaError:
+            return []
+        rows, cols = item.size
+        out, at = [], 1
+        for tok in tokens:
+            start = at + len(tok.lead)
+            end = start + len(tok.text)
+            at = end
+            got = None
+            if tok.kind == "ref":
+                ref = tok.ref
+                if ref.sheet is None or ref.sheet.lower() == item.name.lower():
+                    if isinstance(ref, CellRef):
+                        got = (ref.row, ref.col, ref.row, ref.col)
+                    else:
+                        got = (ref.top, ref.left, ref.bottom, ref.right)
+                    if got[0] >= rows or got[1] >= cols:
+                        got = None
+            elif tok.kind == "name":
+                named = _spreadsheet_name_cells(item.sheet, tok.text)
+                if named is None:
+                    continue
+                sheet, block = named
+                got = block if sheet is item.sheet and block[0] < rows and block[1] < cols else None
+            else:
+                continue
+            if got is not None:
+                got = (got[0], got[1], min(got[2], rows - 1), min(got[3], cols - 1))
+            out.append((start, end, REF_COLOURS[len(out) % len(REF_COLOURS)], got))
+        return out
 
     def _typed_in_bar(self, text: str) -> None:
         if self.editor is None:
@@ -2125,19 +2191,11 @@ class TableEditing:
                 painter.fillRect(got[1], QColor("#000000"))
         if editor is None or not editor.text().startswith("="):
             return
-        spans = F.reference_spans(editor.text()[1:])
-        for k, (_s, _e, ref) in enumerate(spans):
-            if ref.sheet is not None and ref.sheet.lower() != item.name.lower():
+        for _a, _b, hue, block in self.formula_marks(editor.text(), item):
+            if block is None:
                 continue
-            colour = QColor(REF_COLOURS[k % len(REF_COLOURS)])
-            if isinstance(ref, CellRef):
-                t, l, b, r = ref.row, ref.col, ref.row, ref.col
-            else:
-                t, l, b, r = ref.top, ref.left, ref.bottom, ref.right
-            rows, cols = item.size
-            if t >= rows or l >= cols:
-                continue
-            box = item.block_rect(t, l, min(b, rows - 1), min(r, cols - 1))
+            colour = QColor(hue)
+            box = item.block_rect(*block)
             fill = QColor(colour)
             fill.setAlpha(28)
             painter.fillRect(box, fill)

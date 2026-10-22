@@ -16,12 +16,14 @@ It works in the cell's text box and in the formula bar alike: in an entry
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Callable, Optional
 
 from PySide6.QtCore import QCoreApplication, QPoint, QRectF, Qt
 from PySide6.QtGui import (QColor, QFont, QFontInfo, QFontMetricsF, QInputMethodEvent,
                            QPainter, QTextCharFormat)
 from PySide6.QtWidgets import QLineEdit
+
+from .unitedit import SMathUnitEditing
 
 UNIT_BLUE = QColor("#0000ff")              # WebSMath's unit colour (calc/ui/layout.py)
 
@@ -150,32 +152,6 @@ def unit_slot(text: str) -> Optional[int]:
     return None
 
 
-# A unit as SMath's unit box shows it while it is typed (the user,
-# 2026-10-21: "it looks like N^2, not how it should be"): powers raised
-# (N², m⁻¹) and products with a dot (kN·m), as the cell and the equations
-# draw them; division with the solidus a single line has. What is stored
-# stays plain (plain_unit): N^2, kN*m.
-_TO_SUPERSCRIPT = str.maketrans("0123456789-−", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁻")
-_FROM_SUPERSCRIPT = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123456789-")
-# a whole power: ^2, ^-1, ^(-1) — not one with a point (^0.5 stays as typed)
-_POWER = re.compile(r"\^\s*(?:\(\s*([-−]?)\s*(\d+)\s*\)|([-−]?)\s*(\d+)(?![\d.]))")
-_RAISED = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+(?:\.\d*)?")
-
-
-def pretty_unit(text: str) -> str:
-    """*text* as SMath's unit box shows it: kN*m^-1 is kN·m⁻¹."""
-    def raised(m):
-        sign, digits = (m.group(1), m.group(2)) if m.group(2) else (m.group(3), m.group(4))
-        return (sign + digits).translate(_TO_SUPERSCRIPT)
-    return _POWER.sub(raised, text).replace("*", "·")
-
-
-def plain_unit(text: str) -> str:
-    """A unit as shown in a unit box, written plainly: kN·m⁻¹ is kN*m^-1."""
-    text = _RAISED.sub(lambda m: "^" + m.group(0).translate(_FROM_SUPERSCRIPT), text)
-    return text.replace("·", "*").replace("⋅", "*")
-
-
 def unit_placeholder(font: QFont, colour: Optional[QColor] = None):
     """SMath's empty slot as the equations draw it (calc/ui/layout.py,
     Layout.placeholder): the "H" of SMath's equation font at *font*'s size,
@@ -224,19 +200,19 @@ def _error_red() -> str:
     return ERROR_RED.name()
 
 
-class UnitSlot:
+class UnitSlot(SMathUnitEditing):
     """What SMath's unit boxes share (the unit box after a cell's result,
     the formula bar's, and Format Cells' "Show quantities in"): empty or
     unfinished, SMath's black placeholder shows where the unit goes, and
     nothing is said while it is typed; a finished unit SMath would refuse
     (output_unit_refusal) is drawn in SMath's error red, with why in its
     tip, until it is typed into again (the user, 2026-10-19: "does not have
-    the filler unit like smath — currently says wrong unit"). As it is
-    typed, it is written as SMath's box writes it: N^2 is N² (pretty_unit).
+    the filler unit like smath — currently says wrong unit"). It is typed
+    and drawn as SMath's unit placeholder is (unitedit.SMathUnitEditing:
+    ^ raises the exponent as it is typed, / makes a fraction).
 
     For QLineEdit subclasses: call _init_slot() from __init__ (after any
-    style sheet of its own), and paint_unit_slot() at the end of
-    paintEvent."""
+    style sheet of its own)."""
 
     _why = None                    # why the finished unit was refused
     _tip = ""                      # the tip it had before
@@ -246,59 +222,35 @@ class UnitSlot:
         self._own_sheet = self.styleSheet()
         # typed into again, or given another cell's unit: no longer refused
         self.textChanged.connect(lambda _t: self.unflag())
-        # shown as SMath's unit box shows it, as it is typed: N^2 is N²
-        self.textEdited.connect(self._typed)
-        if self.text():
-            self.setText(pretty_unit(self.text()))
-
-    def _typed(self, text: str) -> None:
-        new = pretty_unit(plain_unit(text))
-        if new == text:
-            return
-        caret = len(pretty_unit(plain_unit(text[:self.cursorPosition()])))
-        self.setText(new)
-        self.setCursorPosition(min(caret, len(new)))
+        self._init_unit_editing()
 
     def unit_text(self) -> str:
-        """The unit typed, written plainly (kN*m^-1), as it is stored."""
-        return plain_unit(self.text()).strip()
+        """The unit typed, as it is stored (kN*m^-1)."""
+        return self.text().strip()
 
     def set_unit_text(self, text: Optional[str]) -> None:
-        """Show unit *text* (as stored, kN*m^-1) as SMath's box does."""
-        self.setText(pretty_unit(text or ""))
+        """Hold unit *text* (as stored, kN*m^-1), drawn as SMath's box draws it."""
+        self.setText(text or "")
 
     def flag(self, why: str) -> None:
         """The unit as finished is refused: red, and why in its tip."""
         if self._why is None:
             self._tip = self.toolTip()
         self._why = why
-        self.setStyleSheet(self._own_sheet + "QLineEdit { color: %s; }" % _error_red())
+        self._red = QColor(_error_red())
         self.setToolTip(why)
+        self._relayout()
 
     def unflag(self) -> None:
         if self._why is None:
             return
         self._why = None
-        self.setStyleSheet(self._own_sheet)
+        self._red = None
         self.setToolTip(self._tip)
+        self._relayout()
 
     def flagged(self) -> Optional[str]:
         return self._why
-
-    def slot_colour(self) -> QColor:
-        """SMath's black; a dark theme's text colour on a dark box."""
-        if not self.isEnabled():
-            return QColor("#9a9a9a")
-        if self.palette().base().color().lightness() >= 128 or "background: white" in self._own_sheet:
-            return QColor("#000000")
-        return self.palette().text().color()
-
-    def paint_unit_slot(self) -> Optional[QRectF]:
-        """SMath's placeholder, if the unit is empty or unfinished."""
-        at = unit_slot(self.text())
-        if at is None:
-            return None
-        return paint_slot(self, at, self.slot_colour())
 
 
 def unit_word(text: str, caret: int) -> Optional[tuple]:
@@ -325,6 +277,9 @@ class UnitText(QLineEdit):
         super().__init__(parent)
         self._colouring = False
         self.on_white = False          # the cell's own box: SMath's black and blue
+        # a formula's references and names, each in its colour, as Excel
+        # colours them: text -> [(start, end, colour)] (TableEditing.formula_marks)
+        self.reference_colours: Optional[Callable] = None
         self.textChanged.connect(lambda _t: self.colour_units())
 
     def _dark(self) -> bool:
@@ -346,6 +301,12 @@ class UnitText(QLineEdit):
             fmt.setForeground(self.unit_colour())
             attrs = [QInputMethodEvent.Attribute(QInputMethodEvent.TextFormat, a - caret, b - a, fmt)
                      for a, b in unit_spans(self.text())]
+            if self.reference_colours is not None and self.text().startswith("="):
+                for a, b, colour in self.reference_colours(self.text()):
+                    ref = QTextCharFormat()
+                    ref.setForeground(QColor(colour))
+                    attrs.append(QInputMethodEvent.Attribute(
+                        QInputMethodEvent.TextFormat, a - caret, b - a, ref))
             QCoreApplication.sendEvent(self, QInputMethodEvent("", attrs))
         finally:
             self._colouring = False
@@ -559,9 +520,10 @@ class ResultUnit(UnitSlot, QLineEdit):
         font.setPixelSize(size)
         self.setFont(font)
         self._least = max(48, 4 * size)
-        self.setGeometry(box.left() - 1, box.center().y() - self.sizeHint().height() // 2,
-                         self._width(pretty_unit(st.unit or "")), self.sizeHint().height())
         self.set_unit_text(st.unit)
+        height = max(self.sizeHint().height(), int(size * 1.9))     # room for a fraction
+        self.setGeometry(box.left() - 1, box.center().y() - height // 2, 48, height)
+        self.resize(self._width(), height)
         self._done = False
         self.show()
         self.raise_()
@@ -570,17 +532,13 @@ class ResultUnit(UnitSlot, QLineEdit):
 
     _least = 48
 
-    def _width(self, text: str) -> int:
-        return max(self._least, int(self.fontMetrics().horizontalAdvance(text + "WW")))
+    def _width(self) -> int:
+        return max(self._least, int(self.drawn_width() + 0.999))
 
     def _fit(self) -> None:
         """Wide enough for what is typed, as SMath's box grows with it."""
-        if self.isVisible() and self._width(self.text()) != self.width():
-            self.resize(self._width(self.text()), self.height())
-
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-        self.paint_unit_slot()
+        if self.isVisible() and self._width() != self.width():
+            self.resize(self._width(), self.height())
 
     def _offer(self) -> None:
         from ..calc.ui.suggest import selected_index, unit_box_entries

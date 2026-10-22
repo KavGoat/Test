@@ -594,7 +594,8 @@ def ink_in(w, run, a1):
 
 
 def equals_in_the_unit_box(w, run):
-    """Click B2's black unit box (SMath's), type = in it."""
+    """Click B2's black unit box (SMath's), type = in it — which SMath's unit
+    placeholder ignores — then +, which is no unit, and leave it there."""
     click(w, cell_scene(run, "B2"))
     kind, rect = run.unit_box_rect(1, 1)
     assert kind == "box"
@@ -603,15 +604,18 @@ def equals_in_the_unit_box(w, run):
     assert box is not None and box.isVisible()
     QTest.keyClick(box, Qt.Key_Equal, Qt.NoModifier)
     pump()
-    assert box.text() == "="
+    assert box.text() == "", "= is no part of a unit: SMath's box ignores it"
+    QTest.keyClicks(box, "+")
+    pump()
+    assert box.text() == "+"
 
 
 def test_the_unit_box_goes_when_another_cell_or_the_page_is_clicked(w, said):
     run = a_sheet(w)
     equals_in_the_unit_box(w, run)
     click(w, cell_scene(run, "D6"))
-    assert not left_over(w), "the box with = in it was left over the cells"
-    assert run.sheet.workbook.style_of(run.sheet, 1, 1).unit is None, "= is not a unit"
+    assert not left_over(w), "the box with + in it was left over the cells"
+    assert run.sheet.workbook.style_of(run.sheet, 1, 1).unit is None, "+ is not a unit"
     assert "Syntax is incorrect." in said, said       # as SMath says it
     equals_in_the_unit_box(w, run)
     click(w, w.document.pages[0].frame.mapToScene(QPointF(300, 300)))

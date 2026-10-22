@@ -1491,6 +1491,11 @@ What a typed entry becomes: `5` a number; `1,250.5` with a thousands format;
 `2026-10-09` or `9/10/2026` a date (day first); `14:30` a time; `TRUE`; `#N/A`;
 `'anything` text; `=A1+1` a formula.
 
+While a formula is typed, each cell reference and each spreadsheet name in it
+(`=SUM(loads)+A2`) is coloured, and the cells it stands for are outlined in the same
+colour, as in Excel. A cell named as a CalcForge variable is not: it is an
+equation variable, not one of the sheet's names.
+
 A number too wide for its column is rounded to fit (General format) or written
 `1.2E+09`; `####` appears only when even that will not fit. Typing a number into a
 column whose width was never set widens it.
@@ -1587,9 +1592,13 @@ Cells hold units and calculate with them, as the equations do:
   (`kN`, `kN/m`, `MPa`, `N^2`, or a custom unit), exactly as an equation's unit box
   does: of the same kind it converts (`kN` to `N`, `kN·m` to `N·mm`); of another
   kind the units still needed are put before it, so `12.5 kN` with `N^2` typed
-  shows `12500 s²/(kg·m) N²`. As it is typed the box writes the unit as SMath does
-  — `N^2` becomes `N²`, `m^-1` `m⁻¹`, `*` a dot — and the cell draws it the same
-  way. Blank shows them as typed. What SMath refuses is drawn red, with SMath's
+  shows `12500 s²/(kg·m) N²`. The box is typed into exactly as an equation's unit
+  placeholder: `^` puts the cursor up in a raised exponent (SMath's black square
+  shows where the power goes) and the digits go up there, `→` brings it back
+  down, `/` makes a fraction of the unit before it, `Backspace` and the arrows
+  move through them as in an equation, and `=` is ignored. Each word typed is a
+  unit, drawn in SMath's blue; the cell draws the unit the same way, on one line.
+  Blank shows them as typed. What SMath refuses is drawn red, with SMath's
   words: a name that is no unit (`frobs - not defined.`), a unit written wrongly
   (`Syntax is incorrect.`), °C or °F on another kind of quantity (`Units don't
   match.`). **Format Cells ▸ Number** can give a display unit too;

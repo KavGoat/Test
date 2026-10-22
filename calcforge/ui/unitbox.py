@@ -38,12 +38,6 @@ class UnitBox(UnitSlot, QLineEdit):
         self._model.setStringList(unit_names(self.window))
         super().focusInEvent(event)
 
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-        # empty or unfinished: SMath's placeholder, a small black box where
-        # the unit goes (black on a light theme, as SMath's; the text colour
-        # on a dark one), there while it is typed into too
-        self.paint_unit_slot()
 
 
 class UnitField(UnitSlot, QLineEdit):
@@ -54,10 +48,6 @@ class UnitField(UnitSlot, QLineEdit):
     def __init__(self, text: str = "", parent=None):
         super().__init__(text, parent)
         self._init_slot()
-
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-        self.paint_unit_slot()
 
 
 def unit_names(window=None) -> list:

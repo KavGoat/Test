@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QApplication
 from calcforge.calc.engine.display import display_text
 from calcforge.sheet.numfmt import BOX_GAP, format_value, unit_runs
 from calcforge.sheet.values import _written, with_unit
-from calcforge.ui.cellunits import output_unit_refusal, plain_unit, pretty_unit
+from calcforge.ui.cellunits import output_unit_refusal
 from tests.calc.test_behaviour import error, sheet
 from tests.test_tables import click, make_table, shown
 
@@ -107,12 +107,11 @@ def test_what_smath_refuses_is_refused_in_its_words():
         assert output_unit_refusal(unit, force) is None, unit
 
 
-def test_the_box_writes_the_unit_as_smath_shows_it():
-    assert pretty_unit("N^2") == "N²" and pretty_unit("kN*m^-1") == "kN·m⁻¹"
-    assert pretty_unit("m^(-1)") == "m⁻¹" and pretty_unit("kN/m^2") == "kN/m²"
-    assert pretty_unit("m^0.5") == "m^0.5", "a power with a point stays as typed"
-    for unit in ("N^2", "kN*m^-1", "kN/m^2", "kg*m/s^2", "m^0.5"):
-        assert plain_unit(pretty_unit(unit)) == unit
+def test_a_stored_unit_and_the_editors_row_go_both_ways():
+    from calcforge.ui.unitedit import row_unit_text, unit_row
+    for unit in ("N^2", "kN*m^-1", "kN/m^2", "s^2/(kg*m)", "m^0.5", "kN/m*s", "kN", ""):
+        assert row_unit_text(unit_row(unit)) == unit
+    assert unit_row("kN/m^2").items[0].kind == "frac"
 
 
 @pytest.fixture
@@ -146,52 +145,145 @@ def open_unit_box(w, table):
     return box
 
 
-def test_n_squared_typed_into_the_cells_unit_box(w):
+# keys typed into a cell's unit box; an equation's unit placeholder gets the
+# same keys with SMath's ' before each unit, as its unit list puts one in
+R, L, U, B = Qt.Key_Right, Qt.Key_Left, Qt.Key_Up, Qt.Key_Backspace
+KEYS = [
+    list("N^2"),
+    list("kN/m^2"),
+    list("N^2") + [R] + list("*m"),
+    list("kN*m^-1"),
+    list("kN/m") + [B, B, B],
+    list("m^2") + [L, L, R] + list("3"),
+    list("kN/m") + [U] + list("*m"),
+    list("kN/m^2") + [R, R] + list("*s"),
+]
+
+
+def _with_marks(keys):
+    out, word = [], False
+    for k in keys:
+        letter = isinstance(k, str) and k.isalpha()
+        if letter and not word:
+            out.append("'")
+        word = letter
+        out.append(k)
+    return out
+
+
+def _state(editor):
+    """What the unit placeholder holds, and where its cursor is."""
+    from calcforge.calc.engine.model import walk_rows
+    rows = list(walk_rows(editor.unit))
+    where = next((k for k, r in enumerate(rows) if r is editor.row), None)
+    return repr(editor.unit), where, editor.pos
+
+
+def _press(widget, k):
+    if isinstance(k, str):
+        QTest.keyClicks(widget, k)
+    else:
+        QTest.keyClick(widget, k)
+    settle()
+
+
+def equation_states(w, keys):
+    """An equation's unit placeholder typed into, key by key, in the window:
+    what it holds after each key (the unit's own keys only)."""
+    from tests.test_calc_modes import into_calc_mode, typed
+    into_calc_mode(w, 100, 500)
+    typed(w, "5=")
+    _press(w.view.viewport(), R)
+    item = w.view.calc.item
+    assert item.region.editor.in_unit
+    states = []
+    for k in _with_marks(keys):
+        if w.view.calc.suggestions.isVisible() and not isinstance(k, str):
+            w.view.calc.hide_suggestions()
+        _press(w.view.viewport(), k)
+        if k != "'":
+            states.append(_state(item.region.editor))
+    QTest.keyClick(w.view.viewport(), Qt.Key_Escape)
+    w.view.calc.leave()
+    settle()
+    return states
+
+
+@pytest.mark.parametrize("keys", KEYS, ids=lambda keys: "".join(
+    k if isinstance(k, str) else {R: "→", L: "←", U: "↑", B: "⌫"}[k] for k in keys))
+def test_the_cells_unit_box_types_as_an_equations_unit_placeholder(w, keys):
+    wanted = equation_states(w, keys)
+    assert len(wanted) == len(keys) and wanted[-1][0] != "Row('')"
     table, wb = a_force(w)
     box = open_unit_box(w, table)
-    box.selectAll()
-    seen = []
-    for ch in "N^2":
-        QTest.keyClick(box, ch)
-        settle()
-        seen.append(box.text())
-    assert seen == ["N", "N^", "N²"], "the power raised as it is typed, as in SMath's box"
+    got = []
+    for k in keys:
+        if box.list.isVisible() and not isinstance(k, str):
+            box.list.hide()
+        _press(box, k)
+        got.append(_state(box.unit_editor))
+    assert got == wanted
     box.list.hide()
-    QTest.keyClick(box, Qt.Key_Return)
-    settle()
-    assert not box.isVisible() and box.flagged() is None
-    st = wb.style_of(table.sheet, 0, 0)
-    assert st.unit == "N^2", "stored plainly"
-    assert shown(table, "A1") == "12500 s^2/(kg·m)" + BOX_GAP + "N^2"
-    # opened again, it shows N² again
-    box = open_unit_box(w, table)
-    assert box.text() == "N²" and box.unit_text() == "N^2"
     QTest.keyClick(box, Qt.Key_Escape)
     settle()
 
 
-def test_the_formula_bars_unit_box_shows_powers_and_dots(w):
+def test_n_squared_typed_into_the_cells_unit_box(w):
+    from calcforge.calc.engine.model import Pow
+    table, wb = a_force(w)
+    box = open_unit_box(w, table)
+    _press(box, "N")
+    _press(box, "^")
+    editor = box.unit_editor
+    assert isinstance(editor.row.parent, Pow), "^ puts the cursor up in the exponent"
+    assert "^" not in "".join(i for i in editor.unit.items if isinstance(i, str))
+    assert black_slot_in(box) > 0, "SMath's black square, raised, where the power goes"
+    _press(box, "2")
+    assert editor.row.items == ["2"] and isinstance(editor.row.parent, Pow)
+    assert box.text() == "N^2", "stored plainly"
+    _press(box, R)
+    assert editor.row is editor.unit, "→ comes back down"
+    box.list.hide()
+    QTest.keyClick(box, Qt.Key_Return)
+    settle()
+    assert not box.isVisible() and box.flagged() is None
+    assert wb.style_of(table.sheet, 0, 0).unit == "N^2"
+    assert shown(table, "A1") == "12500 s^2/(kg·m)" + BOX_GAP + "N^2"
+    # opened again, it holds N with its raised 2
+    box = open_unit_box(w, table)
+    assert box.text() == "N^2" and isinstance(box.unit_editor.unit.items[-1], Pow)
+    QTest.keyClick(box, Qt.Key_Escape)
+    settle()
+
+
+def black_slot_in(box) -> int:
+    from tests.test_unit_filler import black_slot
+    return black_slot(box)
+
+
+def test_the_formula_bars_unit_box_types_as_smath_too(w):
+    from calcforge.calc.engine.model import Frac
     table, wb = a_force(w)
     box = w.formula_bar.unit
     box.setFocus()
     box.selectAll()
-    for ch in "kN*m^-1":
-        QTest.keyClick(box, ch)
-    settle()
-    assert box.text() == "kN·m⁻¹" and box.unit_text() == "kN*m^-1"
+    for k in list("kN/m^2"):
+        _press(box, k)
+    assert isinstance(box.unit_editor.unit.items[0], Frac), "/ makes SMath's fraction"
+    assert box.text() == "kN/m^2"
     if box.completer().popup().isVisible():
         box.completer().popup().hide()
     QTest.keyClick(box, Qt.Key_Return)
     settle()
-    assert wb.style_of(table.sheet, 0, 0).unit == "kN*m^-1"
-    # 12.5 kN in kN·m⁻¹: SMath fills in the m before it
-    assert shown(table, "A1") == "12.5 m" + BOX_GAP + "kN·m^-1"
-    # another cell, then this one again: its unit, as SMath writes it
+    assert wb.style_of(table.sheet, 0, 0).unit == "kN/m^2"
+    # 12.5 kN in kN/m²: SMath fills in the m² before it
+    assert shown(table, "A1") == "12.5 m^2" + BOX_GAP + "kN/m^2"
+    # another cell, then this one again: its unit, as SMath draws it
     w.view.tables.select((1, 0))
     settle()
     w.view.tables.select((0, 0))
     settle()
-    assert box.text() == "kN·m⁻¹"
+    assert box.text() == "kN/m^2" and isinstance(box.unit_editor.unit.items[0], Frac)
 
 
 def test_the_unit_is_kept_when_saved_and_opened_again(w, tmp_path):

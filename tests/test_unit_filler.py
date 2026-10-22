@@ -42,14 +42,31 @@ def inked(box, colour, left=0, right=None) -> int:
 
 
 def black_slot(box) -> int:
-    """Pixels of SMath's placeholder (black; a dark theme's text colour on
-    a dark box), where unit_slot puts it."""
-    from calcforge.ui.cellunits import x_of
-    at = unit_slot(box.text())
-    if at is None:
-        at = len(box.text())       # where it would be: nothing drawn there
-    x = int(x_of(box, at))
-    return inked(box, box.slot_colour().name(), x + 3, x + 18)     # past the caret
+    """Pixels of SMath's black placeholders drawn in *box*: where the
+    equation's own drawing of the unit has its empty places (the whole unit
+    while empty, the denominator after kN/, the exponent after m^)."""
+    from calcforge.calc.ui.layout import LRect
+    scale, origin = box._placement()
+    image = box.grab().toImage()
+    n = 0
+
+    def walk(node, ox, oy):
+        nonlocal n
+        x, y = ox + node.x, oy + node.y
+        if isinstance(node, LRect) and node.box is not None:
+            left, w, h, bottom = node.box
+            for px in range(int(origin.x() + (x + left) * scale), int(origin.x() + (x + left + w) * scale) + 1):
+                for py in range(int(origin.y() + (y - bottom - h) * scale),
+                                int(origin.y() + (y - bottom) * scale) + 1):
+                    if 0 <= px < image.width() and 0 <= py < image.height() and \
+                            image.pixelColor(px, py).lightness() < 90:
+                        n += 1
+        for child in node.children:
+            walk(child, x, y)
+    layout = box._item._layout
+    if layout is not None:
+        walk(layout, 0.0, 0.0)
+    return n
 
 
 def red(box) -> int:
