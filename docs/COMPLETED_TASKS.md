@@ -3,6 +3,13 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-23 — Excel's zoom, the side toolbar stood in its room, thumbnails, tabs and names (pushed at 32bdcfc)
+
+- Full test run at 32bdcfc passed (`-n 3`, every-command tests included); 14/14 planted bugs caught.
+- A sheet shown alone zooms about its top-left cell, at once; the active cell kept in sight.
+- A toolbar held at a side edge stands in its room as a real toolbar with its own buttons.
+- A sheet with markups keeps a white thumbnail; every sheet tab shows while there is room; "Workbook ▸ Sheet" over every workbook's grid.
+
 ## 2026-10-22 (late night) — the panel rails back, the side toolbar preview, headings on the grid's pixels, sheets by hand (pushed at cd5969f)
 
 - Full test run at cd5969f: one failure, a docking test reading the far rail's height while a top row closed up; the test now checks only across, and its file passes. 14/14 planted bugs caught. The run before, at bfa7586 (the Excel audit merged), passed but for three timing tests under load, which pass alone.
