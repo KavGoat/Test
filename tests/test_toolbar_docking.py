@@ -110,6 +110,9 @@ def preview_check(w, bar, area, side_capable: bool, out: dict):
             assert central.right() < now.left()
         else:
             assert central.left() > now.right()
+        # the toolbar is shown standing in the room, not lying across the edge
+        assert bar.windowOpacity() == 0.0, "the floating toolbar is not shown over the edge"
+        assert column.picture is not None and not column.picture.isNull()
         out["shown"] = shown
         out["picture"] = w.grab()
     return check
@@ -206,3 +209,31 @@ def test_reset_layout_puts_every_toolbar_back_as_it_started(w):
     for other in w.toolbars:
         if other is not bar:
             assert w.toolBarArea(other) == Qt.TopToolBarArea and other.isVisible()
+
+
+@pytest.mark.parametrize("side", ["right", "left"])
+def test_let_go_at_a_side_it_is_never_seen_back_at_the_top(w, side):
+    """The user, 2026-10-22: "the final placement is correct but the
+    preview is still wrong, it gets pushed down etc. and then snaps to the
+    correct position". Let go at a side edge, Qt puts the toolbar back where
+    it came from before it is put in its column: the window is not drawn
+    until it is there, and nothing glides."""
+    from PySide6.QtCore import QTimer
+    bar = bar_named(w, "toolbar_alignment")
+    seen = []
+
+    def look():
+        if w.updatesEnabled() and not bar.isFloating():
+            seen.append(w.toolBarArea(bar))
+    timer = QTimer()
+    timer.timeout.connect(look)
+    timer.start(2)
+    edge = QPoint(w.width() - 3, w.height() // 2) if side == "right" else QPoint(3, w.height() // 2)
+    area = Qt.RightToolBarArea if side == "right" else Qt.LeftToolBarArea
+    drag(w, bar, edge)
+    timer.stop()
+    assert w.toolBarArea(bar) == area and w.updatesEnabled() and w.isAnimated()
+    assert seen and set(seen) == {area}, "drawn only in its column, never back at the top"
+    assert bar.windowOpacity() == 1.0
+    drag(w, bar, QPoint(w.width() // 2, 60))
+    assert w.toolBarArea(bar) == Qt.TopToolBarArea
