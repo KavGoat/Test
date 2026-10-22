@@ -1788,7 +1788,11 @@ class TableEditing:
         local = item.mapFromScene(scene_pos)
         if not item.chrome_rect().contains(local):
             return None
-        return _cursor_for(self._zone(item, local)) or QCursor(Qt.ArrowCursor)
+        zone = self._zone(item, local)
+        if zone and zone[0] == "border" and getattr(self.view, "_control_held", False):
+            from .cursors import copy_cursor
+            return copy_cursor()               # Ctrl held: a drag copies (Excel's +)
+        return _cursor_for(zone) or QCursor(Qt.ArrowCursor)
 
     # -- inserting a table by dragging ---------------------------------------------------------
     def insert_preview(self) -> Optional[tuple]:
