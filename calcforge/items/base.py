@@ -143,13 +143,16 @@ def paint_hatch(painter: QPainter, region: QPainterPath, style) -> None:
     if region is None or region.isEmpty() or not style.hatched():
         return
     from . import hatches
+    from ..ui.markuplayer import smoothed
     ink = QColor(style.hatch_color or style.stroke or "#000000")
     ink.setAlphaF(max(0.0, min(1.0, style.opacity
                                 * getattr(style, "hatch_opacity", 1.0))))
-    if style.hatch_tile:
-        hatches.paint_tile(painter, region, style.hatch_tile, style.hatch_scale, ink)
-        return
-    hatches.paint(painter, region, style.hatch, style.hatch_scale, ink)
+    # (a markup drawn sharp zoomed out keeps its hatch as it was)
+    with smoothed():
+        if style.hatch_tile:
+            hatches.paint_tile(painter, region, style.hatch_tile, style.hatch_scale, ink)
+        else:
+            hatches.paint(painter, region, style.hatch, style.hatch_scale, ink)
 
 
 def _is_hatch(name: str) -> bool:
@@ -265,19 +268,7 @@ class Style:
             if len(_PENS) > 512:
                 _PENS.clear()
             _PENS[key] = made
-        pen = QPen(made)
-        pixel = _THINNEST[0]
-        width = pen.widthF()
-        if pixel > 0 and self.width > 0:
-            # on screen, zoomed out: sharp — a whole number of pixels wide,
-            # one at least (ui/markuplayer.thinnest_line), dashes as long
-            pixels = width / pixel
-            if pixels < WHOLE_PIXELS_BELOW:
-                sharp = max(round(pixels), 1) * pixel
-                pen.setWidthF(sharp)
-                if pen.style() == Qt.CustomDashLine:
-                    pen.setDashPattern([step * width / sharp for step in pen.dashPattern()])
-        return pen
+        return QPen(made)
 
     def _make_pen(self, scale: float) -> QPen:
         colour = QColor(self.stroke or "#000000")
@@ -1428,14 +1419,11 @@ class MarkupItem(QGraphicsObject):
             self._paint_handles_as_picked(painter)
             return
         painter.save()
-        from ..ui.markuplayer import align_with_squares, thinnest_line
+        from ..ui.markuplayer import align_with_squares, drawn_sharp
         align_with_squares(painter, self)
-        held = _THINNEST[0]
-        _THINNEST[0] = thinnest_line(painter, self)
-        try:
+        # on screen zoomed out, its strokes sharp, as Revu's (markuplayer)
+        with drawn_sharp(painter, self):
             self._paint_own(painter, frame)
-        finally:
-            _THINNEST[0] = held
         painter.restore()
         self._paint_handles_as_picked(painter)
 
@@ -2102,62 +2090,6 @@ def cloud_path(polygon: QPolygonF, radius: float, closed: bool = True,
 #: repaint and into every square it crosses.
 _CLOUDS: dict = {}
 _PENS: dict = {}
-#: one device pixel in a markup's own units while it paints on screen zoomed
-#: out (MarkupItem.paint, ui/markuplayer.thinnest_line), else nothing
-_THINNEST = [0.0]
-#: and lines narrower than this many pixels are drawn a whole number wide
-WHOLE_PIXELS_BELOW = 2.5
-
-
-def crisp_strokes(painter: QPainter, path: Optional[QPainterPath] = None) -> None:
-    """Lines about to be drawn with the painter's pen — a rectangle's sides,
-    or *path* — on screen zoomed out (ui/markuplayer.thinnest_line). Every
-    one running straight across or down the screen: drawn without smoothing,
-    so each lies on whole pixels, one solid row. A slanting line or a curve
-    keeps its smoothing (in steps it would look broken), as thick as the
-    drawing's own thinnest (pdf/engine.ZOOMED_OUT_LINE_PIXELS), so it is as
-    dark as a line of the drawing."""
-    pixel = _THINNEST[0]
-    if pixel <= 0:
-        return
-    device = painter.deviceTransform()
-    if path is None:
-        square = abs(device.m12()) <= 1e-9 and abs(device.m21()) <= 1e-9
-    else:
-        square = _square_to_the_screen(path, device)
-    if square:
-        painter.setRenderHint(QPainter.Antialiasing, False)
-        return
-    from ..pdf.engine import ZOOMED_OUT_LINE_PIXELS
-
-    pen = painter.pen()
-    if pen.style() != Qt.NoPen and not pen.isCosmetic() \
-            and pen.widthF() < ZOOMED_OUT_LINE_PIXELS * pixel:
-        width = pen.widthF()
-        pen.setWidthF(ZOOMED_OUT_LINE_PIXELS * pixel)
-        if pen.style() == Qt.CustomDashLine and width > 0:
-            pen.setDashPattern([step * width / pen.widthF() for step in pen.dashPattern()])
-        painter.setPen(pen)
-
-
-def _square_to_the_screen(path: QPainterPath, device) -> bool:
-    """Whether *path* is straight lines only, each running across or down
-    the screen through *device* (to a twentieth of a pixel)."""
-    curve = QPainterPath.ElementType.CurveToElement
-    move = QPainterPath.ElementType.MoveToElement
-    last = None
-    for index in range(path.elementCount()):
-        element = path.elementAt(index)
-        if element.type == curve:
-            return False
-        here = device.map(QPointF(element.x, element.y))
-        if element.type != move and last is not None:
-            if abs(here.x() - last.x()) > 0.05 and abs(here.y() - last.y()) > 0.05:
-                return False
-        last = here
-    return True
-
-
 #: A PDF reader's cloudy border (Apache PDFBox's CloudyBorder, after
 #: Acrobat), which Revu's clouds look like: circles of the scallop radius
 #: centred on the outline, CLOUD_PITCH × radius apart, so neighbours cross
