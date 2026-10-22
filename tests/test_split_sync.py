@@ -230,7 +230,12 @@ def test_sync_off_clicking_into_the_other_view_moves_neither(window, tmp_path):
         _in_hand(window, pane)
         window.insert_sheet_page(0)
         _settle(6)
-        window.go_to_page(1)
+        # scrolled onto its page (gone to, it opens alone: the workbook view),
+        # the desk at the left where the clicks below land (a click on its
+        # cells would open the workbook view)
+        pane.view.go_to_page_top(1)
+        bar = pane.view.horizontalScrollBar()
+        bar.setValue(bar.minimum())
         _settle()
     assert window.formula_bar.isVisible()
     for pane in (left, right, left, right):

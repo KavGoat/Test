@@ -62,9 +62,10 @@ def test_a_sheet_pages_row_numbers_pick_rows_before_any_cell_is_clicked(w, mode)
     shows its row numbers and column letters, but until a cell had been
     clicked they did nothing at all, in either mode."""
     run = a_closed_sheet(w, mode)
-    last = run.size[1] - 1
     click(w, row_number(run, 3))
     assert w.view.tables.item is run
+    # (the click opened the workbook view, whose grid fills the window)
+    last = run.size[1] - 1
     assert w.view.tables.selection() == (3, 0, 3, last)
 
     w.view.tables.close()
@@ -134,7 +135,11 @@ def test_the_kept_headings_pick_a_row_without_scrolling_the_sheet(w, mode, opene
     h, v = w.view.horizontalScrollBar().value(), w.view.verticalScrollBar().value()
     click(w, w.view.mapToScene(where.toPoint()))
     assert w.view.tables.selection() == (row, 0, row, run.size[1] - 1)
-    assert (w.view.horizontalScrollBar().value(), w.view.verticalScrollBar().value()) == (h, v)
+    if opened:
+        assert (w.view.horizontalScrollBar().value(),
+                w.view.verticalScrollBar().value()) == (h, v)
+    # (closed, the click opened the workbook view: the pages round the sheet
+    # went, and the sheet stayed where it was on the screen)
     assert headings.hit(where)[1] == ("row", row), "the row clicked is still under the pointer"
 
 

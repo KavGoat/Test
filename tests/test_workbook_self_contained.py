@@ -211,7 +211,8 @@ def test_the_sheet_tab_menu_changes_it_as_one_undo_step_and_it_is_saved(w, tmp_p
     from tests.test_calc_saving import reopen, save_to
     last = with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")))
     type_equations(w, last, ["y:Z", "y="])
-    w.sheet_tabs.refresh()
+    w.go_to_page(1)                       # the workbook view: its tabs
+    pump()
     menu = w.sheet_tabs.build_menu(0)
     (tick,) = [a for a in menu.actions() if a.text() == "Self-contained"]
     assert tick.isCheckable() and tick.isChecked()
@@ -233,6 +234,8 @@ def test_the_sheet_tab_menu_changes_it_as_one_undo_step_and_it_is_saved(w, tmp_p
     assert results(w)["y="] == "0.4"
     books = runs(w)["Tables"].sheet.workbook.books
     assert [(b.name, b.self_contained) for b in books.values()] == [("Quake_Calc", False)]
+    w.go_to_page(1)
+    pump()
     menu = w.sheet_tabs.build_menu(0)
     assert not [a for a in menu.actions() if a.text() == "Self-contained"][0].isChecked()
 

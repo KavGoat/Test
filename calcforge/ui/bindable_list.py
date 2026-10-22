@@ -827,6 +827,8 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'sheettab.self_contained': ('Sheet tab: Self-contained', 'Spreadsheet', 'table'),
     # Print / Don't Print for a sheet (its pages left out of print and export)
     'sheettab.print': ('Sheet tab: Print (or Don\'t Print)', 'Spreadsheet', 'table'),
+    # the workbook view's way back to the pages (its × too)
+    'sheettab.close_workbook': ('Sheet tab: Close Workbook', 'Spreadsheet', 'table'),
     # -- properties ------------------------------------------------------------
     'properties.document_default': ('Properties: Document default', 'Markup', 'always'),
     # Revu's Edit beside Show Caption: the caption's values and label

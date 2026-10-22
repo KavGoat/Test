@@ -32,6 +32,7 @@ from .table import (EXCEL_GREEN, HEADING_BG, HEADING_H, HEADING_ON, ROWNUM_W, Ta
                     hidden_mark)
 
 BREAK_BLUE = QColor("#2f6fd6")
+NORMAL_BREAK = QColor("#5f6670")         # the workbook view's page breaks (Excel's Normal)
 SCRATCH = QColor("#ececec")
 PAGE_LABEL = QColor(150, 150, 150, 70)
 DEFAULT_ROWS = 52
@@ -157,7 +158,33 @@ class SheetRunItem(TableItem):
         paging = self.paging
         if paging is None or not paging.slices:
             return (DEFAULT_ROWS, 24)
-        return (paging.slices[-1][1] + 1, paging.shown_cols)
+        rows, cols = paging.slices[-1][1] + 1, paging.shown_cols
+        if self.alone:
+            # shown alone (the workbook view): the grid goes on past its
+            # pages as far as the window has been scrolled, as Excel's does
+            extent = getattr(self.scene(), "sheet_extent", (0, 0))
+            rows, cols = max(rows, extent[0]), max(cols, extent[1])
+        return (rows, cols)
+
+    @property
+    def sheet_rows(self) -> int:
+        """The rows the sheet has (its pages hold), whatever the grid shows."""
+        paging = self.paging
+        return paging.slices[-1][1] + 1 if paging is not None and paging.slices else DEFAULT_ROWS
+
+    @property
+    def alone(self) -> bool:
+        """Whether this sheet is shown alone, filling the canvas (Excel's
+        Normal view: ui/sheetview.py) rather than on its pages."""
+        try:
+            scene = self.scene()
+        except RuntimeError:
+            return False
+        return scene is not None and getattr(scene, "sheet_view", None) == self.uid
+
+    def grid_rect(self) -> QRectF:
+        """The grid and its row and column headings, in its own coordinates."""
+        return self.local_rect().adjusted(-ROWNUM_W, -HEADING_H, 0, 0)
 
     def relayout(self) -> bool:
         """Give each page of the run its slice; True when the sheet needs
@@ -389,7 +416,7 @@ class SheetRunItem(TableItem):
         painter.save()
         self._paint_headings(painter, r0, r1)
         from . import nametags
-        if nametags.shown(self):
+        if nametags.shown(self) and not self.alone:
             # the sheet's name, above its first page's top-left corner
             nametags.draw_tag(painter, QPointF(-ROWNUM_W, -HEADING_H - 0.8), self.name,
                               nametags.OUTER_PT, above=True)
@@ -434,7 +461,7 @@ class SheetRunItem(TableItem):
         # for any edit (the user's seismic workbook, 2026-10-19)
         rules = _looks_in(sheet, a, b, self.size[1] - 1) if sheet.cond_rules else None
         from .nametags import named_blocks, shown
-        tags = (shown(self), tuple(named_blocks(sheet)))
+        tags = (shown(self), tuple(named_blocks(sheet)), self.alone, self._page_numbers())
         return (tuple(xs), tuple(ys[a:b + 2]), content, [tuple(m) for m in sheet.merges], tags,
                 paging.first_col, paging.last_col, paging.print_rows, tuple(paging.slices),
                 tuple(paging.groups),
@@ -560,10 +587,30 @@ class SheetRunItem(TableItem):
             bands.move_to_end(k, last=False)          # first to go if room is short
             return                                     # one a turn: the next paint asks again
 
+    def _page_numbers(self) -> tuple:
+        """Each of the run's pages: its number in the document, or 0 when
+        it doesn't print (no "Page N" on it)."""
+        out = []
+        for frame in self.run_frames():
+            page = frame.page
+            document = getattr(frame, "document", None)
+            if not page.printable or document is None or page not in document.pages:
+                out.append(0)
+            else:
+                out.append(document.index_of(page) + 1)
+        return tuple(out)
+
     def _paint_paper(self, painter: QPainter, r0: int, r1: int) -> None:
-        """White where it prints, grey for the scratch area; "Page N"."""
+        """White where it prints, grey for the scratch area; "Page N", the
+        page's number in the document (none on a page that doesn't print).
+        Shown alone (Excel's Normal view) it is all white, with no page
+        numbers: the dashed page breaks say where the pages fall."""
         xs, ys = self.edges()
         paging = self.paging
+        if self.alone:
+            painter.fillRect(QRectF(0, ys[r0], xs[-1], ys[r1 + 1] - ys[r0]), QColor("white"))
+            return
+        numbers = self._page_numbers()
         c0, c1 = self._printed_cols()
         area = paging.print_rows
         painter.fillRect(QRectF(0, ys[r0], xs[-1], ys[r1 + 1] - ys[r0]), SCRATCH)
@@ -586,7 +633,10 @@ class SheetRunItem(TableItem):
                 box = QRectF(xs[g0], ys[a], xs[g1 + 1] - xs[g0], ys[b + 1] - ys[a])
                 if box.height() < 52:
                     continue                 # a page of a row or two: no room to say so
-                painter.drawText(box, Qt.AlignCenter, f"Page {paging.index_of(i, j) + 1}")
+                k = paging.index_of(i, j)
+                number = numbers[k] if k < len(numbers) else 0
+                if number:                   # (a page that doesn't print has none)
+                    painter.drawText(box, Qt.AlignCenter, f"Page {number}")
 
     def _paint_breaks(self, painter: QPainter) -> None:
         """Excel's Page Break Preview lines: the printed area's edge, and a
@@ -595,10 +645,17 @@ class SheetRunItem(TableItem):
         paging = self.paging
         c0, c1 = self._printed_cols()
         painter.setRenderHint(QPainter.Antialiasing, False)
-        solid = QPen(BREAK_BLUE, 2.0)
-        solid.setCosmetic(True)
-        dashed = QPen(BREAK_BLUE, 2.0, Qt.DashLine)
-        dashed.setCosmetic(True)
+        if self.alone:
+            # Excel's Normal view: thin dashed lines where the pages fall
+            # and round what prints, never the Page Break Preview's blue
+            solid = QPen(NORMAL_BREAK, 1.0, Qt.DashLine)
+            solid.setCosmetic(True)
+            dashed = solid
+        else:
+            solid = QPen(BREAK_BLUE, 2.0)
+            solid.setCosmetic(True)
+            dashed = QPen(BREAK_BLUE, 2.0, Qt.DashLine)
+            dashed.setCosmetic(True)
         area = paging.print_rows
         top = ys[area[0]] if area else 0.0
         bottom = ys[min(area[1] + 1, len(ys) - 1)] if area else ys[-1]

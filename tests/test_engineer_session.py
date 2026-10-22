@@ -208,6 +208,8 @@ def test_ctrl_drag_box_selects_markups_over_a_spreadsheet(w):
     assert w.view.tables.item is run and not any(b.isSelected() for b in boxes), \
         "a plain drag selects cells"
     w.view.tables.close()
+    # (the drag opened the workbook view: the sheet on its own, elsewhere on the canvas)
+    a, z = cell_scene(run, "B2"), cell_scene(run, "H8")
     drag(w.view, a.x(), a.y(), z.x(), z.y(), Qt.ControlModifier)
     pump()
     assert all(b.isSelected() for b in boxes) and w.view.tables.item is None

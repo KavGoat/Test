@@ -1267,6 +1267,8 @@ class PageView(QGraphicsView):
         scale = max(getattr(self, "_zoom", 1.0), MIN_ZOOM)
         across = max(self.viewport().width() / (2.0 * scale) + 12.0, scene.desk_minimum())
         down = max(self.viewport().height() / (2.0 * scale) + 12.0, scene.desk_minimum())
+        if getattr(scene, "sheet_view", None) is not None:
+            across = down = 0.0           # a sheet shown alone: its grid, no desk (sheetview.py)
         rect = scene.pages_rect().adjusted(-across, -down, across, down)
         if rect == self.sceneRect():
             return
@@ -1536,6 +1538,8 @@ class PageView(QGraphicsView):
         paged = self.scroll_mode == "page"
         unmodified_zooms = pixels.isNull() and (
             prefs.wheel_zooms_in_page_mode() if paged else prefs.wheel_zooms())
+        if getattr(self.scene(), "sheet_view", None) is not None:
+            unmodified_zooms = False      # a sheet shown alone: Excel's wheel (sheetview.py)
         zooming = unmodified_zooms != bool(event.modifiers() & Qt.ControlModifier)
         if zooming:
             delta = notches or pixels.y()

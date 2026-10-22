@@ -273,9 +273,10 @@ def test_the_page_tab_and_sheet_tab_menus(w):
     assert top_level(menu) == ["Close", "Close All", "Close Others", "Save", "Save As…",
                                "New Window", "Open in Split View", "Duplicate Tab"]
     sheet_page(w)
-    w.sheet_tabs.refresh()
+    w.go_to_page(1)                       # the workbook view: its tabs
+    pump()
     assert top_level(w.sheet_tabs.build_menu(0)) == ["Insert Sheet", "Delete", "Rename…", "Print",
-                                                     "Go To"]
+                                                     "Go To", "Close Workbook"]
 
 
 def test_calc_modes_page_menu_has_smaths_inserts(w):
@@ -347,8 +348,11 @@ def every_menu(w) -> dict:
     found["sheet row heading"] = w.view.tables.heading_menu("row", 4)
     found["sheet column heading"] = w.view.tables.heading_menu("col", 2)
     w.view.tables.close()
-    w.sheet_tabs.refresh()
+    w.go_to_page(w.document.index_of(run.parentItem().page))   # the workbook view: its tabs
+    pump()
     found["sheet tab"] = w.sheet_tabs.build_menu(0)
+    w.go_to_page(0)
+    pump()
     w.toggle_calc_mode(True)
     found["page (Calc)"] = w.build_context_menu(None, frame.mapToScene(QPointF(80, 200)))
     from tests.test_calc_panels import an_equation

@@ -88,7 +88,7 @@ def fill(w, run, rows, col=0):
 # -- rows -------------------------------------------------------------------------------------------
 def test_insert_and_delete_row_by_the_heading_menu_change_the_rows_and_pages(w):
     run = sheet_page(w)
-    n = run.size[0]                                  # a fresh sheet: a page of rows
+    n = run.sheet_rows                                  # a fresh sheet: a page of rows
     assert len(sheet_pages(w)) == 1 and thumbnails(w) == 2
     open_at(w, run, "A1")
     put(w, run, 0, 1, "=A10")                        # reads a cell below the new row
@@ -97,7 +97,7 @@ def test_insert_and_delete_row_by_the_heading_menu_change_the_rows_and_pages(w):
                                        ["Insert Rows Above"])
     assert found and enabled and got["clicked"]
     run = the_run(w)
-    assert run.size[0] == n + 1, "one row more (it stayed the same before)"
+    assert run.sheet_rows == n + 1, "one row more (it stayed the same before)"
     assert run.sheet.input(0, 1) == "=A11" and run.sheet.input(10, 0) == "7"
     assert len(sheet_pages(w)) == 2 and thumbnails(w) == 3, "the row past the page: a page"
     assert run.paging.slices == [(0, n - 1), (n, n)]
@@ -105,21 +105,21 @@ def test_insert_and_delete_row_by_the_heading_menu_change_the_rows_and_pages(w):
     found, enabled, got = through_menu(w, right_click_row_heading(w, run, 4), ["Delete Rows"])
     assert found and enabled and got["clicked"]
     run = the_run(w)
-    assert run.size[0] == n and run.sheet.input(0, 1) == "=A10"
+    assert run.sheet_rows == n and run.sheet.input(0, 1) == "=A10"
     assert len(sheet_pages(w)) == 1 and thumbnails(w) == 2, "the page left empty goes"
     assert printed(w) == [(0, n - 1)]
     w.undo_stack.undo()                              # one step: the row and its page back
     pump()
-    assert the_run(w).size[0] == n + 1 and len(sheet_pages(w)) == 2
+    assert the_run(w).sheet_rows == n + 1 and len(sheet_pages(w)) == 2
     w.undo_stack.undo()
     pump()
-    assert the_run(w).size[0] == n and len(sheet_pages(w)) == 1
+    assert the_run(w).sheet_rows == n and len(sheet_pages(w)) == 1
     assert the_run(w).sheet.input(0, 1) == "=A10"
 
 
 def test_the_insert_and_delete_dialogs_take_whole_rows_too(w):
     run = sheet_page(w)
-    n = run.size[0]
+    n = run.sheet_rows
     open_at(w, run, "B3")
     w._last_data_dialog = None
     QTest.keyClick(w.view, Qt.Key_Plus, CTRL | SHIFT)       # Ctrl+Shift+=
@@ -128,7 +128,7 @@ def test_the_insert_and_delete_dialogs_take_whole_rows_too(w):
     assert dialog is not None and dialog.windowTitle() == "Insert"
     dialog.choose("row")
     dialog.accept()
-    assert the_run(w).size[0] == n + 1 and len(sheet_pages(w)) == 2
+    assert the_run(w).sheet_rows == n + 1 and len(sheet_pages(w)) == 2
     click(w, cell_scene(the_run(w), "B3"))
     w._last_data_dialog = None
     QTest.keyClick(w.view, Qt.Key_Minus, CTRL)
@@ -137,34 +137,34 @@ def test_the_insert_and_delete_dialogs_take_whole_rows_too(w):
     assert dialog is not None and dialog.windowTitle() == "Delete"
     dialog.choose("row")
     dialog.accept()
-    assert the_run(w).size[0] == n and len(sheet_pages(w)) == 1
+    assert the_run(w).sheet_rows == n and len(sheet_pages(w)) == 1
     # Insert Rows Below on the last row: the sheet's last row is one further
     click(w, cell_scene(the_run(w), f"A{n}"))
     found, enabled, got = through_menu(w, right_click_cell(w, the_run(w), f"A{n}"),
                                        ["Insert", "Insert Rows Below"])
     assert found and enabled and got["clicked"]
-    assert the_run(w).size[0] == n + 1
+    assert the_run(w).sheet_rows == n + 1
 
 
 def test_down_and_enter_on_the_last_row_add_one_row_each(w):
     run = sheet_page(w)
-    n = run.size[0]
+    n = run.sheet_rows
     open_at(w, run, "A1")
     w.view.tables.select((n - 1, 0))
     QTest.keyClick(w.view, Qt.Key_Down)
     pump()
-    assert the_run(w).size[0] == n + 1 and w.view.tables.active == (n, 0)
+    assert the_run(w).sheet_rows == n + 1 and w.view.tables.active == (n, 0)
     assert len(sheet_pages(w)) == 2
     QTest.keyClicks(w.view, "x")
     pump()
     QTest.keyClick(w.view.tables.editor, Qt.Key_Return)
     pump()
-    assert the_run(w).size[0] == n + 2, "Enter on the last row: one more row, not a page"
+    assert the_run(w).sheet_rows == n + 2, "Enter on the last row: one more row, not a page"
     assert the_run(w).paging.slices[-1] == (n, n + 1) and len(sheet_pages(w)) == 2
     assert thumbnails(w) == 3 and printed(w) == [(0, n - 1), (n, n + 1)]
     w.undo_stack.undo()
     pump()
-    assert the_run(w).size[0] == n + 1
+    assert the_run(w).sheet_rows == n + 1
 
 
 # -- the print area ---------------------------------------------------------------------------------
@@ -173,7 +173,7 @@ def test_a_print_area_has_its_pages_and_no_others(w):
     thumbnails. It happened whenever rows or cells ran past the print area
     (every page of rows stayed a page, the ones outside printing nothing)."""
     run = sheet_page(w)
-    n = run.size[0]
+    n = run.sheet_rows
     fill(w, run, 2 * n + 10)                      # three pages of rows
     run = the_run(w)
     assert len(sheet_pages(w)) == 3 and thumbnails(w) == 4
@@ -187,7 +187,7 @@ def test_a_print_area_has_its_pages_and_no_others(w):
     assert options(run.sheet)["print_area"] == [0, 0, n + 5, 2]
     assert len(sheet_pages(w)) == 2 and thumbnails(w) == 3, "the print area's two pages"
     assert printed(w) == [(0, n - 1), (n, n + 5)]
-    assert run.size[0] == 2 * n + 10, "the rows below it are still there, outside the line"
+    assert run.sheet_rows == 2 * n + 10, "the rows below it are still there, outside the line"
     # its bottom edge dragged down past the next page break: three pages
     from tests.test_usability import drag
     xs, ys = run.edges()
@@ -220,7 +220,7 @@ def test_a_print_area_has_its_pages_and_no_others(w):
     found, enabled, got = through_menu(w, right_click_cell(w, the_run(w), "A2"),
                                        ["Page Layout", "Print Area", "Clear Print Area"])
     assert got["clicked"] and options(the_run(w).sheet)["print_area"] is None
-    rows = the_run(w).size[0]
+    rows = the_run(w).sheet_rows
     assert rows == 2 * n + 11
     assert len(sheet_pages(w)) == len(the_run(w).paging.slices) == thumbnails(w) - 1
     assert printed(w)[-1][1] == rows - 1, "every row prints again"

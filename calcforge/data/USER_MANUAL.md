@@ -759,7 +759,8 @@ panel they go on a line of their own under the title.
 in, or spreadsheet pages made here side by side — show in Thumbnails as one
 entry: its first page on a stack of sheets, with **▸ Loads** over **pages 2–10**
 (the document's own page numbers, which stay as they are everywhere else).
-Click the picture to go to its first page; click its name (the ▸) to show its
+Click the picture to open the workbook (its first sheet, alone: see *The workbook
+view and sheet tabs*); click its name (the ▸) to show its
 pages one by one (**▾ Loads**, on a tinted band) and again to fold them back;
 **Expand Section** / **Collapse Section** on a page's right-click menu do the
 same. It starts folded. Picked, the entry is the whole workbook: Delete Pages,
@@ -861,7 +862,7 @@ Print dialog with the preview built in:
 
 What prints is exactly what is drawn: equations, tables and charts are part of the
 page and print with Document Only. A page with *Include in Print & Export* off, a
-sheet marked **Don't Print** (see *Sheet tabs*), or a markup with its **Print**
+sheet marked **Don't Print** (see *The workbook view and sheet tabs*), or a markup with its **Print**
 tick off, does not print.
 
 **File ▸ Export ▸ PDF…** (`Ctrl+E`) writes a plain PDF with the markups drawn in;
@@ -1467,8 +1468,9 @@ The engine has **122** built-in functions.
 **Opening the cells.** In Calc mode click a table to work in it; in Markup mode a
 table is a markup (click selects, drag moves) and a double-click opens its cells
 (or right-click ▸ **Edit Table**). Click outside it or press `Esc` to close it.
-On a spreadsheet page, in Markup mode, `Ctrl`+drag box-selects markups over the
-cells and a plain drag selects cells. While a table is open it shows Excel's row
+On a spreadsheet page a click on a cell opens the workbook view (see *The workbook
+view and sheet tabs*). On a spreadsheet page, in Markup mode, `Ctrl`+drag
+box-selects markups over the cells and a plain drag selects cells. While a table is open it shows Excel's row
 and column headings, the selection and the fill handle; on a long sheet the column
 letters and row numbers stay in view as you scroll.
 
@@ -1731,23 +1733,41 @@ the equation and R² on the chart). The axis titles carry the cells' units.
   and the page breaks flow again. Paper and orientation belong to the whole sheet.
 - Cell borders always print; gridlines and headings print only when asked.
 
-### Sheet tabs
+### The workbook view and sheet tabs
 
-Under the canvas, beside the scroll bar, a tab for each sheet of the workbook in
-view, in reading order (tables have none). The tabs, like the formula bar, show
-only in the **spreadsheet view**: while the page in view — the one the page box
-shows — is a page of a workbook, or while one of its sheets is open for its cells
-(a click on a cell). Scroll off the workbook and they go, once the middle of the
-window is a little way past its edge (so they don't flicker at the boundary); a
-sheet open for its cells is closed once none of its pages is on screen, unless a
-cell is being typed in.
+**A workbook opens as Excel opens it.** Go to a workbook — click its entry in
+Thumbnails, click a cell on one of its pages, type one of its page numbers in the
+page box — and its sheet is shown alone, filling the document area: an endless
+grid from A1 with its row and column headings, which scrolls within that sheet
+only. There are no page edges and no other pages to scroll on to; scrolled or
+zoomed out, the grid goes on, and typing far down gives the rows the pages they
+need. Where the pages fall is shown as Excel's Normal view shows it: thin dashed
+lines at the page breaks and round what prints. Markups on the sheet's pages show
+where they are over the cells and can be picked and changed as on the page
+(they belong to the cells under them). Each workbook keeps its own zoom
+(`Ctrl`+wheel zooms the grid), and each sheet where you left it and its active
+cell.
 
+The pages are still there: in the page view (anywhere else in the document) a
+workbook's pages show as they print — its Page Layout view — and **File ▸
+Print…**'s preview is its print preview. Thumbnails, Print, Export and the page
+numbers go on as before.
+
+**Leaving it:** click any other page in Thumbnails or type its number in the page
+box; `Ctrl+Page Down` / `Ctrl+Page Up` go to the next or previous sheet, and past
+the last or first sheet out to the page after or before the workbook; or the
+**×** at the right end of the sheet tabs (**Close Workbook**, also on a tab's
+menu) goes back to the page you came from, as you left it.
+
+**Sheet tabs.** In the workbook view, under the canvas beside the scroll bar, a
+tab for each of its sheets in reading order (tables have none). The tabs, like
+the formula bar, show only in the workbook view.
 Click a tab to go to it; double-click to rename; drag it to move the sheet's
 pages among the workbook's; **+** adds a sheet at the end of the workbook (to an
-Excel workbook, one of its sheets, sharing its names). Right-click a tab — or
-press and hold it, on a touch screen — for **Insert Sheet**, **Delete**,
-**Rename…**, **Print** and **Go To** — and, on a sheet of an imported Excel
-workbook, the **Self-contained** tick (see *Excel workbooks*). Rename a table from its right-click menu
+Excel workbook, one of its sheets, sharing its names) and shows it. Right-click a
+tab — or press and hold it, on a touch screen — for **Insert Sheet**, **Delete**,
+**Rename…**, **Print**, **Go To** and **Close Workbook** — and, on a sheet of an
+imported Excel workbook, the **Self-contained** tick (see *Excel workbooks*). Rename a table from its right-click menu
 (**Rename Table…**) or the Properties panel; references follow a rename. Sheet and
 table names are unique in the whole document.
 
@@ -1760,6 +1780,10 @@ browser neither shows nor prints them; CalcForge keeps them in the file's own
 record and puts them back where they were when it opens the file. The sheet is
 still part of the document: equations and other sheets read its cells as before.
 
+**Page numbers on a sheet's pages.** In the page view each page of a sheet shows
+its number in the document ("Page 4") faintly behind the cells; a page that
+doesn't print shows none.
+
 ### Excel workbooks
 
 **File ▸ Open** an `.xlsx` makes a new document of it; **File ▸ Import ▸ Excel
@@ -1767,7 +1791,7 @@ Workbook** (or Document ▸ Insert, or a page's menu) adds one Before or After t
 current page. A workbook with several worksheets asks which to bring in, and
 for each whether it prints: the window lists the worksheets with a tick to bring
 each in and a **Print** column, ticked (**Print**) to start; untick it for
-**Don't Print** (see *Sheet tabs*). Each
+**Don't Print** (see *The workbook view and sheet tabs*). Each
 worksheet becomes a run of spreadsheet pages with its cells, formulas, formatting,
 sizes, merges, names, comments, validation, conditional formatting and page
 layout; hidden worksheets come in too. Charts, pictures and a print scale other
