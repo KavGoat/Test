@@ -4474,6 +4474,17 @@ class MainWindow(QMainWindow):
         what the file holds and not what it is called: a PDF carrying a
         MarkForge record is a document and opens as one, whatever its name.
         """
+        try:
+            return self._open_path(path)
+        finally:
+            # What opening made is looked over once, now, while the window
+            # is opening anyway: left to Python, it was looked over in the
+            # middle of the first gesture after — 50 ms with nothing drawn,
+            # the box of a call-out stopping dead under the pointer (2026-10-21)
+            import gc
+            gc.collect()
+
+    def _open_path(self, path: str) -> Optional[bool]:
         from .xlsximport import is_workbook
         if is_workbook(path):
             # an Excel workbook: its worksheets as spreadsheet pages (cells only)

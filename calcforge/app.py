@@ -11,7 +11,28 @@ from .theme import DARK, LIGHT, stylesheet
 from .settings import APP_NAME, ORGANISATION, app_settings, migrate_from_markforge
 
 
+def _no_wait_for_the_screen() -> None:
+    """On Windows, a frame drawn with the graphics card goes to the screen
+    without the program waiting there for the screen's next refresh.
+
+    The desktop composes every window and shows each at the refresh anyway,
+    so nothing tears; but waiting held the whole program up until then on
+    every frame, and a frame that took a little longer than one refresh
+    waited for the next — the call-out's box following the pointer at half
+    the screen's rate (the user, 2026-10-21: "like the fps is lowered"). The
+    canvas asks for a frame no oftener than the screen shows one
+    (PageView._frame_if_due). Before the application exists: the window's
+    surface is made from this."""
+    if sys.platform != "win32":
+        return
+    from PySide6.QtGui import QSurfaceFormat
+    shape = QSurfaceFormat.defaultFormat()
+    shape.setSwapInterval(0)
+    QSurfaceFormat.setDefaultFormat(shape)
+
+
 def build_application(argv: list[str]) -> QApplication:
+    _no_wait_for_the_screen()
     QApplication.setApplicationName(APP_NAME)
     QApplication.setOrganizationName(ORGANISATION)
     QApplication.setApplicationDisplayName(APP_NAME)

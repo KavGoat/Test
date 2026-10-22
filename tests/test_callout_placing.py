@@ -45,6 +45,14 @@ its target equally. The words now go where the pointer is (on the grid when
 it is snapped to), shown and placed alike, and the leader holds its side
 until another is clearly better.
 
+And the frame rate (the user, 2026-10-21: "it's like the fps is lowered"): on
+Windows the repaint Qt posts waits while input waits, and a mouse reporting
+hundreds of times a second nearly always has a move waiting, so frames came
+late and unevenly; a frame drawn on the card also waited for the screen's
+refresh, and one a little late waited for the next. Moves now put their frame
+on the screen themselves, once a refresh, with the canvas's own changes in
+it, and on Windows the card does not wait for the refresh.
+
 Cloud+ is Revu's: press and drag for a rectangular cloud of that size, or
 click its corners for a free-form one — closed by a double-click, by clicking
 the first corner again, by Enter or by a right-click — and then a click for
@@ -800,6 +808,119 @@ def test_the_properties_panel_is_taken_apart_at_once_after_a_click(w):
     assert font is not None and font.isVisible(), "the Font list is back in its place"
 
 
+# -- frames at the screen's rate -----------------------------------------------------
+
+#: how often a mouse reports, as many do on Windows (and how a gaming one does)
+MOUSE_RATE = 1000.0
+
+
+def _moved_as_windows_moves(w, start: QPoint, seconds: float, held=Qt.NoButton) -> int:
+    """The pointer moving at an even speed, as Windows hands it over: the
+    latest place each time the last move has been dealt with, and anything
+    posted — the window's repaint among it — only once no move is waiting.
+    How many moves were handed over."""
+    from PySide6.QtGui import QMouseEvent
+
+    viewport = vp(w)
+    app = QApplication.instance()
+    began = time.perf_counter()
+    due, moves = 0.0, 0
+    while True:
+        now = time.perf_counter() - began
+        if now > seconds:
+            return moves
+        if now >= due:
+            at = QPointF(start.x() + int(300 * now), start.y() - int(120 * now))
+            QApplication.sendEvent(viewport, QMouseEvent(
+                QEvent.MouseMove, at, viewport.mapToGlobal(at), Qt.NoButton, held,
+                Qt.NoModifier))
+            moves += 1
+            due = max(due + 1.0 / MOUSE_RATE, time.perf_counter() - began - 1.0 / MOUSE_RATE)
+            if time.perf_counter() - began >= due:
+                continue                      # the mouse has moved again meanwhile
+        app.processEvents()
+
+
+def _pacing(w, gesture: str, tmp_path) -> dict:
+    """The frames the window put on the screen while the box of a call-out
+    being placed followed the pointer, or a placed markup was dragged."""
+    from calcforge.items.shapes import RectItem
+
+    _marked_up(w, tmp_path)
+    view = w.view
+    # as on Windows, where it is needed (PageView.paces_its_frames)
+    view.paces_its_frames = True
+    if gesture == "callout":
+        w.select_tool("callout")
+        pump()
+        click(w, page(w, 300, 300))
+        start, held = screen(w, page(w, 330, 320)), Qt.NoButton
+    else:
+        w.select_tool("rect")
+        drag(w, page(w, 250, 250), page(w, 350, 310))
+        w.select_tool("select")
+        pump()
+        box = [item for item in w.document.pages[0].frame.markups()
+               if isinstance(item, RectItem)][-1]           # the one just drawn
+        rect = box.local_rect().normalized()
+        edge = box.mapToScene(QPointF(rect.left() + rect.width() * 0.3, rect.top()))
+        QTest.mousePress(vp(w), Qt.LeftButton, Qt.NoModifier, screen(w, edge))
+        start, held = screen(w, edge), Qt.LeftButton
+    _quiet(w, repaint=False)
+    seen = _Seen(w, [vp(w)])
+    times: list = []
+
+    class _When(QObject):
+        def eventFilter(self, watched, event):
+            if watched is vp(w) and event.type() == QEvent.Paint:
+                times.append(time.perf_counter())
+            return False
+    when = _When()
+    vp(w).installEventFilter(when)
+    try:
+        moves = _moved_as_windows_moves(w, start, 1.2, held)
+    finally:
+        vp(w).removeEventFilter(when)
+        seen.stop()
+    if gesture == "drag":
+        assert view._mode == "move", "the rectangle was being dragged"
+        QTest.mouseRelease(vp(w), Qt.LeftButton, Qt.NoModifier, start)
+    else:
+        key(w, Qt.Key_Escape)
+    gaps = [(b - a) * 1000.0 for a, b in zip(times, times[1:])]
+    span = times[-1] - times[0] if len(times) > 1 else 1.0
+    return {"moves": moves, "fps": (len(times) - 1) / span, "frames": seen.frames,
+            "paints": len(times), "longest": max(gaps) if gaps else 1e9,
+            "steady": sum(1 for gap in gaps if gap <= 17.0) / max(len(gaps), 1)}
+
+
+def _keeps_pace(stats: dict, gesture: str, least_fps: float, steady: float,
+                longest: float) -> None:
+    assert stats["moves"] > 100, f"{gesture}: only {stats['moves']} moves handed over"
+    assert stats["fps"] >= least_fps and stats["steady"] >= steady \
+        and stats["longest"] <= longest, (
+            f"{gesture}: {stats['fps']:.0f} frames a second, {stats['steady']:.0%} of them "
+            f"within 17 ms, the longest wait {stats['longest']:.0f} ms")
+    # every frame put on the screen has the canvas in it: a frame of
+    # something else between two of the canvas's was one more wait for the
+    # screen — half the frames
+    assert stats["frames"] <= stats["paints"] + 2, (
+        f"{gesture}: {stats['frames']} frames to the screen for {stats['paints']} "
+        f"of the canvas")
+
+
+@pytest.mark.parametrize("gesture", ["callout", "drag"])
+def test_frames_keep_the_screens_pace(w, tmp_path, gesture):
+    """While a call-out's box follows the pointer to where its words go, and
+    while a placed markup is dragged, frames go to the screen at its rate as
+    the mouse reports a thousand times a second — not only when the mouse
+    pauses, as when every report was dealt with before the repaint Qt had
+    posted (the user, 2026-10-21: "just moving the box around is not buttery
+    smooth, it's like the fps is lowered")."""
+    _keeps_pace(_pacing(w, gesture, tmp_path), gesture, least_fps=50.0, steady=0.85,
+                longest=40.0)
+
+
 # -- on the graphics card ----------------------------------------------------------
 
 #: set in the child process that draws with the graphics card
@@ -875,6 +996,19 @@ def test_on_the_card(w, tmp_path):
     assert (shown == fresh).all(), "the card left something of an earlier frame"
 
 
+
+@pytest.mark.skipif(not os.environ.get(CARD), reason="run in its own process, on the card")
+@pytest.mark.parametrize("gesture", ["callout", "drag"])
+def test_frames_keep_pace_on_the_card(w, tmp_path, gesture):
+    """The same on the card. Drawn here by a processor pretending to be one
+    (every frame of the whole window takes it 12-20 ms), so the budget is
+    what that allows: a frame for every one it can draw, none of them a frame
+    without the canvas, none of them waiting long."""
+    assert w.view.gpu, "drawing with the graphics card"
+    _keeps_pace(_pacing(w, gesture, tmp_path), gesture, least_fps=35.0, steady=0.0,
+                longest=70.0)
+
+
 def _opengl_under_x() -> bool:
     from tests.test_text_flicker import _opengl_under_x as probe
     return probe()
@@ -893,14 +1027,14 @@ def test_placing_a_callout_on_the_graphics_card():
     done = subprocess.run(
         ["xvfb-run", "-a", "-s", "-screen 0 1600x1000x24", sys.executable, "-m", "pytest",
          "-p", "no:cacheprovider", "-q", "-rA", "-x", os.path.abspath(__file__),
-         "-k", "test_on_the_card"],
+         "-k", "test_on_the_card or test_frames_keep_pace_on_the_card"],
         env=env, capture_output=True, text=True, timeout=600,
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     tail = "\n".join(line for line in done.stdout.splitlines()
                      if "PASSED" in line or "FAILED" in line or "Error" in line
                      or "assert" in line)
     assert done.returncode == 0, tail
-    assert done.stdout.count("PASSED ") == 1, tail
+    assert done.stdout.count("PASSED ") == 3, tail
 
 
 # -- Cloud+, drawn as Revu draws it ---------------------------------------------
