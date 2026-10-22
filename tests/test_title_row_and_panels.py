@@ -122,13 +122,6 @@ def test_a_layout_saved_with_stacked_panels_is_tabbed_when_restored(window, qapp
 # toolbars in side columns
 # ---------------------------------------------------------------------------
 
-def _in_window(window, widget):
-    """*widget*'s place in the window's coordinates (the rails and panels
-    are in the panels' own host, mainwindow._DockHost)."""
-    from PySide6.QtCore import QPoint, QRect
-    return QRect(widget.mapTo(window, QPoint(0, 0)), widget.size())
-
-
 def test_a_toolbar_on_the_left_edge_is_a_column_outside_the_rail_and_panels(window, qapp):
     window.show()
     _settle(qapp)
@@ -139,24 +132,24 @@ def test_a_toolbar_on_the_left_edge_is_a_column_outside_the_rail_and_panels(wind
     assert window.toolBarArea(measure) == Qt.LeftToolBarArea
     assert measure.orientation() == Qt.Vertical
     assert measure.toolButtonStyle() == Qt.ToolButtonIconOnly
-    rail = _in_window(window, window.left_rail_bar)
+    rail = window.left_rail_bar.geometry()
     column = measure.geometry()
     assert column.right() < rail.left(), "outside the rail, at the window's edge"
-    assert column.right() < _in_window(window, window.dock_pages).left()
-    # a second one is outside the rail too (in the first one's column, or one
-    # of its own, as it is dropped: Qt places it, as along the top)
+    assert column.right() < window.dock_pages.geometry().left()
+    # a second one has a column of its own too
     calculation = _bars(window)["toolbar_calculation"]
     window.addToolBar(Qt.LeftToolBarArea, calculation)
     _settle(qapp)
+    assert calculation.geometry().x() != measure.geometry().x()
     assert max(calculation.geometry().right(), measure.geometry().right()) < \
-        _in_window(window, window.left_rail_bar).left()
+        window.left_rail_bar.geometry().left()
     # remembered, and locking still works
     state = window.saveState()
     window._default_toolbar_rows()
     window.restoreState(state)
     _settle(qapp)
     assert window.toolBarArea(measure) == Qt.LeftToolBarArea
-    assert measure.geometry().right() < _in_window(window, window.left_rail_bar).left()
+    assert measure.geometry().right() < window.left_rail_bar.geometry().left()
     window.lock_toolbars(True)
     assert not measure.isMovable()
     window.lock_toolbars(False)
@@ -168,8 +161,8 @@ def test_the_right_edge_works_the_same_way(window, qapp):
     tools = _bars(window)["toolbar_tools"]
     window.addToolBar(Qt.RightToolBarArea, tools)
     _settle(qapp)
-    assert tools.geometry().left() > _in_window(window, window.right_rail_bar).right()
-    assert tools.geometry().left() > _in_window(window, window.dock_properties).right()
+    assert tools.geometry().left() > window.right_rail_bar.geometry().right()
+    assert tools.geometry().left() > window.dock_properties.geometry().right()
 
 
 def test_the_properties_toolbar_stays_top_or_bottom(window, qapp):
