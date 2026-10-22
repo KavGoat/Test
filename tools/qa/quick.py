@@ -125,8 +125,11 @@ def run(base, workers="3"):
     started = time.time()
     files = changed(base)
     whole = sorted(tests_for(files))
+    # (a test renamed or gone since the list was built is left out: pytest
+    # would otherwise stop at it before running anything)
+    known = set(collect())
     quick = [t for t in open(LIST, encoding="utf-8").read().splitlines()
-             if t and not t.startswith("#") and t.split("::")[0] not in whole]
+             if t and not t.startswith("#") and t.split("::")[0] not in whole and t in known]
     print(f"{len(files)} files changed since {base}; {len(whole)} test files run whole, "
           f"plus {len(quick)} quick-check tests")
     for t in whole:
