@@ -114,15 +114,11 @@ def preview_check(w, bar, area, side_capable: bool, out: dict):
             assert central.right() < now.left()
         else:
             assert central.left() > now.right()
-        # the toolbar is shown standing in the room, not lying across the edge
-        assert bar.windowOpacity() == 0.0, "the floating toolbar is not shown over the edge"
-        # its own buttons, stood on end, as the rows along the top show it
-        stand = column.stand
-        assert stand is not None and stand.isVisible() and stand.orientation() == Qt.Vertical
-        from PySide6.QtWidgets import QWidgetAction
-        theirs = [a for a in bar.actions() if not a.isSeparator()
-                  and not isinstance(a, QWidgetAction) and a.isVisible()]
-        assert [a for a in stand.actions() if not a.isSeparator()] == theirs
+        # marked as the top rows mark the gap a toolbar held over them opens:
+        # Qt's gap indicator, the toolbar itself under the pointer
+        from PySide6.QtWidgets import QRubberBand
+        assert isinstance(column, QRubberBand)
+        assert bar.windowOpacity() == 1.0 and bar.isVisible(), "the toolbar held is seen"
         out["shown"] = shown
         out["picture"] = w.grab()
     return check
@@ -244,6 +240,5 @@ def test_let_go_at_a_side_it_is_never_seen_back_at_the_top(w, side):
     timer.stop()
     assert w.toolBarArea(bar) == area and w.updatesEnabled() and w.isAnimated()
     assert seen and set(seen) == {area}, "drawn only in its column, never back at the top"
-    assert bar.windowOpacity() == 1.0
     drag(w, bar, QPoint(w.width() // 2, 60))
     assert w.toolBarArea(bar) == Qt.TopToolBarArea

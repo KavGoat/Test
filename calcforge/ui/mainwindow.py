@@ -564,9 +564,6 @@ class _ToolbarDrags(QObject):
             self.still = None
             window.setUpdatesEnabled(True)
             window.update()
-        for bar in window.toolbars:
-            if bar.windowOpacity() < 1.0:
-                bar.setWindowOpacity(1.0)
 
     # -- where a toolbar dragged to a side edge will land ------------------------
     #
@@ -600,12 +597,7 @@ class _ToolbarDrags(QObject):
             side = None
         self.side = side
         column = self.column_for(bar, side) if side is not None else None
-        # over a side edge the toolbar is shown standing in its room, not
-        # lying across the edge where Qt holds it
-        faded = 0.0 if side is not None else 1.0
-        if bar.windowOpacity() != faded:
-            bar.setWindowOpacity(faded)
-        self._show(column, side, bar if column is not None else None)
+        self._show(column, side)
 
     def column_for(self, bar, side) -> QRect:
         """Where *bar* will stand on end on *side*: a column of its own at
@@ -635,13 +627,11 @@ class _ToolbarDrags(QObject):
         room = margins.left() + margins.right() if margins is not None else 0
         return max(widest + room, 24)
 
-    def _show(self, column, side=None, bar=None) -> None:
-        """Open room *column* wide outside *side*'s rail (None: close it),
-        *bar* standing in it."""
+    def _show(self, column, side=None) -> None:
+        """Open room *column* wide outside *side*'s rail (None: close it)."""
         room = self.room
         if room is None:
             room = self.room = _SideRoom(self.window)
-        room.bar = bar
         room.open(side, column.width() if column is not None else 0)
 
 
@@ -668,7 +658,6 @@ class _SideRoom(QObject):
         self.shown = 0                  # how far the room has opened
         self.placed = {}                # widget -> where the layout had it
         self.tint = None
-        self.bar = None                 # the toolbar held, to stand in it
         self.easing = None
 
     def rail(self, side):
@@ -751,16 +740,14 @@ class _SideRoom(QObject):
         if rail is None:
             return
         if self.tint is None:
-            self.tint = _DropColumn(self.window)
+            self.tint = _drop_gap(self.window)
         if self.side == Qt.RightToolBarArea:
             column = QRect(rail.right() + 1 - by, rail.top(), by, rail.height())
         else:
             column = QRect(rail.left(), rail.top(), by, rail.height())
         self.tint.setGeometry(column)
-        self.tint.stand_in(self.bar, rail.height(), self.side)
         self.tint.setVisible(by > 0)
         self.tint.raise_()
-        self.tint.update()
 
     def _put_back(self) -> None:
         if self.easing is not None:
@@ -770,66 +757,23 @@ class _SideRoom(QObject):
             self._move(0)
         if self.tint is not None:
             self.tint.hide()
-            self.tint.stand_in(None)
         self.side = None
         self.width = 0
         self.placed = {}
 
 
-class _DropColumn(QWidget):
-    """The room a toolbar held at a side edge will land in, with the toolbar
-    standing in it as it will be — its own buttons, stood on end — the way
-    the rows along the top show a toolbar held over them in its place (the
-    user, 2026-10-22: "it shows a blue bar where the toolbar might go but
-    doesn't actually preview each item")."""
-
-    def __init__(self, window):
-        super().__init__(window)
-        self.setObjectName("toolbarDropColumn")
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self.stand = None               # the stand-in toolbar
-        self._for = None                # the toolbar it stands in for
-        self.hide()
-
-    def stand_in(self, bar, height: int = 0, side=None) -> None:
-        """The toolbar *bar* on end in this room (None: put away)."""
-        from shiboken6 import isValid
-        if bar is None or not isValid(bar):
-            if self.stand is not None:
-                self.stand.hide()
-                self.stand.deleteLater()
-            self.stand = self._for = None
-            return
-        if self._for is not bar or self.stand is None:
-            self.stand_in(None)
-            from PySide6.QtWidgets import QToolBar, QWidgetAction
-            stand = QToolBar(self)
-            stand.setObjectName("toolbarDropStandIn")
-            stand.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            stand.setMovable(False)
-            stand.setFloatable(False)
-            stand.setOrientation(Qt.Vertical)
-            stand.setIconSize(bar.iconSize())
-            stand.setToolButtonStyle(Qt.ToolButtonIconOnly)
-            for action in bar.actions():
-                if action.isSeparator():
-                    stand.addSeparator()
-                elif not isinstance(action, QWidgetAction) and action.isVisible():
-                    stand.addAction(action)       # (the same command: its icon, its state)
-            self.stand, self._for = stand, bar
-        stand = self.stand
-        wide = max(stand.sizeHint().width(), 1)
-        # standing at the window's edge of the room, as it glides open
-        x = self.width() - wide if side == Qt.RightToolBarArea else 0
-        stand.setGeometry(x, 0, wide, max(height, 1))
-        stand.show()
-
-    def paintEvent(self, _event) -> None:
-        from PySide6.QtGui import QPalette
-        painter = QPainter(self)
-        # the toolbars' own ground, under the stand-in (not a tint)
-        painter.fillRect(self.rect(), self.palette().color(QPalette.Window))
-        painter.end()
+def _drop_gap(window):
+    """The room a toolbar held at a side edge will land in, marked as Qt
+    marks the gap a toolbar held over the top rows opens — with its own gap
+    indicator, a rubber band, the blue the style draws (the user, 2026-10-22:
+    "it should show a blue gap ... look at how the top bar is handled and
+    copy that"), the toolbar itself under the pointer as it is there."""
+    from PySide6.QtWidgets import QRubberBand
+    gap = QRubberBand(QRubberBand.Rectangle, window)
+    gap.setObjectName("toolbarDropColumn")
+    gap.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    gap.hide()
+    return gap
 
 
 class DetachableTabBar(QTabBar):

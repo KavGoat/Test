@@ -2577,8 +2577,8 @@ drawn on it keeps its own colours.
   it stands on end in a column of its own at the window's edge, outside the
   panel strip, so the panels still open between the strip and the page. As along
   the top, room opens while you drag: near a side edge the panel strip, the panels
-  and the page move in, the toolbar stands in the room they leave with its own
-  buttons on end, and lands there when you let go. The Properties and Markup Styles toolbars go top or bottom only.
+  and the page move in, the room they leave is marked blue as a gap along the top
+  is, and the toolbar lands there when you let go. The Properties and Markup Styles toolbars go top or bottom only.
 - Panels: open and close them from the edge strips or **Window ▸ Panels**; drag an
   icon to the other side; pin, float or roll up a panel from its title bar.
   **Window ▸ Pin Panels** pins them all; **Reset Layout** puts every panel and
