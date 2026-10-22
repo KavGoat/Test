@@ -4993,6 +4993,33 @@ class MainWindow(QMainWindow):
             timer.timeout.connect(self._wrap_toolbar_rows)
         timer.start(0)
 
+    def createPopupMenu(self):
+        """The window's own toolbars, then the panel rails and the panels:
+        those live in the dock host (_DockHost) now, and Qt's own menu lists
+        only what is docked in this window — Left panels and Right panels
+        had gone from it."""
+        menu = super().createPopupMenu()
+        host = getattr(self, "dock_host", None)
+        if host is None:
+            return menu
+        theirs = QMainWindow.createPopupMenu(host)
+        if theirs is None:
+            return menu
+        if menu is None:
+            return theirs
+        mine = {action.text() for action in menu.actions() if not action.isSeparator()}
+        actions = [action for action in theirs.actions()
+                   if action.isSeparator() or action.text() not in mine]
+        if any(not action.isSeparator() for action in actions):
+            menu.addSeparator()
+            for action in actions:
+                if action.isSeparator():
+                    menu.addSeparator()
+                else:
+                    menu.addAction(action)
+        theirs.setParent(menu)
+        return menu
+
     def saveState(self, version: int = 0) -> QByteArray:
         """The arrangement as the user made it: without the row breaks put
         in only because the window is narrow just now."""
