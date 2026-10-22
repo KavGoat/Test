@@ -1888,12 +1888,17 @@ class PageView(QGraphicsView):
             held |= Qt.AltModifier
         return held
 
-    def snap(self, point: QPointF, force: bool = False) -> QPointF:
-        """Snap a point given in page coordinates."""
+    def snap(self, point: QPointF, force: bool = False, frame=None) -> QPointF:
+        """Snap a point given in page coordinates (of *frame*, when known).
+
+        Not on a spreadsheet's page: its grid is its cells, and Excel has no
+        grid to snap to — the page grid is not drawn there either."""
         settings = self.document().settings
         if self.snapping_off_now() and not force:
             return point
         if not (settings.snap_to_grid or force):
+            return point
+        if not force and getattr(frame, "is_sheet", False):
             return point
         from .calcedit import GRID_PT          # SMath's grid: one for everything
         step = GRID_PT
@@ -1918,16 +1923,72 @@ class PageView(QGraphicsView):
         ignore = set(ignore)
         if self._draft is not None:
             ignore.add(self._draft)
-        caught = self.snap_to_item(scene_pos, ignore)
-        if caught is not None:
-            return caught
         frame = frame or self.frame_at(scene_pos) or self.frame()
+        grid = self.grid_point(scene_pos, frame)
+        caught = self.snap_to_item(scene_pos, ignore)
+        # With the grid snapped to, what is drawn is caught only where it is
+        # nearer than the grid's nearest point: on a drawing there is a line
+        # end or a corner within reach nearly everywhere, and the grid never
+        # had a say (the user, 2026-10-22: "Grid snap does not work")
+        if caught is not None and (grid is None or _apart(caught, scene_pos)
+                                   <= _apart(grid, scene_pos)):
+            return caught
         lined_up = self.snap_to_alignment(scene_pos, frame, ignore)
-        if lined_up is not None:
-            return lined_up
+        if grid is None:
+            return lined_up if lined_up is not None else QPointF(scene_pos)
+        return self._on_the_grid(scene_pos, grid, lined_up, frame)
+
+    def grid_point(self, scene_pos: QPointF, frame=None) -> Optional[QPointF]:
+        """The page grid's point nearest *scene_pos*, on the canvas — or None
+        when the grid is not snapped to (or Ctrl lets go of it)."""
+        settings = self.document().settings
+        if not settings.snap_to_grid or self.snapping_off_now() \
+                or getattr(frame, "is_sheet", False):
+            return None
         if frame is None:
-            return self.snap(scene_pos)
-        return frame.mapToScene(self.snap(frame.mapFromScene(scene_pos)))
+            return self.snap(QPointF(scene_pos))
+        return frame.mapToScene(self.snap(frame.mapFromScene(scene_pos), frame=frame))
+
+    def _on_the_grid(self, scene_pos: QPointF, grid: QPointF, lined_up, frame) -> QPointF:
+        """The grid's point, with a level or an upright lined up with kept
+        where it is nearer than the grid's line that way — so a point lined
+        up with something across is still on the grid down, rather than
+        wherever the pointer was. Worked out along the page's own sides (a
+        page may be turned). The marker shows where it is."""
+        to_page = (lambda point: frame.mapFromScene(point)) if frame is not None \
+            else (lambda point: QPointF(point))
+        to_scene = (lambda point: frame.mapToScene(point)) if frame is not None \
+            else (lambda point: QPointF(point))
+        here, on_grid = to_page(scene_pos), to_page(grid)
+        x, y = on_grid.x(), on_grid.y()
+        guides = []
+        for which, value in (self._snap_guides if lined_up is not None else ()):
+            # the guide on the page: two of its points, seen from the page
+            if which == "across":
+                ends = (QPointF(scene_pos.x(), value), QPointF(scene_pos.x() + 100.0, value))
+            else:
+                ends = (QPointF(value, scene_pos.y()), QPointF(value, scene_pos.y() + 100.0))
+            a, b = to_page(ends[0]), to_page(ends[1])
+            if abs(a.y() - b.y()) < 1e-6:            # level on the page
+                if abs(a.y() - here.y()) <= abs(y - here.y()):
+                    y = a.y()
+                    guides.append((which, value))
+            elif abs(a.x() - b.x()) < 1e-6:          # upright on the page
+                if abs(a.x() - here.x()) <= abs(x - here.x()):
+                    x = a.x()
+                    guides.append((which, value))
+            elif _apart(lined_up, scene_pos) < _apart(grid, scene_pos):
+                return lined_up                      # (a page turned part way)
+        point = to_scene(QPointF(x, y))
+        self._invalidate_snap_overlay(self._snap_marker, self._snap_guides)
+        self._snap_marker = QPointF(point)
+        self._snap_guides = guides
+        self._invalidate_snap_overlay(self._snap_marker, self._snap_guides)
+        if not guides:
+            if self._snap_caught != "grid":
+                self.statusMessage.emit("Snapped to the grid")
+            self._snap_caught = "grid"
+        return point
 
     def words_point(self, scene_pos: QPointF) -> QPointF:
         """Where a call-out's or a Cloud+'s words go for the pointer at
@@ -1946,7 +2007,7 @@ class PageView(QGraphicsView):
         frame = self.frame_at(scene_pos) or self.frame()
         if frame is None:
             return self.snap(QPointF(scene_pos))
-        return frame.mapToScene(self.snap(frame.mapFromScene(scene_pos)))
+        return frame.mapToScene(self.snap(frame.mapFromScene(scene_pos), frame=frame))
 
     def placing_words(self) -> bool:
         """Whether the next click puts a call-out's words down."""
@@ -3013,6 +3074,9 @@ class PageView(QGraphicsView):
             self.begin_snapshot()
             self._draft = RectItem("cloud")
             self._prepare_draft(self._draft)
+            # dragged out from where the press snapped to (the grid's point),
+            # as every other shape is — not from where the pointer was
+            self._draw_origin = QPointF(point)
             self._draft.setPos(frame.mapFromScene(point))
             self._draft.set_local_rect(QRectF(0, 0, 0, 0))
             frame.add_markup(self._draft)
@@ -3210,7 +3274,7 @@ class PageView(QGraphicsView):
                 # moved with others — a group, a selection — its arrow comes
                 # along, or the group leaves its leaders behind (the user's
                 # video, 2026-10-01).
-                self._place(item, target if free else self.snap(target),
+                self._place(item, target if free else self.snap(target, frame=item.parentItem()),
                             keep_leader=not self._copy_on_move
                             and len(self._move_items) == 1)
                 if id(item) in held:
@@ -3331,6 +3395,32 @@ class PageView(QGraphicsView):
         screen = self.screen()
         rate = screen.refreshRate() if screen is not None else 60.0
         return max(1.0 / max(rate, 30.0) - 0.002, 0.004)
+
+    def _nudge_onto_the_grid(self, items: list, delta: QPointF) -> QPointF:
+        """With the grid snapped to, an arrow key takes the markups to the
+        grid's next line that way: the corner of the box round them, from
+        wherever it is (Shift still nudges a point at a time)."""
+        settings = self.document().settings
+        frame = items[0].parentItem()
+        if not settings.snap_to_grid or self.snapping_off_now() \
+                or not hasattr(frame, "page_rect") or getattr(frame, "is_sheet", False):
+            return delta
+        from .calcedit import GRID_PT
+        box = QRectF()
+        for item in items:
+            if item.parentItem() is not frame:
+                return delta
+            local = item.local_rect() if hasattr(item, "local_rect") else item.boundingRect()
+            box = box.united(item.mapRectToParent(local.normalized()))
+
+        def onward(value: float, way: float) -> float:
+            if not way:
+                return 0.0
+            steps = value / GRID_PT
+            target = (math.floor(steps + 1e-6) + 1 if way > 0
+                      else math.ceil(steps - 1e-6) - 1) * GRID_PT
+            return target - value
+        return QPointF(onward(box.left(), delta.x()), onward(box.top(), delta.y()))
 
     def escape_everything(self, quiet: bool = False) -> str:
         """One press of Escape, back to a blank slate.
@@ -6397,7 +6487,7 @@ class PageView(QGraphicsView):
         if not frame.page_rect().contains(point):
             left, top, _width, _height = frame.page.setup.content_rect_pt
             point = QPointF(left, top)
-        return self.snap(point)
+        return self.snap(point, frame=frame)
 
     def typing_frame(self):
         """The page a region opened by typing belongs to."""
@@ -6671,6 +6761,8 @@ class PageView(QGraphicsView):
                 from .calcedit import GRID_PT
                 delta = QPointF(math.copysign(GRID_PT, delta.x()) if delta.x() else 0.0,
                                 math.copysign(GRID_PT, delta.y()) if delta.y() else 0.0)
+            elif items and not modifiers & Qt.ShiftModifier:
+                delta = self._nudge_onto_the_grid(items, delta)
             if items:
                 self.begin_snapshot(self.all_frames())
                 origins = [(item, QPointF(item.pos())) for item in items]
@@ -6928,6 +7020,10 @@ def _put_back_stamps(frame, before: list) -> None:
 
 def _far_enough(a: QPointF, b: QPointF) -> bool:
     return math.hypot(b.x() - a.x(), b.y() - a.y()) >= FREE_MIN_STEP
+
+
+def _apart(point: QPointF, of: QPointF) -> float:
+    return math.hypot(point.x() - of.x(), point.y() - of.y())
 
 
 def _within(point: QPointF, of: QPointF, reach: float) -> bool:
