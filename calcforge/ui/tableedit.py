@@ -593,6 +593,8 @@ class TableEditing:
         self._properties_follow(item)
         view.setFocus()
         view.statusMessage.emit(f"{item.name}: type into the cells · click outside it or Esc to close it")
+        from . import sheetview
+        sheetview.opened(view, item)      # a sheet's cell clicked on its page: the workbook view
 
     def refresh_bar(self) -> None:
         """The formula bar shows whenever a sheet or table is in use: one open
@@ -610,15 +612,15 @@ class TableEditing:
         if not wanted:
             scene = view.scene()
             wanted = scene is not None and any(isinstance(i, TableItem) for i in scene.selectedItems())
-        if not wanted and window is not None and getattr(window, "document", None) is not None:
-            tabs = getattr(window, "sheet_tabs", None)
-            if tabs is not None and getattr(window, "view", None) is view:
-                # the spreadsheet view: a workbook in view (sheettabs.py)
-                wanted = tabs.in_view()
-            else:
-                pages = window.document.pages
-                index = getattr(window, "current_index", 0)
-                wanted = 0 <= index < len(pages) and pages[index].sheet is not None
+        if not wanted:
+            # the workbook view: a sheet shown alone (sheetview.py)
+            from .sheetview import run_shown
+            wanted = run_shown(view.scene()) is not None
+        if not wanted and window is not None and getattr(window, "document", None) is not None \
+                and getattr(window, "view", None) is view:
+            pages = window.document.pages
+            index = getattr(window, "current_index", 0)
+            wanted = 0 <= index < len(pages) and pages[index].sheet is not None
         if self.item is None:
             bar.name.clear()
             bar.edit.clear()
@@ -739,7 +741,7 @@ class TableEditing:
         m = item.sheet.merge_at(*self.active) if item.sheet else None
         if m is not None:
             self.active = (m[0], m[1])
-        if _is_run(item) and self.active[0] >= item.size[0] and self.anchor == self.edge:
+        if _is_run(item) and self.active[0] == item.sheet_rows and self.anchor == self.edge:
             # Enter or ↓ off the last row: the sheet gets one more row (the
             # user, 2026-10-17: a row, not a page); a page only when the
             # rows run past the page
@@ -754,7 +756,7 @@ class TableEditing:
         item = self.item
         if item is None or item.sheet is None:
             return
-        rows = max(int((item.sheet.page or {}).get("rows") or 0), item.size[0]) + 1
+        rows = max(int((item.sheet.page or {}).get("rows") or 0), item.sheet_rows) + 1
         sheetlayout.change_options(window, item, "Add row", rows=rows)
         item = self.item
         if item is not None:
@@ -2373,6 +2375,8 @@ class TableEditing:
         if self.item is None or self.editor is not None:
             return False
         key, mods = event.key(), event.modifiers()
+        if mods & Qt.ControlModifier and key in (Qt.Key_PageUp, Qt.Key_PageDown):
+            return False                 # Excel's next / previous sheet: the window's page keys
         if self._bound_command(event) is not None:
             return True
         if mods & Qt.ControlModifier and key in (Qt.Key_Z, Qt.Key_Y, Qt.Key_Home, Qt.Key_End,

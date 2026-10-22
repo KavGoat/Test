@@ -78,11 +78,14 @@ class SheetHeadings(QWidget):
                 continue                       # not in view
             left = max(top_left.x(), 0)
             right = min(bottom_right.x(), viewport.width())
-            if top_left.y() - head_h < 0 < bottom_right.y():
+            # kept only once the sheet's own headings are (partly) out of view:
+            # at the top of the window they are there to be used, their
+            # column and row edges dragged (the workbook view's grid starts there)
+            if top_left.y() - HEADING_H * k < -0.5 and 0 < bottom_right.y():
                 strips.append((run, "col", QRect(int(left), 0, int(right - left), head_h)))
             top = max(top_left.y(), 0)
             bottom = min(bottom_right.y(), viewport.height())
-            if top_left.x() - num_w < 0 < bottom_right.x():
+            if top_left.x() - ROWNUM_W * k < -0.5 and 0 < bottom_right.x():
                 strips.append((run, "row", QRect(0, int(top), num_w, int(bottom - top))))
         self._strips = strips
         if not strips:

@@ -426,6 +426,21 @@ class PageListWidget(QListWidget):
         if event.type() in (QEvent.FontChange, QEvent.StyleChange):
             self.relayout()
 
+    def indexAt(self, point):
+        """The thumbnail under *point*. With a workbook's pages hidden behind
+        its entry, Qt's own answer counted the hidden rows once their
+        pictures came in, and a click on the first page found nothing —
+        the reader was stuck in the workbook (the user, 2026-10-22); then
+        the thumbnails showing are asked where they are."""
+        if self.shown_count() == self.count():
+            return super().indexAt(point)
+        from PySide6.QtCore import QModelIndex
+        for row in self.shown_rows():
+            index = self.model().index(row, 0)
+            if self.visualRect(index).contains(point):
+                return index
+        return QModelIndex()
+
     def shown_count(self) -> int:
         """How many thumbnails are showing: a workbook shown as one entry
         hides the rest of its pages."""
@@ -757,6 +772,7 @@ class PagesPanel(QWidget):
         # rather than twenty.
         self.list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list.currentRowChanged.connect(self._row_changed)
+        self.list.itemClicked.connect(self._clicked)
         self.list.model().rowsMoved.connect(self._rows_moved)
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._context_menu)
@@ -1280,6 +1296,31 @@ class PagesPanel(QWidget):
                 self.pageSelected.emit(row)
             finally:
                 self._following_the_strip = False
+
+    def _clicked(self, entry) -> None:
+        """A click on the thumbnail that is already the current row goes
+        there too. Inside a workbook shown as one entry the current row is
+        its entry while the page in view is one of its other pages (sheet
+        two, say), so a click on the entry changed no row and went nowhere:
+        the reader was stuck in the workbook (the user, 2026-10-22)."""
+        row = self.list.row(entry)
+        if self._suppress or row < 0:
+            return
+        if row == getattr(self.window, "current_index", row):
+            # the page in view already — but a workbook's page clicked opens
+            # the workbook view (sheetview.py), unless it is open
+            from .sheetview import run_shown
+            document = getattr(self.window, "document", None)
+            page = document.pages[row] if document is not None and row < len(document.pages) \
+                else None
+            if page is None or page.sheet is None or \
+                    run_shown(getattr(self.window, "scene", None)) == page.sheet:
+                return
+        self._following_the_strip = True
+        try:
+            self.pageSelected.emit(row)
+        finally:
+            self._following_the_strip = False
 
     def _rows_moved(self, _parent, start, end, _dest, row) -> None:
         """A run of pages has been dragged somewhere else in the strip.
@@ -5771,6 +5812,10 @@ class PropertiesPanel(QScrollArea):
         name.editingFinished.connect(renamed)
         form.addRow("Name:", name)
         rows, cols = first.size
+        paging = getattr(first, "paging", None)
+        if getattr(first, "SHEET_RUN", False) and paging is not None:
+            # the sheet's own, not the grid the workbook view shows past it
+            rows, cols = first.sheet_rows, paging.shown_cols
         size = QLabel(f"{rows} rows × {cols} columns")
         size.setObjectName("tableSize")
         form.addRow("Size:", size)

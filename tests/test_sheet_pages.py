@@ -138,19 +138,19 @@ def test_going_past_the_last_row_adds_one_row(w):
     only when the rows run past the page, as in Excel."""
     run = sheet_page(w)
     n = run.paging.slices[0][1] + 1            # rows on a page
-    assert run.size[0] == n, "a fresh sheet: a page of rows"
+    assert run.sheet_rows == n, "a fresh sheet: a page of rows"
     open_at(w, run, "A1")
     w.view.tables.select((n - 1, 0))
     key(w, Qt.Key_Down)
     (run,) = runs(w)
     assert w.view.tables.active == (n, 0), "on to the row below the last one"
-    assert run.size[0] == n + 1, "one row more, not a page of them"
+    assert run.sheet_rows == n + 1, "one row more, not a page of them"
     assert len(w.document.pages) == 3, "the page that row needs"
     assert run.paging.slices == [(0, n - 1), (n, n)]
     type_text(w, "next")
     enter(w)
     (run,) = runs(w)
-    assert run.size[0] == n + 2 and len(w.document.pages) == 3, "Enter on the last row: one more"
+    assert run.sheet_rows == n + 2 and len(w.document.pages) == 3, "Enter on the last row: one more"
     assert [p.sheet for p in w.document.pages[1:]] == [run.uid, run.uid]
     assert value(run, n, 0) == "next"
     # page 2 sits right under page 1: one continuous grid
@@ -159,7 +159,7 @@ def test_going_past_the_last_row_adds_one_row(w):
     w.undo_stack.undo()                       # the row Enter added
     pump()
     (run,) = runs(w)
-    assert run.size[0] == n + 1 and value(run, n, 0) == "next"
+    assert run.sheet_rows == n + 1 and value(run, n, 0) == "next"
     w.undo_stack.undo()                       # the typing
     pump()
     (run,) = runs(w)
@@ -167,12 +167,12 @@ def test_going_past_the_last_row_adds_one_row(w):
     w.undo_stack.undo()                       # the row ↓ added, and its page
     pump()
     (run,) = runs(w)
-    assert run.size[0] == n and len(w.document.pages) == 2
+    assert run.sheet_rows == n and len(w.document.pages) == 2
     for _ in range(3):
         w.undo_stack.redo()
     pump()
     (run,) = runs(w)
-    assert len(w.document.pages) == 3 and value(run, n, 0) == "next" and run.size[0] == n + 2
+    assert len(w.document.pages) == 3 and value(run, n, 0) == "next" and run.sheet_rows == n + 2
 
 
 def test_empty_pages_at_the_end_are_kept(w):
@@ -756,6 +756,10 @@ def test_sheet_tabs_go_to_every_sheet_and_not_tables(w):
     w.insert_sheet_page(0)                  # Sheet1 on page 2
     pump()
     pump()
+    assert tabs.isHidden(), "its page in the pages: no tabs (the workbook view has them)"
+    w.go_to_page(1)                         # the sheet alone, its tabs under it
+    pump()
+    assert not tabs.isHidden()
     tabs.add.click()                        # + : a second sheet at the end
     pump()
     pump()

@@ -1,19 +1,17 @@
-"""Excel's sheet tabs, under the canvas: the sheets of the workbook in view,
-in reading order (the user's choice, 2026-10-11: a tab strip that navigates
-— each sheet stays on its own printed pages). Tables have none (the user,
-2026-10-11: "Tables don't need tabs").
+"""Excel's sheet tabs, under the canvas, in the workbook view: the sheets of
+the workbook shown, in reading order, with + for a new sheet and × at the
+end to go back to the pages (ui/sheetview.py; the user, 2026-10-22: "like
+Excel, when I click a workbook it opens a [spreadsheet] with tabs at the
+bottom"). Tables have none (the user, 2026-10-11: "Tables don't need tabs").
 
-The strip shows only while a workbook is in view (the user, 2026-10-21:
-"spreadsheet imported tabs etc. are always showing at the bottom, don't"):
-a workbook is a section of the document (sheetpages.sections), and while
-the page in view — the one the page box shows — is one of its pages, or one
-of its sheets is open, the spreadsheet view is on: the formula bar, these
-tabs and, with a cell picked, the cell tools. Scrolling off it turns the
-view off again, a little past the edge of its pages rather than on the
-pixel, so the bars don't flicker on and off at the page boundary.
+Whether the strip shows has one answer, asked afresh on every change that
+could alter it (a page gone to, the pages rebuilt, undo, a document tab or a
+pane changed, a file opened): its own view's canvas is showing a sheet alone
+(``scene.sheet_view``). Nothing else turns it on or off (the user,
+2026-10-22: "I could see workbook tabs when not in a workbook").
 
-A click goes to it, the tab of the sheet in view is the current one, a
-double-click renames, a tab dragged along moves the sheet's run of pages,
+A click goes to that sheet, the tab of the sheet shown is the current one,
+a double-click renames, a tab dragged along moves the sheet's run of pages,
 and + adds a new sheet at the end of the workbook. Right-click (or a long
 press, for touch) a tab for its menu: Print, ticked while the sheet prints,
 is Print / Don't Print for the sheet; a sheet that doesn't print has a grey
@@ -27,14 +25,9 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMenu, QTabBar, QToolButton, QWidget
 
-#: How far past the edge of a workbook's pages the middle of the window must
-#: go before the spreadsheet view follows a scroll, in screen pixels: more
-#: than half the formula bar's height, so the bar showing or going (which
-#: moves the middle by half its height) never turns it back.
-HYSTERESIS_PX = 32
-
 #: How long a press on a tab is held before it opens the tab's menu (touch).
 LONG_PRESS_MS = 550
+
 
 
 def no_print_pixmap(size: int = 16, ratio: float = 1.0, ink: Optional[str] = None) -> QPixmap:
@@ -79,6 +72,8 @@ class _TabBar(QTabBar):
         wash.setAlpha(150)
         painter = QPainter(self)
         for i in greyed:
+            # the sheet shown keeps more of its tab, so it reads as the current one
+            wash.setAlpha(90 if i == self.currentIndex() else 150)
             painter.fillRect(self.tabRect(i), wash)
         painter.end()
 
@@ -90,9 +85,7 @@ class SheetTabs(QWidget):
         self.setObjectName("sheetTabs")
         self.entries: list = []                 # (run uid, name) of the workbook listed
         self.section_key: Optional[str] = None  # the workbook listed (its first run)
-        self.showing = False                    # whether the spreadsheet view is on
-        self._updating = False
-        self._hooked = None                     # the view whose scrolling is heard
+        self.showing = False                    # whether a sheet is shown alone
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 0, 4, 0)
         layout.setSpacing(2)
@@ -122,156 +115,86 @@ class SheetTabs(QWidget):
         self._long.timeout.connect(self._long_pressed)
         self.bar.installEventFilter(self)
         self.popup: Optional[QMenu] = None
+        # Excel has none: the way back to the pages (the page you came from)
+        self.close_button = QToolButton()
+        self.close_button.setObjectName("sheetViewClose")
+        self.close_button.setText("×")
+        self.close_button.setAutoRaise(True)
+        self.close_button.setToolTip("Close Workbook — back to the pages, where you were")
+        self.close_button.clicked.connect(self.close_sheet_view)
         layout.addWidget(self.add)
         layout.addWidget(self.bar, 1)
+        layout.addWidget(self.close_button)
         self._moving = False
         self.hide()
 
-    # -- the workbook in view ---------------------------------------------------------
+    # -- the workbook shown -----------------------------------------------------------
     def _sections(self) -> list:
         from .sheetpages import sections
         return sections(self.window.document)
 
     def section(self):
-        """The workbook listed in the strip (shown or not), or None."""
+        """The workbook listed in the strip, or None."""
         for section in self._sections():
             if section.key == self.section_key:
                 return section
         return None
 
+    def view(self):
+        """The view this strip sits under (each pane of a split has its own)."""
+        from PySide6.QtWidgets import QGraphicsView
+        widget = self.parentWidget()
+        while widget is not None and not isinstance(widget, QGraphicsView):
+            widget = widget.parentWidget()
+        return widget if widget is not None else getattr(self.window, "view", None)
+
     def in_view(self) -> bool:
-        """Whether the spreadsheet view is on (the formula bar asks)."""
-        if not self._updating:
-            self.update_mode()
-        return self.showing
+        """Whether a sheet is shown alone under this strip."""
+        from .sheetview import run_shown
+        view = self.view()
+        return run_shown(view.scene() if view is not None else None) is not None
 
-    def _frames_rect(self, section) -> QRectF:
+    def update_mode(self) -> bool:
+        """Show the strip if, and only if, its view's canvas shows a sheet
+        alone, listing that workbook's sheets. True when that changed."""
         from shiboken6 import isValid
-        out = QRectF()
-        for i in section.pages:
-            frame = self.window.document.pages[i].frame
-            if frame is not None and isValid(frame) and frame.isVisible():
-                out = out.united(frame.sceneBoundingRect())
-        return out
 
-    def _middle(self):
-        """The middle of the window on the canvas, and the hysteresis there."""
-        view = self.window.view
-        transform = view.transform()
-        scale = max((transform.m11() ** 2 + transform.m12() ** 2) ** 0.5, 1e-6)
-        return view.mapToScene(view.viewport().rect().center()), HYSTERESIS_PX / scale
-
-    def _seen(self, section) -> bool:
-        """Whether any of the workbook's pages is in the window."""
-        view = self.window.view
-        shown = view.mapToScene(view.viewport().rect()).boundingRect()
-        _middle, margin = self._middle()
-        # more than a sliver of it: the edge of a page above the one gone to
-        # peeking in at the top is not the sheet in view
-        shown = shown.adjusted(margin, margin, -margin, -margin)
-        return self._frames_rect(section).intersects(shown)
-
-    def _open_section(self, found: list):
-        """The workbook of the sheet open for its cells, if one is."""
-        from ..items.sheetpage import SheetRunItem
-        tables = getattr(self.window.view, "tables", None)
-        item = tables.item if tables is not None else None
-        if not isinstance(item, SheetRunItem):
-            return None
-        return next((s for s in found if item.uid in s.runs), None)
-
-    def _wanted(self, found: list, jumped: bool, scrolled: bool):
-        """The workbook the spreadsheet view is for, or None."""
-        window = self.window
-        index = window.current_index
-        counter = next((s for s in found if s.first <= index <= s.last), None)
-        opened = self._open_section(found)
-        if opened is not None:
-            if jumped and (counter is None or counter.key != opened.key):
-                # gone to another page: once there, put down a sheet no longer on screen
-                QTimer.singleShot(0, self, self._left_behind)
-            if not (scrolled and not jumped and self._put_down(opened)):
-                return opened            # a sheet open stays in view while it is on screen
-        if jumped:
-            return counter
-        shown = next((s for s in found if s.key == self.section_key), None) \
-            if self.showing else None
-        if (counter.key if counter else None) == (shown.key if shown else None):
-            return counter
-        # the page box has moved on: followed, unless the middle of the window
-        # is still within a little of the edge it crossed
-        middle, margin = self._middle()
-        if shown is not None and self._frames_rect(shown).adjusted(
-                -margin, -margin, margin, margin).contains(middle):
-            return shown                 # not far enough off it yet
-        if counter is not None:
-            rect = self._frames_rect(counter)
-            if rect.adjusted(-margin, -margin, margin, margin).contains(middle) and \
-                    not rect.adjusted(margin, margin, -margin, -margin).contains(middle):
-                return shown             # not far enough onto it yet
-        return counter
-
-    def _put_down(self, section) -> bool:
-        """Close the sheet open for its cells once none of its workbook's
-        pages is on screen (not while a cell is being typed in). True when
-        it was closed."""
-        tables = self.window.view.tables
-        if tables.editor is not None or self._seen(section):
+        from .sheetview import run_shown
+        if self._moving or not isValid(self):
             return False
-        tables.close()
-        return True
+        view = self.view()
+        scene = view.scene() if view is not None else None
+        uid = run_shown(scene)
+        document = getattr(scene, "document", None) or self.window.document
+        from .sheetpages import sections
+        found = sections(document)
+        section = next((s for s in found if uid in s.runs), None) if uid else None
+        was = (self.showing, self.section_key)
+        self.showing = section is not None
+        self.section_key = section.key if section is not None else None
+        self._document = document
+        self._fill()
+        self.setVisible(self.showing)
+        self._scroll_row(view, bool(found))
+        self.follow()
+        return was != (self.showing, self.section_key)
 
-    def _left_behind(self) -> None:
-        from shiboken6 import isValid
-        if not isValid(self) or getattr(self.window, "sheet_tabs", None) is not self:
+    def close_sheet_view(self) -> None:
+        """The ×: back to the pages, to the page you came from."""
+        from .sheetview import close
+        if self.view() is not getattr(self.window, "view", None):
             return
-        opened = self._open_section(self._sections())
-        if opened is not None and self._put_down(opened):
-            self.update_mode(jumped=False)
-
-    def update_mode(self, jumped: Optional[bool] = None, scrolled: bool = False) -> bool:
-        """Turn the spreadsheet view on or off for what is in view, and list
-        the workbook's sheets. True when anything changed."""
-        from shiboken6 import isValid
-        if self._updating or self._moving or not isValid(self):
-            return False
-        if jumped is None:
-            from .viewsync import ViewSync
-            jumped = bool(ViewSync._jumping)
-        self._updating = True
-        try:
-            found = self._sections()
-            wanted = self._wanted(found, jumped, scrolled) if found else None
-            was = (self.showing, self.section_key)
-            self.showing = wanted is not None
-            if wanted is not None:
-                self.section_key = wanted.key
-            elif not any(s.key == self.section_key for s in found):
-                # nothing in view: the tabs (hidden) are the first workbook's,
-                # for a key bound to a tab's command
-                self.section_key = found[0].key if found else None
-            if not scrolled or was[1] != self.section_key:
-                self._fill()             # (a scroll that stays on it changes nothing there)
-            self.setVisible(self.showing)
-            self._scroll_row(bool(found))
-            self.follow()
-            changed = was != (self.showing, self.section_key)
-        finally:
-            self._updating = False
-        if changed:
-            tables = getattr(self.window.view, "tables", None)
-            if tables is not None:
-                tables.refresh_bar()
-        return changed
+        close(self.window)
 
     def _fill(self) -> None:
         """The tabs of the workbook listed, rebuilt if its sheets changed."""
-        section = self.section()
+        document = getattr(self, "_document", None) or self.window.document
+        from .sheetpages import run_book, sections
+        section = next((s for s in sections(document) if s.key == self.section_key), None)
         found = []
         if section is not None:
-            from .sheetpages import run_book
             for uid in section.runs:
-                found.append((uid, run_book(self.window.document, uid)[2]))
+                found.append((uid, run_book(document, uid)[2]))
         if found != self.entries:
             self.entries = found
             self._marked = ()
@@ -288,7 +211,8 @@ class SheetTabs(QWidget):
         if not 0 <= index < len(self.entries):
             return True
         from .sheetpages import sheet_prints
-        return sheet_prints(self.window.document, self.entries[index][0])
+        return sheet_prints(getattr(self, "_document", None) or self.window.document,
+                            self.entries[index][0])
 
     def _mark_printing(self) -> None:
         """A sheet that doesn't print: its tab greyed, a crossed-out printer
@@ -309,13 +233,12 @@ class SheetTabs(QWidget):
 
     _marked: tuple = ()
 
-    def _scroll_row(self, any_sheets: bool) -> None:
+    def _scroll_row(self, view, any_sheets: bool) -> None:
         # Excel's row: the tabs on the left of the horizontal scroll bar, one
         # bar — the tabs on a row of their own under the canvas's scroll bar
         # read as a second scroll bar (the user, 2026-10-15). The bar is kept
         # showing while the document has sheets, whether or not their tabs
         # are, so the canvas keeps its height as the tabs come and go.
-        view = getattr(self.window, "view", None)
         if view is None:
             return
         policy = Qt.ScrollBarAlwaysOn if any_sheets else Qt.ScrollBarAsNeeded
@@ -331,45 +254,29 @@ class SheetTabs(QWidget):
             scroll.style().polish(scroll)
             scroll.updateGeometry()
 
-    def _hook(self) -> None:
-        """Hear the canvas scroll, to turn the view off (or on) once the
-        middle of the window is far enough past the workbook's edge."""
-        window = self.window
-        view = getattr(window, "view", None)
-        if view is None or getattr(window, "sheet_tabs", None) is not self or self._hooked is view:
-            return
-        self._hooked = view
-        view.verticalScrollBar().valueChanged.connect(self._scrolled)
-        view.horizontalScrollBar().valueChanged.connect(self._scrolled)
-
-    def _scrolled(self, _value: int = 0) -> None:
-        window = self.window
-        if getattr(window, "sheet_tabs", None) is not self or window.view is not self._hooked:
-            return
-        if self.section_key is None and not self._sections():
-            return
-        self.update_mode(scrolled=True)
-
     def refresh(self) -> None:
-        """Rebuild the tabs if the sheets changed; then the current one."""
+        """The strip as its view now is — and every other pane's strip, so
+        none is left showing for a workbook it no longer shows."""
         from shiboken6 import isValid
         if not isValid(self) or self._moving:
             return
-        self._hook()
-        self.update_mode()
+        from .sheetview import sync
+        sync(self.window)
+        changed = self.update_mode()
+        for pane in getattr(self.window, "_panes", None) or ():
+            other = getattr(pane, "sheet_tabs", None)
+            if other is not None and other is not self and isValid(other):
+                other.update_mode()
+        if changed:
+            tables = getattr(self.view(), "tables", None)
+            if tables is not None:
+                tables.refresh_bar()
 
     def follow(self) -> None:
         """The tab of the spreadsheet page in view."""
-        window = self.window
-        wanted: Optional[str] = None
-        pages = window.document.pages
-        index = window.current_index
-        if 0 <= index < len(pages):
-            wanted = pages[index].sheet
-        from ..items.sheetpage import SheetRunItem
-        item = getattr(getattr(window.view, "tables", None), "item", None)
-        if isinstance(item, SheetRunItem):
-            wanted = item.uid              # the sheet open for its cells
+        from .sheetview import run_shown
+        view = self.view()
+        wanted = run_shown(view.scene() if view is not None else None)
         for i, (uid, _name) in enumerate(self.entries):
             if uid == wanted:
                 self.bar.blockSignals(True)
@@ -473,6 +380,9 @@ class SheetTabs(QWidget):
             menu.addSeparator()
             menu.addAction("Go To", lambda: self.go(index)).setToolTip(
                 "Go to this sheet's first page")
+        if self.showing:
+            menu.addAction("Close Workbook", self.close_sheet_view).setToolTip(
+                "Back to the pages, where you were (the × at the end of the tabs)")
         return menutidy.tidy(menu)
 
     def set_printing(self, index: int, on: bool) -> None:
@@ -543,6 +453,8 @@ class SheetTabs(QWidget):
         section = self.section()
         if section is not None:
             sheetpages.new_sheet_in(window, section)
+            # and it is the sheet shown (new_sheet_in made it the current page)
+            window.go_to_page(window.current_index)
         else:
             sheetpages.insert_sheet_page(window, len(window.document.pages) - 1, new_sheet=True)
         self.refresh()

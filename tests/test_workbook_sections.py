@@ -10,9 +10,8 @@ sheet individually; it should also allow me to easily choose inside the
 spreadsheet view, so maybe right-click (long) on a tab chip has Print / No
 Print. And grey out the tab or something if not printed."
 
-* The sheet tabs (and the formula bar) show only while a workbook is in
-  view: the page the page box shows is one of its pages, or one of its
-  sheets is open. Scrolling off it turns them off a little past its edge.
+* The sheet tabs (and the formula bar) show only in the workbook view
+  (tests/test_workbook_view.py).
 * In Thumbnails a workbook is one entry, "▸ Loads" over "pages 2–7", that
   expands to its pages; picked, it stands for all its pages.
 * Each sheet prints or not: chosen on import, and from its tab's
@@ -24,17 +23,16 @@ Print. And grey out the tab or something if not printed."
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialogButtonBox, QMenu
 
 openpyxl = pytest.importorskip("openpyxl")
 
-from calcforge.items.sheetpage import SheetRunItem  # noqa: E402
 from calcforge.ui import sheetpages  # noqa: E402
 from calcforge.ui.panels import NO_PRINT_ROLE, SECTION_ROLE  # noqa: E402
-from calcforge.ui.sheettabs import HYSTERESIS_PX, LONG_PRESS_MS  # noqa: E402
+from calcforge.ui.sheettabs import LONG_PRESS_MS  # noqa: E402
 from tests.test_workbook_self_contained import results, type_equations  # noqa: E402
 
 
@@ -119,90 +117,6 @@ def sheet_pages(w, name: str) -> list:
 
 def bar_shown(w) -> bool:
     return not w.formula_bar.isHidden()
-
-
-# -- the tabs only while the workbook is in view --------------------------------------------
-def test_the_tabs_show_only_while_the_workbook_is_in_view(w, tmp_path):
-    section = with_loads(w, tmp_path)
-    assert section.name == "Loads" and section.first == 1
-    tabs = w.sheet_tabs
-    w.go_to_page(0)
-    pump()
-    assert tabs.isHidden() and not bar_shown(w), "an ordinary page: no tabs, no formula bar"
-    w.go_to_page(section.first)
-    pump()
-    assert tabs.isVisible() and bar_shown(w)
-    assert [name for _uid, name in tabs.entries] == ["Loads", "Factors"]
-    w.go_to_page(section.last + 1)
-    pump()
-    assert tabs.isHidden() and not bar_shown(w), "gone past it: off again"
-    # the + adds a sheet to the workbook, at its end
-    w.go_to_page(section.first)
-    pump()
-    tabs.add.click()
-    pump()
-    section = sheetpages.sections(w.document)[0]
-    assert len(section.runs) == 3 and w.current_index == section.last
-    added = next(i for i in w.view.scene().items()
-                 if isinstance(i, SheetRunItem) and i.uid == section.runs[-1])
-    assert added.sheet.book == section.book, "a sheet of the workbook, sharing its names"
-    assert w.document.pages[section.last + 1].sheet is None
-
-
-def test_scrolling_off_it_turns_the_view_off_past_the_edge_not_on_it(w, tmp_path):
-    section = with_loads(w, tmp_path)
-    tabs = w.sheet_tabs
-    w.go_to_page(section.last)
-    pump()
-    assert tabs.isVisible()
-    view = w.view
-    bar = view.verticalScrollBar()
-    edge = w.document.pages[section.last].frame.sceneBoundingRect().bottom()
-    margin = tabs._middle()[1]             # HYSTERESIS_PX screen pixels, on the canvas
-    assert margin == pytest.approx(HYSTERESIS_PX / view.transform().m11())
-
-    def middle_y():
-        return view.mapToScene(view.viewport().rect().center()).y()
-
-    # a step at a time, as a scroll does, till the page box moves on
-    while w.current_index == section.last:
-        bar.setValue(bar.value() + 4)
-        pump(1)
-    assert w.current_index == section.last + 1
-    assert middle_y() - edge < margin
-    assert tabs.isVisible() and bar_shown(w), "just over the edge: still the spreadsheet view"
-    while middle_y() - edge <= margin + 4:
-        bar.setValue(bar.value() + 4)
-        pump(1)
-    assert tabs.isHidden() and not bar_shown(w), "well past it: off"
-    # and back: on again only once well onto it
-    while w.current_index != section.last:
-        bar.setValue(bar.value() - 4)
-        pump(1)
-    assert tabs.isHidden(), "just onto it: not yet"
-    while edge - middle_y() <= margin + 4:
-        bar.setValue(bar.value() - 4)
-        pump(1)
-    assert tabs.isVisible() and bar_shown(w)
-
-
-def test_a_click_on_a_sheet_turns_it_on_and_scrolling_right_off_puts_it_down(w, tmp_path):
-    from tests.test_sheet_pages import open_at
-    section = with_loads(w, tmp_path)
-    w.go_to_page(0)
-    pump()
-    tabs = w.sheet_tabs
-    assert tabs.isHidden()
-    run = next(i for i in w.view.scene().items()
-               if isinstance(i, SheetRunItem) and i.uid == section.runs[0])
-    open_at(w, run, "A2")                  # a click on one of its cells
-    pump()
-    assert tabs.isVisible() and bar_shown(w) and w.view.tables.item is run
-    w.go_to_page(len(w.document.pages) - 1)    # far off it
-    pump()
-    pump()
-    assert w.view.tables.item is None, "the sheet is put down once off screen"
-    assert tabs.isHidden() and not bar_shown(w)
 
 
 # -- Thumbnails: one entry for the workbook --------------------------------------------------

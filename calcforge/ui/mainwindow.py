@@ -1638,10 +1638,9 @@ class MainWindow(QMainWindow):
                   tip="Put the view back the way up the page is")
         # Bare Page Up/Down scroll a screenful, as they do in any reader; with
         # Ctrl they jump a whole page.
-        self._act("prev_page", "Previous Page", lambda: self.go_to_page(self.current_index - 1),
-                  "Ctrl+PgUp")
-        self._act("next_page", "Next Page", lambda: self.go_to_page(self.current_index + 1),
-                  "Ctrl+PgDown")
+        # (in the workbook view, the previous or next sheet: sheetview.page_key)
+        self._act("prev_page", "Previous Page", lambda: self._page_key(-1), "Ctrl+PgUp")
+        self._act("next_page", "Next Page", lambda: self._page_key(1), "Ctrl+PgDown")
         self._act("actual_size", "Actual Size", lambda: self.view.set_zoom(1.0), "Ctrl+8")
         self._act("pin_panels", "Pin Panels", self.pin_all_panels, "", checkable=True,
                   tip="Keep the panels where they are, so a stray drag cannot move them")
@@ -3240,9 +3239,15 @@ class MainWindow(QMainWindow):
                                self.act_sticky):
                     menu.addAction(action)
 
+    def _page_key(self, step: int) -> None:
+        from . import sheetview
+        sheetview.page_key(self, step)
+
     def _wire_view(self, view) -> None:
         """The window listens to a view of its own — only while it is the
         view being worked in, when the window is split in two."""
+        from . import sheetview
+        sheetview.watch(view)            # a sheet shown alone keeps filling it
         def active(slot):
             return lambda *args: slot(*args) if self.view is view else None
 
@@ -5357,7 +5362,11 @@ class MainWindow(QMainWindow):
     def _go_to_page(self, index: int) -> None:
         if not 0 <= index < len(self.document.pages):
             return
-        if index == self.current_index:
+        # a page of a sheet shows the sheet alone (the workbook view), any
+        # other page the pages again (ui/sheetview.py)
+        from . import sheetview
+        how = sheetview.route(self, index)
+        if index == self.current_index and not how and not sheetview.is_on(self):
             # already in view (a zoom brought it there, leaving a run picked
             # in Thumbnails): asked for, it is the page picked
             self.pages_panel.show_current(index)
@@ -5383,6 +5392,7 @@ class MainWindow(QMainWindow):
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
         self.page_spin.blockSignals(False)
+        sheetview.after_going(self, index, how)
         self.pages_panel.show_current(index)
         self.refresh_scale_label()
         self.refresh_selection()

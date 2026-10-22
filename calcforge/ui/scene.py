@@ -1992,6 +1992,15 @@ class DocumentScene(QGraphicsScene):
         self.cover_page = False        # Show Cover Page in Side-by-Side
         self.frames: list[PageFrame] = []
         self.print_mode = False
+        # The workbook view (ui/sheetview.py): the run id of the sheet shown
+        # alone, filling the canvas as Excel's grid does, or None for the
+        # pages; how many rows and columns its grid is drawn to at least,
+        # and what the view was before it (to go back to)
+        self.sheet_view: Optional[str] = None
+        self.sheet_extent = (0, 0)
+        self.sheet_return: Optional[dict] = None
+        self.sheet_zooms: dict = {}          # workbook key -> its zoom
+        self.sheet_places: dict = {}         # run id -> (canvas point at the top left, cell)
         self._pages_rect = QRectF()
         self._desk_margin = QPointF(PAGE_GAP, PAGE_GAP)
         # Markups are dragged, resized and re-laid-out constantly, and a text
@@ -2327,6 +2336,8 @@ class DocumentScene(QGraphicsScene):
                 left += across(frame) + PAGE_GAP
             y += max(down(frame) for frame in row) + PAGE_GAP
         self.rows = rows
+        if self.sheet_view is not None and self._lay_out_the_sheet():
+            return
         if self.page_mode in ("single", "side") and self.frames:
             # one page, or one spread, at a time: the rest leave the canvas
             self.shown_page = max(0, min(self.shown_page, len(self.frames) - 1))
@@ -2351,6 +2362,38 @@ class DocumentScene(QGraphicsScene):
         self._apply_desk_margin()
         self._previews_soon.start()
 
+    #: How far to the left of the document's pages a sheet shown alone is
+    #: laid out, in points: its grid grows down and to the right as it is
+    #: scrolled (sheetview.py) and never reaches another page (Excel's
+    #: 16,384 columns are well under a million points), and it stays put as
+    #: pages are added or taken away.
+    SHEET_AWAY = 1.0e7
+
+    def _lay_out_the_sheet(self) -> bool:
+        """The workbook view: the sheet's pages, edge to edge as always, on
+        their own far to the left of every other page, and the canvas just its grid
+        (from its row and column headings) — nothing else can be scrolled to.
+        The other pages keep their places and stay drawable (print, export,
+        thumbnails). False when the sheet is no longer in the document."""
+        from ..items.sheetpage import run_item_for
+        run = [f for f in self.frames if f.page.sheet == self.sheet_view
+               and f.sheet_rect is not None]
+        item = run_item_for(run[0]) if run else None
+        if item is None:
+            return False
+        base = QPointF(-self.SHEET_AWAY, 0.0)
+        for frame in run:
+            offset = getattr(frame, "sheet_offset", None) or QPointF(0, 0)
+            frame.setRotation(0)
+            frame.setPos(base + offset)
+        for frame in self.frames:
+            if not frame.isVisible():
+                frame.setVisible(True)        # (a one-page layout hid the rest)
+        self._pages_rect = item.mapRectToScene(item.grid_rect())
+        self.setSceneRect(self._pages_rect)
+        self._previews_soon.start()
+        return True
+
     def pages_rect(self) -> QRectF:
         """Where the pages (or the spread in view) lie on the canvas; each
         view keeps its own desk round this (PageView._update_desk_margin)."""
@@ -2368,6 +2411,9 @@ class DocumentScene(QGraphicsScene):
         self._apply_desk_margin()
 
     def _apply_desk_margin(self) -> None:
+        if self.sheet_view is not None:
+            self.setSceneRect(self._pages_rect)     # a sheet alone: no desk round it
+            return
         x = self._desk_margin.x()
         y = self._desk_margin.y()
         self.setSceneRect(self._pages_rect.adjusted(-x, -y, x, y))
