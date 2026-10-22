@@ -1032,15 +1032,21 @@ class _TextBase(MarkupItem):
                     best, nearest = index, gap
         return best
 
-    def leader_moved(self) -> None:
-        """The arrow head or the box moved: work the hinges out again.
+    def leader_moved(self, moved: Optional["_Leader"] = None) -> None:
+        """The box moved, or one leader's head (*moved*): work the hinges out
+        again — the box's every one, a head's only its own.
 
         The side is released so the leader leaves by whichever side now faces
         its target. The reach (hinge stand-off) is *kept*: somebody who set a
         longer or shorter hinge meant that length, and losing it every time
         the box or arrow moves forces them to set it again on every drag.
+        A leader added, moved or taken away never moves another: releasing
+        every side when a cloud leader was added sent an arrow leader that
+        kept a side of its own to the side facing its head (the user,
+        2026-10-22: "adding a cloud leader to an existing callout ... moved
+        the old arrow leader position").
         """
-        for leader in self.leaders:
+        for leader in self.leaders if moved is None else [moved]:
             leader.side = ""
 
     # -- the one-leader spellings, kept for everything that uses them ------
@@ -1243,8 +1249,8 @@ class _TextBase(MarkupItem):
                     leader.tip = QPointF(local_pos)
                 # What the leader points at has been moved: the hinge follows
                 # it round rather than staying on a side that no longer faces
-                # it.
-                self.leader_moved()
+                # it — this leader's, not the others'.
+                self.leader_moved(leader)
                 self.geometryChanged.emit()
             else:
                 self.set_elbow_of(leader, local_pos)
@@ -1714,7 +1720,7 @@ class CalloutItem(_TextBase):
             self.leaders.append(leader)
         else:
             leader.cloud = wanted
-        self.leader_moved()
+        self.leader_moved(leader)
         self.geometryChanged.emit()
 
     def add_cloud_leader(self, points) -> "_Leader":
@@ -1724,9 +1730,10 @@ class CalloutItem(_TextBase):
         middle = (QPointF(sum(p.x() for p in wanted) / len(wanted),
                           sum(p.y() for p in wanted) / len(wanted))
                   if wanted else QPointF(self._rect.center()))
+        # a leader of its own, on the side facing its cloud: the others stay
+        # as they are
         leader = _Leader(middle, "", self.ELBOW_REACH, "cloud", wanted)
         self.leaders.append(leader)
-        self.leader_moved()
         self.geometryChanged.emit()
         return leader
 
