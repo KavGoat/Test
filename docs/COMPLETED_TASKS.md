@@ -3,6 +3,16 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-22 — frame pacing, the toolbar preview, sharp markups, SMath units in cells, sheet-scoped names, workbook sections and printing (pushed at a5a8d8c)
+
+- Full test run passed at a5a8d8c (`-n 3`, every-command tests included); 14/14 planted bugs caught.
+- The toolbar drop preview shows the column at the window's edge.
+- Zoomed out, markups sharp; the drawing soft.
+- A cell's custom unit by SMath's own rule (the missing unit before the typed one); the unit box shows N², m⁻¹.
+- Spreadsheet names are reached as Sheet.name only; only CalcForge variables are tagged; old documents keep calculating.
+- The tab strip only while a workbook is in view; a workbook is one section in Thumbnails; Print / Don't Print per sheet.
+- The callout box glides with the pointer; on Windows frames are paced to the screen and the card doesn't wait for its refresh (not yet confirmed on Windows).
+
 ## 2026-10-21 (later) — toolbar crash and docking, alignment greying, flips, cursors in dark mode, the leader keeping up, zoomed out (pushed at 08b795e)
 
 - Full test run passed at 08b795e (`-n 3`, every-command tests included); 14/14 planted bugs caught. An earlier run at e0849b1 failed five tests: three from a toolbar "held" state that never cleared, one frame-count test that didn't allow for the pointer pausing under load, and the big-set scrolling budget (16.4 ms against 16 under load; it passed alone); fixed at 08b795e.
