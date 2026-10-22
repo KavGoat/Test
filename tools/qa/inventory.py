@@ -474,6 +474,8 @@ def walk_controls(area, where, root, ident, sources, collapse_at=14, state="",
                           "QLineEdit": "field", "QSpinBox": "number",
                           "QDoubleSpinBox": "number"}.get(kind, kind)
             note = kind_short + (f", {state}" if state else "")
+            if path == "Formula bar" and not widget.isEnabled():
+                note += ", disabled here"     # Excel's ✗ and ✓, until a cell is typed in
             add_row(area, path, label, shortcut, tokens, note=note)
             menu = widget.menu() if isinstance(widget, (QToolButton, QPushButton)) else None
             if menu is not None:
@@ -1886,6 +1888,9 @@ def main():
                         hits = menu_rows_by_method[caller]
                         break
             for hit in hits[:2]:
+                methods = set(hit["tokens"].get("method", []))
+                if len(methods) > 1:
+                    continue        # its label is several commands' (Rename…): not this one's
                 openers.append((hit["where"], norm(hit["name"])))
         openers = list(OrderedDict.fromkeys(openers))
         where = "; ".join(f"{w} ▸ {n}" for w, n in openers) or (

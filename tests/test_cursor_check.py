@@ -341,7 +341,9 @@ def test_a_sheets_print_area_and_its_cells(w):
     w.view.centerOn(edge)
     pump()
     hover(w, edge)
-    assert shown(w) == Qt.SplitHCursor, "the print area's edge"
+    # Excel's plain double arrow over a page break or the print area's edge
+    # (docs/qa/excel_audit.md, the pointers)
+    assert shown(w) == Qt.SizeHorCursor, "the print area's edge"
     from calcforge.ui.view import excel_cursor
     hover(w, cell_scene(run, "B3"))
     assert shown(w) == excel_cursor("cell").pixmap().cacheKey()

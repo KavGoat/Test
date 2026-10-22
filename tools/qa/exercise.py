@@ -279,6 +279,8 @@ DIALOG_OPENERS = {
                                                        "click": "New…"}}]),
     "panels.rename()": ("bookmarked", ["panel", "Bookmarks", "Rename"]),
     "panels.rename_set()": ("toolchest", ["call", "rename_set"]),
+    # a tool's own Rename… (the sheet tabs' Rename… types in the tab instead)
+    "panels.rename_entry()": ("toolchest", ["context", "chest_tool", ["Rename…"]]),
     # Revu's Edit beside Show Caption (the Properties panel)
     "panels.edit_caption()": ("area", ["panel", "Properties", "Edit"]),
     "sheetlayout.sheet_page_setup()": ("sheet_open", ["menu", ["Calculation", "Page Layout",
@@ -3383,6 +3385,10 @@ def context_spot(win, target, ctx, entry):
         bar = win.sheet_tabs.bar
         if bar.count() == 0:
             raise NotReached("no sheet tab")
+        if getattr(win.sheet_tabs, "editor", None) is not None:
+            # a name left being typed on the tab (Rename… just before): Esc,
+            # as a person would, so the click reaches the tab, not the box
+            win.sheet_tabs._end_rename(False)
         return bar, bar.tabRect(0).center()
     if target == "ruler":
         from calcforge.ui.rulers import Ruler
