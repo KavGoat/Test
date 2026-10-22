@@ -130,6 +130,7 @@ class SheetHeadings(QWidget):
         """(run, ("col", c)) or (run, ("row", r)) under a point of the canvas."""
         if not self.isVisible():
             return None
+        self._drop_gone()
         point = QPointF(viewport_pos)
         for run, kind, rect in reversed(self._strips):     # (the corner over both)
             if not QRectF(rect).contains(point):
@@ -155,7 +156,19 @@ class SheetHeadings(QWidget):
         return None
 
     # -- drawing -----------------------------------------------------------------------------
+    def _drop_gone(self) -> None:
+        """Strips of a sheet whose cells have gone (its pages rebuilt, undone)
+        are dropped until the next refresh: drawing them read a freed item."""
+        from shiboken6 import isValid
+        scene = self.view.scene()
+        kept = [strip for strip in self._strips if isValid(strip[0])
+                and strip[0].scene() is scene]
+        if len(kept) != len(self._strips):
+            self._strips = kept
+            self.refresh_soon()
+
     def paintEvent(self, event) -> None:
+        self._drop_gone()
         painter = QPainter(self)
         view = self.view
         k = self._scale()

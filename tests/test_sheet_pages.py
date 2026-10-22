@@ -618,7 +618,7 @@ def test_the_print_area_is_dragged_by_its_edges(w):
     # now it has a bottom edge too
     xs, ys = run.edges()
     bottom = run.mapToScene(QPointF(xs[1], ys[10]))
-    assert w.view.tables.hover_cursor(bottom).shape() == Qt.SplitVCursor
+    assert w.view.tables.hover_cursor(bottom).shape() == Qt.SizeVerCursor
     end = run.mapToScene(QPointF(xs[1], ys[20] + 1))
     drag(w.view, bottom.x(), bottom.y(), end.x(), end.y())
     pump()
@@ -653,7 +653,7 @@ def test_the_print_area_drags_without_opening_the_sheet_first(w):
     w.view.centerOn(edge)
     pump()
     hover(w.view, edge.x(), edge.y())
-    assert w.view.viewport().cursor().shape() == Qt.SplitHCursor
+    assert w.view.viewport().cursor().shape() == Qt.SizeHorCursor
     end = run.mapToScene(QPointF(xs[2] + 1, ys[3]))
     drag(w.view, edge.x(), edge.y(), end.x(), end.y())
     pump()
