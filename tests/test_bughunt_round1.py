@@ -131,7 +131,12 @@ def test_the_kept_headings_pick_a_row_without_scrolling_the_sheet(w, mode, opene
     strips = [rect for _run, kind, rect in headings._strips if kind == "row"]
     assert strips, "the row numbers are kept in view"
     where = QPointF(strips[0].center())
-    _run, (_kind, row) = headings.hit(where)
+    _run, (kind, row) = headings.hit(where)
+    if kind == "row_edge":
+        # (on the line between two rows, a click sizes the row: the middle of one)
+        where += QPointF(0, 6)
+        _run, (kind, row) = headings.hit(where)
+    assert kind == "row"
     h, v = w.view.horizontalScrollBar().value(), w.view.verticalScrollBar().value()
     click(w, w.view.mapToScene(where.toPoint()))
     assert w.view.tables.selection() == (row, 0, row, run.size[1] - 1)
