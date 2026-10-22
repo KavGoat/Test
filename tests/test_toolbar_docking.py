@@ -85,18 +85,22 @@ def preview_check(w, bar, area, side_capable: bool, out: dict):
         assert w.toolBarArea(bar) != area or not bar.isFloating()
         column = w.findChild(QWidget, "toolbarDropColumn")
         other = Qt.LeftToolBarArea if area == Qt.RightToolBarArea else Qt.RightToolBarArea
-        assert rails(w)[other] == before[other], "the other side stays put"
+        # (lifting a toolbar out of the top rows can take a row away, and
+        # everything below moves up: only across must the other side stay)
+        def across(box):
+            return box.left(), box.right(), box.width()
+        assert across(rails(w)[other]) == across(before[other]), "the other side stays put"
         if not side_capable:
             assert column is None or not column.isVisible(), "it only goes top or bottom"
-            assert rails(w) == before
+            assert all(across(rails(w)[side]) == across(before[side]) for side in before)
             return
         assert column is not None and column.isVisible(), "the room it will land in is shown"
         shown = column.geometry()
         rail, now = before[area], rails(w)[area]
         edge = w.contentsRect()
         assert 20 <= shown.width() < 2 * rail.width(), "a toolbar's column, nothing wider"
-        assert shown.top() == rail.top() and shown.height() == rail.height()
-        assert now.size() == rail.size(), "the rail itself is as it was"
+        assert shown.top() == now.top() and shown.height() == now.height()
+        assert now.width() == rail.width(), "the rail itself is as it was"
         # the rail has moved in by the room, which is at the window's edge
         if area == Qt.RightToolBarArea:
             assert shown.right() == edge.right() == rail.right()

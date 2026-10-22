@@ -3,6 +3,14 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-22 (late night) — the panel rails back, the side toolbar preview, headings on the grid's pixels, sheets by hand (pushed at cd5969f)
+
+- Full test run at cd5969f: one failure, a docking test reading the far rail's height while a top row closed up; the test now checks only across, and its file passes. 14/14 planted bugs caught. The run before, at bfa7586 (the Excel audit merged), passed but for three timing tests under load, which pass alone.
+- The panel rails and panels as they were before the dock host; a toolbar held at a side edge stands in the room the rail glides in to make, and is never seen back at the top when let go.
+- The workbook view: the kept headings' edges on the grid's lines at every zoom (read off the screen); blue print area and page breaks dragged in Normal view; a new sheet opens alone; no page rulers; bigger scroll thumbs; the sheet's name and the × over the grid at the right.
+- Sheets by hand: double-click the fill handle; the sheet scrolls while cells are dragged past its edge; Esc lets the cells go so markups can be drawn and their keys used; a markup tool draws over the cells.
+- The Excel audit (36 of 40 differences fixed): the tab row and splitter, Excel's footer and views, Freeze Panes, Excel's pointers and keys, Excel's 100 %.
+
 ## 2026-10-22 (evening) — grid snap, sharp markups zoomed out, the side toolbar preview, the cloud leader (pushed at b2d1651)
 
 - Full test run at 438564f: one failure (the window's right-click menu had lost the panel rails after the window restructure), fixed at b2d1651 and its tests rerun; 14/14 planted bugs caught.
