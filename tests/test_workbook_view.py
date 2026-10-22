@@ -391,3 +391,51 @@ def test_saved_and_opened_in_the_workbook_view(w, wb, tmp_path):
     w.go_to_page(sheetpages.sections(w.document)[0].first)
     pump()
     assert shown(w) == loads.uid
+
+
+# -- the user, 2026-10-22 (night): "a page on insert (why, I asked for the
+# canvas)"; the page rulers over the cells; "horizontal scroll ... too small"
+
+def test_insert_spreadsheet_page_opens_the_new_sheet_alone(w):
+    from calcforge.ui.sheetview import run_shown
+    pages = len(w.document.pages)
+    w.act_add_sheet_page.trigger()
+    pump()
+    assert len(w.document.pages) == pages + 1
+    page = w.document.pages[w.current_index]
+    assert page.sheet is not None
+    assert run_shown(w.scene) is not None, "the new sheet is shown alone, as Excel opens one"
+    assert w.view.tables.item is not None and w.view.tables.active == (0, 0)
+
+
+def test_no_page_rulers_over_a_sheet_shown_alone(w):
+    w.act_rulers.setChecked(True)
+    pump()
+    assert w.view.rulers.on
+    w.act_add_sheet_page.trigger()
+    pump()
+    assert shown(w) is not None
+    assert not w.view.rulers.on, "Excel's Normal view has no rulers"
+    w.act_rulers.setChecked(False)
+    w.act_rulers.setChecked(True)          # turned on while there: still none
+    pump()
+    assert not w.view.rulers.on
+    from calcforge.ui import sheetview
+    sheetview.leave(w)
+    pump()
+    assert w.view.rulers.on, "back on the pages, the rulers are back"
+    w.act_rulers.setChecked(False)
+
+
+def test_a_new_sheets_scroll_thumbs_are_big(w):
+    w.act_add_sheet_page.trigger()
+    pump()
+    for bar in (w.view.horizontalScrollBar(), w.view.verticalScrollBar()):
+        span = bar.maximum() - bar.minimum() + bar.pageStep()
+        assert bar.pageStep() / span >= 0.45, "the thumb is about half the bar or more"
+    # scrolled into, the grid grows; and Page Down goes a whole screenful
+    bar = w.view.verticalScrollBar()
+    before = bar.maximum()
+    bar.setValue(bar.maximum())
+    pump()
+    assert bar.maximum() > before

@@ -718,7 +718,7 @@ class PagesPanel(QWidget):
                  "the arrow offers Before or After", lambda: self.window.add_page()),
                 ("add_sheet_page", "insert_sheet_page", "Insert Spreadsheet Page — after "
                  "this page (pages next to each other are one sheet); the arrow offers "
-                 "Before or After", lambda: self.window.insert_sheet_page()),
+                 "Before or After", lambda: self.window.insert_spreadsheet()),
                 ("duplicate_page", "duplicate_page", "Duplicate Page — the page, or the "
                  "pages picked out",
                  lambda: self.window.duplicate_page(

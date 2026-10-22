@@ -241,6 +241,14 @@ def _bars(window) -> None:
     window.view.tables.refresh_bar()
     from . import sheetstatus
     sheetstatus.refresh(window)            # (the footer, and the bar over it)
+    # no page rulers over a sheet shown alone, as Excel's Normal view has
+    # none: they are the paper's, in mm, beside the column headings
+    rulers = getattr(window.view, "rulers", None)
+    wanted = getattr(window, "act_rulers", None)
+    if rulers is not None and wanted is not None:
+        on = wanted.isChecked() and run_shown(window.scene) is None
+        if rulers.on != on:
+            rulers.show(on)
     QApplication.sendPostedEvents(None, QEvent.LayoutRequest)
 
 
@@ -484,12 +492,15 @@ def page_key(window, step: int) -> None:
 
 
 # -- the endless grid -------------------------------------------------------------------------------
-#: How much grid there is past what is seen, in screenfuls.
-AHEAD = 1.0
+#: How much grid there is past what is seen, in screenfuls: a little, so the
+#: scroll bars' thumbs are big on a sheet little used, as Excel's are (the
+#: user, 2026-10-22: "horizontal scroll ... too small"); it grows as it is
+#: scrolled into.
+AHEAD = 0.25
 
 #: The grid grows and shrinks by whole blocks of rows and columns, so the
 #: canvas is laid out again now and then, not at every notch of the wheel.
-ROW_BLOCK, COL_BLOCK = 50, 10
+ROW_BLOCK, COL_BLOCK = 20, 5
 
 
 def fill(view, extra: Optional[QPointF] = None) -> bool:
@@ -501,7 +512,7 @@ def fill(view, extra: Optional[QPointF] = None) -> bool:
     True when it changed."""
     scene = view.scene()
     uid = run_shown(scene)
-    if uid is None:
+    if uid is None or _FILLING["on"]:
         return False
     from .sheetpages import run_items
     item = next((i for i in run_items(scene) if i.uid == uid and i.sheet is not None), None)
@@ -544,12 +555,21 @@ def fill(view, extra: Optional[QPointF] = None) -> bool:
     scene.sheet_extent = (rows, cols)
     if item.size == was:
         return False
-    item.prepareGeometryChange()
-    item._edges = None
-    item.update()
-    scene.layout_pages()
-    _keep_whole(view, item, *was)
+    # laying the canvas out again and putting the view back scroll it, which
+    # comes back here: not to take away again what was just given for *extra*
+    _FILLING["on"] = True
+    try:
+        item.prepareGeometryChange()
+        item._edges = None
+        item.update()
+        scene.layout_pages()
+        _keep_whole(view, item, *was)
+    finally:
+        _FILLING["on"] = False
     return True
+
+
+_FILLING = {"on": False}
 
 
 def reach(view, item, cell: tuple) -> bool:

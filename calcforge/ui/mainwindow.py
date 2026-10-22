@@ -1787,7 +1787,7 @@ class MainWindow(QMainWindow):
         self._act("add_page", "Blank Page", lambda: self.add_page(), "Ctrl+Shift+N",
                   name="Insert Blank Page",
                   tip="Insert Blank Page: the size, how many, and where they go")
-        self._act("add_sheet_page", "Spreadsheet Page", lambda: self.insert_sheet_page(),
+        self._act("add_sheet_page", "Spreadsheet Page", lambda: self.insert_spreadsheet(),
                   name="Insert Spreadsheet Page",
                   tip="Insert Spreadsheet Page: a page of spreadsheet cells; on a "
                       "spreadsheet it is one more page of that sheet")
@@ -2780,7 +2780,7 @@ class MainWindow(QMainWindow):
             ("add_page", "Insert Blank Page", True,
              lambda i, b: self.add_page(i, before=b), "A blank page"),
             ("add_sheet_page", "Insert Spreadsheet Page", False,
-             lambda i, b: self.insert_sheet_page(i, before=b), "A page of spreadsheet cells"),
+             lambda i, b: self.insert_spreadsheet(i, before=b), "A page of spreadsheet cells"),
             ("insert_pdf", "Insert Pages", True,
              lambda i, b: self.insert_pdf(i, before=b), "Pages from a PDF"),
             ("insert_image_page", "Insert Image Page", True,
@@ -6329,6 +6329,20 @@ class MainWindow(QMainWindow):
         from .sheetpages import insert_sheet_page
         insert_sheet_page(self, index, before)
 
+    def insert_spreadsheet(self, index: Optional[int] = None, before: bool = False) -> None:
+        """Insert ▸ Spreadsheet Page from the menus and Thumbnails: the page,
+        and its sheet opened alone, as Excel opens a new workbook (the user,
+        2026-10-22: "a page on insert — why? I asked for the canvas")."""
+        self.insert_sheet_page(index, before)
+        page = self.document.pages[self.current_index]
+        if page.sheet is None or page.frame is None:
+            return
+        from ..items.sheetpage import run_item_for
+        from . import sheetview
+        item = run_item_for(page.frame)
+        if item is not None:
+            sheetview.enter(self, item.uid)
+
     def sheet_page_setup(self, index: Optional[int] = None) -> None:
         """The spreadsheet's own page layout (ui/sheetlayout.py)."""
         from .sheetlayout import sheet_page_setup
@@ -7867,7 +7881,9 @@ class MainWindow(QMainWindow):
 
     def show_rulers(self, on: bool) -> None:
         from ..settings import app_settings
-        self.view.rulers.show(on)
+        from .sheetview import run_shown
+        # (none over a sheet shown alone: they come back as it is left)
+        self.view.rulers.show(on and run_shown(self.scene) is None)
         app_settings().setValue("view/rulers", bool(on))
 
     def show_crosshair(self, on: bool) -> None:

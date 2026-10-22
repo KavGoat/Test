@@ -1483,7 +1483,8 @@ The engine has **122** built-in functions.
   PDF. Dragging its edge or corner adds or removes rows and columns.
 - A **spreadsheet page** is a whole page of cells: **Document ▸ Insert ▸
   Spreadsheet Page ▸ Before / After**, the Thumbnails panel's Insert Spreadsheet
-  Page button, or a page's right-click menu. Consecutive spreadsheet pages are **one sheet** that
+  Page button, or a page's right-click menu; the new sheet opens straight away in the
+  workbook view. Consecutive spreadsheet pages are **one sheet** that
   grows a page at a time; the columns that fit inside the page margins print, and
   everything to the right of the blue line is a **scratch area** for side
   calculations that never prints. Only markups can go on a spreadsheet page.
@@ -1783,8 +1784,9 @@ area outlined in a thin solid line, thin dashed lines at the page breaks (and
 round what prints when there is no print area), and each page's "Page N" faintly
 behind its cells. Markups on the sheet's pages show
 where they are over the cells and can be picked and changed as on the page
-(they belong to the cells under them). Each workbook keeps its own zoom, and each
-sheet where you left it and its active cell.
+(they belong to the cells under them). The page rulers are not shown over the
+cells, as Excel's Normal view has none; they come back as you leave. Each workbook
+keeps its own zoom, and each sheet where you left it and its active cell.
 
 **Zoom and scrolling, as Excel's.** The zoom box's 100 % is Excel's 100 %: cells
 drawn the size Excel draws them (a default column 64 pixels wide, a row 20, on a
@@ -1792,9 +1794,9 @@ drawn the size Excel draws them (a default column 64 pixels wide, a row 20, on a
 zooms in Excel's steps of 15 % (100 %, 115 %, 130 %…, 10 % to 400 %), as does the
 footer's slider. A notch of the wheel scrolls three rows, `Shift`+wheel across.
 The scroll bars have their arrows at both ends; dragging a thumb says the row
-(or column) at the top. The grid is as big as the window and a screenful more,
-growing as you scroll on and shrinking back as you scroll back, so the thumb is
-as big as the sheet in use allows.
+(or column) at the top. The grid is as big as the window and a little more,
+growing as you scroll on (`Page Down` a screenful at a time) and shrinking back as
+you scroll back, so the thumb is as big as the sheet in use allows.
 
 **The footer.** In the workbook view the footer is Excel's: the cell mode on the
 left — **Ready**, **Enter** (typing into a cell), **Edit** (after `F2`) or
