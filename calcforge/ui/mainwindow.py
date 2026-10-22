@@ -2824,7 +2824,8 @@ class MainWindow(QMainWindow):
         if key == "add_sheet_page":
             page = self.document.pages[self.page_index(index)] if index is not None else None
             if page is not None and page.sheet is not None:
-                what = "Another page of this spreadsheet, at its end"
+                what = "A new workbook of its own"
+                where = "this workbook"
         dots = "…" if dialog else ""
         before = sub.addAction(f"Before{dots}", lambda _c=False: run(index, True))
         before.setToolTip(f"{what}, placed before {where}")
@@ -6364,8 +6365,14 @@ class MainWindow(QMainWindow):
     def insert_spreadsheet(self, index: Optional[int] = None, before: bool = False) -> None:
         """Insert ▸ Spreadsheet Page from the menus and Thumbnails: the page,
         and its sheet opened alone, as Excel opens a new workbook (the user,
-        2026-10-22: "a page on insert — why? I asked for the canvas")."""
-        self.insert_sheet_page(index, before)
+        2026-10-22: "a page on insert — why? I asked for the canvas"). On a
+        workbook's page, another workbook beside the whole of it."""
+        from .sheetpages import new_workbook_beside, section_of
+        section = section_of(self.document, self.page_index(index))
+        if section is not None:
+            new_workbook_beside(self, section, before)
+        else:
+            self.insert_sheet_page(index, before)
         page = self.document.pages[self.current_index]
         if page.sheet is None or page.frame is None:
             return

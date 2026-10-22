@@ -221,12 +221,16 @@ def test_add_sheet_page_is_insert_spreadsheet_page_on_a_sheet(w):
     menu = w.page_menu(index)
     assert "Add Sheet Page" not in labels(menu)
     after = entry(entry(menu, "Insert Spreadsheet Page").menu(), "After")
-    assert after.toolTip().startswith("Another page of this spreadsheet")
+    # the user, 2026-10-23: on a workbook it inserts another workbook
+    assert after.toolTip() == "A new workbook of its own, placed after this workbook"
     pages = len(w.document.pages)
     after.trigger()
     pump()
     assert len(w.document.pages) == pages + 1
-    assert w.document.pages[index + 1].sheet == run.uid, "one more page of the same sheet"
+    new = w.document.pages[index + 1]
+    assert new.sheet is not None and new.sheet != run.uid, "a sheet of its own"
+    from calcforge.ui.sheetpages import section_of
+    assert section_of(w.document, index + 1) is not section_of(w.document, index)
 
 
 def test_menu_bar_spreadsheet_page_before_by_mouse(shown):

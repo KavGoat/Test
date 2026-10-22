@@ -1484,7 +1484,11 @@ The engine has **122** built-in functions.
 - A **spreadsheet page** is a whole page of cells: **Document ▸ Insert ▸
   Spreadsheet Page ▸ Before / After**, the Thumbnails panel's Insert Spreadsheet
   Page button, or a page's right-click menu; the new sheet opens straight away in the
-  workbook view. Consecutive spreadsheet pages are **one sheet** that
+  workbook view. On a workbook's page (or in the workbook view) it inserts **another
+  workbook** — "Workbook (2)", a sheet of its own with its own names — after the
+  whole workbook, or before its first sheet; **⊕** on the sheet tabs adds a sheet to
+  the workbook in view instead, and a page of rows more comes by typing past the
+  sheet's last page. Consecutive spreadsheet pages are **one sheet** that
   grows a page at a time; the columns that fit inside the page margins print, and
   everything to the right of the blue line is a **scratch area** for side
   calculations that never prints. Only markups can go on a spreadsheet page.

@@ -400,6 +400,40 @@ def new_sheet_in(window, section: Section, before: Optional[str] = None) -> None
     window._structural_change("Insert spreadsheet page", mutate)
 
 
+def new_workbook_beside(window, section: Section, before: bool = False) -> None:
+    """Insert ▸ Spreadsheet Page on a workbook: another workbook, a sheet
+    of its own, after the whole workbook (before its first sheet with
+    *before*) — not one more page of the sheet in view (the user,
+    2026-10-23: "insert spreadsheet after on a workbook set should insert
+    another workbook, currently does nothing"). It is a workbook of its own,
+    so it is not taken for one more sheet of its neighbour: "Workbook (2)",
+    its names its own."""
+    import uuid
+
+    from ..sheet.docbook import book_for, sheet_ident
+    from ..sheet.xlsx import workbook_ident
+    document = window.document
+    wb = book_for(document).workbook
+    target = section.first if before else section.last + 1
+    setup = PageSetup.from_dict(document.pages[section.last].setup.to_dict())
+    (setup.margin_left, setup.margin_top, setup.margin_right,
+     setup.margin_bottom) = EXCEL_MARGINS_MM
+    shown = {_book_shown(b.file, b.name).lower() for b in wb.books.values()}
+    shown |= {s.name.lower() for s in sections(document)} | {"workbook"}
+    title = copy_name("Workbook", shown)
+    idents = {b.name for b in wb.books.values()} | {sheet_ident(s.name) for s in wb.sheets}
+    book = {"id": "book-" + uuid.uuid4().hex[:12], "name": workbook_ident(title, idents),
+            "file": title, "self_contained": True}
+
+    def mutate():
+        page = document.add_page(target)
+        page.setup = setup
+        page.sheet, record = new_sheet_record(setup, book)
+        page._pending_items = [record]
+        window.current_index = target
+    window._structural_change("Insert spreadsheet page", mutate)
+
+
 def why_not_moved(document, source: int, count: int, target: int) -> str:
     """What to say when a reorder is refused (move_allowed False)."""
     pages = list(document.pages)

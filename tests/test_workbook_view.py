@@ -408,6 +408,40 @@ def test_insert_spreadsheet_page_opens_the_new_sheet_alone(w):
     assert w.view.tables.item is not None and w.view.tables.active == (0, 0)
 
 
+def test_insert_spreadsheet_on_a_workbook_inserts_another_workbook(w):
+    """The user, 2026-10-23: "Insert spreadsheet after on a workbook set
+    should insert another workbook, currently does nothing"."""
+    from calcforge.ui.sheetpages import sections
+    from calcforge.ui.sheetview import run_shown
+    w.act_add_sheet_page.trigger()
+    pump()
+    w.sheet_tabs.new_sheet()                # a workbook of two sheets
+    pump()
+    first = run_shown(w.scene)
+    assert [len(s.runs) for s in sections(w.document)] == [2]
+    w.act_add_sheet_page.trigger()          # in the workbook view: After
+    pump()
+    books = sections(w.document)
+    assert [len(s.runs) for s in books] == [2, 1], "a workbook of its own, after the whole one"
+    assert books[1].name == "Workbook (2)" and books[0].name == "Workbook"
+    shown = run_shown(w.scene)
+    assert shown is not None and shown is not first and shown.uid == books[1].runs[0]
+    assert [n for _u, n in w.sheet_tabs.entries] == [shown.sheet.name], "its own tabs"
+    assert w.view.tables.item is not None and w.view.tables.active == (0, 0)
+    # Before, from the page menu of the first workbook's first page
+    index = books[0].first
+    menu = w.page_menu(index)
+    sub = next(a.menu() for a in menu.actions() if a.text() == "Insert Spreadsheet Page")
+    next(a for a in sub.actions() if a.text() == "Before").trigger()
+    pump()
+    books = sections(w.document)
+    assert [len(s.runs) for s in books] == [1, 2, 1]
+    assert books[0].name == "Workbook (3)" and books[0].last == index
+    w.undo_stack.undo()
+    pump()
+    assert [len(s.runs) for s in sections(w.document)] == [2, 1]
+
+
 def test_no_page_rulers_over_a_sheet_shown_alone(w):
     w.act_rulers.setChecked(True)
     pump()
