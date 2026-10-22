@@ -42,6 +42,8 @@ TAB_RATIO = 0.6
 
 #: The scroll bar keeps at least this much of the row (px), the tabs their splitter.
 MIN_BAR = 24
+#: what the scroll bar keeps at least while the tabs take what they need
+ROOMY_BAR = 200
 
 
 
@@ -180,8 +182,8 @@ class _Splitter(QWidget):
 
 
 class SheetTitle(QWidget):
-    """The workbook view's title strip, over the grid: the sheet's name in
-    bold (after its workbook's, for one brought in from Excel), as a table's
+    """The workbook view's title strip, over the grid: the workbook's name,
+    then the sheet's in bold, as a table's
     name tag says whose cells they are, and the × back to the pages at its
     right."""
 
@@ -328,10 +330,33 @@ class SheetTabs(QWidget):
             return
         total = row.width()
         width = int(round(total * self.ratio()))
+        if not self._ratio_chosen():
+            # every tab in sight while there is room for them, the scroll bar
+            # keeping a good length (the user, 2026-10-22: "the sheet tab chip
+            # at the bottom did not fully show all the sheets, cut off")
+            width = max(width, min(self.whole_width(), total - ROOMY_BAR))
         width = max(self.splitter.width(), min(width, total - MIN_BAR))
         if self.width() != width or self.minimumWidth() != width:
             self.setFixedWidth(max(width, 0))
             self._show_current()
+
+    def _ratio_chosen(self) -> bool:
+        """Whether the split was dragged to (now, or kept with the workbook)."""
+        if self._ratio is not None:
+            return True
+        for uid, _name in self.entries[:1]:
+            item = self._item(uid)
+            page = getattr(getattr(item, "sheet", None), "page", None) or {}
+            return "tab_ratio" in page
+        return False
+
+    def whole_width(self) -> int:
+        """How wide the strip is with every tab showing."""
+        layout = self.layout()
+        margins = layout.contentsMargins()
+        parts = (self.back, self.forth, self.add, self.splitter)
+        return (sum(p.sizeHint().width() for p in parts) + self.bar.sizeHint().width()
+                + layout.spacing() * (len(parts) + 1) + margins.left() + margins.right() + 4)
 
     def set_ratio(self, ratio: float) -> None:
         self._ratio = max(0.0, min(1.0, ratio))
@@ -408,15 +433,18 @@ class SheetTabs(QWidget):
         self.scroll_tabs(first)
 
     def _name_title(self, index: int) -> None:
-        """The strip over the grid: the workbook's name (an Excel one's, when
-        it came from a file) and the sheet's."""
+        """The strip over the grid: the workbook's name and the sheet's, the
+        same for every workbook (the user, 2026-10-22: the first showed only
+        "Sheet1", its copy "Workbook (2) ▸ Sheet1" — "why not the same format")."""
         if not 0 <= index < len(self.entries):
             self.title.show_names("", "")
             return
         from .sheetpages import sections
         document = getattr(self, "_document", None) or self.window.document
         section = next((x for x in sections(document) if x.key == self.section_key), None)
-        book = section.name if section is not None and section.book else ""
+        book = section.name if section is not None else ""
+        if section is not None and section.book is None and len(section.runs) == 1:
+            book = "Workbook"     # (a lone sheet's entry in Thumbnails is its own name)
         self.title.show_names(book, self.entries[index][1])
 
     def _sheet_list(self, at: QPoint) -> Optional[QMenu]:

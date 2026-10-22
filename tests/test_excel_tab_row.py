@@ -70,11 +70,19 @@ def test_the_tabs_take_six_tenths_of_the_row_the_scroll_bar_the_rest(w, book):
     bar = w.view.horizontalScrollBar()
     assert tabs.width() == pytest.approx(row.width() * TAB_RATIO, abs=2)
     assert bar.width() >= row.width() * 0.35, "the scroll bar keeps its 40 %"
-    # whatever the number of sheets
+    # more sheets than fit: the tabs take what they need while the row has
+    # room, the scroll bar keeping a good length (the user, 2026-10-22: "the
+    # sheet tab chip at the bottom did not fully show all the sheets")
+    from calcforge.ui.sheettabs import ROOMY_BAR
     for _ in range(6):
         tabs.new_sheet()
         pump()
-    assert tabs.width() == pytest.approx(row_of(tabs).width() * TAB_RATIO, abs=2)
+    row = row_of(tabs)
+    assert tabs.width() >= row.width() * TAB_RATIO - 2
+    assert tabs.width() == min(max(int(round(row.width() * TAB_RATIO)), tabs.whole_width()),
+                               row.width() - ROOMY_BAR) or \
+        tabs.width() == pytest.approx(row.width() * TAB_RATIO, abs=2)
+    assert w.view.horizontalScrollBar().width() >= ROOMY_BAR - 30
 
 
 def drag_splitter(w, tabs, dx, double=False):

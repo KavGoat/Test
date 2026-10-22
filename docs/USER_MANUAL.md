@@ -1868,8 +1868,10 @@ box; `Ctrl+Page Down` / `Ctrl+Page Up` go to the next or previous sheet, and pas
 the last or first sheet out to the page after or before the workbook; or the
 **×** at the top right of the sheet (**Close Workbook**, also on a tab's menu)
 goes back to the page you came from, as you left it. The strip it is on, over the
-grid, names the sheet in bold (after its workbook's name, for one brought in from
-Excel).
+grid, names the workbook and, in bold, the sheet ("Workbook ▸ Sheet1", "Loads ▸
+Factors"; a copy "Workbook (2) ▸ Sheet1 (2)"). The tabs take what they need to all be
+in sight while the row has room (the scroll bar keeping a good length), until the
+split between them is dragged.
 
 **Sheet tabs.** In the workbook view, under the canvas, the row Excel has: the
 tab-scroll arrows **◀ ▶** (a click scrolls the tabs a tab at a time, `Ctrl`+click

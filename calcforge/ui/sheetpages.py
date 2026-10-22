@@ -480,7 +480,10 @@ def workbook_copy(document, section: Section) -> list:
     else:
         # sheets made here: the copy a workbook of its own, so that its names
         # are its own and not the original's again
-        title = copy_name(section.name, shown)
+        # (a lone sheet's section is named after the sheet: its copy is a
+        # workbook, "Workbook (2)", as the strip over the grid names it)
+        base = "Workbook" if len(section.runs) == 1 else section.name
+        title = copy_name(base, shown | {"workbook"})
         file, own = title, True
     # the copy's file name says it is the copy (Loads (2).xlsx): it is how
     # the workbook is shown; its name for the equations is unique (Loads_2)

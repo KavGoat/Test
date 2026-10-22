@@ -1814,9 +1814,14 @@ class PageFrame(QGraphicsObject):
                         item._handles_visible = False
                     try:
                         self.layer.suspend()
+                        # the markups alone, over the grid just drawn: not the
+                        # canvas's desk under them (a thumbnail of a sheet with
+                        # a markup on it was grey: the user, 2026-10-22)
+                        scene._over_a_sheet = True
                         with only_this_page(scene, self):
                             scene.render(painter, inner, self.mapRectToScene(source), Qt.IgnoreAspectRatio)
                     finally:
+                        scene._over_a_sheet = False
                         for item in hidden:
                             item.setVisible(not item.hidden)
                         for item in markups:
@@ -2503,7 +2508,7 @@ class DocumentScene(QGraphicsScene):
         # grey of the canvas across the whole sheet — which, on an exported
         # drawing whose page is laid in underneath the render, hid the drawing
         # completely and left the markups floating on grey.
-        if any(frame.print_mode for frame in self.frames):
+        if any(frame.print_mode for frame in self.frames) or self.__dict__.get("_over_a_sheet"):
             return
         # Out to whole pixels of the screen. At 125 % or 150 % the part of
         # the window being repainted ends part way through a pixel, which Qt

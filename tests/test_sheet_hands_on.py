@@ -118,3 +118,52 @@ def test_the_strip_over_the_grid_names_the_sheet_and_closes_it(w, sheet):
     QTest.mouseClick(close, Qt.LeftButton)
     pump()
     assert run_shown(w.scene) is None and not title.isVisible()
+
+
+# -- the user, 2026-10-22, after midnight -----------------------------------------------------------
+def test_a_markup_on_a_sheet_leaves_its_thumbnail_white(w, sheet):
+    """"I put a markup on a workbook and the thumbnail greys out": the
+    markups were drawn over the grid through the scene, which painted the
+    canvas's grey desk first, all over the sheet."""
+    from calcforge.items.shapes import RectItem
+    run = sheet
+    w.view.set_tool("rect")
+    pump()
+    drag(w, at(w, run, 4, 1), at(w, run, 9, 3))
+    assert any(isinstance(i, RectItem) for i in w.view.scene().items())
+    frame = next(p.frame for p in w.document.pages if p.sheet == run.uid)
+    image = frame.render_image(dpi=18.0, for_print=False)
+    assert image.pixelColor(image.width() // 2, image.height() * 3 // 4).lightness() > 240, \
+        "the paper white under and round the markup"
+
+
+def test_every_tab_shows_while_there_is_room(w, sheet):
+    """"The sheet tab chip at the bottom did not fully show all the sheets":
+    the tabs had 60 % of the row whatever they needed."""
+    w.resize(1400, 900)
+    pump()
+    tabs = w.sheet_tabs
+    for _ in range(6):
+        tabs.new_sheet()
+        pump()
+    assert tabs.bar.count() == 7
+    assert tabs.clip.width() >= tabs.bar.sizeHint().width(), "all seven in sight"
+    view = w.view
+    assert view.horizontalScrollBar().width() >= 150, "the scroll bar still a good length"
+
+
+def test_every_workbook_is_named_the_same_way_over_its_grid(w, sheet):
+    """"The first showed Sheet1 but its duplicate shows Workbook2 ▸ Sheet1,
+    why not the same format": workbook ▸ sheet, for each."""
+    from calcforge.ui import sheetview
+    title = w.sheet_tabs.title
+    assert (title.book.text(), title.sheet.text()) == ("Workbook  ▸", "Sheet1")
+    index = w.current_index
+    sheetview.leave(w)
+    pump()
+    w.duplicate_page(index)
+    pump()
+    copy = next(i for i, p in enumerate(w.document.pages) if p.sheet and i > index)
+    w.go_to_page(copy)
+    pump()
+    assert (title.book.text(), title.sheet.text()) == ("Workbook (2)  ▸", "Sheet1 (2)")
