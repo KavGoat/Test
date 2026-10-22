@@ -7,6 +7,7 @@ import time
 import numpy  # noqa: F401  (loaded now: the first drag that snaps needs it at once)
 import os
 import re
+import sys
 from copy import deepcopy
 from typing import Optional
 
@@ -1705,6 +1706,9 @@ class PageView(QGraphicsView):
             surface = CardSurface()
             shape = QSurfaceFormat()
             shape.setSamples(4)                       # smooth markup edges
+            # (and as the window's own: on Windows, no wait for the screen's
+            # refresh — app._no_wait_for_the_screen)
+            shape.setSwapInterval(QSurfaceFormat.defaultFormat().swapInterval())
             surface.setFormat(shape)
             self.setViewport(surface)
             # Qt does not scroll a texture by moving its pixels — a scroll is
@@ -1726,6 +1730,7 @@ class PageView(QGraphicsView):
         stay inside them (PageFrame.say_whether_markups_stay_in), so Qt can
         pass by the markups of a page that is not being repainted."""
         now = time.monotonic()
+        self._painted_at = now
         for frame in getattr(self.scene(), "frames", None) or ():
             frame.say_whether_markups_stay_in(now)
         surface = self.viewport()
@@ -3275,7 +3280,53 @@ class PageView(QGraphicsView):
         if kind in _BUTTON_EVENTS:
             with clear_of_the_panels():
                 return super().viewportEvent(event)
+        if kind == QEvent.MouseMove:
+            done = super().viewportEvent(event)
+            self._frame_if_due()
+            return done
         return super().viewportEvent(event)
+
+    #: when the canvas was last painted (time.monotonic)
+    _painted_at = 0.0
+    #: whether moves of the pointer put their frame on the screen themselves
+    #: (_frame_if_due): where posted events wait behind input — Windows.
+    #: Elsewhere the repaint Qt posts comes straight after the move anyway.
+    paces_its_frames = sys.platform == "win32"
+
+    def _frame_if_due(self) -> None:
+        """Put the frame a move asked for on the screen now, if a frame's
+        time has gone by since the last one.
+
+        Qt hands the window its repaint as a posted event, and on Windows
+        posted events wait while input is waiting — and a mouse reporting
+        several hundred times a second nearly always has another move
+        waiting. So the box of a call-out being placed, or a markup being
+        dragged, was moved for every report and drawn whenever the mouse
+        happened to leave a gap: late and unevenly, a tenth of a second at
+        times with nothing drawn (the user, 2026-10-21: "it's like the fps
+        is lowered"). Here at most once a frame, never more often than the
+        screen refreshes."""
+        if not self.paces_its_frames:
+            return
+        now = time.monotonic()
+        if now - self._painted_at < self._frame_time():
+            return
+        # What moved on the canvas is first worked out where it is to be
+        # drawn: Qt does that for the canvas in a call of its own, queued —
+        # left for later, the frame went to the screen without it and then
+        # again with it, two frames for one move, each waiting for the screen
+        scene = self.scene()
+        if scene is not None:
+            for _ in range(2):              # (and what that call queues in turn)
+                QApplication.sendPostedEvents(scene, QEvent.MetaCall)
+        # (the window this view is in: its .window is the main window)
+        QApplication.sendPostedEvents(QWidget.window(self), QEvent.UpdateRequest)
+
+    def _frame_time(self) -> float:
+        """How long the screen shows a frame for, a little less to be sure."""
+        screen = self.screen()
+        rate = screen.refreshRate() if screen is not None else 60.0
+        return max(1.0 / max(rate, 30.0) - 0.002, 0.004)
 
     def escape_everything(self, quiet: bool = False) -> str:
         """One press of Escape, back to a blank slate.
