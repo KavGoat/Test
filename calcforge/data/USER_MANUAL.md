@@ -2454,11 +2454,12 @@ drawn on it keeps its own colours.
   Styles, Properties and Alignment (hidden at first, as Revu's); **Lock Toolbars**; **Customise Toolbars…** picks which
   markup tools are on the toolbar (a tool taken off stays on its menu and key).
 - Drag a toolbar by its handle to any edge of the window. On the left or right
-  it stands on end in a column of its own at the window's edge, outside the
-  panel strip, so the panels still open between the strip and the page. While
-  you drag it near a side edge, that column is outlined at the window's edge,
-  where it will go when you let go. The Properties and Markup Styles toolbars go
-  top or bottom only.
+  it stands on end at the window's edge, outside the panel strip, so the panels
+  still open between the strip and the page. As along the top, the room opens
+  while you drag: near a side edge the panel strip, the panels and the page move
+  in to show where it will go, and it lands there when you let go (beside or
+  below another toolbar already on that side, as you drop it). The Properties
+  and Markup Styles toolbars go top or bottom only.
 - Panels: open and close them from the edge strips or **Window ▸ Panels**; drag an
   icon to the other side; pin, float or roll up a panel from its title bar.
   **Window ▸ Pin Panels** pins them all; **Reset Layout** puts every panel and
