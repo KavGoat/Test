@@ -1756,7 +1756,9 @@ the equation and R² on the chart). The axis titles carry the cells' units.
 - **Page breaks**: Excel's Page Break Preview — dashed blue where they fall by
   themselves, solid blue where you put them. **Insert Page Break**, **Remove Page
   Break** and **Reset All Page Breaks**; dragging an automatic break makes it
-  yours.
+  yours. The breaks and the print area's edges are dragged on the sheet's pages
+  and in the workbook view's Page Break Preview, with the plain double arrow; in
+  its Normal view they are only lines, and a drag over one picks cells.
 - **Sideways sheets**: a sheet wider than its paper prints on pages side by side,
   numbered down then over; more pages across come from a wide print area, a
   vertical page break or Fit to N pages wide.
@@ -1781,9 +1783,69 @@ area outlined in a thin solid line, thin dashed lines at the page breaks (and
 round what prints when there is no print area), and each page's "Page N" faintly
 behind its cells. Markups on the sheet's pages show
 where they are over the cells and can be picked and changed as on the page
-(they belong to the cells under them). Each workbook keeps its own zoom
-(`Ctrl`+wheel zooms the grid), and each sheet where you left it and its active
-cell.
+(they belong to the cells under them). Each workbook keeps its own zoom, and each
+sheet where you left it and its active cell.
+
+**Zoom and scrolling, as Excel's.** The zoom box's 100 % is Excel's 100 %: cells
+drawn the size Excel draws them (a default column 64 pixels wide, a row 20, on a
+96 dpi screen); the pages and printing are as they always were. `Ctrl`+wheel
+zooms in Excel's steps of 15 % (100 %, 115 %, 130 %…, 10 % to 400 %), as does the
+footer's slider. A notch of the wheel scrolls three rows, `Shift`+wheel across.
+The scroll bars have their arrows at both ends; dragging a thumb says the row
+(or column) at the top. The grid is as big as the window and a screenful more,
+growing as you scroll on and shrinking back as you scroll back, so the thumb is
+as big as the sheet in use allows.
+
+**The footer.** In the workbook view the footer is Excel's: the cell mode on the
+left — **Ready**, **Enter** (typing into a cell), **Edit** (after `F2`) or
+**Point** (picking a reference for a formula) — and, with more than one cell
+picked, the **Average**, **Count** and **Sum** of what they hold; on the right
+the view buttons **Normal**, **Page Layout** and **Page Break Preview**, a zoom
+slider and the zoom box. The paper's controls (the pointer's position, the
+scale, snapping, the page layout, window sync and the paper size) come back with
+the pages.
+
+**Normal, Page Layout, Page Break Preview** (the footer's buttons, or **View ▸
+Spreadsheet**). Normal is the workbook view; Page Layout shows the sheet's pages;
+Page Break Preview is the workbook view with what prints white and the rest
+grey, the page breaks blue (dashed where they fell by themselves) and each
+page's "Page N": drag a blue line to move a break or the print area's edge. A
+sheet keeps the view it was left in.
+
+**Freeze Panes** (**View ▸ Spreadsheet**): **Freeze Panes** keeps the rows above
+and the columns left of the active cell in sight as the sheet scrolls (on a
+frozen sheet it is **Unfreeze Panes**); **Freeze Top Row**, **Freeze First
+Column** and **Unfreeze Panes**. Each is one undo step and is saved with the
+sheet; an Excel file's frozen panes come in with it. A thin line marks where
+the frozen cells end; they are clicked, typed into and picked like any other,
+the active cell is kept in sight below and right of them, and `Ctrl+Home` goes
+to the first cell that is not frozen. As in Excel they are the workbook view's:
+the pages print and show the sheet whole.
+
+**Picking cells and keys, as Excel's.** There is always an active cell: `Esc`
+cancels what is being typed (and the copied cells' marching ants) but never puts
+the sheet down. `Ctrl`+click or `Ctrl`+drag adds another block to those picked
+(shaded); the footer sums them all, and clearing, bold, number formats and the
+other formats act on all of them; Copy and Cut say Excel's "This command cannot
+be used on multiple selections". `Ctrl+A` picks the block of data round the
+active cell first, pressed again the whole sheet. `Ctrl`+arrow past the last
+cell of data goes to the sheet's end (row 1,048,576, column XFD). `Page Down` /
+`Page Up` go a screenful, the window with them. After `F2` (Edit) the arrows move
+the caret in the formula; typed straight in (Enter) they pick references. On a
+sheet a click on a HYPERLINK cell follows it; press and hold it to pick the cell.
+`Shift`+drag of the selection's border cuts the cells and inserts them where it
+is let go, the cells between closing up. The pointer is Excel's: the white cross
+over cells and the select-all corner, the arrow with the move sign on the
+selection's border (with the small + while `Ctrl` is held: a copy), the split
+arrows on heading edges (the headings kept in sight as the sheet scrolls too),
+and the plain double arrow on Page Break Preview's lines. A column's edge being
+dragged says its width as Excel does, in characters of the default font
+("Width: 8.43 (64 pixels)").
+
+**The formula bar.** The Name Box says the size of a block ("4R × 3C") only while
+the mouse picks it, then the active cell; drag the dots after it to widen it.
+**✗** (Cancel) and **✓** (Enter) beside **fx** while a cell is typed into; **fx**
+(Insert Function) starts a formula in the active cell with the list of functions.
 
 The pages are still there: in the page view (anywhere else in the document) a
 workbook's pages show as they print — its Page Layout view — and **File ▸
@@ -1802,12 +1864,21 @@ the last or first sheet out to the page after or before the workbook; or the
 **×** at the right end of the sheet tabs (**Close Workbook**, also on a tab's
 menu) goes back to the page you came from, as you left it.
 
-**Sheet tabs.** In the workbook view, under the canvas beside the scroll bar, a
-tab for each of its sheets in reading order (tables have none). The tabs, like
-the formula bar, show only in the workbook view.
-Click a tab to go to it; double-click to rename; drag it to move the sheet's
-pages among the workbook's; **+** adds a sheet at the end of the workbook (to an
-Excel workbook, one of its sheets, sharing its names) and shows it. Right-click a
+**Sheet tabs.** In the workbook view, under the canvas, the row Excel has: the
+tab-scroll arrows **◀ ▶** (a click scrolls the tabs a tab at a time, `Ctrl`+click
+goes to the first or last sheet, a right-click lists every sheet to go to), a tab
+for each sheet in reading order (tables have none; the sheet shown white, its
+name green), **⊕** for a new sheet, the **×**, and the splitter at the left of the
+scroll bar: the tabs take 60 % of the row to start, as Excel's do; drag the
+splitter (Excel's double-headed arrow) to give the tabs or the scroll bar more
+room, double-click it to put it back. The split is kept with the workbook and
+saved, and an Excel file's comes in with it. The tabs, like the formula bar,
+show only in the workbook view.
+Click a tab to go to it; double-click to rename it on the tab (`Enter` keeps the
+name, `Esc` leaves it); drag it to move the sheet's pages among the workbook's;
+**⊕** adds a sheet at the end of the workbook (to an Excel workbook, one of its
+sheets, sharing its names) and shows it, and `Shift+F11` puts a new sheet before
+the one shown. Right-click a
 tab — or press and hold it, on a touch screen — for **Insert Sheet**, **Delete**,
 **Rename…**, **Print**, **Go To** and **Close Workbook** — and, on a sheet of an
 imported Excel workbook, the **Self-contained** tick (see *Excel workbooks*). Rename a table from its right-click menu
@@ -1839,7 +1910,9 @@ each in and a **Print** column, ticked (**Print**) to start; untick it for
 **Don't Print** (see *The workbook view and sheet tabs*). Each
 worksheet becomes a run of spreadsheet pages with its cells, formulas, formatting,
 sizes, merges, names, comments, validation, conditional formatting and page
-layout; hidden worksheets come in too. Charts, pictures and a print scale other
+layout, its frozen panes and the view it was left in (Normal or Page Break
+Preview), and the workbook's split between its tabs and its scroll bar; hidden
+worksheets come in too. Charts, pictures and a print scale other
 than 100 % are left out, and CalcForge says so, listing any cell whose formula
 gives another answer here than Excel last showed. A worksheet whose name is
 already used in the document is renamed `Name (2)` (then `(3)`…), and the formulas
@@ -2545,7 +2618,7 @@ command — with a key or not — is in **CalcForge ▸ Keyboard Shortcuts**, wh
 key can be changed.
 
 <!-- generated:shortcuts -->
-**197** commands have a key out of the box. Every other command can be given one in Keyboard Shortcuts.
+**198** commands have a key out of the box. Every other command can be given one in Keyboard Shortcuts.
 
 #### File
 
@@ -2793,6 +2866,7 @@ key can be changed.
 | Insert or edit a note | `Shift+F2` | In a table / sheet |
 | Insert the time | `Ctrl+Shift+:` | In a table / sheet |
 | Insert today's date | `Ctrl+;` | In a table / sheet |
+| Insert worksheet | `Shift+F11` | In a table / sheet |
 | Italic | `Ctrl+I` | In a table / sheet |
 | Name Manager | `Ctrl+F3` | In a table / sheet |
 | No borders | `Ctrl+Shift+_` | In a table / sheet |

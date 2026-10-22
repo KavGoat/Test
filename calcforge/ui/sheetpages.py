@@ -353,7 +353,7 @@ def one_page_area(setup) -> list:
     from ..sheet.pagination import paginate
     from .xlsximport import _Layout
     paging = paginate(_Layout({"cells": [], "page": {}}), setup)
-    (a, b), (c0, c1) = paging.slices[0], paging.groups[0]
+    (_top, b), (_left, c1) = paging.slices[0], paging.groups[0]
     return [0, 0, max(b, 0), max(c1, 0)]
 
 

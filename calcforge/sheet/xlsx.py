@@ -586,6 +586,9 @@ def _page_options(ws, renamed) -> dict:
             out["tab_ratio"] = max(0.0, min(1.0, int(ratio) / 1000.0))
     except (TypeError, ValueError, IndexError):
         pass
+    # the view the sheet was left in: Page Break Preview comes in as it is
+    if getattr(getattr(ws, "sheet_view", None), "view", None) == "pageBreakPreview":
+        out["view"] = "break_preview"
     # Freeze Panes: the rows above and the columns left of the cell named
     frozen = getattr(ws, "freeze_panes", None)
     if frozen:

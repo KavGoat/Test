@@ -794,7 +794,9 @@ def test_a_column_edge_drag_shows_a_guide_and_sizes_on_release(w):
     assert axis == "col" and at == pytest.approx(xs[1] + width + moved, abs=1.0), \
         "the dashed line, under the pointer"
     wanted = at - xs[1]
-    assert QToolTip.text() == f"Width: {wanted:.2f} pt ({round(wanted * 96 / 72)} pixels)"
+    pixels = round(wanted * 96 / 72)
+    # Excel's: characters of the default font's digits (docs/qa/excel_audit.md, G2)
+    assert QToolTip.text() == f"Width: {(pixels - 5) / 7:.2f} ({pixels} pixels)"
     let_go(w, end)
     assert the_run(w).sheet.width(1) == pytest.approx(wanted) and te.size_guide is None
     w.undo_stack.undo()

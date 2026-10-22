@@ -181,9 +181,11 @@ def test_frozen_panes_are_saved_and_come_in_from_excel(w, sheet, tmp_path):
     book.active.title = "Frozen"
     book.active["A1"] = "head"
     book.active.freeze_panes = "B3"
+    book.active.sheet_view.view = "pageBreakPreview"       # and the view it was left in
     book.save(path)
     assert w.insert_workbook(str(path), 0)
     pump()
     run = next(i for i in w.view.scene().items() if isinstance(i, SheetRunItem)
                and i.sheet is not None and i.sheet.name == "Frozen")
     assert frozen(run) == (2, 1)
+    assert run.sheet.page["view"] == "break_preview"

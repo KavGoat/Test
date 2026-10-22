@@ -119,6 +119,15 @@ def test_the_footer_says_the_mode_and_the_sums_of_the_cells_picked(w, sheet):
         x.objectName() for x in w.statusBar().dropped()]
 
 
+def test_another_document_gets_the_papers_footer_back(w, sheet):
+    made = footer(w)
+    assert made["mode"].isVisible()
+    w.new_document()
+    pump()
+    assert not made["mode"].isVisible() and made["droppable"] is None
+    assert w.statusBar()._droppable, "the paper's controls can come back for room"
+
+
 def test_the_view_buttons_and_the_slider(w, sheet):
     made = footer(w)
     buttons = made["buttons"]

@@ -637,7 +637,9 @@ def test_every_label_the_user_reads_is_one_or_two_words(window, qapp):
                  # Revu's Sketch to Scale panel (the user's photo, 2026-10-18)
                  "Show Segment Values",
                  # Revu's Align Markups (Center in Document; the user, 2026-10-20)
-                 "Centre in Document")
+                 "Centre in Document",
+                 # Excel's View tab, as Excel names them (docs/qa/excel_audit.md)
+                 "Page Break Preview", "Freeze Top Row", "Freeze First Column")
     long = [entry for entry in long if not any(name in entry for name in bluebeams)]
     assert not long, "labels of more than two words:\n" + "\n".join(sorted(set(long)))
 

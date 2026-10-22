@@ -510,12 +510,18 @@ class SheetTabs(QWidget):
             scroll.style().polish(scroll)
             scroll.updateGeometry()
         # the workbook view's bars: Windows' arrows at their ends (A4)
+        changed = False
         for bar in (scroll, view.verticalScrollBar()):
             if bool(bar.property("sheetView")) != self.showing:
                 bar.setProperty("sheetView", self.showing)
                 bar.style().unpolish(bar)
                 bar.style().polish(bar)
                 bar.updateGeometry()
+                changed = True
+        if changed:
+            # the view lays its bars out at once: the window is its new size
+            # before it is scrolled back to where it was
+            QApplication.sendEvent(view, QEvent(QEvent.LayoutRequest))
 
     def refresh(self) -> None:
         """The strip as its view now is — and every other pane's strip, so
@@ -526,6 +532,11 @@ class SheetTabs(QWidget):
         from .sheetview import sync
         sync(self.window)
         changed = self.update_mode()
+        from . import sheetfreeze, sheetstatus
+        sheetstatus.refresh(self.window)   # the footer: Excel's or the paper's, as the view is
+        view = self.view()
+        if view is not None:
+            sheetfreeze.refresh(view)
         for pane in getattr(self.window, "_panes", None) or ():
             other = getattr(pane, "sheet_tabs", None)
             if other is not None and other is not self and isValid(other):

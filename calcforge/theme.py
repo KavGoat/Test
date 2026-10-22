@@ -368,20 +368,22 @@ QScrollBar#sheetRowScroll::handle:horizontal {{ margin: 6px 2px; }}
     border-bottom: 2px solid #217346;
 }}
 /* the workbook view's scroll bars: Excel's (Windows') arrows at their ends */
-QScrollBar[sheetView="true"]:vertical {{ width: 16px; margin: 16px 0; }}
-QScrollBar[sheetView="true"]:horizontal {{ margin: 0 16px; }}
-QScrollBar[sheetView="true"]::handle:vertical {{ margin: 2px 3px; min-height: 18px; }}
+/* (as wide as the bars are everywhere else: the window keeps its size, and
+   the sheet stays where it is on the screen, going in and out) */
+QScrollBar[sheetView="true"]:vertical {{ margin: 14px 0; }}
+QScrollBar[sheetView="true"]:horizontal {{ margin: 0 14px; }}
+QScrollBar[sheetView="true"]::handle:vertical {{ min-height: 18px; }}
 QScrollBar[sheetView="true"]::add-line:vertical {{
-    height: 16px; width: 16px; subcontrol-position: bottom; subcontrol-origin: margin;
+    height: 14px; width: 12px; subcontrol-position: bottom; subcontrol-origin: margin;
 }}
 QScrollBar[sheetView="true"]::sub-line:vertical {{
-    height: 16px; width: 16px; subcontrol-position: top; subcontrol-origin: margin;
+    height: 14px; width: 12px; subcontrol-position: top; subcontrol-origin: margin;
 }}
 QScrollBar[sheetView="true"]::add-line:horizontal {{
-    width: 16px; subcontrol-position: right; subcontrol-origin: margin;
+    width: 14px; subcontrol-position: right; subcontrol-origin: margin;
 }}
 QScrollBar[sheetView="true"]::sub-line:horizontal {{
-    width: 16px; subcontrol-position: left; subcontrol-origin: margin;
+    width: 14px; subcontrol-position: left; subcontrol-origin: margin;
 }}
 QScrollBar[sheetView="true"]::up-arrow {{ image: url("{arrow_up}"); width: 8px; height: 8px; }}
 QScrollBar[sheetView="true"]::down-arrow {{ image: url("{arrow_down}"); width: 8px; height: 8px; }}

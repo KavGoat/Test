@@ -213,6 +213,10 @@ class FormulaBar(QWidget):
         super().__init__()
         self.tables = tables
         self.setObjectName("formulaBar")
+        # its width the pane's: it never makes the pane it goes to wider
+        # (moved between Split View's panes, the views shifted)
+        from PySide6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(4)

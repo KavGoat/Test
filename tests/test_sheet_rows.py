@@ -188,11 +188,15 @@ def test_a_print_area_has_its_pages_and_no_others(w):
     assert len(sheet_pages(w)) == 2 and thumbnails(w) == 3, "the print area's two pages"
     assert printed(w) == [(0, n - 1), (n, n + 5)]
     assert run.sheet_rows == 2 * n + 10, "the rows below it are still there, outside the line"
-    # its bottom edge dragged down past the next page break: three pages
+    # its bottom edge dragged down past the next page break (in Page Break
+    # Preview, where Excel's lines drag): three pages
+    w.act_sheet_break_preview.trigger()
+    pump()
+    run = the_run(w)
     from tests.test_usability import drag
     xs, ys = run.edges()
     edge = run.mapToScene(QPointF(xs[1], ys[n + 6]))
-    assert w.view.tables.hover_cursor(edge).shape() == Qt.SplitVCursor
+    assert w.view.tables.hover_cursor(edge).shape() == Qt.SizeVerCursor
     end = run.mapToScene(QPointF(xs[1], ys[2 * n + 3] + 1))
     drag(w.view, edge.x(), edge.y(), end.x(), end.y())
     pump()

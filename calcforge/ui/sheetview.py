@@ -171,7 +171,8 @@ def enter(window, uid: str, cell: Optional[tuple] = None, page: Optional[int] = 
     item.relayout()                        # (lays the canvas out again)
     _bars(window)
     zoom = scene.sheet_zooms.get(_section_key(window, uid))
-    view.set_zoom(zoom if zoom is not None else EXCEL_SCALE)      # Excel's 100 %
+    # Excel's 100 % to start (a click on its page keeps the zoom it was seen at)
+    view.set_zoom(zoom if zoom is not None else (view.zoom() if keep is not None else EXCEL_SCALE))
     fill(view)
     kept = scene.sheet_places.get(uid)
     if keep is not None:
@@ -238,6 +239,8 @@ def _bars(window) -> None:
     if tabs is not None:
         tabs.refresh()
     window.view.tables.refresh_bar()
+    from . import sheetstatus
+    sheetstatus.refresh(window)            # (the footer, and the bar over it)
     QApplication.sendPostedEvents(None, QEvent.LayoutRequest)
 
 
