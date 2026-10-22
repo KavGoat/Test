@@ -199,31 +199,132 @@ def _on_a_screen_page(item) -> bool:
     return layer is not None and layer._on_screen()
 
 
-#: Zoomed out on screen, a markup's lines are drawn sharp: no thinner than
-#: one device pixel, thin ones a whole number of pixels wide, and straight
-#: ones without smoothing (items/base.crisp_strokes), so each is one solid
-#: dark row of pixels. Smoothed at a pixel and a bit like the drawing's
-#: (pdf/engine.ZOOMED_OUT_LINE_PIXELS), a markup's line was soft-edged; the
-#: user wanted markups crisp and the drawing soft (2026-10-21: "maybe markups
-#: don't fuzzy at all?"). Curves keep their smoothing, a pixel wide at least.
-MARKUP_LINE_PIXELS = 1.0
+#: Zoomed out on screen, a markup's lines are drawn sharp — every stroke,
+#: curves, clouds, slants, leaders and arrows too: without smoothing, a whole
+#: number of device pixels wide when thinner than WHOLE_PIXELS_BELOW, one at
+#: least, so each is solid ink on whole pixels, no grey half anywhere. The
+#: user: "Markup still fuzzy, only PDF lines should be fuzzy" (2026-10-22), as
+#: Revu draws markups zoomed out; the drawing itself stays smoothed
+#: (pdf/engine.thinnest_line). Words (paint_words), fills and hatches are as
+#: they were.
+WHOLE_PIXELS_BELOW = 2.5
+
+#: the painter a markup is being drawn sharp through just now, if any
+_SHARP = [None]
+_PLAIN: dict = {}
 
 
-def thinnest_line(painter: QPainter, item) -> float:
-    """One device pixel in *painter*'s present units, while *item* is drawn on
-    screen zoomed out (below 100 %): the thinnest its lines are drawn, and
-    the unit they are made whole pixels of. Nothing (0) in a print, an
-    export, or from 100 % up."""
+def _zoomed_out_on_screen(painter: QPainter, item) -> bool:
     from ..pdf.engine import ZOOMED_OUT_BELOW
 
     engine = painter.paintEngine()
     if engine is None or engine.type() not in _SCREEN_ENGINES:
-        return 0.0
-    device = painter.deviceTransform()
-    scale = math.sqrt(abs(device.m11() * device.m22() - device.m12() * device.m21()))
-    if scale <= 0 or scale >= ZOOMED_OUT_BELOW - 1e-9 or not _on_a_screen_page(item):
-        return 0.0
-    return MARKUP_LINE_PIXELS / scale
+        return False
+    scale = _scale_of(painter.deviceTransform())
+    return 0 < scale < ZOOMED_OUT_BELOW - 1e-9 and _on_a_screen_page(item)
+
+
+def _scale_of(device: QTransform) -> float:
+    return math.sqrt(abs(device.m11() * device.m22() - device.m12() * device.m21()))
+
+
+def _sharpen(painter: QPainter) -> None:
+    """The painter's pen, a whole number of device pixels wide, one at least,
+    its dashes as long as they were."""
+    pen = painter.pen()
+    width = pen.widthF()
+    if pen.style() == Qt.NoPen or pen.isCosmetic() or width <= 0:
+        return                     # (a cosmetic pen is a pixel already)
+    scale = _scale_of(painter.deviceTransform())
+    pixels = width * scale
+    if scale <= 0 or pixels >= WHOLE_PIXELS_BELOW:
+        return
+    sharp = max(round(pixels), 1) / scale
+    if abs(sharp - width) < 1e-12:
+        return
+    if pen.style() == Qt.CustomDashLine:
+        pattern = [step * width / sharp for step in pen.dashPattern()]
+        pen.setWidthF(sharp)
+        pen.setDashPattern(pattern)
+    else:
+        pen.setWidthF(sharp)
+    _PLAIN["setPen"](painter, pen)
+
+
+def _set_render_hint(painter, hint, on=True):
+    if on and _SHARP[0] is painter and hint == QPainter.Antialiasing:
+        return
+    _PLAIN["setRenderHint"](painter, hint, on)
+
+
+def _set_render_hints(painter, hints, on=True):
+    if on and _SHARP[0] is painter:
+        hints = QPainter.RenderHint(hints) & ~QPainter.Antialiasing
+    _PLAIN["setRenderHints"](painter, hints, on)
+
+
+def _set_pen(painter, *pen):
+    _PLAIN["setPen"](painter, *pen)
+    if _SHARP[0] is painter:
+        _sharpen(painter)
+
+
+def _install() -> None:
+    """Have QPainter keep a markup sharp while one is drawn through it.
+
+    Each kind of markup turns smoothing on and sets its pens itself, in
+    dozens of places; QPainter's own setRenderHint, setRenderHints and
+    setPen are wrapped once so that, for the one painter a markup is being
+    drawn sharp through (_SHARP), smoothing stays off and pens come out
+    whole pixels. Any other painter, and that one at any other time, is
+    untouched."""
+    if _PLAIN:
+        return
+    for name, wrapper in (("setRenderHint", _set_render_hint),
+                          ("setRenderHints", _set_render_hints),
+                          ("setPen", _set_pen)):
+        _PLAIN[name] = getattr(QPainter, name)
+        setattr(QPainter, name, wrapper)
+
+
+class drawn_sharp:
+    """While *item* paints through *painter*, on screen zoomed out: its
+    strokes sharp: no smoothing, pens whole pixels (WHOLE_PIXELS_BELOW)."""
+
+    __slots__ = ("painter", "held", "on")
+
+    def __init__(self, painter: QPainter, item):
+        self.painter = painter
+        self.on = _zoomed_out_on_screen(painter, item)
+
+    def __enter__(self):
+        self.held = _SHARP[0]
+        if self.on:
+            _install()
+            _SHARP[0] = self.painter
+            _PLAIN["setRenderHint"](self.painter, QPainter.Antialiasing, False)
+            _sharpen(self.painter)
+        return self
+
+    def __exit__(self, *_exc):
+        _SHARP[0] = self.held
+        return False
+
+
+class smoothed:
+    """Inside a markup drawn sharp, something drawn as it always is (a
+    hatch)."""
+
+    __slots__ = ("held",)
+
+    def __enter__(self):
+        self.held = _SHARP[0]
+        _SHARP[0] = None
+        return self
+
+    def __exit__(self, *_exc):
+        _SHARP[0] = self.held
+        return False
 
 
 def _whole(value: float) -> int:

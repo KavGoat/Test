@@ -900,17 +900,16 @@ cells' own Find and Replace — see Part 3.)
   moving, the drawing already made stands in, scaled; once you stop, the page
   is drawn sharp at exactly the zoom on screen, the same as before. Scrolling
   draws ahead in the direction you are going. Nothing needs setting.
-- **Clear when zoomed out.** Below 100 % no line of the drawing is drawn
-  thinner than a pixel and a bit, with smooth edges, as in Revu: every hairline
-  comes out dark wherever it falls, lines of one weight look the same weight
-  and coloured lines keep their colour, instead of thin lines coming out as
-  pale grey pairs of pixels. Markups are drawn sharp: a thin markup line is a
-  whole number of pixels wide, and one running straight across or down the
-  screen (a rectangle's sides, a level line, a text box's border) is one solid
-  row of pixels with no soft edge; slanting lines and curves such as clouds
-  keep smooth edges, as dark as the drawing's. Words stay as they are, and
-  from 100 % up lines are drawn at their own width as before. Only the screen
-  changes; prints, exports and the PDF are not affected.
+- **Clear when zoomed out.** Below 100 % the drawing's lines keep smooth edges
+  but are drawn a little wider than a pixel, so a hairline comes out dark
+  wherever it falls and lines of one weight look the same weight: just below
+  100 % no thinner than 1.4 pixels, easing down to one pixel by 25 % and below,
+  so a dense sheet seen whole does not fill in. Markups are drawn sharp, as in
+  Revu: every markup line — straight, slanting or curved, clouds, arrows and
+  freehand included — is solid ink on whole pixels, a whole number of pixels
+  wide and one at least, with no soft edge. Words, fills and hatches stay as
+  they are, and from 100 % up lines are drawn at their own width as before.
+  Only the screen changes; prints, exports and the PDF are not affected.
 - **Moving about**: `Page Up` / `Page Down` move a screenful; `Home` and `End` go
   to the first and last page; `Ctrl+Left` / `Ctrl+Right` (and `Ctrl+Page Up` /
   `Ctrl+Page Down`) turn pages; `Ctrl+Home` / `Ctrl+End` reach the very ends. The
