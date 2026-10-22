@@ -1164,8 +1164,11 @@ unit, its page (and whether it is inside a self-contained block), and its error
 in red. The definition in force at the selected equation is bold. Click a row to
 go to the equation; **Find a variable** narrows the list; right-click ▸ **Go to**
 or **Make Global**. Under **Tables** are what the tables give the equations: each
-defined name and each column a table's headings name (`Loads.Load`), with its
-value. With calc section breaks the rows come section by section.
+cell named with its Variable box and each column a table's headings name
+(`Loads.Load`), with its value. A spreadsheet's own names (Define Name, the Name
+Box, and every name an imported workbook brings) are CalcForge variables only
+when you make them so: tick **Sheet Names** to list them too. With calc section
+breaks the rows come section by section.
 
 ### Plots
 
@@ -1484,7 +1487,11 @@ The engine has **122** built-in functions.
 - A **spreadsheet page** is a whole page of cells: **Document ▸ Insert ▸
   Spreadsheet Page ▸ Before / After**, the Thumbnails panel's Insert Spreadsheet
   Page button, or a page's right-click menu; the new sheet opens straight away in the
-  workbook view. Consecutive spreadsheet pages are **one sheet** that
+  workbook view. On a workbook's page (or in the workbook view) it inserts **another
+  workbook** — "Workbook (2)", a sheet of its own with its own names — after the
+  whole workbook, or before its first sheet; **⊕** on the sheet tabs adds a sheet to
+  the workbook in view instead, and a page of rows more comes by typing past the
+  sheet's last page. Consecutive spreadsheet pages are **one sheet** that
   grows a page at a time; the columns that fit inside the page margins print, and
   everything to the right of the blue line is a **scratch area** for side
   calculations that never prints. Only markups can go on a spreadsheet page.
@@ -1927,11 +1934,17 @@ worksheet becomes a run of spreadsheet pages with its cells, formulas, formattin
 sizes, merges, names, comments, validation, conditional formatting and page
 layout, its frozen panes and the view it was left in (Normal or Page Break
 Preview), and the workbook's split between its tabs and its scroll bar; hidden
-worksheets come in too. Charts, pictures and a print scale other
-than 100 % are left out, and CalcForge says so, listing any cell whose formula
-gives another answer here than Excel last showed. A worksheet whose name is
-already used in the document is renamed `Name (2)` (then `(3)`…), and the formulas
-reading it follow. Nothing is ever written back to Excel.
+worksheets come in too. Its **charts** come in as CalcForge charts — XY scatter,
+line and column, with their series, title, axis titles, axis limits, log scales,
+gridlines and legend — where Excel anchors them and as big, moving with their
+cells; its **pictures** come in as images, placed and sized the same way. Charts
+of other kinds (pie, area, 3-D…) and a print scale other than 100 % are left out,
+and CalcForge says so, listing any cell whose formula gives another answer here
+than Excel last showed. A worksheet whose name is already used in the document is
+renamed `Name (2)` (then `(3)`…), and the formulas and charts reading it follow;
+the same workbook brought in twice is shown as `Loads` and `Loads (2)`, and its
+name for the equations is `Loads` and `Loads_2`, so the two never mix. Nothing is
+ever written back to Excel.
 
 Formulas come out as Excel showed them, named ranges included. Where an older
 workbook's formula uses a block of cells where one value is wanted — a name of a
@@ -1963,8 +1976,8 @@ The import window has a **Self-contained** tick (ticked to start):
 Change it later with the **Self-contained** tick on the sheet tab's right-click
 menu, or in the Properties panel's **Workbook** section (shown while one of its
 sheets is open); it is one undo step and is saved with the document. Unticking it
-then lists any names already used and asks before going ahead. The Variables panel
-lists a self-contained workbook's names under a heading of its own
+then lists any names already used and asks before going ahead. With **Sheet Names**
+ticked, the Variables panel lists a self-contained workbook's names under a heading of its own
 (**Workbook Seismic_Actions_NZS1170_5**), written as the equations read them; the
 Name Manager's Scope shows the workbook.
 

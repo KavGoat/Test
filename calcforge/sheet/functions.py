@@ -2188,7 +2188,8 @@ def XLOOKUP(target, look, ret, missing=MISSING, mode=MISSING, search=MISSING):
 
 @fn("INDEX", least=2, most=4)
 def INDEX(ref, row, col=MISSING, area=MISSING):
-    r = integer(row) if scalar(row) is not BLANK else 0
+    # the row left out (INDEX(C7:G7,,4)) is 0, as a blank one: every row
+    r = 0 if row is MISSING or scalar(row) is BLANK else integer(row)
     c = 1 if col is MISSING else (integer(col) if scalar(col) is not BLANK else 0)
     if isinstance(ref, RefValue):
         h, w = ref.height, ref.width

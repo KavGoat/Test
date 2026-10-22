@@ -73,9 +73,37 @@ def _pages_needed(data: dict, setup: PageSetup) -> int:
     return max(1, paginate(_Layout(data), setup).pages)
 
 
-def pages_for(imported, base: PageSetup) -> list:
+def _drawing_records(sheet, document=None) -> list:
+    """The worksheet's charts as chart markups, and its pictures as image
+    markups (their pictures kept in *document*), each held to the cell
+    Excel anchors it at (the run puts it there once laid out:
+    items/sheetpage.py)."""
+    from PySide6.QtCore import QRectF
+
+    from ..items.chart import ChartItem
+    from ..items.media import ImageItem
+
+    out = []
+    for found in getattr(sheet, "charts", None) or ():
+        chart = ChartItem(found["spec"])
+        record = chart.serialize()
+        record["w"], record["h"] = found["w"], found["h"]
+        record["cell_anchor"] = list(found["anchor"])
+        out.append(record)
+    if document is not None:
+        for found in getattr(sheet, "pictures", None) or ():
+            key = document.add_asset(found["data"], found["suffix"])
+            picture = ImageItem(key, QRectF(0, 0, found["w"], found["h"]))
+            record = picture.serialize()
+            record["cell_anchor"] = list(found["anchor"])
+            out.append(record)
+    return out
+
+
+def pages_for(imported, base: PageSetup, document=None) -> list:
     """The pages of an imported workbook: each worksheet a run of
-    spreadsheet pages, its cells on the run's first page."""
+    spreadsheet pages, its cells, charts and pictures on the run's first
+    page (the pictures kept in *document*)."""
     from ..items.sheetpage import SheetRunItem
 
     pages = []
@@ -91,7 +119,7 @@ def pages_for(imported, base: PageSetup) -> list:
             page.sheet = item.uid
             page.printable = sheet.name not in silent     # Don't Print, chosen on import
             if k == 0:
-                page._pending_items = [record]
+                page._pending_items = [record] + _drawing_records(sheet, document)
             pages.append(page)
     return pages
 
@@ -528,8 +556,26 @@ def choose_sheets(window, imported, path: str = "", document=None) -> bool:
     imported.no_print = set(chooser.no_print()) & set(chosen) if chooser is not None else set()
     if how == SheetChooser.RENAME:
         imported.renamed = prefix_names(imported, [n for n, _why in chooser.clashes], prefix)
-    make_book(imported, book_name, os.path.basename(path or ""), how == SheetChooser.KEEP)
+    make_book(imported, book_name, shown_file(document, os.path.basename(path or "")),
+              how == SheetChooser.KEEP)
     return True
+
+
+def shown_file(document, file: str) -> str:
+    """The workbook's file name as shown, unique in the document: the same
+    workbook brought in twice is "Loads" and "Loads (2)", as its sheets are
+    (the user, 2026-10-23: "the workbook name was the same, sheets had a (2)")."""
+    import os
+
+    if document is None or not file:
+        return file
+    from ..sheet.docbook import book_for
+    from .sheetpages import _book_shown, copy_name
+    shown = {_book_shown(b.file, b.name).lower() for b in book_for(document).workbook.books.values()}
+    stem, ext = os.path.splitext(file)
+    if stem.lower() not in shown:
+        return file
+    return copy_name(stem, shown) + ext
 
 
 def insert_workbook(window, path: Optional[str] = None, index: Optional[int] = None,
@@ -572,7 +618,7 @@ def insert_workbook(window, path: Optional[str] = None, index: Optional[int] = N
     else:
         target = safe_target(document, which + 1)
     base = document.pages[which].setup
-    pages = pages_for(imported, base)
+    pages = pages_for(imported, base, document)
 
     def mutate():
         for offset, page in enumerate(pages):
@@ -597,6 +643,6 @@ def open_workbook(window, path: str):
     import os
     document.title = os.path.splitext(os.path.basename(path))[0]
     base = document.pages[0].setup if document.pages else PageSetup()
-    document.pages = pages_for(imported, base)
+    document.pages = pages_for(imported, base, document)
     document.modified = False
     return document, imported

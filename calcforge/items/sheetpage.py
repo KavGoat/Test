@@ -235,6 +235,12 @@ class SheetRunItem(TableItem):
             return False
         anchors = self._anchors if self._anchors is not None else self.capture_anchors()
         self._anchors = None
+        for item in self._markups():
+            # a chart brought in from Excel: at the cell Excel anchors it to
+            pending = getattr(item, "_cell_anchor", None)
+            if pending:
+                item._cell_anchor = None
+                anchors[item] = list(pending)
         setup = frames[0].page.setup
         if (sheet.page or {}).get("rows") is None:
             # a sheet made before rows were counted: it has the rows its

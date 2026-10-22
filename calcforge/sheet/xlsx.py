@@ -53,6 +53,8 @@ class ImportedSheet:
     margins_mm: Optional[tuple] = None  # left, top, right, bottom
     hidden: bool = False
     excel_values: dict = field(default_factory=dict)   # (row, col) -> Excel's last value of a formula
+    charts: list = field(default_factory=list)         # its charts (sheet/xlsxcharts.py charts_of)
+    pictures: list = field(default_factory=list)       # its pictures (xlsxcharts.pictures_of)
 
 
 @dataclass
@@ -511,15 +513,15 @@ def _read_workbook(path: str, taken: Optional[set] = None) -> Imported:
             "portrait", "landscape") else None
         m = ws.page_margins
         margins = (m.left * 25.4, m.top * 25.4, m.right * 25.4, m.bottom * 25.4) if m is not None else None
-        if getattr(ws, "_charts", None):
-            left_out.append(f"{len(ws._charts)} chart{'s' * (len(ws._charts) > 1)} on “{ws.title}”")
-        if getattr(ws, "_images", None):
-            left_out.append(f"{len(ws._images)} picture{'s' * (len(ws._images) > 1)} on “{ws.title}”")
+        from .xlsxcharts import charts_of, pictures_of
+        charts = charts_of(ws, data, renamed, left_out)
+        pictures = pictures_of(ws, data, left_out)
         if setup is not None and setup.fitToWidth not in (None, 0, 1) and _fits_to_page(ws):
             left_out.append(f"fitting “{ws.title}” to {int(setup.fitToWidth)} pages wide "
                             f"(its columns that fit print, the rest is scratch)")
         sheets.append(ImportedSheet(name, data, paper, orientation, margins,
-                                    ws.sheet_state != "visible", excel_values))
+                                    ws.sheet_state != "visible", excel_values, charts,
+                                    pictures))
     _names(wb, sheets, renames, renamed, left_out)
     return Imported(sheets, left_out)
 

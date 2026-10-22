@@ -356,9 +356,17 @@ def test_variables_panel_and_name_manager_show_the_workbook(w, tmp_path):
                                       "Tables.ReturnPeriodFactor"}
     assert not [r for r in table_rows(w.document) if r.name == "Z"], "not a document variable"
     w.variables_panel.refresh()
-    heads = [w.variables_panel.tree.topLevelItem(i).text(0)
-             for i in range(w.variables_panel.tree.topLevelItemCount())]
-    assert "Workbook Quake_Calc" in heads
+
+    def heads():
+        tree = w.variables_panel.tree
+        return [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
+    # the user, 2026-10-23: only CalcForge's variables, unless Sheet Names is ticked
+    assert "Workbook Quake_Calc" not in heads()
+    assert not [h for h in heads() if "Quake_Calc." in h or "ReturnPeriodFactor" in h]
+    w.variables_panel.sheet_names.setChecked(True)
+    assert "Workbook Quake_Calc" in heads()
+    assert "Quake_Calc.Z" in heads()
+    w.variables_panel.sheet_names.setChecked(False)
     wb = runs(w)["Tables"].sheet.workbook
     scopes = sorted(scope_text(wb, dn) for dn in wb.names.values())
     assert scopes == ["Quake_Calc (self-contained)", "Quake_Calc (self-contained)", "Tables"]
@@ -371,4 +379,7 @@ def test_a_second_import_of_the_same_workbook_is_another_workbook(w, tmp_path):
     pump()
     books = runs(w)["Tables"].sheet.workbook.books
     assert sorted(b.name for b in books.values()) == ["Quake_Calc", "Quake_Calc_2"]
+    # shown as its sheets are: "Quake Calc" and "Quake Calc (2)" (the user, 2026-10-23)
+    from calcforge.ui.sheetpages import sections
+    assert [s.name for s in sections(w.document) if s.book] == ["Quake Calc", "Quake Calc (2)"]
     assert runs(w)["Tables (2)"].sheet.cells[(0, 1)].value == pytest.approx(0.8)

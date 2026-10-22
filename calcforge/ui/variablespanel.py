@@ -11,6 +11,10 @@ headings name (Loads.Load), with its value; clicking one goes to its cells.
 A self-contained imported workbook's names come last, under the workbook,
 written as the equations read them (Seismic_Actions_NZS1170_5.Z; a sheet's
 own name as Tables.ReturnPeriodFactor) — they are not document variables.
+A spreadsheet's own names (Define Name, and every name an imported workbook
+brings) are listed only with **Sheet Names** ticked (the user, 2026-10-23:
+only CalcForge's variables, not the sheets'); a cell named with its Variable
+box is a CalcForge variable and always listed.
 
 A name defined twice has two rows: SMath allows redefining, and which
 definition an equation sees depends on where it is — the latest one before
@@ -29,7 +33,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QHeaderView, QLabel, QLineEdit, QMenu, QTreeWidget,
+from PySide6.QtWidgets import (QCheckBox, QHeaderView, QLabel, QLineEdit, QMenu, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 COLUMNS = ("Name", "Value", "Unit", "Page")
@@ -51,6 +55,7 @@ class VariableRow:
     is_global: bool = False     # read by later sections too
     key: Optional[tuple] = None  # where it is defined in reading order
     group: str = ""             # a self-contained workbook's name, for its own heading
+    sheet_name: bool = False    # a spreadsheet's own name (Define Name), not a CalcForge variable
 
 
 def _split_value(shown: str) -> tuple:
@@ -190,7 +195,8 @@ def table_rows(document) -> list:
         made = VariableRow(name, text, unit, page, f"Page {page}" if page else "",
                            error, -1, "Workbook" if group else "Table", cells,
                            **placed(sheet, cells),
-                           key=book_key(sheet) if sheet is not None else None, group=group)
+                           key=book_key(sheet) if sheet is not None else None, group=group,
+                           sheet_name=not dn.variable)
         (own if group else rows).append(made)
     for sheet in wb.sheets:
         if sheet.kind != "table" or not sheet.size:
@@ -300,6 +306,13 @@ class VariablesPanel(QWidget):
         self.filter.setClearButtonEnabled(True)
         self.filter.textChanged.connect(lambda _t: self._fill())
         lay.addWidget(self.filter)
+        self.sheet_names = QCheckBox("Sheet Names")
+        self.sheet_names.setObjectName("variablesSheetNames")
+        self.sheet_names.setToolTip("List the spreadsheets' own names too (Define Name, and the "
+                                    "names an imported workbook brings); untick for CalcForge's "
+                                    "variables only")
+        self.sheet_names.toggled.connect(lambda _on: self._fill())
+        lay.addWidget(self.sheet_names)
         self.tree = QTreeWidget()
         self.tree.setColumnCount(len(COLUMNS))
         self.tree.setHeaderLabels(list(COLUMNS))
@@ -474,8 +487,11 @@ class VariablesPanel(QWidget):
         headed = False
         section_shown = None
         group_shown = None
+        names_too = self.sheet_names.isChecked()
         for index, row in enumerate(self.rows):
             if wanted and wanted not in row.name.lower():
+                continue
+            if row.sheet_name and not names_too:
                 continue
             if row.group and row.group != group_shown:
                 group_shown = row.group

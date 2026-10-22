@@ -1887,6 +1887,10 @@ class MarkupItem(QGraphicsObject):
         self.modified = data.get("modified", self.modified)
         self.printable = bool(data.get("printable", True))
         self.hidden = bool(data.get("hidden", False))
+        # a chart or picture brought in from Excel: the cell its corner is
+        # in, [row, col, dx, dy] (its spreadsheet run puts it there once laid
+        # out: items/sheetpage.py relayout)
+        self._cell_anchor = data.get("cell_anchor")
         self.from_annotation = int(data.get("from_annotation", 0) or 0)
         self.still_theirs = bool(data.get("still_theirs", False))
         self.split_from = int(data.get("split_from_annotation", 0) or 0)
