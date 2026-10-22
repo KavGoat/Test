@@ -599,8 +599,11 @@ class _Watch(QObject):
         for bar in (view.horizontalScrollBar(), view.verticalScrollBar()):
             bar.valueChanged.connect(self.changed)
             bar.rangeChanged.connect(self.changed)
-        view.verticalScrollBar().sliderMoved.connect(lambda _v: self.tip(True))
-        view.horizontalScrollBar().sliderMoved.connect(lambda _v: self.tip(False))
+        # (once the view has scrolled to where the thumb was dragged)
+        view.verticalScrollBar().sliderMoved.connect(
+            lambda _v: QTimer.singleShot(0, self, lambda: self.tip(True)))
+        view.horizontalScrollBar().sliderMoved.connect(
+            lambda _v: QTimer.singleShot(0, self, lambda: self.tip(False)))
         view.zoomChanged.connect(self.changed)
         view.viewport().installEventFilter(self)
 

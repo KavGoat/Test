@@ -147,17 +147,28 @@ class _Splitter(QWidget):
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self._dragging = True
+            # where it was pressed, along the row, and on the screen: the
+            # splitter moves under the pointer as it is dragged
+            row = self.owner._row
+            start = self.mapTo(row, event.position().toPoint()).x() if row is not None else 0
+            self._from = (float(start), event.globalPosition().x())
             event.accept()
+
+    _from = (0.0, 0.0)
+
+    def _row_x(self, event) -> float:
+        start, screen = self._from
+        return start + event.globalPosition().x() - screen
 
     def mouseMoveEvent(self, event) -> None:
         if self._dragging:
-            self.owner.drag_ratio(event.globalPosition().x())
+            self.owner.drag_ratio(self._row_x(event))
             event.accept()
 
     def mouseReleaseEvent(self, event) -> None:
         if self._dragging and event.button() == Qt.LeftButton:
             self._dragging = False
-            self.owner.drag_ratio(event.globalPosition().x())
+            self.owner.drag_ratio(self._row_x(event))
             self.owner.keep_ratio()
             event.accept()
 
@@ -287,13 +298,12 @@ class SheetTabs(QWidget):
         self._ratio = max(0.0, min(1.0, ratio))
         self.fit_row()
 
-    def drag_ratio(self, global_x: float) -> None:
-        """The splitter dragged to *global_x*: the tabs end there."""
+    def drag_ratio(self, x: float) -> None:
+        """The splitter dragged to *x* along the row: the tabs end there."""
         row = self._row
         if row is None or row.width() <= 0:
             return
-        left = row.mapToGlobal(QPoint(0, 0)).x()
-        self.set_ratio((global_x - left + self.splitter.width() / 2.0) / row.width())
+        self.set_ratio((x + self.splitter.width() / 2.0) / row.width())
 
     def keep_ratio(self) -> None:
         """The split dragged to: kept with the workbook (each of its
@@ -340,9 +350,7 @@ class SheetTabs(QWidget):
         self.first_shown = first
         self.clip.offset = self.bar.tabRect(first).left() if count else 0
         self.clip.place()
-        self.back.setEnabled(first > 0)
-        self.forth.setEnabled(count > 0 and self.bar.tabRect(count - 1).right()
-                              - self.clip.offset >= room)
+        # (never greyed: a right-click on either lists every sheet, as Excel's)
 
     def _show_current(self) -> None:
         """The current tab in sight, scrolled to if it was not."""
@@ -585,10 +593,18 @@ class SheetTabs(QWidget):
                           "Esc leaves it")
         editor._uid = uid
         editor.returnPressed.connect(lambda: self._end_rename(True))
-        editor.editingFinished.connect(lambda: self._end_rename(True))
+        # a click elsewhere keeps the name too (the focus taken by the sheet
+        # coming into view does not)
         editor.installEventFilter(self)
         editor.show()
         editor.setFocus(Qt.MouseFocusReason)
+
+        def ready(editor=editor):
+            from shiboken6 import isValid
+            if self.editor is editor and isValid(editor):
+                editor.setFocus(Qt.OtherFocusReason)    # (the sheet shown took it)
+                editor.selectAll()
+        QTimer.singleShot(0, ready)
 
     def _end_rename(self, keep: bool) -> None:
         editor, self.editor = self.editor, None
@@ -703,6 +719,10 @@ class SheetTabs(QWidget):
                 and event.key() == Qt.Key_Escape:
             self._end_rename(False)
             return True
+        if watched is self.editor and event.type() == QEvent.FocusOut \
+                and event.reason() == Qt.MouseFocusReason:
+            QTimer.singleShot(0, lambda: self._end_rename(True))
+            return False
         if watched is self.bar:
             kind = event.type()
             if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:

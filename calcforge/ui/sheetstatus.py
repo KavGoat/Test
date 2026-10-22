@@ -191,10 +191,13 @@ def refresh(window) -> None:
     # Markups List's bar goes while a sheet is shown alone
     split = getattr(window, "bottom_split", None)
     if split is not None and split.count() > 1:
-        handle = split.handle(1)
         opened = getattr(window, "markups_list_open", lambda: False)()
-        if handle.isHidden() != (on and not opened):
-            handle.setVisible(not on or opened)
+        if on and not opened:
+            if made.get("handle_width") is None:
+                made["handle_width"] = split.handleWidth()
+                split.setHandleWidth(0)
+        elif made.get("handle_width") is not None:
+            split.setHandleWidth(made.pop("handle_width"))
     if not on:
         return
     tables = window.view.tables
