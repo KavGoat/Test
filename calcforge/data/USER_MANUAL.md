@@ -170,8 +170,13 @@ and line ends of markups (**Snap to Markup**), of the PDF's own drawing (**Snap
 to Content**) and the page grid (**Snap to Grid**); **Align to Markups** and
 **Align to Content** line a new point up level with or under one already there.
 What has been caught is marked with a small orange square and named in the
-status bar. Hold `Ctrl` while dragging to let go of snapping for that drag. All
-of these are on **View** and on the status bar's **Snap ▾**.
+status bar. With **Snap to Grid** on, every point drawn, moved or resized goes
+on the grid (6.75 pt, SMath's): a corner or a line end is caught only where the
+pointer is nearer to it than to the grid's nearest point, and a point lined up
+one way stays on the grid the other way; the marker shows the grid point. It
+does not apply on a spreadsheet's pages, which have cells instead (as in Excel).
+Hold `Ctrl` while dragging to let go of snapping for that drag. All of these are
+on **View** and on the status bar's **Snap ▾**.
 
 **Typing straight onto the page.** On bare paper in Markup mode, `"` starts a
 text box where the pointer is, `|` a note and `@` a callout. Any other letter
@@ -381,7 +386,8 @@ measurement extras too: cut-outs, Units, Caption and Totals.
   arrow carries a copy sign while `Ctrl` is held, and `Ctrl`+click adds the
   markup to the selection. A drag with `Shift`, `Ctrl` or `Alt` held never
   changes the markup's shape. Drag it onto another page and it belongs to that
-  page. The arrow keys nudge by 1 mm, `Shift`+arrow by 1 pt.
+  page. The arrow keys nudge by 1 mm — with **Snap to Grid** on, to the grid's
+  next line that way — and `Shift`+arrow by 1 pt.
 - **Resize**: drag a handle; the arrows on the pointer lie the way the handle
   pulls, turned with a turned markup. `Shift` on a corner keeps the proportions.
   The blue dot on a dashed stalk turns the markup;
@@ -918,17 +924,16 @@ cells' own Find and Replace — see Part 3.)
   moving, the drawing already made stands in, scaled; once you stop, the page
   is drawn sharp at exactly the zoom on screen, the same as before. Scrolling
   draws ahead in the direction you are going. Nothing needs setting.
-- **Clear when zoomed out.** Below 100 % no line of the drawing is drawn
-  thinner than a pixel and a bit, with smooth edges, as in Revu: every hairline
-  comes out dark wherever it falls, lines of one weight look the same weight
-  and coloured lines keep their colour, instead of thin lines coming out as
-  pale grey pairs of pixels. Markups are drawn sharp: a thin markup line is a
-  whole number of pixels wide, and one running straight across or down the
-  screen (a rectangle's sides, a level line, a text box's border) is one solid
-  row of pixels with no soft edge; slanting lines and curves such as clouds
-  keep smooth edges, as dark as the drawing's. Words stay as they are, and
-  from 100 % up lines are drawn at their own width as before. Only the screen
-  changes; prints, exports and the PDF are not affected.
+- **Clear when zoomed out.** Below 100 % the drawing's lines keep smooth edges
+  but are drawn a little wider than a pixel, so a hairline comes out dark
+  wherever it falls and lines of one weight look the same weight: just below
+  100 % no thinner than 1.4 pixels, easing down to one pixel by 25 % and below,
+  so a dense sheet seen whole does not fill in. Markups are drawn sharp, as in
+  Revu: every markup line — straight, slanting or curved, clouds, arrows and
+  freehand included — is solid ink on whole pixels, a whole number of pixels
+  wide and one at least, with no soft edge. Words, fills and hatches stay as
+  they are, and from 100 % up lines are drawn at their own width as before.
+  Only the screen changes; prints, exports and the PDF are not affected.
 - **Moving about**: `Page Up` / `Page Down` move a screenful; `Home` and `End` go
   to the first and last page; `Ctrl+Left` / `Ctrl+Right` (and `Ctrl+Page Up` /
   `Ctrl+Page Down`) turn pages; `Ctrl+Home` / `Ctrl+End` reach the very ends. The

@@ -55,29 +55,36 @@ pymupdf.TOOLS.mupdf_display_warnings(False)
 MIN_LINE_PIXELS = 1.0
 pymupdf.TOOLS.set_graphics_min_line_width(MIN_LINE_PIXELS)
 
-# And on screen, zoomed out — fewer pixels than points — no line is drawn
-# thinner than ZOOMED_OUT_LINE_PIXELS, still smoothed. At one pixel, a
-# hairline that fell half way between two rows of pixels came out as two rows
-# of mid grey, and one that fell on a row as one row of black: the same
-# sheet's lines were black or pale by where they happened to fall, and
-# coloured lines went pastel (the user, 2026-10-20: "Fuzzy is not good
-# enough ... Bluebeam looks better in zoomed out mode and more legible").
-# Drawn onto the pixels instead (MuPDF's centre-of-pixel rule) every line was
-# one hard row — stair-stepped on a slope, hatching in moiré — "too contrasty"
-# (the user, 2026-10-21). A pixel and a bit, smoothed, is the middle: wherever
-# a hairline falls its darkest row is three-quarters dark or more, its edges
-# stay soft, and every line of a weight looks the same weight. Markups drawn
-# on screen keep to the same width (ui/markuplayer.thinnest_line), so a
-# markup's line and the drawing's look alike. From 100 % up, and in a print,
-# an export or the PDF, lines are as they were.
+# And on screen, zoomed out — fewer pixels than points — lines are drawn a
+# little wider than a pixel, still smoothed: just below 100 % no thinner than
+# ZOOMED_OUT_LINE_PIXELS, easing down to one pixel by ZOOMED_OUT_FLOOR and
+# below (thinnest_line). At one pixel a hairline half way between two rows of
+# pixels came out as two rows of mid grey, one on a row as black: the same
+# sheet's lines were black or pale by where they fell (the user, 2026-10-20:
+# "Fuzzy is not good enough ... Bluebeam looks better in zoomed out mode").
+# Drawn onto the pixels instead it was "too contrasty" (2026-10-21), and a
+# pixel and a bit at every zoom turned a dense sheet far out into dark blocks,
+# its lines a pixel or two apart: "the min line width should reduce based on
+# how much it's zoomed out" (2026-10-22). So the extra width goes as the zoom
+# goes down, by the same step for each halving of the zoom — at 75 % 1.32
+# pixels, at 50 % 1.2, at 37 % 1.11, at 25 % and below 1 — where lines that
+# far out are packed too close for any more ink. Markups are drawn sharp
+# instead (ui/markuplayer.drawn_sharp). From 100 % up, and in a print, an
+# export or the PDF, lines are as they were.
 ZOOMED_OUT_LINE_PIXELS = 1.4
 ZOOMED_OUT_BELOW = 1.0
+ZOOMED_OUT_FLOOR = 0.25
 
 
 def thinnest_line(scale: float) -> float:
     """The thinnest a line is drawn on screen, in device pixels, at *scale*
     pixels to the point."""
-    return ZOOMED_OUT_LINE_PIXELS if scale < ZOOMED_OUT_BELOW - 1e-9 else MIN_LINE_PIXELS
+    if scale >= ZOOMED_OUT_BELOW - 1e-9:
+        return MIN_LINE_PIXELS
+    if scale <= ZOOMED_OUT_FLOOR:
+        return MIN_LINE_PIXELS
+    share = math.log2(scale / ZOOMED_OUT_FLOOR) / math.log2(ZOOMED_OUT_BELOW / ZOOMED_OUT_FLOOR)
+    return MIN_LINE_PIXELS + (ZOOMED_OUT_LINE_PIXELS - MIN_LINE_PIXELS) * share
 
 
 def drain_messages() -> str:

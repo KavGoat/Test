@@ -1,26 +1,22 @@
-"""Zoomed out, a drawing's line work — and a markup's — is clear and dark
-with smooth edges, as Bluebeam's (the user, 2026-10-20: "Fuzzy is not good
-enough ... Bluebeam looks better in zoomed out mode and more legible"; and
-2026-10-21: "Fuzzy is better but too contrasty when zoomed out, think you did
-too much. That should also apply to markups though" — and then "maybe markups
-don't fuzzy at all?": markups crisp, the drawing soft).
+"""Zoomed out, the drawing's line work is clear with smooth edges and the
+markups on it are sharp, as in Bluebeam (the user, 2026-10-20: "Fuzzy is not
+good enough ... Bluebeam looks better in zoomed out mode and more legible";
+2026-10-21: "too contrasty ... think you did too much", "maybe markups don't
+fuzzy at all?"; 2026-10-22: "Markup still fuzzy, only PDF lines should be
+fuzzy; the min line width should reduce based on how much it's zoomed out").
 
-Smoothed at a pixel wide, a hairline half way between two rows of pixels came
-out as two rows of mid grey (118), one on a row as black: the same sheet's
-lines were black or pale by where they fell. Drawn onto the pixels instead,
-every line was one hard black row: stair-stepped on a slope, hatching in
-moiré. Now, below 100 %, no line is thinner than a pixel and a bit
-(pdf/engine.ZOOMED_OUT_LINE_PIXELS), still smoothed: wherever a hairline
-falls its darkest row is three-quarters dark or more and its edges are soft.
-Markups drawn on screen zoomed out are sharp: a thin line is a whole number
-of pixels wide, one at least, and one running straight across or down the
-screen is drawn without smoothing — one solid dark row of pixels, no soft
-edge; slanting lines and curves (clouds, arcs) keep their smoothing, a pixel
-wide at least, and are unbroken. Words, 100 % and up, prints and exports are
-as before.
+The drawing (pdf/engine.thinnest_line): below 100 % no line thinner than
+1.4 device pixels just below 100 %, easing by the same step for each halving
+of the zoom to one pixel at 25 % and below, still smoothed — dark and soft
+where there is room, and a dense sheet far out does not fill in.
 
-On a synthetic sheet only — thin lines at every fraction of a pixel, a
-sloping hairline, hatching, a red line and small words.
+Markups (ui/markuplayer.drawn_sharp): below 100 % every stroke — lines,
+rectangles, slants, clouds, ellipses, arrows, freehand — is drawn without
+smoothing, a whole number of device pixels wide, one at least: solid ink on
+whole pixels, nothing part-covered, unbroken along a curve. Words, fills and
+hatches, 100 % and up, prints and exports are as before.
+
+On synthetic sheets only.
 """
 from __future__ import annotations
 
@@ -32,23 +28,24 @@ import pytest
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QImage, QPolygonF
 
-#: hairlines, their widths in points, and where they start down the page
-WIDTHS = (0.0, 0.1, 0.25, 0.5)
-TOP, PITCH, ACROSS = 40.0, 13.37, (40.0, 560.0)
-#: zoomed out, a hairline's darkest row is at least this dark wherever it
-#: falls (smoothed at one pixel it was 118 between two rows), and its ink —
-#: how many pixels' worth of black across it, a neighbour's edge included at
-#: 25 % — within INK
-DARK = 80
-INK = (1.2, 2.7)
+#: the drawing's hairlines: their widths in points, where they start down
+#: the page and how far apart (three pixels apart at 12 %)
+WIDTHS = (0.0, 0.1, 0.25)
+TOP, PITCH, ACROSS = 40.0, 26.74, (40.0, 560.0)
+LINES = 6 * len(WIDTHS)
+#: MuPDF's smoothing is in steps: a hairline's ink, in pixels across, comes
+#: within this of the width it is drawn at
+INK_SLACK = 0.12
 #: a markup's widths (a width of none is no line at all)
 MARKUP_WIDTHS = (0.1, 0.25, 0.5)
 #: where the markup lines down the page start, across it
 DOWN = 40.0
-#: a grey between paper and black: smoothing
+#: paper and ink: a markup drawn sharp has nothing in between
+PAPER, INK = 250, 5
 
 
 def _soft(values) -> bool:
+    """A grey between paper and black: smoothing."""
     return bool(((values > 40) & (values < 215)).any())
 
 
@@ -56,20 +53,15 @@ def _sheet(path=None) -> pymupdf.Document:
     document = pymupdf.open()
     page = document.new_page(width=600, height=800)
     shape = page.new_shape()
-    for group, width in enumerate(WIDTHS):
-        for k in range(12):
-            y = TOP + (group * 12 + k) * PITCH
-            shape.draw_line((ACROSS[0], y), (ACROSS[1], y))
-            shape.finish(color=(0, 0, 0), width=width)
+    for index in range(LINES):
+        y = TOP + index * PITCH
+        shape.draw_line((ACROSS[0], y), (ACROSS[1], y))
+        shape.finish(color=(0, 0, 0), width=WIDTHS[index % len(WIDTHS)])
     # a hairline at a shallow slope, and a red one
     shape.draw_line((40, 700), (560, 730))
     shape.finish(color=(0, 0, 0), width=0.1)
     shape.draw_line((40, 760), (560, 760.4))
     shape.finish(color=(0.9, 0, 0), width=0.25)
-    # hatching
-    for k in range(30):
-        shape.draw_line((300 + k * 6, 690), (330 + k * 6, 650))
-        shape.finish(color=(0, 0, 0), width=0.13)
     shape.commit()
     page.insert_text((40, 790), "GENERAL ARRANGEMENT  SECTION A-A", fontsize=16, fontname="helv")
     if path is not None:
@@ -94,24 +86,45 @@ def _render(scale: float) -> np.ndarray:
 
 
 def _hairlines(rgb: np.ndarray, scale: float):
-    """For each horizontal hairline: its darkest row's mean, how many pixels
-    of black its rows hold between them, and its rows' means."""
+    """For each horizontal hairline: its rows' means across the line, and
+    how many pixels of black they hold between them."""
     grey = rgb.mean(axis=2)
     left, right = int(ACROSS[0] * scale) + 2, int(ACROSS[1] * scale) - 2
-    for index in range(len(WIDTHS) * 12):
+    for index in range(LINES):
         y = (TOP + index * PITCH) * scale
-        rows = grey[int(y) - 2:int(y) + 3, left:right].mean(axis=1)
-        yield float(rows.min()), float(((255 - rows) / 255).sum()), rows
+        rows = grey[int(y) - 1:int(y) + 2, left:right].mean(axis=1)
+        yield rows, float(((255 - rows) / 255).sum())
 
 
-@pytest.mark.parametrize("scale", [0.25, 0.37, 0.5, 0.75])
-def test_a_zoomed_out_hairline_is_dark_wherever_it_falls_with_soft_edges(scale):
+# ---------------------------------------------------------------------------
+# the drawing
+# ---------------------------------------------------------------------------
+
+def test_the_drawings_thinnest_line_eases_down_with_the_zoom():
+    from calcforge.pdf import engine
+
+    curve = {scale: engine.thinnest_line(scale) for scale in
+             (2.0, 1.0, 0.99, 0.75, 0.5, 0.37, 0.25, 0.12, 0.05)}
+    assert curve[2.0] == curve[1.0] == engine.MIN_LINE_PIXELS
+    assert curve[0.99] == pytest.approx(engine.ZOOMED_OUT_LINE_PIXELS, abs=0.01)
+    assert curve[0.75] == pytest.approx(1.32, abs=0.01)
+    assert curve[0.5] == pytest.approx(1.2, abs=0.01)
+    assert curve[0.37] == pytest.approx(1.11, abs=0.01)
+    assert curve[0.25] == curve[0.12] == curve[0.05] == engine.MIN_LINE_PIXELS
+    widths = [curve[s] for s in (0.99, 0.75, 0.5, 0.37, 0.25)]
+    assert widths == sorted(widths, reverse=True), "never wider further out"
+
+
+@pytest.mark.parametrize("scale", [0.75, 0.5, 0.37, 0.25, 0.12])
+def test_a_zoomed_out_hairline_is_as_wide_as_the_curve_says_with_soft_edges(scale):
+    from calcforge.pdf import engine
+
+    wanted = engine.thinnest_line(scale)
     found = list(_hairlines(_render(scale), scale))
-    for darkest, ink, _rows in found:
-        assert darkest <= DARK, f"a hairline came out grey ({darkest:.0f}) at {scale}"
-        assert INK[0] <= ink <= INK[1], f"a hairline held {ink:.2f} pixels of ink at {scale}"
-    # not one hard row each: the edges are smoothed
-    softened = sum(1 for _darkest, _ink, rows in found if _soft(rows))
+    for rows, ink in found:
+        assert abs(ink - wanted) <= INK_SLACK, \
+            f"a hairline held {ink:.2f} pixels of ink at {scale}, not {wanted:.2f}"
+    softened = sum(1 for rows, _ink in found if _soft(rows))
     assert softened >= len(found) // 2, f"only {softened} hairlines smoothed at {scale}"
 
 
@@ -123,19 +136,15 @@ def test_a_sloping_hairline_is_unbroken_and_smooth_and_a_red_one_stays_red(scale
     for x in range(int(45 * scale), int(555 * scale)):
         y = (700 + 30 * (x / scale - 40) / 520) * scale
         column = grey[int(y) - 2:int(y) + 3, x]
-        assert column.min() <= DARK + 20, f"a gap in a sloping hairline at x={x}"
+        assert column.min() <= 140, f"a gap in a sloping hairline at x={x}"
         along.append(column)
     assert _soft(np.concatenate(along)), "the sloping hairline is stair-stepped, not smoothed"
     red = rgb[int(760 * scale) - 2:int(760 * scale) + 3, int(50 * scale):int(550 * scale)]
     reddest = red[np.argmin(red[:, :, 1].mean(axis=1))]
-    assert reddest[:, 0].mean() > 200 and reddest[:, 1].mean() < 90, "the red line went pink"
+    assert reddest[:, 0].mean() > 200 and reddest[:, 1].mean() < 140, "the red line went pale"
 
 
 def test_from_a_hundred_per_cent_up_line_work_is_as_before():
-    from calcforge.pdf import engine
-
-    assert engine.thinnest_line(1.0) == engine.thinnest_line(2.0) == engine.MIN_LINE_PIXELS
-    assert engine.thinnest_line(0.99) == engine.ZOOMED_OUT_LINE_PIXELS
     scale = 2.0
     grey = _render(scale).mean(axis=2)
     slope = grey[int(700 * scale):int(732 * scale), int(60 * scale):int(540 * scale)]
@@ -158,33 +167,35 @@ def test_the_rule_is_for_the_screen_only():
     from calcforge.pdf import engine
 
     width, level = mupdf.fz_graphics_min_line_width(), mupdf.fz_graphics_aa_level()
-    _render(0.25)
+    _render(0.5)
     assert mupdf.fz_graphics_min_line_width() == width == engine.MIN_LINE_PIXELS
     assert mupdf.fz_graphics_aa_level() == level == 8
 
 
-def _pump(qapp, seconds: float, view=None) -> None:
+# ---------------------------------------------------------------------------
+# markups
+# ---------------------------------------------------------------------------
+
+def _pump(qapp, seconds: float) -> None:
     end = time.monotonic() + seconds
     while time.monotonic() < end:
         qapp.processEvents()
-        if view is not None:
-            view.viewport().grab()
         time.sleep(0.01)
 
 
 def _markups_beside_the_drawing(window, qapp, tmp_path, zoom: float):
-    """The drawing's hairlines on the left; on the right, markup lines of the
-    same weights at the same heights, markup lines running down the page, a
-    rectangle, a sloping line and a cloud, all black; shown at *zoom*. The
-    window's pixels (grey), and where things are on them (at)."""
+    """The drawing's hairlines on the left; on the right and below, black
+    markups: lines across and down the page at sub-pixel places, a
+    rectangle, a sloping line, a cloud, an ellipse, a polyline with a
+    slanting leg, an arrow and a freehand stroke; shown at *zoom*. The
+    window's pixels (grey), where things are on them (at) and the markups."""
     from calcforge.io import pdftiles
     from calcforge.items.shapes import PolyItem, RectItem
 
-    # (twice the pitch: at 25 % lines a pitch apart are three pixels apart)
-    heights = [TOP + k * 2 * PITCH for k in range(len(MARKUP_WIDTHS) * 4)]
+    heights = [TOP + k * PITCH for k in range(len(MARKUP_WIDTHS) * 4)]
     weights = [MARKUP_WIDTHS[k % len(MARKUP_WIDTHS)] for k in range(len(heights))]
     document = pymupdf.open()
-    page = document.new_page(width=600, height=800)
+    page = document.new_page(width=600, height=1000)
     for y, width in zip(heights, weights):
         page.draw_line((40, y), (280, y), width=width, color=(0, 0, 0))
     path = str(tmp_path / "side.pdf")
@@ -194,25 +205,33 @@ def _markups_beside_the_drawing(window, qapp, tmp_path, zoom: float):
     window.open_from_command_line(path)
     view = window.view
     frame = view.scene().frames[0]
+    made = {}
 
-    def black(item, width):
+    def black(name, item, width):
         item.style.stroke = "#000000"
         item.style.width = width
         item.style.fill = ""
         frame.add_markup(item, item.pos())
+        made[name] = item
         return item
 
-    for y, width in zip(heights, weights):
-        black(PolyItem("line", [QPointF(320, y), QPointF(560, y)]), width)
+    for k, (y, width) in enumerate(zip(heights, weights)):
+        black(f"across{k}", PolyItem("line", [QPointF(320, y), QPointF(560, y)]), width)
     for k, width in enumerate(weights):
-        black(PolyItem("line", [QPointF(DOWN + k * 2 * PITCH, 400),
-                                QPointF(DOWN + k * 2 * PITCH, 520)]), width)
-    black(RectItem("rect", QRectF(400.3, 400.6, 150.2, 90.7)), 0.5)
-    black(PolyItem("line", [QPointF(40, 560), QPointF(560, 600)]), 0.25)
-    cloud = black(RectItem("cloud", QRectF(330, 640, 200, 110)), 0.5)
+        black(f"down{k}", PolyItem("line", [QPointF(DOWN + k * PITCH / 2, 400),
+                                            QPointF(DOWN + k * PITCH / 2, 520)]), width)
+    black("rect", RectItem("rect", QRectF(400.3, 400.6, 150.2, 90.7)), 0.5)
+    black("slope", PolyItem("line", [QPointF(40, 560), QPointF(560, 600)]), 0.25)
+    black("cloud", RectItem("cloud", QRectF(330, 640, 200, 110)), 0.5)
+    black("ellipse", RectItem("ellipse", QRectF(60, 640, 200, 110)), 0.25)
+    black("polyline", PolyItem("polyline", [QPointF(60, 780), QPointF(160, 780),
+                                            QPointF(160, 820), QPointF(260, 860)]), 0.5)
+    black("arrow", PolyItem("arrow", [QPointF(330, 780), QPointF(520, 850)]), 0.5)
+    black("ink", PolyItem("ink", [QPointF(330 + j * 9, 870 + 12 * ((j % 4) - 1.5))
+                                  for j in range(20)]), 0.5)
     _pump(qapp, 0.5)
     view.set_zoom(zoom)
-    view.centerOn(frame.mapToScene(QPointF(300, 400)))
+    view.centerOn(frame.mapToScene(QPointF(300, 450)))
     deadline = time.monotonic() + 30
     quiet = 0
     while time.monotonic() < deadline and quiet < 30:
@@ -232,10 +251,15 @@ def _markups_beside_the_drawing(window, qapp, tmp_path, zoom: float):
     def at(x, y):
         point = view.mapFromScene(frame.mapToScene(QPointF(x, y)))
         down, across = int(point.y() * ratio), int(point.x() * ratio)
-        assert 6 <= down < grey.shape[0] - 6 and 6 <= across < grey.shape[1] - 6
+        assert 3 <= down < grey.shape[0] - 3 and 3 <= across < grey.shape[1] - 3
         return down, across
 
-    return grey, at, heights, weights, cloud
+    def around(item):
+        box = view.mapFromScene(item.mapToScene(item.boundingRect())).boundingRect()
+        return grey[max(int(box.top() * ratio) - 2, 0):int(box.bottom() * ratio) + 3,
+                    max(int(box.left() * ratio) - 2, 0):int(box.right() * ratio) + 3]
+
+    return grey, at, around, made, heights, weights
 
 
 def _one_solid_row(profile) -> bool:
@@ -244,68 +268,77 @@ def _one_solid_row(profile) -> bool:
     return int((ink >= 230).sum()) == 1 and int(((ink > 12) & (ink < 230)).sum()) == 0
 
 
+@pytest.mark.parametrize("zoom", [0.25, 0.5])
+def test_zoomed_out_every_markup_stroke_is_sharp(window, qapp, tmp_path, zoom):
+    """Through the window — the markups from the page's squares — every
+    markup's strokes, slanting, curved and freehand ones too, are solid ink
+    on whole pixels: no pixel part-covered, as Revu draws markups zoomed
+    out; and a slanting line, an ellipse and a cloud are unbroken."""
+    from calcforge.items.base import cloud_path
+
+    grey, at, around, made, _heights, _weights = _markups_beside_the_drawing(
+        window, qapp, tmp_path, zoom)
+    for name, item in made.items():
+        pixels = around(item)
+        soft = (pixels > INK) & (pixels < PAPER)
+        assert not soft.any(), f"the {name} has {int(soft.sum())} soft pixels at {zoom}"
+        assert (pixels <= INK).any(), f"the {name} is not drawn at {zoom}"
+    for x in range(60, 540, 3):
+        down, across = at(x, 560 + 40 * (x - 40) / 520)
+        assert grey[down - 2:down + 3, across].min() <= INK, f"a gap in the slope at {x}"
+    for name in ("cloud", "ellipse"):
+        item = made[name]
+        rect = item.local_rect()
+        if name == "cloud":
+            outline = cloud_path(QPolygonF([rect.topLeft(), rect.topRight(), rect.bottomRight(),
+                                            rect.bottomLeft()]), item.cloud_radius,
+                                 inverted=item.cloud_invert)
+        else:
+            from PySide6.QtGui import QPainterPath
+            outline = QPainterPath()
+            outline.addEllipse(rect)
+        for step in range(240):
+            point = item.mapToParent(outline.pointAtPercent(step / 240))
+            down, across = at(point.x(), point.y())
+            assert grey[down - 1:down + 2, across - 1:across + 2].min() <= INK, \
+                f"the {name} is broken at {step / 2.4:.0f} %"
+
+
 @pytest.mark.parametrize("zoom", [0.25, 0.37, 0.5])
-def test_on_screen_a_markup_line_zoomed_out_is_one_solid_pixel(window, qapp, tmp_path, zoom):
-    """Through the window — the drawing by the render processes, the markups
-    from the page's squares — a markup's line across or down the screen is
-    one solid dark pixel wide, wherever it falls, with no soft edge; the
-    drawing's hairline beside it keeps its own softer rule."""
-    grey, at, heights, weights, _cloud = _markups_beside_the_drawing(window, qapp, tmp_path, zoom)
+def test_zoomed_out_a_markup_line_is_one_solid_pixel(window, qapp, tmp_path, zoom):
+    """A markup's thin line across or down the screen is one solid dark pixel
+    wide, wherever it falls; the drawing's hairline beside it stays soft."""
+    grey, at, _around, _made, heights, weights = _markups_beside_the_drawing(
+        window, qapp, tmp_path, zoom)
     for y in heights:
         down, across = at(440, y)
         rows = grey[down - 1:down + 3, across - 20:across + 20].mean(axis=1)
         assert _one_solid_row(rows), f"a markup line across is soft: {rows.round()}"
-        down, across = at(160, y)
-        rows = grey[down - 3:down + 4, across - 20:across + 20].mean(axis=1)
-        assert rows.min() <= DARK + 10, "the drawing's hairline went grey"
     for k in range(len(weights)):
-        down, across = at(DOWN + k * 2 * PITCH, 460)
+        down, across = at(DOWN + k * PITCH / 2, 460)
         columns = grey[down - 10:down + 10, across - 1:across + 3].mean(axis=0)
         assert _one_solid_row(columns), f"a markup line down is soft: {columns.round()}"
-    for x, y, across_the_side in ((400.3, 445, False), (550.5, 445, False),
-                                  (475, 400.6, True), (475, 491.3, True)):
-        down, across = at(x, y)
-        if across_the_side:
-            profile = grey[down - 1:down + 3, across - 10:across + 10].mean(axis=1)
-        else:
-            profile = grey[down - 10:down + 10, across - 1:across + 3].mean(axis=0)
-        assert _one_solid_row(profile), f"a rectangle's side is soft: {profile.round()}"
-
-
-@pytest.mark.parametrize("zoom", [0.25, 0.5])
-def test_a_sloping_markup_line_and_a_cloud_are_unbroken(window, qapp, tmp_path, zoom):
-    """A sloping markup line and a cloud keep their smoothing zoomed out (in
-    steps they would look broken), as thick as the drawing's thinnest, and are
-    unbroken and dark all along."""
-    from calcforge.items.base import cloud_path
-
-    grey, at, _heights, _weights, cloud = _markups_beside_the_drawing(window, qapp, tmp_path,
-                                                                       zoom)
-    for x in range(60, 540, 4):
-        down, across = at(x, 560 + 40 * (x - 40) / 520)
-        column = grey[down - 2:down + 3, across]
-        assert column.min() <= DARK + 10, f"a gap in the sloping line at {x}"
-    rect = cloud.local_rect()
-    outline = cloud_path(QPolygonF([rect.topLeft(), rect.topRight(), rect.bottomRight(),
-                                    rect.bottomLeft()]), cloud.cloud_radius,
-                         inverted=cloud.cloud_invert)
-    for step in range(200):
-        point = cloud.mapToParent(outline.pointAtPercent(step / 200))
-        down, across = at(point.x(), point.y())
-        assert grey[down - 1:down + 2, across - 1:across + 2].min() <= DARK + 10, \
-            f"the cloud is broken at {step / 2:.0f} %"
+    softened = 0
+    for y in heights:
+        down, across = at(160, y)
+        softened += _soft(grey[down - 1:down + 3, across - 20:across + 20].mean(axis=1))
+    assert softened > 0, "the drawing's hairlines went sharp too"
 
 
 def test_at_a_hundred_per_cent_markup_lines_are_as_before(window, qapp, tmp_path):
-    """From 100 % up a markup's hairline is drawn at its own width, as
-    before: a quarter-point line is a faint quarter of a pixel."""
-    grey, at, heights, weights, _cloud = _markups_beside_the_drawing(window, qapp, tmp_path, 1.0)
+    """From 100 % up a markup's hairline is drawn at its own width, smoothed,
+    as before: a quarter-point line is a faint quarter of a pixel."""
+    grey, at, _around, _made, heights, weights = _markups_beside_the_drawing(
+        window, qapp, tmp_path, 1.0)
+    checked = 0
     for y, width in zip(heights, weights):
-        if width == 0.25 and 150 < y < 360:
+        if width == 0.25 and 200 < y < 330:
             down, across = at(440, y)
             rows = grey[down - 3:down + 4, across - 20:across + 20].mean(axis=1)
             ink = float(((255 - rows) / 255).sum())
             assert 0.05 < ink < 0.5, "a quarter-point markup line widened at 100 %"
+            checked += 1
+    assert checked
 
 
 def test_a_markup_pen_off_screen_is_its_own_width():

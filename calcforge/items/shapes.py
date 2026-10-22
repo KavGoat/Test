@@ -12,7 +12,7 @@ from PySide6.QtGui import QFontMetricsF
 from ..core.units import Unit, format_quantity, parse_unit
 from .base import (CLOUD_SIZE, HANDLE_SIZE, SELECT_BLUE, MarkupItem, Style,
                    handle_zoom, paint_control_point, paint_rotate_handle,
-                   cloud_path, crisp_strokes, draw_head, register_item, round_the_joins)
+                   cloud_path, draw_head, register_item, round_the_joins)
 from . import complexlines
 
 # Page refreshes construct two lengths per rectangle; the unit is built once.
@@ -619,9 +619,6 @@ class RectItem(MarkupItem):
                 outline.addRect(rect)
             complexlines.draw(painter, outline, self.style)
         elif self.kind == "ellipse":
-            outline = QPainterPath()
-            outline.addEllipse(rect)
-            crisp_strokes(painter, outline)      # zoomed out (base)
             painter.drawEllipse(rect)
         elif self.kind == "cloud":
             polygon = QPolygonF([rect.topLeft(), rect.topRight(),
@@ -633,14 +630,11 @@ class RectItem(MarkupItem):
                 painter.fillPath(filled, self.style.brush())
             painter.setBrush(Qt.NoBrush)
             round_the_joins(painter)
-            crisp_strokes(painter, path)         # zoomed out (base)
             painter.drawPath(path)
         elif self.style.corner_radius > 0:
             painter.drawRoundedRect(rect, self.style.corner_radius, self.style.corner_radius)
         else:
-            crisp_strokes(painter)               # sharp zoomed out (base)
             painter.drawRect(rect)
-            painter.setRenderHint(QPainter.Antialiasing, True)
         self.paint_cutouts(painter)
         self._paint_extras(painter)
         if self.show_size and self.size_text:
@@ -1342,10 +1336,8 @@ class PolyItem(MarkupItem):
         if self.kind == "cloud":
             round_the_joins(painter)
         painter.setBrush(Qt.NoBrush)
-        crisp_strokes(painter, path)             # zoomed out (base)
         if not complexlines.draw(painter, path, self.style):
             painter.drawPath(path)
-        painter.setRenderHint(QPainter.Antialiasing, True)
         self.paint_cutouts(painter)
         self._paint_arrows(painter)
 
