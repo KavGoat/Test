@@ -240,7 +240,7 @@ def test_page_breaks_show_dashed_and_the_page_numbers_stay_in_the_workbook_view(
     # "the background page number thing is lost" (the user, 2026-10-22)
     assert loads.alone and paper_words(loads) == drawn, "the workbook view: numbered too"
     pens = break_pens(loads)
-    assert pens and all(pen.style() == Qt.DashLine and pen.widthF() <= 1.0 for pen in pens)
+    assert pens and all(pen.style() == Qt.DashLine for pen in pens), "the pages' dashed blue breaks"
 
 
 def paper_words(item) -> list:
@@ -439,3 +439,36 @@ def test_a_new_sheets_scroll_thumbs_are_big(w):
     bar.setValue(bar.maximum())
     pump()
     assert bar.maximum() > before
+
+
+def _edges(get, first, last):
+    """Where a line darker than both its neighbours two pixels away is."""
+    found = []
+    for i in range(first + 2, last - 2):
+        here = get(i)
+        if here + 10 < get(i - 2) and here + 10 < get(i + 2) and (not found or i - found[-1] > 2):
+            found.append(i)
+    return found
+
+
+@pytest.mark.parametrize("zoom", [1.0, 1.15, 1.45, 2.5, 3.3])
+def test_the_kept_headings_edges_are_on_the_grids_lines(w, zoom):
+    """The user, 2026-10-22: zoomed in, "Excel top left is still not
+    aligning correctly" — the headings kept at the top and left were drawn
+    rounded to whole pixels, a pixel or two off the grid's lines. Each row
+    number's edge is on its grid line's pixel, scrolled or not."""
+    w.act_add_sheet_page.trigger()
+    pump()
+    view = w.view
+    view.set_zoom(EXCEL_SCALE * zoom)
+    QTest.qWait(700)                       # the zoom settled: the grid drawn sharp
+    for down in (0, 53, 97):
+        view.verticalScrollBar().setValue(view.verticalScrollBar().minimum() + down)
+        QTest.qWait(80)
+        pump()
+        image = view.grab(view.viewport().geometry()).toImage()
+        light = lambda x, y: image.pixelColor(x, y).lightness()   # noqa: E731
+        top = int(60 * zoom)
+        numbers = _edges(lambda y: light(3, y), top, image.height() - 20)[:6]
+        grid = _edges(lambda y: light(image.width() // 2 + 3, y), top, image.height() - 20)[:6]
+        assert numbers and numbers == grid, f"scrolled {down}: {numbers} against {grid}"

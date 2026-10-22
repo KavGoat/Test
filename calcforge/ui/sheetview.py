@@ -307,9 +307,10 @@ def sheet_mode(item) -> str:
 
 def breaks_editable(item) -> bool:
     """Whether a sheet's page breaks and print area's edges can be dragged:
-    on its pages, and in Page Break Preview — never in Normal view, where
-    Excel's page lines are only lines (B1)."""
-    return not getattr(item, "alone", False) or sheet_mode(item) == BREAK_PREVIEW
+    always — on its pages and shown alone, in either view (the user,
+    2026-10-22: "I should be able to drag etc straight away like how it
+    used to be when I had paged sheets before")."""
+    return True
 
 
 def current_view(window) -> str:

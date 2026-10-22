@@ -90,19 +90,20 @@ def is_cell_cross(c) -> bool:
 
 
 # -- B1, B5: the page lines in Normal view and in Page Break Preview -------------------------------
-def test_in_normal_view_the_page_line_is_only_a_line(w, sheet):
+def test_in_normal_view_the_print_areas_edge_drags_straight_away(w, sheet):
+    """The user, 2026-10-22: "the print area blue lines ... I should be able
+    to drag etc straight away like how it used to be when I had paged sheets
+    before" — Normal view too, not only Page Break Preview."""
     run = sheet
+    assert run.normal_view
     xs, ys = run.edges()
     edge = run.paging.last_col + 1             # the print area's right edge (J|K)
-    on_line = at(w, run, xs[edge] + 1.0, (ys[9] + ys[10]) / 2)
+    on_line = at(w, run, xs[edge], (ys[9] + ys[10]) / 2)
     move(w, on_line)
-    assert is_cell_cross(cursor(w)), "the white cross, as over any cell"
-    area_before = options(run.sheet)["print_area"]
-    drag(w, on_line, at(w, run, xs[edge + 1] + 10, (ys[9] + ys[10]) / 2))
+    assert cursor(w).shape() == Qt.SizeHorCursor, "Excel's double arrow over the line"
+    drag(w, on_line, at(w, run, xs[edge + 2] + 2, (ys[9] + ys[10]) / 2))
     run = shown_run(w)
-    assert options(run.sheet)["print_area"] == area_before, "the print area left alone"
-    picked = w.view.tables.selection()
-    assert picked[:3] == (9, edge, 9) and picked[3] > edge, "the cells dragged over: picked"
+    assert options(run.sheet)["print_area"][3] == edge + 1, "the print area a column wider"
 
 
 def test_in_page_break_preview_it_drags_with_the_plain_double_arrow(w, sheet):

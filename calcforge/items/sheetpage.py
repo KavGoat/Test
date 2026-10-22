@@ -32,7 +32,6 @@ from .table import (EXCEL_GREEN, HEADING_BG, HEADING_H, HEADING_ON, ROWNUM_W, Ta
                     hidden_mark)
 
 BREAK_BLUE = QColor("#2f6fd6")
-NORMAL_BREAK = QColor("#5f6670")         # the workbook view's page breaks (Excel's Normal)
 SCRATCH = QColor("#ececec")
 PAGE_LABEL = QColor(150, 150, 150, 70)
 DEFAULT_ROWS = 52
@@ -207,7 +206,7 @@ class SheetRunItem(TableItem):
     @property
     def normal_view(self) -> bool:
         """Shown alone in Excel's Normal view (not its Page Break Preview):
-        all white, the page breaks thin grey lines that are not dragged."""
+        all white (the page lines blue and dragged, as on the pages)."""
         if not self.alone:
             return False
         from ..ui.sheetview import BREAK_PREVIEW, sheet_mode
@@ -692,21 +691,15 @@ class SheetRunItem(TableItem):
         c0, c1 = self._printed_cols()
         painter.setRenderHint(QPainter.Antialiasing, False)
         area = paging.print_rows
-        if self.normal_view:
-            # Excel's Normal view: a set print area outlined in a thin solid
-            # line, the pages' breaks thin and dashed (one put there by
-            # hand solid), never the Page Break Preview's blue
-            solid = QPen(NORMAL_BREAK, 1.0)
-            solid.setCosmetic(True)
-            dashed = QPen(NORMAL_BREAK, 1.0, Qt.DashLine)
-            dashed.setCosmetic(True)
-            edge = solid if area or options(self.sheet)["print_area"] else dashed
-        else:
-            solid = QPen(BREAK_BLUE, 2.0)
-            solid.setCosmetic(True)
-            dashed = QPen(BREAK_BLUE, 2.0, Qt.DashLine)
-            dashed.setCosmetic(True)
-            edge = solid
+        # the blue lines of the sheet's pages in every view, to be dragged
+        # straight away (the user, 2026-10-22: "the print area blue lines
+        # still not showing correct, I should be able to drag etc straight
+        # away like how it used to be when I had paged sheets before")
+        solid = QPen(BREAK_BLUE, 2.0)
+        solid.setCosmetic(True)
+        dashed = QPen(BREAK_BLUE, 2.0, Qt.DashLine)
+        dashed.setCosmetic(True)
+        edge = solid
         top = ys[area[0]] if area else 0.0
         bottom = ys[min(area[1] + 1, len(ys) - 1)] if area else \
             ys[min(self.sheet_rows, len(ys) - 1)]

@@ -1757,9 +1757,9 @@ the equation and R² on the chart). The axis titles carry the cells' units.
 - **Page breaks**: Excel's Page Break Preview — dashed blue where they fall by
   themselves, solid blue where you put them. **Insert Page Break**, **Remove Page
   Break** and **Reset All Page Breaks**; dragging an automatic break makes it
-  yours. The breaks and the print area's edges are dragged on the sheet's pages
-  and in the workbook view's Page Break Preview, with the plain double arrow; in
-  its Normal view they are only lines, and a drag over one picks cells.
+  yours. The breaks and the print area's edges are dragged straight away, with the
+  plain double arrow: on the sheet's pages and in the workbook view, in either of
+  its views.
 - **Sideways sheets**: a sheet wider than its paper prints on pages side by side,
   numbered down then over; more pages across come from a wide print area, a
   vertical page break or Fit to N pages wide.
@@ -1779,10 +1779,9 @@ page box — and its sheet is shown alone, filling the document area: an endless
 grid from A1 with its row and column headings, which scrolls within that sheet
 only. There are no page edges and no other pages to scroll on to; scrolled or
 zoomed out, the grid goes on, and typing far down gives the rows the pages they
-need. Where the pages fall is shown as Excel's Normal view shows it: a print
-area outlined in a thin solid line, thin dashed lines at the page breaks (and
-round what prints when there is no print area), and each page's "Page N" faintly
-behind its cells. Markups on the sheet's pages show
+need. Where the pages fall is shown as on the sheet's pages: what prints outlined
+in solid blue, the page breaks dashed blue (solid where you put them), each to be
+dragged, and each page's "Page N" faintly behind its cells. Markups on the sheet's pages show
 where they are over the cells and can be picked and changed as on the page
 (they belong to the cells under them). The page rulers are not shown over the
 cells, as Excel's Normal view has none; they come back as you leave. Each workbook
@@ -1840,7 +1839,7 @@ is let go, the cells between closing up. The pointer is Excel's: the white cross
 over cells and the select-all corner, the arrow with the move sign on the
 selection's border (with the small + while `Ctrl` is held: a copy), the split
 arrows on heading edges (the headings kept in sight as the sheet scrolls too),
-and the plain double arrow on Page Break Preview's lines. A column's edge being
+and the plain double arrow on the blue page lines. A column's edge being
 dragged says its width as Excel does, in characters of the default font
 ("Width: 8.43 (64 pixels)").
 

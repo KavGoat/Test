@@ -87,8 +87,9 @@ class SheetHeadings(QWidget):
         k = self._scale()
         # the sheet's own heading sizes at the zoom: they never jump as they
         # come away from the grid (H2)
-        head_h = max(1, int(round(HEADING_H * k)))
-        num_w = max(1, int(round(ROWNUM_W * k)))
+        import math
+        head_h = max(1, math.ceil(HEADING_H * k - 0.01))
+        num_w = max(1, math.ceil(ROWNUM_W * k - 0.01))
         for run in self._runs():
             grid = run.local_rect()
             top_left = view.mapFromScene(run.mapToScene(grid.topLeft()))
@@ -101,11 +102,14 @@ class SheetHeadings(QWidget):
             # kept only once the sheet's own headings are (partly) out of view:
             # at the top of the window they are there to be used, their
             # column and row edges dragged (the workbook view's grid starts there)
-            if top_left.y() - HEADING_H * k < -0.5 and 0 < bottom_right.y():
+            # (a sheet shown alone always has them: drawn here, every edge on
+            # its grid line's pixel, scrolled or not)
+            alone = getattr(run, "alone", False)
+            if (alone or top_left.y() - HEADING_H * k < -0.5) and 0 < bottom_right.y():
                 strips.append((run, "col", QRect(int(left), 0, int(right - left), head_h)))
             top = max(top_left.y(), 0)
             bottom = min(bottom_right.y(), viewport.height())
-            if top_left.x() - ROWNUM_W * k < -0.5 and 0 < bottom_right.x():
+            if (alone or top_left.x() - ROWNUM_W * k < -0.5) and 0 < bottom_right.x():
                 strips.append((run, "row", QRect(0, int(top), num_w, int(bottom - top))))
             kinds = [kind for owner, kind, _rect in strips if owner is run]
             if "col" in kinds and "row" in kinds:
@@ -175,65 +179,196 @@ class SheetHeadings(QWidget):
             self._strips = kept
             self.refresh_soon()
 
+    def _paint_as_the_grid(self, painter, run, kind, rect, local, grid, font) -> bool:
+        """A strip drawn the way the grid beside it is: the grid comes from
+        pictures of the sheet's rows, each drawn at the scale of its own
+        whole pixels and put on whole pixels of the screen (SheetRunItem.
+        _paint_bands), so the strip is too — the same picture scale, placed
+        by the same rounding — and every heading's edge lands on its grid
+        line's pixel. False when the grid is not drawn from pictures (so
+        close in, or while a zoom glides): then it is drawn directly."""
+        import math
+        from PySide6.QtGui import QPixmap
+        from ..ui.scene import _draw_on_the_pixel_grid, _painted_scale
+        painter.save()
+        painter.setTransform(local)
+        scale = round(_painted_scale(painter), 4)
+        device = painter.deviceTransform()
+        painter.restore()
+        xs, ys = run.edges()
+        width = int(round(xs[-1] * scale))
+        if width <= 0 or width > 8192 or abs(device.m12()) > 1e-9 or run._zoom_gliding():
+            return False
+        ratio = self.devicePixelRatioF()
+        inverse, ok = device.inverted()
+        if not ok:
+            return False
+        seen = inverse.mapRect(QRectF(rect.left() * ratio, rect.top() * ratio,
+                                      rect.width() * ratio, rect.height() * ratio))
+        if kind == "col":
+            # across: the bands' picture width
+            high = max(1, math.ceil(rect.height() * ratio))
+            first = max(0, bisect.bisect_right(xs, seen.left()) - 2)
+            last = min(len(xs) - 2, bisect.bisect_right(xs, seen.right()) + 1)
+            tile = QPixmap(width, high)
+            tile.fill(HEADING_BG)
+            p = QPainter(tile)
+            p.scale(width / xs[-1], high / HEADING_H)
+            p.translate(0, HEADING_H)
+            p.setRenderHint(QPainter.Antialiasing, False)
+            p.setFont(font)
+            _cells(p, run, "col", first, last, grid)
+            p.end()
+            # placed by the bands' own rule (the same left and right edges,
+            # so the same stretch when a band's picture is a pixel off its place)
+            top_at = inverse.map(QPointF(0, rect.top() * ratio)).y()
+            painter.save()
+            painter.setTransform(local)
+            _draw_on_the_pixel_grid(painter, QRectF(0, top_at, xs[-1], high / device.m22()), tile)
+            painter.restore()
+            return True
+        # down: band by band, each as its band of rows is drawn and placed
+        rows = len(ys) - 1
+        band = run.BAND
+        wide = max(1, math.ceil(rect.width() * ratio))
+        r0 = max(0, bisect.bisect_right(ys, seen.top()) - 2)
+        r1 = min(rows - 1, bisect.bisect_right(ys, seen.bottom()) + 1)
+        for k in range(r0 // band, r1 // band + 1):
+            a, b = k * band, min(rows - 1, k * band + band - 1)
+            top, bottom = ys[a], ys[b + 1]
+            high = int(round((bottom - top) * scale))
+            if high <= 0:
+                continue
+            tile = QPixmap(wide, high)
+            tile.fill(HEADING_BG)
+            p = QPainter(tile)
+            p.scale(wide / ROWNUM_W, high / (bottom - top))
+            p.translate(ROWNUM_W, -top)
+            p.setRenderHint(QPainter.Antialiasing, False)
+            p.setFont(font)
+            _cells(p, run, "row", max(a, r0), min(b, r1), grid)
+            p.end()
+            left_at = inverse.map(QPointF(rect.left() * ratio, 0)).x()
+            painter.save()
+            painter.setTransform(local)
+            _draw_on_the_pixel_grid(painter, QRectF(left_at, top, wide / device.m11(),
+                                                    bottom - top), tile)
+            painter.restore()
+        return True
+
     def paintEvent(self, event) -> None:
+        """Each strip drawn as the sheet draws its own headings — in the
+        sheet's own coordinates, through the view's scale, pinned to the top
+        (left) of the window: every edge where the grid's line is, at any
+        zoom and screen scale (the user, 2026-10-22: zoomed in, "Excel top
+        left is still not aligning correctly" — rounded to whole pixels and
+        drawn a pixel in, the edges sat one or two pixels off the grid's)."""
+        from PySide6.QtGui import QTransform
+        from ..core.typography import page_font
+        from ..items.sheetpage import paint_corner
         self._drop_gone()
         painter = QPainter(self)
         view = self.view
-        k = self._scale()
-        font = QFont(self.font())
-        font.setPixelSize(max(1, int(round(8 * k * 96 / 72))))   # the sheet's own
-        painter.setFont(font)
-        grid = QPen(QColor("#bdbdbd"), 1)
+        grid = QPen(QColor("#bdbdbd"), 0)
+        grid.setCosmetic(True)
+        font = page_font("", 8.0)
         for run, kind, rect in self._strips:
-            if kind == "corner":
-                from ..items.sheetpage import paint_corner
-                paint_corner(painter, QRectF(rect).adjusted(0, 0, -1, -1), self.corner_hot,
-                             run.everything_picked(), grid)
-                continue
             painter.save()
             painter.setClipRect(rect)
+            # the sheet's own coordinates in this widget's
+            # the very transform the view draws the sheet with (worked out
+            # as it does, so an edge rounds to the grid's pixel), moved only
+            # across the strip: the letters' strip down to the top of the
+            # window, the numbers' strip across to its left
+            local = run.deviceTransform(view.viewportTransform())
+            kx, ky = local.m11(), local.m22()
+            if kind == "corner":
+                at = QPointF(rect.right() + 1, rect.bottom() + 1)
+                painter.setTransform(QTransform(kx, 0, 0, ky, at.x(), at.y()))
+                painter.setRenderHint(QPainter.Antialiasing, False)
+                paint_corner(painter, run.corner_rect(), self.corner_hot,
+                             run.everything_picked(), grid)
+                painter.restore()
+                continue
+            if self._paint_as_the_grid(painter, run, kind, rect, local, grid, font):
+                painter.restore()
+                continue
             painter.fillRect(rect, HEADING_BG)
+            painter.setTransform(local)
+            if kind == "col":
+                painter.translate(0, (rect.top() + HEADING_H * ky - local.dy()) / ky)
+            else:
+                painter.translate((rect.left() + ROWNUM_W * kx - local.dx()) / kx, 0)
+            painter.setRenderHint(QPainter.Antialiasing, False)
+            painter.setFont(font)
+            painter.setBrush(Qt.NoBrush)
             xs, ys = run.edges()
             sel = run.selection if run.opened else None
             # only the columns or rows the strip shows (a sheet can have thousands)
-            corners = [run.mapFromScene(view.mapToScene(p)) for p in
-                       (rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight())]
+            inverse, _ok = painter.transform().inverted()
+            seen = inverse.mapRect(QRectF(rect))
             if kind == "col":
-                lo = min(p.x() for p in corners)
-                hi = max(p.x() for p in corners)
-                first = max(0, bisect.bisect_right(xs, lo) - 2)
-                last = min(len(xs) - 1, bisect.bisect_right(xs, hi) + 1)
+                first = max(0, bisect.bisect_right(xs, seen.left()) - 2)
+                last = min(len(xs) - 1, bisect.bisect_right(xs, seen.right()) + 1)
                 for c in range(first, last):
-                    a = view.mapFromScene(run.mapToScene(QPointF(xs[c], 0))).x()
-                    b = view.mapFromScene(run.mapToScene(QPointF(xs[c + 1], 0))).x()
-                    if b < rect.left() or a > rect.right() or b - a < 1:
+                    cell = QRectF(xs[c], -HEADING_H, xs[c + 1] - xs[c], HEADING_H)
+                    if cell.width() <= 0:
                         continue
-                    cell = QRect(int(a), rect.top(), int(b - a), rect.height())
                     on = sel is not None and sel[1] <= c <= sel[3]
                     painter.fillRect(cell, HEADING_ON if on else HEADING_BG)
                     painter.setPen(grid)
-                    painter.drawRect(cell.adjusted(0, 0, -1, -1))
+                    _outline(painter, cell)
                     painter.setPen(EXCEL_GREEN if on else QColor("#444444"))
                     painter.drawText(cell, Qt.AlignCenter, col_letters(c))
             else:
-                lo = min(p.y() for p in corners)
-                hi = max(p.y() for p in corners)
-                first = max(0, bisect.bisect_right(ys, lo) - 2)
-                last = min(len(ys) - 1, bisect.bisect_right(ys, hi) + 1)
+                first = max(0, bisect.bisect_right(ys, seen.top()) - 2)
+                last = min(len(ys) - 1, bisect.bisect_right(ys, seen.bottom()) + 1)
                 for r in range(first, last):
-                    a = view.mapFromScene(run.mapToScene(QPointF(0, ys[r]))).y()
-                    b = view.mapFromScene(run.mapToScene(QPointF(0, ys[r + 1]))).y()
-                    if b < rect.top() or a > rect.bottom() or b - a < 1:
+                    cell = QRectF(-ROWNUM_W, ys[r], ROWNUM_W, ys[r + 1] - ys[r])
+                    if cell.height() <= 0:
                         continue
-                    cell = QRect(rect.left(), int(a), rect.width(), int(b - a))
                     on = sel is not None and sel[0] <= r <= sel[2]
                     painter.fillRect(cell, HEADING_ON if on else HEADING_BG)
                     painter.setPen(grid)
-                    painter.drawRect(cell.adjusted(0, 0, -1, -1))
+                    _outline(painter, cell)
                     painter.setPen(EXCEL_GREEN if on else QColor("#444444"))
                     painter.drawText(cell, Qt.AlignCenter, str(r + 1))
             painter.restore()
         painter.end()
+
+
+def _cells(p: QPainter, run, kind: str, first: int, last: int, grid: QPen) -> None:
+    """Headings *first* to *last* in the sheet's own coordinates, their
+    edges drawn as the grid draws its lines."""
+    xs, ys = run.edges()
+    sel = run.selection if run.opened else None
+    for i in range(first, last + 1):
+        if kind == "col":
+            cell = QRectF(xs[i], -HEADING_H, xs[i + 1] - xs[i], HEADING_H)
+            if cell.width() <= 0:
+                continue
+            on = sel is not None and sel[1] <= i <= sel[3]
+            text = col_letters(i)
+        else:
+            cell = QRectF(-ROWNUM_W, ys[i], ROWNUM_W, ys[i + 1] - ys[i])
+            if cell.height() <= 0:
+                continue
+            on = sel is not None and sel[0] <= i <= sel[2]
+            text = str(i + 1)
+        p.fillRect(cell, HEADING_ON if on else HEADING_BG)
+        p.setPen(grid)
+        _outline(p, cell)
+        p.setPen(EXCEL_GREEN if on else QColor("#444444"))
+        p.drawText(cell, Qt.AlignCenter, text)
+
+
+def _outline(painter: QPainter, cell: QRectF) -> None:
+    """A heading's edges drawn as the grid draws its lines (drawLine, not
+    drawRect, whose aliased edges round a pixel differently): on them."""
+    painter.drawLine(cell.topLeft(), cell.topRight())
+    painter.drawLine(cell.bottomLeft(), cell.bottomRight())
+    painter.drawLine(cell.topLeft(), cell.bottomLeft())
+    painter.drawLine(cell.topRight(), cell.bottomRight())
 
 
 def _edge_at(edges: list, at: float, tol: float) -> Optional[int]:

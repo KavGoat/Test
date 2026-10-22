@@ -34,7 +34,7 @@ from PySide6.QtWidgets import QDialog, QMenu
 
 openpyxl = pytest.importorskip("openpyxl")
 
-from calcforge.items.sheetpage import CORNER_HOT, CORNER_MARK, SheetRunItem  # noqa: E402
+from calcforge.items.sheetpage import BREAK_BLUE, CORNER_HOT, CORNER_MARK, SheetRunItem  # noqa: E402
 from calcforge.items.table import HEADING_BG, HEADING_H, ROWNUM_W  # noqa: E402
 from calcforge.sheet.pagination import options  # noqa: E402
 from calcforge.ui import sheetpages  # noqa: E402
@@ -200,8 +200,9 @@ def test_a_new_sheet_prints_one_page_from_a1_outlined_solid_in_the_workbook_view
     item = next(i for i in w.view.scene().items() if isinstance(i, SheetRunItem))
     assert item.alone
     edge = outline_pen(item)
-    assert edge.style() == Qt.SolidLine and edge.widthF() <= 1.0 and edge.isCosmetic(), \
-        "the print area: a thin solid outline"
+    # the pages' blue line, to be dragged straight away (the user, 2026-10-22)
+    assert edge.style() == Qt.SolidLine and edge.isCosmetic() and edge.color() == BREAK_BLUE, \
+        "the print area: the pages' solid blue outline"
     # the new sheet's paper says where it prints: its number on it
     assert paper_words(item) == ["Page 2"]
     # saved and opened: still its print area
@@ -236,8 +237,8 @@ def test_an_imported_sheet_keeps_its_print_area_and_one_without_prints_its_cells
     QTest.mouseClick(bar, Qt.LeftButton, Qt.NoModifier, bar.tabRect(1).center())
     pump()
     assert runs(w, "Free").alone
-    assert outline_pen(runs(w, "Free")).style() == Qt.DashLine, \
-        "no print area: only Excel's dashed page lines"
+    assert outline_pen(runs(w, "Free")).style() == Qt.SolidLine, \
+        "no print area: what prints (its cells) outlined, as on the pages"
     assert all(p.style() == Qt.DashLine for p in break_pens(runs(w, "Free")))
 
 
