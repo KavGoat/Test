@@ -179,6 +179,41 @@ class _Splitter(QWidget):
         event.accept()
 
 
+class SheetTitle(QWidget):
+    """The workbook view's title strip, over the grid: the sheet's name in
+    bold (after its workbook's, for one brought in from Excel), as a table's
+    name tag says whose cells they are, and the × back to the pages at its
+    right."""
+
+    def __init__(self, close_button: QToolButton):
+        super().__init__()
+        from PySide6.QtWidgets import QLabel
+        self.setObjectName("sheetTitle")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 1, 2, 1)
+        layout.setSpacing(6)
+        self.book = QLabel()
+        self.book.setObjectName("sheetTitleBook")
+        self.sheet = QLabel()
+        self.sheet.setObjectName("sheetTitleSheet")
+        bold = self.sheet.font()
+        bold.setBold(True)
+        self.sheet.setFont(bold)
+        self.sheet.setTextInteractionFlags(Qt.NoTextInteraction)
+        layout.addWidget(self.book)
+        layout.addWidget(self.sheet)
+        layout.addStretch(1)
+        layout.addWidget(close_button)
+        self.hide()
+
+    def show_names(self, book: str, sheet: str) -> None:
+        self.book.setText(f"{book}  ▸" if book else "")
+        self.book.setVisible(bool(book))
+        self.sheet.setText(sheet)
+        self.setToolTip(f"{book} ▸ {sheet}" if book else sheet)
+
+
 class SheetTabs(QWidget):
     def __init__(self, window):
         super().__init__()
@@ -243,8 +278,12 @@ class SheetTabs(QWidget):
         layout.addWidget(self.clip)
         layout.addWidget(self.add)
         layout.addStretch(1)
-        layout.addWidget(self.close_button)
         layout.addWidget(self.splitter)
+        # the workbook's and the sheet's names over the grid, the × at their
+        # right: the top right of the sheet, where a window's close is (the
+        # user, 2026-10-22: "the x button to escape workbook should be top
+        # right, where is the sheet name easily visible like table name")
+        self.title = SheetTitle(self.close_button)
         self._moving = False
         self.hide()
 
@@ -355,6 +394,7 @@ class SheetTabs(QWidget):
     def _show_current(self) -> None:
         """The current tab in sight, scrolled to if it was not."""
         i = self.bar.currentIndex()
+        self._name_title(i)
         if i < 0:
             self.scroll_tabs(self.first_shown)
             return
@@ -366,6 +406,18 @@ class SheetTabs(QWidget):
         while first < i and rect.right() - self.bar.tabRect(first).left() >= room:
             first += 1
         self.scroll_tabs(first)
+
+    def _name_title(self, index: int) -> None:
+        """The strip over the grid: the workbook's name (an Excel one's, when
+        it came from a file) and the sheet's."""
+        if not 0 <= index < len(self.entries):
+            self.title.show_names("", "")
+            return
+        from .sheetpages import sections
+        document = getattr(self, "_document", None) or self.window.document
+        section = next((x for x in sections(document) if x.key == self.section_key), None)
+        book = section.name if section is not None and section.book else ""
+        self.title.show_names(book, self.entries[index][1])
 
     def _sheet_list(self, at: QPoint) -> Optional[QMenu]:
         """Excel's right-click on the tab arrows: every sheet, to go to."""
@@ -428,6 +480,7 @@ class SheetTabs(QWidget):
         self._document = document
         self._fill()
         self.setVisible(self.showing)
+        self.title.setVisible(self.showing)
         self._scroll_row(view, bool(found))
         self.fit_row()
         self.follow()
@@ -691,7 +744,7 @@ class SheetTabs(QWidget):
                 "Go to this sheet's first page")
         if self.showing:
             menu.addAction("Close Workbook", self.close_sheet_view).setToolTip(
-                "Back to the pages, where you were (the × at the end of the tabs)")
+                "Back to the pages, where you were (the × at the top right of the sheet)")
         return menutidy.tidy(menu)
 
     def set_printing(self, index: int, on: bool) -> None:

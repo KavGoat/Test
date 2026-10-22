@@ -6,7 +6,7 @@ bottom" — "Not full window, fits the document panel completely").
 Going to a workbook — its entry in Thumbnails, one of its pages (a click on
 a cell, the page box), a sheet tab — shows the sheet alone: an endless grid
 from A1 that scrolls within that sheet only, with its row and column
-headings, the tab strip at the bottom to change sheet and a × at its end to
+headings, the tab strip at the bottom to change sheet and a × at the top right to
 go back to the page you came from. No page edges and no other pages: the
 sheet's pages sit edge to edge on the canvas, far to the left of every other page
 (DocumentScene._lay_out_the_sheet), the canvas is only its grid, and the

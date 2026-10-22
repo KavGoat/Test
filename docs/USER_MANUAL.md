@@ -1693,6 +1693,7 @@ it. Drag the selection's border to move the cells (`Ctrl` copies them).
 ### Fill, copy and paste
 
 - The **fill handle** (the selection's corner) fills a series or copies formulas;
+  double-click it to fill down as far as the column beside goes, as in Excel;
   **Fill Down** (`Ctrl+D`) and **Fill Right** (`Ctrl+R`).
 - **Copy, Cut, Paste** (`Ctrl+C`, `Ctrl+X`, `Ctrl+V`) work with Excel both ways,
   keeping formulas and formats. **Paste Special**: Values (`Ctrl+Shift+V`),
@@ -1823,9 +1824,12 @@ the active cell is kept in sight below and right of them, and `Ctrl+Home` goes
 to the first cell that is not frozen. As in Excel they are the workbook view's:
 the pages print and show the sheet whole.
 
-**Picking cells and keys, as Excel's.** There is always an active cell: `Esc`
-cancels what is being typed (and the copied cells' marching ants) but never puts
-the sheet down. `Ctrl`+click or `Ctrl`+drag adds another block to those picked
+**Picking cells and keys, as Excel's.** `Esc` cancels what is being typed (and the
+copied cells' marching ants); pressed again it lets the cells go, the sheet staying
+in view, so the markup keys and tools work on it (a markup tool picked draws over
+the cells straight away); a click on a cell picks it again. Dragging cells (a
+selection, the fill handle, a move, a page line) past the edge of the view scrolls
+the sheet that way, the further out the faster. `Ctrl`+click or `Ctrl`+drag adds another block to those picked
 (shaded); the footer sums them all, and clearing, bold, number formats and the
 other formats act on all of them; Copy and Cut say Excel's "This command cannot
 be used on multiple selections". `Ctrl+A` picks the block of data round the
@@ -1862,8 +1866,10 @@ view, and on the headings kept in sight as the sheet scrolls.
 **Leaving it:** click any other page in Thumbnails or type its number in the page
 box; `Ctrl+Page Down` / `Ctrl+Page Up` go to the next or previous sheet, and past
 the last or first sheet out to the page after or before the workbook; or the
-**×** at the right end of the sheet tabs (**Close Workbook**, also on a tab's
-menu) goes back to the page you came from, as you left it.
+**×** at the top right of the sheet (**Close Workbook**, also on a tab's menu)
+goes back to the page you came from, as you left it. The strip it is on, over the
+grid, names the sheet in bold (after its workbook's name, for one brought in from
+Excel).
 
 **Sheet tabs.** In the workbook view, under the canvas, the row Excel has: the
 tab-scroll arrows **◀ ▶** (a click scrolls the tabs a tab at a time, `Ctrl`+click

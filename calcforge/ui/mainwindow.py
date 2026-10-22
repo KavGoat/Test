@@ -1453,6 +1453,7 @@ class MainWindow(QMainWindow):
         marker.hide()
         column.addWidget(marker)
         column.addWidget(tabs)
+        column.addWidget(sheet_tabs.title)        # the workbook view's names and ×
         column.addWidget(view, 1)
         self.view_split.addWidget(widget)
         pane = ViewPane(widget, column, view, tabs, sheet_tabs)

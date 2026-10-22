@@ -362,6 +362,10 @@ QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar#sheetRowScroll:horizontal {{ height: 24px; }}
 QScrollBar#sheetRowScroll::handle:horizontal {{ margin: 6px 2px; }}
 #sheetTabs QTabBar::tab {{ padding: 3px 10px; }}
+/* the workbook view's title strip over the grid: the sheet's name, the × */
+#sheetTitle {{ background: {chrome}; border-bottom: 1px solid {chrome_edge}; }}
+#sheetTitle QLabel#sheetTitleSheet {{ color: #217346; }}
+#sheetTitle QToolButton#sheetViewClose {{ font-size: 15px; padding: 0 6px; }}
 /* Excel's sheet tab in use: white, its name green and bold, a green line under it */
 #sheetTabs QTabBar::tab:selected {{
     background: #ffffff; color: #217346; font-weight: bold;

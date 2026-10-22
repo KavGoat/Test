@@ -224,13 +224,26 @@ def test_after_f2_the_arrows_move_the_caret(w, sheet):
 
 
 # -- F1: Esc --------------------------------------------------------------------------------------
-def test_esc_never_puts_the_sheet_down_and_typing_goes_on(w, sheet):
+def test_esc_lets_the_cells_go_the_sheet_stays_and_a_click_takes_them_up(w, sheet):
+    """The user, 2026-10-22: "escape while in sheet mode should unselect a
+    cell so I can start using shortcuts for markups". Esc lets the cells go
+    (the sheet stays shown alone); the markup keys are the canvas's again; a
+    click on a cell picks it, and typing goes into it."""
+    from calcforge.ui.sheetview import run_shown
     run = sheet
     click(w, at(w, run, 2, 6))
     key(w, Qt.Key_Escape)
     tables = w.view.tables
-    assert tables.item is shown_run(w) and tables.active == (2, 6)
-    assert w.formula_bar.name.text() == "G3"
+    assert tables.item is None, "no cell picked"
+    assert run_shown(w.scene) == run.uid, "the sheet still shown alone"
+    QTest.keyClick(w.view.viewport(), Qt.Key_R)          # Revu's Rectangle key
+    pump()
+    assert w.view.tool_key == "rect", "a markup's key works on the sheet"
+    key(w, Qt.Key_Escape)                                # the tool put down
+    assert w.view.tool_key == "select"
+    run = shown_run(w)
+    click(w, at(w, run, 2, 6))
+    assert tables.item is run and tables.active == (2, 6)
     typed(w, "7")
     key(w, Qt.Key_Return)
     assert shown_run(w).sheet.cells[(2, 6)].input == "7"

@@ -200,11 +200,12 @@ class SheetHeadings(QWidget):
         if width <= 0 or width > 8192 or abs(device.m12()) > 1e-9 or run._zoom_gliding():
             return False
         ratio = self.devicePixelRatioF()
-        inverse, ok = device.inverted()
+        # (in this widget's own coordinates: what the painter paints into may
+        # put it anywhere — the window's backing store, a grab of the window)
+        inverse, ok = local.inverted()
         if not ok:
             return False
-        seen = inverse.mapRect(QRectF(rect.left() * ratio, rect.top() * ratio,
-                                      rect.width() * ratio, rect.height() * ratio))
+        seen = inverse.mapRect(QRectF(rect))
         if kind == "col":
             # across: the bands' picture width
             high = max(1, math.ceil(rect.height() * ratio))
@@ -221,7 +222,7 @@ class SheetHeadings(QWidget):
             p.end()
             # placed by the bands' own rule (the same left and right edges,
             # so the same stretch when a band's picture is a pixel off its place)
-            top_at = inverse.map(QPointF(0, rect.top() * ratio)).y()
+            top_at = inverse.map(QPointF(0, rect.top())).y()
             painter.save()
             painter.setTransform(local)
             _draw_on_the_pixel_grid(painter, QRectF(0, top_at, xs[-1], high / device.m22()), tile)
@@ -248,7 +249,7 @@ class SheetHeadings(QWidget):
             p.setFont(font)
             _cells(p, run, "row", max(a, r0), min(b, r1), grid)
             p.end()
-            left_at = inverse.map(QPointF(rect.left() * ratio, 0)).x()
+            left_at = inverse.map(QPointF(rect.left(), 0)).x()
             painter.save()
             painter.setTransform(local)
             _draw_on_the_pixel_grid(painter, QRectF(left_at, top, wide / device.m11(),

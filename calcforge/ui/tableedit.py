@@ -1174,6 +1174,12 @@ class TableEditing:
         if item is not None and event.button() == Qt.LeftButton and \
                 self._press_result_unit(item, item.mapFromScene(scene_pos)):
             return True
+        if item is not None and view.tool_key != "select" and event.button() == Qt.LeftButton:
+            # a markup tool picked with the cells open: it draws, over them
+            # (the user, 2026-10-22: "I cannot markup on sheet even with
+            # clicking on the icon")
+            self.close()
+            return False
         if item is not None:
             local = item.mapFromScene(scene_pos)
             inside = item.chrome_rect().contains(local) or item.tab_rect().contains(local)
@@ -1451,6 +1457,71 @@ class TableEditing:
             return list(range(t, b + 1))
         return [row]
 
+    # -- Excel: the sheet scrolls by itself while cells are dragged past its edge
+    EDGE_SCROLLED = ("select", "cols", "rows", "point", "fill", "move", "area", "break", "vbreak")
+    _edge_timer = None
+    _edge_at = None                    # the pointer, in the view's own pixels
+
+    def _scroll_at_the_edge(self) -> None:
+        """Dragging cells (a selection, a fill, a move, a page line) past
+        the edge of the view, or over the headings kept along its top and
+        left, scrolls the sheet that way — the further out, the faster — and
+        the drag follows, until the pointer comes back in or the button is
+        let go (the user, 2026-10-22: "sheet should auto scroll up or right
+        if I am selecting cells and go past the viewport")."""
+        timer = self._edge_timer
+        if timer is None:
+            from PySide6.QtCore import QTimer
+            timer = self._edge_timer = QTimer(self.view)
+            timer.setInterval(30)
+            timer.timeout.connect(self._edge_tick)
+        if self._edge_step() != (0, 0):
+            if not timer.isActive():
+                timer.start()
+        elif timer.isActive():
+            timer.stop()
+
+    def _edge_step(self) -> tuple:
+        """(dx, dy) to scroll by now: how far the pointer is past an edge."""
+        view = self.view
+        port = view.viewport()
+        at = self._edge_at
+        if at is None:
+            return 0, 0
+        inside = port.rect()
+        headings = getattr(view, "sheet_headings", None)
+        top = left = 0
+        if headings is not None and headings.isVisible():
+            for _run, kind, rect in headings._strips:
+                if kind == "col":
+                    top = max(top, rect.bottom() + 1)
+                elif kind == "row":
+                    left = max(left, rect.right() + 1)
+
+        def speed(beyond: int) -> int:
+            return 0 if beyond <= 0 else min(80, 6 + beyond // 2)
+        dx = speed(at.x() - inside.right()) - speed(left - at.x())
+        dy = speed(at.y() - inside.bottom()) - speed(top - at.y())
+        return dx, dy
+
+    def _edge_tick(self) -> None:
+        timer = self._edge_timer
+        drag = self.drag
+        # (until it is let go: the release puts the drag down)
+        if drag is None or self.item is None or drag[0] not in self.EDGE_SCROLLED:
+            timer.stop()
+            return
+        dx, dy = self._edge_step()
+        if (dx, dy) == (0, 0):
+            timer.stop()
+            return
+        view = self.view
+        for bar, by in ((view.horizontalScrollBar(), dx), (view.verticalScrollBar(), dy)):
+            if by:
+                bar.setValue(bar.value() + by)
+        # the pointer held where it is: the cell under it now the sheet has moved
+        self.mouse_move(_StillHeld(), view.mapToScene(self._edge_at))
+
     def mouse_move(self, event, scene_pos: QPointF) -> bool:
         if self.insert_drag is not None:
             frame, start, _end = self.insert_drag
@@ -1465,6 +1536,9 @@ class TableEditing:
             return False
         local = item.mapFromScene(scene_pos)
         kind = drag[0]
+        if kind in self.EDGE_SCROLLED and not isinstance(event, _StillHeld):
+            self._edge_at = self.view.mapFromScene(scene_pos)    # where the pointer is held
+            self._scroll_at_the_edge()
         cell = self._cell_near(item, local)
         if kind == "select":
             self.select(self.anchor, cell, self.active)
@@ -1563,6 +1637,43 @@ class TableEditing:
         x = max(0.0, min(local.x(), xs[-1] - 0.01))
         y = max(0.0, min(local.y(), ys[-1] - 0.01))
         return item.cell_at(QPointF(x, y))
+
+    def fill_down_beside(self) -> bool:
+        """Excel's double-click on the fill handle: the selection filled down
+        as far as the cells beside it go — the column to its left, or to its
+        right when that one is empty below it (the user, 2026-10-22: "add the
+        excel double click to autofill drag formula thing"). One undo step;
+        True when anything was filled."""
+        item = self.item
+        sheet = getattr(item, "sheet", None)
+        if item is None or sheet is None:
+            return False
+        t, l, b, r = self.selection()
+        rows = item.size[0]
+
+        def filled(row, col):
+            return 0 <= col and sheet.input(row, col) != ""
+
+        last = b
+        for beside in (l - 1, r + 1):
+            if not filled(b, beside) and not filled(b + 1, beside):
+                continue
+            row = b
+            while row + 1 < 1_048_576 and filled(row + 1, beside):
+                row += 1
+            if row > b:
+                last = row
+                break
+        if last <= b:
+            return False
+        if last >= rows:
+            from . import sheetview
+            sheetview.reach(self.view, item, (last, r))
+        src, dst = (t, l, b, r), (b + 1, l, last, r)
+        from ..sheet.fill import fill
+        self._change("Fill", lambda wb, sh: fill(wb, sh, src, dst, step_one=False))
+        self.select((t, l), (last, r), self.active)
+        return True
 
     @staticmethod
     def _fill_target(src, cell):
@@ -1742,6 +1853,9 @@ class TableEditing:
             return False
         if zone[0] == "tab":
             self.rename()
+            return True
+        if zone[0] == "fill":
+            self.fill_down_beside()
             return True
         if zone[0] == "col_edge":
             self.autofit("col", self._chosen_cols(zone[1]))
@@ -2544,9 +2658,14 @@ class TableEditing:
             if self.copied is not None:
                 self.copied = None
                 item.update()
-            elif not getattr(item, "alone", False):
+            else:
+                # the cells let go (shown alone too: the sheet stays in
+                # view), so the keys are the markups' again and the tools
+                # draw on it (the user, 2026-10-22: "escape while in sheet
+                # mode should unselect a cell so I can start using shortcuts
+                # for markups"); a click on a cell takes them up again
                 self.close()
-            # (the workbook view: there is always an active cell, as in Excel)
+                self.view.setFocus(Qt.OtherFocusReason)
             return True
         command = self._bound_command(event)
         if command is not None:
@@ -3621,3 +3740,17 @@ class TableEditing:
                                         "equations as Sheet.name):")
         if ok and name.strip():
             self.define_name(name.strip())
+
+
+class _StillHeld:
+    """A pointer held still past the sheet's edge while it scrolls (the
+    moves the edge scroll makes for it)."""
+
+    @staticmethod
+    def buttons():
+        return Qt.LeftButton
+
+    @staticmethod
+    def modifiers():
+        from PySide6.QtWidgets import QApplication
+        return QApplication.keyboardModifiers()
