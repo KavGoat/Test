@@ -471,6 +471,34 @@ def test_renaming_in_the_properties_panel_updates_formulas(w):
     assert sorted(t.name for t in tables(w)) == ["Table1", "Table2"]
 
 
+def test_a_name_already_taken_in_the_properties_panel_warns(w, monkeypatch):
+    """The user, 2026-10-22: a name another sheet or table has is refused
+    with a warning (not only on the status bar); the box shows the old name."""
+    from PySide6.QtWidgets import QLineEdit, QMessageBox
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning",
+                        staticmethod(lambda parent, title, text, *a: warned.append(text)))
+    one = make_table(w)
+    w.view.tables.close()
+    w.insert_table()
+    a, b = page_to_scene(w, 72, 300), page_to_scene(w, 168, 330)
+    drag(w.view, a.x(), a.y(), b.x(), b.y())
+    pump()
+    w.view.tables.close()
+    w.interactive_prompts = True
+    w.view.scene().clearSelection()
+    one.setSelected(True)
+    w.refresh_selection()
+    pump()
+    box = w.findChild(QLineEdit, "tableName")
+    box.setText("table2")
+    box.editingFinished.emit()
+    pump()
+    assert len(warned) == 1 and "already taken" in warned[0] and "this table" in warned[0]
+    assert box.text() == "Table1"
+    assert sorted(t.name for t in tables(w)) == ["Table1", "Table2"]
+
+
 def test_dragging_a_heading_border_resizes_and_double_click_fits(w):
     table = make_table(w)
     fill_column(w, table, ["a rather long piece of text"])

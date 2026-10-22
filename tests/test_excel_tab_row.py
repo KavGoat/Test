@@ -233,6 +233,49 @@ def test_a_double_click_renames_the_sheet_on_its_tab(w, book):
     assert [n for _u, n in tabs.entries][2] == "Sheet3" and tabs.editor is None
 
 
+def test_a_name_already_taken_is_refused_with_a_warning(w, book, monkeypatch):
+    """The user, 2026-10-22: "when trying to rename a sheet to something
+    that's already named, show a warning saying no" (Excel: That name is
+    already taken). The tab goes back to editing with the name typed."""
+    from PySide6.QtWidgets import QMessageBox
+    tabs = book
+    bar = tabs.bar
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning",
+                        staticmethod(lambda parent, title, text, *a: warned.append(text)))
+    w.interactive_prompts = True
+
+    def rename(index, text):
+        QTest.mouseDClick(bar, Qt.LeftButton, Qt.NoModifier, bar.tabRect(index).center())
+        pump()
+        QTest.keyClicks(tabs.editor, text)
+        QTest.keyClick(tabs.editor, Qt.Key_Return)
+        pump()
+
+    rename(1, "sheet1")             # another's name, in any case
+    assert len(warned) == 1 and "already taken" in warned[0] and "Sheet1" in warned[0]
+    assert [n for _u, n in tabs.entries] == ["Sheet1", "Sheet2", "Sheet3"]
+    editor = tabs.editor
+    assert isinstance(editor, QLineEdit) and editor.isVisible(), "back to editing"
+    assert editor.text() == "sheet1" and editor.selectedText() == "sheet1"
+    assert editor.geometry().intersects(bar.tabRect(1))
+    QTest.keyClicks(editor, "Loads (2)")     # typed over: a name of its own
+    QTest.keyClick(editor, Qt.Key_Return)
+    pump()
+    assert [n for _u, n in tabs.entries] == ["Sheet1", "Loads (2)", "Sheet3"]
+    assert tabs.editor is None and len(warned) == 1
+    # equations write both Loads (2) and Loads_2 as Loads_2: refused too
+    rename(2, "Loads_2")
+    assert len(warned) == 2 and "Loads_2" in warned[1] and "Loads (2)" in warned[1]
+    assert [n for _u, n in tabs.entries][2] == "Sheet3"
+    QTest.keyClick(tabs.editor, Qt.Key_Escape)
+    pump()
+    assert tabs.editor is None and [n for _u, n in tabs.entries][2] == "Sheet3"
+    # its own name in another case is no clash
+    rename(2, "SHEET3")
+    assert len(warned) == 2 and [n for _u, n in tabs.entries][2] == "SHEET3"
+
+
 def test_shift_f11_inserts_a_sheet_before_the_one_shown(w, book):
     tabs = book
     QTest.mouseClick(tabs.bar, Qt.LeftButton, Qt.NoModifier, tabs.bar.tabRect(1).center())

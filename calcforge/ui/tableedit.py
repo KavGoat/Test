@@ -37,6 +37,7 @@ from ..items.table import (HEADING_H, ROWNUM_W, TableItem, THIN, cell_font, show
 from ..sheet import clip
 from ..sheet import formula as F
 from ..sheet.refs import CellRef, area_text, col_letters, parse_range
+from ..sheet.docbook import sheet_ident
 from ..sheet.style import Border
 
 REF_COLOURS = ["#1f6fd1", "#d1281f", "#7b2fb0", "#1d8a3a", "#c76a00", "#008b8b", "#b0306e"]
@@ -92,6 +93,32 @@ def _alive(item) -> bool:
         return item is not None and item.scene() is not None
     except RuntimeError:
         return False
+
+
+def rename_refused(item, name: str, error: Exception) -> str:
+    """Why a sheet or table cannot take the name: Excel's words when another
+    one already has it, else the name's own problem."""
+    wb = getattr(item.sheet, "workbook", None)
+    other = wb.sheet(name.strip()) if wb is not None else None
+    if other is not None and other is not item.sheet:
+        kind = "sheet" if getattr(item, "SHEET_RUN", False) else "table"
+        return (f"That name is already taken: another sheet or table is called "
+                f"\u201c{other.name}\u201d. Try a different one for this {kind}.")
+    clash = _written_alike(wb, item.sheet, name) if wb is not None else None
+    if clash is not None:
+        return (f"That name is already taken in equations: \u201c{clash.name}\u201d "
+                f"and \u201c{name.strip()}\u201d are both written {sheet_ident(name)}. "
+                f"Try a different one.")
+    return str(error)
+
+
+def _written_alike(wb, sheet, name: str):
+    """Another sheet or table an equation would write the same way
+    (Loads (2) and Loads_2 are both Loads_2), the exact name aside."""
+    ident = sheet_ident(name).lower()
+    lower = name.strip().lower()
+    return next((s for s in wb.sheets if s is not sheet and s.name.lower() != lower
+                 and sheet_ident(s.name).lower() == ident), None)
 
 
 def _frames(item) -> list:
@@ -3248,10 +3275,21 @@ class TableEditing:
                 frames.append(other.parentItem())
         self.view.begin_snapshot(frames)
         try:
+            clash = _written_alike(wb, item.sheet, name)
+            if clash is not None:
+                raise ValueError(f"\u201c{clash.name}\u201d is already written "
+                                 f"{sheet_ident(name)} in equations.")
             wb.rename_sheet(item.sheet, name)
         except ValueError as e:
             self.view.statusMessage.emit(str(e))
             self.view._snapshot = []
+            # Excel: "That name is already taken", in a box that must be
+            # answered (a name refused only on the status bar went unseen)
+            window = getattr(self.view, "window", None)
+            if getattr(window, "interactive_prompts", True):
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(window if isinstance(window, QWidget) else self.view,
+                                    "Rename", rename_refused(item, name, e))
             return False
         # formulas in other tables changed too: their pages are in the snapshot
         self.view.commit_snapshot("Rename table")

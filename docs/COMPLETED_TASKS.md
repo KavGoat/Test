@@ -3,6 +3,12 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-23 (later) — the side toolbar's blue gap, a sheet name already taken refused
+
+- The quick check passed on 8982328 before it was pushed.
+- A toolbar held at a side edge marks its room with Qt's blue rubber band, as along the top; the toolbar itself stays under the pointer.
+- Renaming a sheet or table to a name another already has (or one equations would write the same way) shows **That name is already taken** and goes back to editing: tests/test_excel_tab_row.py, tests/test_tables.py.
+
 ## 2026-10-23 — Excel's zoom, the side toolbar stood in its room, thumbnails, tabs and names (pushed at 32bdcfc)
 
 - Full test run at 32bdcfc passed (`-n 3`, every-command tests included); 14/14 planted bugs caught.

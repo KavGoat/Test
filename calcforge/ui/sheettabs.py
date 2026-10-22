@@ -708,10 +708,23 @@ class SheetTabs(QWidget):
         item = self._item(uid)
         name = next((n for u, n in self.entries if u == uid), None)
         if keep and item is not None and new and new != name:
-            self.window.view.tables.rename_to(item, new)
+            if not self.window.view.tables.rename_to(item, new):
+                # refused (another sheet has the name): Excel puts the tab
+                # back into editing, the name typed chosen to type over
+                QTimer.singleShot(0, lambda: self._rename_again(uid, new))
+                return
             self.entries = []
             self.refresh()
         self.window.view.setFocus()
+
+    def _rename_again(self, uid: str, text: str) -> None:
+        index = next((i for i, (u, _n) in enumerate(self.entries) if u == uid), -1)
+        if index < 0:
+            return
+        self._rename(index)
+        if self.editor is not None:
+            self.editor.setText(text)
+            self.editor.selectAll()
 
     # -- moving a sheet ------------------------------------------------------------------
     def _moved(self, frm: int, to: int) -> None:

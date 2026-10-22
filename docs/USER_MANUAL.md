@@ -1894,7 +1894,11 @@ tab — or press and hold it, on a touch screen — for **Insert Sheet**, **Dele
 **Rename…**, **Print**, **Go To** and **Close Workbook** — and, on a sheet of an
 imported Excel workbook, the **Self-contained** tick (see *Excel workbooks*). Rename a table from its right-click menu
 (**Rename Table…**) or the Properties panel; references follow a rename. Sheet and
-table names are unique in the whole document.
+table names are unique in the whole document: a name another sheet or table
+already has (in any case) is refused with a warning, **That name is already
+taken**, and the tab goes back to editing with the name you typed chosen, ready
+to type over. So is a name equations would write the same way as another's
+(`Loads (2)` and `Loads_2` are both `Loads_2` in an equation).
 
 **Print / Don't Print.** **Print** on a tab's menu is ticked while the sheet
 prints; untick it for **Don't Print** (one undo step). A sheet that doesn't print
