@@ -322,7 +322,11 @@ def set_view(window, which: str) -> None:
     if which == PAGE_LAYOUT:
         if is_on(window):
             leave(window, to=index)
-            window.go_to_page(index)
+            # its page, at its top (going to it would open the workbook again)
+            window.view.go_to_page_top(index)
+            window.current_index = -1
+            window.follow_scrolled_page(index)
+            _chrome(window)
         return
     uid = run_shown(scene)
     if uid is None:
@@ -520,6 +524,13 @@ def fill(view, extra: Optional[QPointF] = None) -> bool:
     if tables.item is item:
         t, l, b, r = tables.selection()
         rows, cols = max(rows, b + 1, tables.active[0] + 1), max(cols, r + 1, tables.active[1] + 1)
+    hold = getattr(scene, "sheet_hold", None)
+    if hold is not None:
+        # a cell being gone to (reach): its row and column kept until it is
+        if tables.item is item and tables.active[0] >= hold[0] - 1 \
+                and tables.active[1] >= hold[1] - 1:
+            scene.sheet_hold = None
+        rows, cols = max(rows, hold[0]), max(cols, hold[1])
     now = scene.sheet_extent
     held = view.verticalScrollBar().isSliderDown() or view.horizontalScrollBar().isSliderDown()
     if held:
@@ -546,6 +557,7 @@ def reach(view, item, cell: tuple) -> bool:
         return False
     rows, cols = scene.sheet_extent
     want = (max(rows, cell[0] + 1), max(cols, cell[1] + 1))
+    scene.sheet_hold = (cell[0] + 1, cell[1] + 1)
     if want != tuple(scene.sheet_extent):
         was = item.size
         scene.sheet_extent = want

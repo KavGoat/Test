@@ -969,6 +969,10 @@ class TableEditing:
         of the cells picked (sheetstatus.py)."""
         from . import sheetstatus
         sheetstatus.refresh_soon(getattr(self.view, "window", None))
+        bar = self.bar
+        for button in (getattr(bar, "cancel_button", None), getattr(bar, "enter_button", None)):
+            if button is not None:
+                button.setEnabled(self.editor is not None)   # ✗ and ✓ while typing
 
     def _update_bar(self) -> None:
         self._status_soon()
