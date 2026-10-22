@@ -3,6 +3,16 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-22 (later) — SMath unit typing in cells, named ranges coloured, the workbook view, Global (pushed at 392d905)
+
+- Full test run passed at 392d905 (`-n 3`, every-command tests included); 14/14 planted bugs caught.
+- A cell's unit is typed as into SMath's unit placeholder, by CalcForge's own equation editor.
+- Spreadsheet names in a formula being typed are coloured, their cells outlined to match.
+- A workbook opens as Excel does: its sheet alone, filling the document area, tabs and a close button at the bottom; page breaks dashed.
+- Thumbnails clicks no longer get stuck inside a workbook; the tab strip shows only while a sheet is shown alone.
+- Sheet watermarks show the document's page number, none on sheets not printed.
+- "Global (Read by Later Calc Sections)" is now "Global".
+
 ## 2026-10-22 — frame pacing, the toolbar preview, sharp markups, SMath units in cells, sheet-scoped names, workbook sections and printing (pushed at a5a8d8c)
 
 - Full test run passed at a5a8d8c (`-n 3`, every-command tests included); 14/14 planted bugs caught.
