@@ -521,6 +521,9 @@ class _ToolbarDrags(QObject):
         self.room = None
 
     def eventFilter(self, watched, event) -> bool:
+        from PySide6.QtWidgets import QToolBar
+        if not isinstance(watched, QToolBar):
+            return False                   # (only a toolbar is ever held)
         kind = event.type()
         if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
             self.held = watched
