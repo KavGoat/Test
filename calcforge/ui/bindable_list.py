@@ -97,6 +97,10 @@ ALIASES: dict[str, str] = {
     "cell.make_local": "cell.make_global",
     # the Variable row's Global tick replaced Make Global / Local (2026-10-16)
     "cell.global_read_by_later_calc_sections": "cell.make_global",
+    # the menus' "Global (Read by Later Calc Sections)" is plain Global now
+    # (the user, 2026-10-22: the long name was confusing)
+    "cell.global": "cell.make_global",
+    "canvas.global_read_by_later_calc_sections": "canvas.global",
     "cell.insert.insert_cells": "sheet.insert_cells",
     "cell.delete.delete_cells": "sheet.delete_cells",
     # a cell's menu: the spreadsheet's own keys (shortcuts.SHEET_KEYS)
@@ -259,8 +263,7 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'canvas.insert_here.calculation_block':
         ('Insert Here ▸ Calculation Block', 'Calculation', 'always'),
     'canvas.insert_here.plot': ('Insert Here ▸ Plot', 'Calculation', 'always'),
-    'canvas.global_read_by_later_calc_sections':
-        ('Equation Global', 'Calculation', 'always'),
+    'canvas.global': ('Equation Global', 'Calculation', 'always'),
     'canvas.equation.display_input_data':
         ('Equation ▸ Display Input Data', 'Calculation', 'always'),
     'canvas.equation.go_to_definition': ('Equation ▸ Go to Definition', 'Calculation', 'always'),
