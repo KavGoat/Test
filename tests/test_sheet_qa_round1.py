@@ -692,7 +692,7 @@ def test_a_cells_menu_starts_with_its_variable_name_and_global(w):
     assert holder.objectName() == "cellVariableRow"
     # Decimal Places and Significant Figures beside it, as an equation's (2026-10-19)
     assert [a.text() for a in actions[1:3]] == ["Decimal Places", "Significant Figures"]
-    assert actions[3].text() == "Global (Read by Later Calc Sections)" and actions[3].isCheckable()
+    assert actions[3].text() == "Global" and actions[3].isCheckable()
     assert actions[4].isSeparator() and actions[5].text() == "Cut", "then Excel's menu, as before"
     labels = [a.text() for a in menu.actions()]
     assert "Make Global" not in labels and "Make Local" not in labels, "Global once, at the top"
@@ -743,7 +743,7 @@ def test_a_cells_menu_starts_with_its_variable_name_and_global(w):
     # Global, clicked in the real menu
     click(w, cell_scene(tables(w)[0], "B2"))
     found, enabled, _ = through_menu(w, right_click_cell(w, tables(w)[0], "B2"),
-                                     ["Global (Read by Later Calc Sections)"])
+                                     ["Global"])
     assert found and enabled
     t = tables(w)[0]
     assert calcsections.cells_global(t.sheet, [1, 1, 1, 1])

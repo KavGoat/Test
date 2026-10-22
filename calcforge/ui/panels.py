@@ -4582,12 +4582,11 @@ class PropertiesPanel(QScrollArea):
         significant.toggled.connect(lambda on: change(
             "Significant figures", set_fmt(significant=on)))
         form.addRow("", significant)
-        # the menu's Global (Read by Later Calc Sections), its words in the tip
-        # so the panel keeps its width
+        # the menu's Global (the user, 2026-10-22: "read by later calc
+        # section" was confusing)
         made_global = QCheckBox("Global")
         made_global.setObjectName("equationGlobal")
-        made_global.setToolTip("Global: read by later calc sections. Its variables carry "
-                               "on past calc section breaks")
+        made_global.setToolTip("Equations after a section break can use this too")
         made_global.setChecked(region.is_global)
         made_global.toggled.connect(lambda on: change(
             "Make global" if on else "Make local", lambda r: setattr(r, "is_global", on)))

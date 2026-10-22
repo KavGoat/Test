@@ -236,7 +236,7 @@ def test_the_cells_menu_starts_as_an_equations_does(win):
     menu = win.view.tables.cell_menu()
     top = [a.text() for a in menu.actions() if not a.isSeparator()][:4]
     assert top == ["", "Decimal Places", "Significant Figures",
-                   "Global (Read by Later Calc Sections)"]     # "" is the Variable box
+                   "Global"]     # "" is the Variable box
     equation = an_equation(win, "e1:=1/3", x=300, y=500)
     put_down(win)
     equation.setSelected(True)

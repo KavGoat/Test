@@ -593,7 +593,7 @@ def test_context_menu_items_match_site(v):
     whole = _menu_titles(_whole_menu(v, item))
     first = [x if isinstance(x, str) else x[0] for x in whole][:4]
     assert first == ["Decimal Places", "Significant Figures",
-                     "Global (Read by Later Calc Sections)", "-"]
+                     "Global", "-"]
     places = dict(x for x in whole if not isinstance(x, str))["Decimal Places"]
     assert places[:2] == ["Trailing Zeros", "-"]
     assert places[2:] == [str(n) if n != 4 else "4 *" for n in range(16)]

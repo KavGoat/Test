@@ -748,7 +748,7 @@ def test_a_definitions_menu_starts_with_its_variable_settings(win):
     menu = win.build_context_menu(definition, definition.sceneBoundingRect().center())
     first = [a.text() for a in menu.actions()][:3]
     assert first == ["Decimal Places", "Significant Figures",
-                     "Global (Read by Later Calc Sections)"]
+                     "Global"]
     equation = next(a.menu() for a in menu.actions() if a.text() == "Equation")
     assert "Decimal places" not in [a.text() for a in equation.actions()], "moved, not copied"
     places = menu.actions()[0].menu()

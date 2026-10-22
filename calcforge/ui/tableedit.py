@@ -3135,11 +3135,11 @@ class TableEditing:
         # calculation sections (2026-10-11): cells read by every later section
         area = list(self.selection())
         on = calcsections.cells_global(item.sheet, area)
-        made = menu.addAction("Global (Read by Later Calc Sections)",
+        made = menu.addAction("Global",
                               lambda: calcsections.set_cells_global(window, item, area, not on))
         made.setCheckable(True)
         made.setChecked(on)
-        made.setToolTip("Global cells are read by every later calc section (past its breaks)")
+        made.setToolTip("Equations after a section break can use these cells too")
 
     def number_entries(self, menu) -> None:
         """Decimal Places ▸ (General, 0–15) and Significant Figures, worded

@@ -1129,10 +1129,9 @@ are not seen after it — an equation reading one says so, and a cell gives
 `#REF!`. The break shows as a purple band above its page and never prints.
 
 To carry something past the breaks, make it **Global**: right-click an equation
-▸ **Global (Read by Later Calc Sections)** or right-click its row in the Variables
-panel ▸ **Make Global**; for a table's cells, right-click ▸ **Global (Read by Later
-Calc Sections)**. Every later section then reads it; the same commands make it
-local again.
+▸ **Global**, or right-click its row in the Variables panel ▸ **Make Global**;
+for a table's cells, right-click ▸ **Global**. Equations after a section break
+can then use it; the same commands make it local again.
 
 ### The Variables panel
 

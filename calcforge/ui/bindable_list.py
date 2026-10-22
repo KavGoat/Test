@@ -260,7 +260,7 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
         ('Insert Here ▸ Calculation Block', 'Calculation', 'always'),
     'canvas.insert_here.plot': ('Insert Here ▸ Plot', 'Calculation', 'always'),
     'canvas.global_read_by_later_calc_sections':
-        ('Equation Global (Read by Later Calc Sections)', 'Calculation', 'always'),
+        ('Equation Global', 'Calculation', 'always'),
     'canvas.equation.display_input_data':
         ('Equation ▸ Display Input Data', 'Calculation', 'always'),
     'canvas.equation.go_to_definition': ('Equation ▸ Go to Definition', 'Calculation', 'always'),
