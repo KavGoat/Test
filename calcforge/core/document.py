@@ -683,6 +683,27 @@ class Document:
         except ValueError:
             return -1
 
+    def printed_numbers(self) -> list:
+        """Each page's number as printed: the pages that print counted in
+        order, a page that doesn't print None (the user, 2026-10-22: "page
+        numbers count printed pages only" — the pages after one that
+        doesn't print move up to fill its place)."""
+        out, n = [], 0
+        for page in self.pages:
+            if page.printable:
+                n += 1
+                out.append(n)
+            else:
+                out.append(None)
+        return out
+
+    def printed_number(self, page_index: int):
+        """Page *page_index*'s number as printed, or None (it doesn't print)."""
+        pages = self.pages
+        if not 0 <= page_index < len(pages) or not pages[page_index].printable:
+            return None
+        return sum(1 for page in pages[:page_index + 1] if page.printable)
+
     # -- assets ------------------------------------------------------------
     def add_asset(self, data: bytes, suffix: str = "png") -> str:
         key = f"asset_{uuid.uuid4().hex[:12]}.{suffix}"
@@ -791,8 +812,9 @@ class Document:
             "keywords": self.keywords,
             "revision": str(self.revision) if self.revision else "",
             "id": self.doc_id,
-            "page": str(page_index + 1),
-            "pages": str(len(self.pages)),
+            # the page as printed: the pages that don't print aren't counted
+            "page": str(self.printed_number(page_index) or page_index + 1),
+            "pages": str(sum(1 for page in self.pages if page.printable) or len(self.pages)),
             "date": now.strftime("%Y-%m-%d"),
             "time": now.strftime("%H:%M"),
             "file": self.path or "",

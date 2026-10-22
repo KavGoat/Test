@@ -707,6 +707,10 @@ class PagesPanel(QWidget):
         self.page_buttons = {}
         self._button_icons = {}
         for key, picture, tip, slot in (
+                # one click, no dialog: a blank page after this one
+                ("quick_add_page", "add_page", "Add Page — a blank page after this "
+                 "one (after the whole workbook on a workbook), no questions",
+                 lambda: self.window.quick_add_page()),
                 ("insert_pdf", "insert_pages", "Insert Pages — pages from a PDF, after "
                  "this page; the arrow offers Before or After",
                  lambda: self.window.insert_pdf()),
@@ -1345,14 +1349,17 @@ class PagesPanel(QWidget):
             del self._thumbnails[gone]
         self.list.clear()
         lines = 1
+        # numbered as printed: a page that doesn't print has no number, and
+        # those after it move up (the user, 2026-10-22)
+        numbers = document.printed_numbers()
         for index, page in enumerate(document.pages):
             # The scale rides with the page number: what a measurement on that
             # page means depends on it, and it belongs where the page is named
             # — on a line of its own under the number, as Revu has it.
             scale = page.scale.label if page.scale.is_calibrated() else ""
-            parts = [str(index + 1)]
+            parts = [str(numbers[index])] if numbers[index] else []
             label = page.label.strip()
-            if label and label != parts[0]:
+            if label and label not in (str(numbers[index] or ""), str(index + 1)):
                 parts.append(label)
             caption = "   ".join(parts)
             if scale:
@@ -1360,7 +1367,9 @@ class PagesPanel(QWidget):
                 lines = 2
             entry = QListWidgetItem(self._placeholder(page, document), caption)
             entry.setTextAlignment(Qt.AlignHCenter)
-            tip = page.label or page.source_note or f"Page {index + 1}"
+            tip = page.label or page.source_note or (
+                f"Page {numbers[index]}" if numbers[index] else "No page number")
+            tip += f"\nPage {index + 1} of the document's {len(document.pages)} (the page box)"
             if not page.printable:
                 entry.setForeground(QColor("#8b929c"))
                 tip += "\nExcluded from print and export"

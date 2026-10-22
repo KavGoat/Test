@@ -67,9 +67,14 @@ class Section:
     def last(self) -> int:
         return self.pages[-1]
 
+    #: its pages' numbers as printed (Document.printed_numbers), those that print
+    printed: list = []
+
     def page_range(self) -> str:
-        """"pages 2–10", or "page 3"."""
-        a, b = self.first + 1, self.last + 1
+        """"pages 2–10", or "page 3", numbered as printed; "doesn't print"."""
+        if not self.printed:
+            return "doesn't print"
+        a, b = self.printed[0], self.printed[-1]
         return f"page {a}" if a == b else f"pages {a}–{b}"
 
     def label(self) -> str:
@@ -105,26 +110,28 @@ def run_book(document, uid: str) -> tuple:
     if sheet is not None:
         book_id = getattr(sheet, "book", None)
         found = sheet.workbook.books.get(book_id) if book_id else None
-        shown = None
-        if found is not None:
-            import os
-            shown = os.path.splitext(found.file)[0] if found.file else found.name
+        shown = _book_shown(found.file, found.name) if found is not None else None
         return book_id, shown, sheet.name
     record = record or {}
     book = record.get("book") or {}
-    shown = None
-    if book.get("id"):
-        import os
-        shown = os.path.splitext(book.get("file") or "")[0] or book.get("name") or "Workbook"
+    shown = _book_shown(book.get("file") or "", book.get("name") or "") if book.get("id") \
+        else None
     return book.get("id"), shown, record.get("name") or "Sheet"
+
+
+def _book_shown(file: str, name: str) -> str:
+    """A workbook's name as shown: its file's name (a copy's is "Loads (2)",
+    workbook_copy), else its name for the equations."""
+    import os
+    return os.path.splitext(os.path.basename(file or ""))[0] or name or "Workbook"
 
 
 def sections(document, fresh: bool = False) -> list:
     """The document's workbooks, in page order (kept until its pages or
     their sheets change; *fresh*: worked out again, a sheet renamed)."""
     pages = document.pages
-    key = tuple((i, id(p), p.sheet, id(p.frame)) for i, p in enumerate(pages)
-                if p.sheet is not None)
+    key = (tuple((i, id(p), p.sheet, id(p.frame)) for i, p in enumerate(pages)
+                 if p.sheet is not None), tuple(p.printable for p in pages))
     cached = getattr(document, "_sections_cache", None)
     if not fresh and cached is not None and cached[0] == key and cached[1] == len(pages):
         return cached[2]
@@ -143,9 +150,11 @@ def sections(document, fresh: bool = False) -> list:
             last._names = []
             out.append(last)
         last._names.append(sheet_name)
+    numbers = document.printed_numbers()
     for section in out:
         if section.book is None and len(section.runs) > 1:
             section.name = "Workbook"      # sheets made here, side by side
+        section.printed = [numbers[i] for i in section.pages if numbers[i]]
     document._sections_cache = (key, len(pages), out)
     return out
 
@@ -292,8 +301,6 @@ def insert_sheet_page(window, index: Optional[int] = None, before: bool = False,
                       new_sheet: bool = False) -> None:
     """A spreadsheet page beside page *index*: part of the run it touches,
     or a new sheet of its own (always, with *new_sheet*: after the run)."""
-    from ..items.sheetpage import SheetRunItem
-
     document = window.document
     which = window.page_index(index)
     here = document.pages[which]
@@ -333,19 +340,43 @@ def insert_sheet_page(window, index: Optional[int] = None, before: bool = False,
             page.sheet = run
             page.printable = printable
         else:
-            item = SheetRunItem()
-            page.sheet = item.uid
-            page._pending_items = [item.serialize()]
+            page.sheet, record = new_sheet_record(setup)
+            page._pending_items = [record]
         window.current_index = target
     window._structural_change("Insert spreadsheet page", mutate)
+
+
+def one_page_area(setup) -> list:
+    """The cells that fit on one page at *setup*, from A1 — a new sheet's
+    print area (the user, 2026-10-22: "default to a one-page-size print
+    area on new sheet insert"), as [top, left, bottom, right]."""
+    from ..sheet.pagination import paginate
+    from .xlsximport import _Layout
+    paging = paginate(_Layout({"cells": [], "page": {}}), setup)
+    (a, b), (c0, c1) = paging.slices[0], paging.groups[0]
+    return [0, 0, max(b, 0), max(c1, 0)]
+
+
+def new_sheet_record(setup, book: Optional[dict] = None) -> tuple:
+    """(run id, record) of a new, empty sheet: its print area one page of
+    cells from A1 (Page Layout ▸ Print Area ▸ Clear Print Area takes it
+    off), part of the imported workbook *book* when given."""
+    from ..items.sheetpage import SheetRunItem
+    item = SheetRunItem()
+    record = item.serialize()
+    area = one_page_area(setup)
+    table = {"name": None, "cells": [], "styles": [{}],
+             "page": {"print_area": area} if area else {}}
+    if book is not None:
+        table["book"] = dict(book)
+    record["table"] = table
+    return item.uid, record
 
 
 def new_sheet_in(window, section: Section) -> None:
     """The sheet tabs' +: a new sheet at the end of the workbook in view —
     one of the Excel workbook's sheets when it is one (sharing its names),
     its paper the last sheet's, with Excel's Normal margins."""
-    from ..items.sheetpage import SheetRunItem
-
     document = window.document
     target = section.last + 1
     setup = PageSetup.from_dict(document.pages[section.last].setup.to_dict())
@@ -360,11 +391,7 @@ def new_sheet_in(window, section: Section) -> None:
     def mutate():
         page = document.add_page(target)
         page.setup = setup
-        item = SheetRunItem()
-        record = item.serialize()
-        if book is not None:
-            record["table"] = {"name": None, "cells": [], "styles": [{}], "book": dict(book)}
-        page.sheet = item.uid
+        page.sheet, record = new_sheet_record(setup, book)
         page._pending_items = [record]
         window.current_index = target
     window._structural_change("Insert spreadsheet page", mutate)
@@ -396,6 +423,83 @@ def safe_target(document, target: int) -> int:
         if section.book is not None and section.first < target <= section.last:
             return section.last + 1
     return target
+
+
+def copy_name(name: str, taken: set) -> str:
+    """Excel's name for a copied sheet: "Loads (2)", then (3)…, not one of
+    *taken* (lower case)."""
+    n = 2
+    while f"{name} ({n})".lower() in taken:
+        n += 1
+    return f"{name} ({n})"
+
+
+def workbook_copy(document, section: Section) -> list:
+    """Page records of a copy of the workbook *section*: every sheet with
+    its cells, formats, names, print settings and Print / Don't Print, and
+    the markups on its pages (the user, 2026-10-22: "Duplicate Page on a
+    workbook ... should insert a whole new workbook"). Each sheet is named
+    as Excel names a copy ("Loads (2)"), the copy's formulas and names read
+    its own sheets, and the copy is a workbook of its own (an Excel
+    workbook's copy as Self-contained as it is, sheets made here a
+    self-contained one; its name for the equations unique, Loads_2) — so
+    equations reading the original go on reading the original."""
+    import uuid
+
+    from ..sheet import formula as F
+    from ..sheet.docbook import book_for
+    from ..sheet.xlsx import workbook_ident
+    wb = book_for(document).workbook
+    entries = fresh_item_ids([document.pages[i].to_dict() for i in section.pages])
+    taken = {sheet.name.lower() for sheet in wb.sheets}
+    tables = [payload["table"] for entry in entries for payload in entry.get("items", [])
+              if isinstance(payload, dict) and payload.get("type") == "sheet_run"
+              and isinstance(payload.get("table"), dict)]
+    renamed = {}
+    for table in tables:
+        old = table.get("name") or "Sheet"
+        new = copy_name(old, taken)
+        taken.add(new.lower())
+        renamed[old] = new
+        table["name"] = new
+    import os
+
+    from ..sheet.docbook import sheet_ident
+    idents = {b.name for b in wb.books.values()}
+    idents |= {sheet_ident(s.name) for s in wb.sheets} | {sheet_ident(n) for n in taken}
+    shown = {_book_shown(b.file, b.name).lower() for b in wb.books.values()}
+    shown |= {s.name.lower() for s in sections(document)}
+    found = wb.books.get(section.book) if section.book is not None else None
+    if found is not None:
+        stem, ext = os.path.splitext(os.path.basename(found.file or ""))
+        title = copy_name(stem or found.name, shown)
+        file, own = title + (ext or ".xlsx"), found.self_contained
+    else:
+        # sheets made here: the copy a workbook of its own, so that its names
+        # are its own and not the original's again
+        title = copy_name(section.name, shown)
+        file, own = title, True
+    # the copy's file name says it is the copy (Loads (2).xlsx): it is how
+    # the workbook is shown; its name for the equations is unique (Loads_2)
+    book = {"id": "book-" + uuid.uuid4().hex[:12], "name": workbook_ident(file, idents),
+            "file": file, "self_contained": own}
+
+    def moved(text: str) -> str:
+        for old, new in renamed.items():
+            if old.lower() in text.lower():
+                try:
+                    text = F.rename_sheet_in(text, old, new)
+                except F.FormulaError:
+                    pass
+        return text
+    for table in tables:
+        for cell in table.get("cells", []):
+            if isinstance(cell[2], str) and cell[2].startswith("="):
+                cell[2] = "=" + moved(cell[2][1:])
+        for entry in table.get("names", []):
+            entry[1] = moved(entry[1])
+        table["book"] = dict(book)
+    return entries
 
 
 def fresh_item_ids(entries: list) -> list:
@@ -537,3 +641,39 @@ def with_runs(document, pages: list) -> list:
 def blocks_calc(frame) -> bool:
     """Equations and tables do not go on spreadsheet pages."""
     return is_sheet_frame(frame)
+
+
+def duplicate_workbooks(window, wanted: list) -> bool:
+    """Duplicate Page on a workbook (its entry, or any of its pages): a copy
+    of the whole workbook as a new workbook right after it (workbook_copy),
+    one undo step, and the copy gone to. False when none of *wanted* is a
+    workbook's page (an ordinary page is duplicated as it always was)."""
+    import os
+
+    from ..core.document import Page
+    document = window.document
+    touched = [s for s in sections(document) if any(i in s.pages for i in wanted)]
+    if not touched:
+        return False
+    copies = [(section.last + 1, workbook_copy(document, section)) for section in touched]
+
+    def mutate():
+        first = None
+        for at, entries in reversed(copies):
+            for offset, entry in enumerate(entries):
+                page = Page.from_dict(entry)
+                page.uid = os.urandom(8).hex()
+                document.pages.insert(at + offset, page)
+        shift = 0
+        for at, entries in copies:
+            if first is None:
+                first = at + shift
+            shift += len(entries)
+        window.current_index = first
+    names = ", ".join(s.name for s in touched)
+    window._structural_change("Duplicate workbook", mutate)
+    from .sheetview import is_on
+    if is_on(window):
+        window.go_to_page(window.current_index)       # the copy, shown
+    window.status_hint.setText(f"Duplicated {names}: the copy follows it")
+    return True

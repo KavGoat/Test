@@ -66,6 +66,37 @@ def _looks_in(sheet, a: int, b: int, last_col: int) -> tuple:
     return tuple(sorted(out))
 
 
+#: Excel's select-all corner: its triangle, and the triangle under the pointer
+CORNER_MARK = QColor("#b6b6b6")
+CORNER_HOT = QColor("#5f5f5f")
+CORNER_HOT_BG = QColor("#e2e2e2")
+
+
+def paint_corner(painter: QPainter, box: QRectF, hot: bool = False, everything: bool = False,
+                 edge: Optional[QPen] = None) -> None:
+    """Excel's select-all box where the row and column headings meet: the
+    headings' grey, their edge, and a small triangle in its bottom right
+    corner pointing there — darker under the pointer, Excel's green when
+    the whole sheet is picked."""
+    from PySide6.QtGui import QPolygonF
+    painter.save()
+    painter.fillRect(box, CORNER_HOT_BG if hot else HEADING_BG)
+    if edge is not None:
+        painter.setPen(edge)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(box)
+    side = min(box.width(), box.height()) * 0.62
+    inset = min(box.width(), box.height()) * 0.14
+    right, bottom = box.right() - inset, box.bottom() - inset
+    triangle = QPolygonF([QPointF(right, bottom - side), QPointF(right, bottom),
+                          QPointF(right - side, bottom)])
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(EXCEL_GREEN if everything else (CORNER_HOT if hot else CORNER_MARK))
+    painter.drawPolygon(triangle)
+    painter.restore()
+
+
 def run_frames_from(frame) -> list:
     """The frames of the run *frame* is in, first to last."""
     scene = frame.scene() if frame is not None else None
@@ -119,6 +150,7 @@ class SheetRunItem(TableItem):
         # told what part is being repainted: a long sheet draws only its rows on screen
         self.setFlag(QGraphicsItem.ItemUsesExtendedStyleOption, True)
         self.setZValue(-2)
+        self.setAcceptHoverEvents(True)      # (the select-all corner lights up)
 
     def set_locked(self, locked: bool) -> None:
         self.locked = bool(locked)       # never picked up: it is the pages' own grid
@@ -461,7 +493,8 @@ class SheetRunItem(TableItem):
         # for any edit (the user's seismic workbook, 2026-10-19)
         rules = _looks_in(sheet, a, b, self.size[1] - 1) if sheet.cond_rules else None
         from .nametags import named_blocks, shown
-        tags = (shown(self), tuple(named_blocks(sheet)), self.alone, self._page_numbers())
+        tags = (shown(self), tuple(named_blocks(sheet)), self.alone, self._page_numbers(),
+                self.sheet_rows)
         return (tuple(xs), tuple(ys[a:b + 2]), content, [tuple(m) for m in sheet.merges], tags,
                 paging.first_col, paging.last_col, paging.print_rows, tuple(paging.slices),
                 tuple(paging.groups),
@@ -588,37 +621,39 @@ class SheetRunItem(TableItem):
             return                                     # one a turn: the next paint asks again
 
     def _page_numbers(self) -> tuple:
-        """Each of the run's pages: its number in the document, or 0 when
-        it doesn't print (no "Page N" on it)."""
+        """Each of the run's pages: its number as printed (the pages that
+        print counted, Document.printed_numbers), or 0 when it doesn't
+        print (no "Page N" on it)."""
+        frames = self.run_frames()
+        document = getattr(frames[0], "document", None) if frames else None
+        if document is None:
+            return tuple(0 for _f in frames)
+        numbers = document.printed_numbers()
+        where = {id(page): k for k, page in enumerate(document.pages)}
         out = []
-        for frame in self.run_frames():
-            page = frame.page
-            document = getattr(frame, "document", None)
-            if not page.printable or document is None or page not in document.pages:
-                out.append(0)
-            else:
-                out.append(document.index_of(page) + 1)
+        for frame in frames:
+            k = where.get(id(frame.page))
+            out.append((numbers[k] or 0) if k is not None else 0)
         return tuple(out)
 
     def _paint_paper(self, painter: QPainter, r0: int, r1: int) -> None:
         """White where it prints, grey for the scratch area; "Page N", the
-        page's number in the document (none on a page that doesn't print).
-        Shown alone (Excel's Normal view) it is all white, with no page
-        numbers: the dashed page breaks say where the pages fall."""
+        page's number as printed (none on a page that doesn't print). Shown
+        alone (the workbook view, Excel's Normal view) it is all white, the
+        thin lines saying where the pages fall, and the numbers stay."""
         xs, ys = self.edges()
         paging = self.paging
-        if self.alone:
-            painter.fillRect(QRectF(0, ys[r0], xs[-1], ys[r1 + 1] - ys[r0]), QColor("white"))
-            return
         numbers = self._page_numbers()
         c0, c1 = self._printed_cols()
         area = paging.print_rows
-        painter.fillRect(QRectF(0, ys[r0], xs[-1], ys[r1 + 1] - ys[r0]), SCRATCH)
+        band = QRectF(0, ys[r0], xs[-1], ys[r1 + 1] - ys[r0])
+        painter.fillRect(band, QColor("white") if self.alone else SCRATCH)
         top = ys[area[0]] if area else 0.0
-        bottom = ys[min(area[1] + 1, len(ys) - 1)] if area else ys[-1]
+        last = self.sheet_rows
+        bottom = ys[min(area[1] + 1, len(ys) - 1)] if area else ys[min(last, len(ys) - 1)]
         printed = QRectF(xs[c0], top, xs[c1 + 1] - xs[c0], bottom - top)
-        painter.fillRect(printed.intersected(QRectF(0, ys[r0], xs[-1], ys[r1 + 1] - ys[r0])),
-                         QColor("white"))
+        if not self.alone:
+            painter.fillRect(printed.intersected(band), QColor("white"))
         font = QFont(page_font("", 40.0, True))
         painter.setFont(font)
         painter.setPen(PAGE_LABEL)
@@ -645,21 +680,26 @@ class SheetRunItem(TableItem):
         paging = self.paging
         c0, c1 = self._printed_cols()
         painter.setRenderHint(QPainter.Antialiasing, False)
+        area = paging.print_rows
         if self.alone:
-            # Excel's Normal view: thin dashed lines where the pages fall
-            # and round what prints, never the Page Break Preview's blue
-            solid = QPen(NORMAL_BREAK, 1.0, Qt.DashLine)
+            # Excel's Normal view: a set print area outlined in a thin solid
+            # line, the pages' breaks thin and dashed (one put there by
+            # hand solid), never the Page Break Preview's blue
+            solid = QPen(NORMAL_BREAK, 1.0)
             solid.setCosmetic(True)
-            dashed = solid
+            dashed = QPen(NORMAL_BREAK, 1.0, Qt.DashLine)
+            dashed.setCosmetic(True)
+            edge = solid if area or options(self.sheet)["print_area"] else dashed
         else:
             solid = QPen(BREAK_BLUE, 2.0)
             solid.setCosmetic(True)
             dashed = QPen(BREAK_BLUE, 2.0, Qt.DashLine)
             dashed.setCosmetic(True)
-        area = paging.print_rows
+            edge = solid
         top = ys[area[0]] if area else 0.0
-        bottom = ys[min(area[1] + 1, len(ys) - 1)] if area else ys[-1]
-        painter.setPen(solid)
+        bottom = ys[min(area[1] + 1, len(ys) - 1)] if area else \
+            ys[min(self.sheet_rows, len(ys) - 1)]
+        painter.setPen(edge)
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(QRectF(xs[c0], top, xs[c1 + 1] - xs[c0], bottom - top))
         for k, (a, _b) in enumerate(paging.slices):
@@ -739,10 +779,32 @@ class SheetRunItem(TableItem):
             painter.drawText(cell, Qt.AlignCenter, str(r + 1))
         for cell, axis in marks:
             hidden_mark(painter, cell, axis)
-        corner = QRectF(-ROWNUM_W, -HEADING_H, ROWNUM_W, HEADING_H)
-        painter.fillRect(corner, HEADING_BG)
-        painter.setPen(grid)
-        painter.drawRect(corner)
+        paint_corner(painter, self.corner_rect(), self.corner_hot, self.everything_picked(),
+                     grid)
+
+    # -- Excel's select-all corner ------------------------------------------------------------
+    corner_hot = False                   # the pointer over it (hover)
+
+    def corner_rect(self) -> QRectF:
+        return QRectF(-ROWNUM_W, -HEADING_H, ROWNUM_W, HEADING_H)
+
+    def everything_picked(self) -> bool:
+        sel = self.selection if self.opened else None
+        rows, cols = self.size
+        return sel is not None and tuple(sel) == (0, 0, rows - 1, cols - 1)
+
+    def hoverMoveEvent(self, event) -> None:
+        self._hover_corner(self.corner_rect().contains(event.pos()))
+        super().hoverMoveEvent(event)
+
+    def hoverLeaveEvent(self, event) -> None:
+        self._hover_corner(False)
+        super().hoverLeaveEvent(event)
+
+    def _hover_corner(self, hot: bool) -> None:
+        if hot != self.corner_hot:
+            self.corner_hot = hot
+            self.update(self.corner_rect())
 
     # -- on paper ------------------------------------------------------------------------------------
     def paint_page(self, painter: QPainter, frame) -> Optional[tuple]:

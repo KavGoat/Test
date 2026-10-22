@@ -21,10 +21,14 @@ from tests.test_tables import cell_scene, click, enter, key, pump, type_text
 
 
 @pytest.fixture
-def w(window):
+def w(window, monkeypatch):
     window.show()
     window.activateWindow()
     window.view.set_zoom(1.0)
+    # these are about a sheet whose pages follow its rows: a new sheet's
+    # print area of one page (tests/test_workbook_view.py) is left off
+    from calcforge.ui import sheetpages as _pages
+    monkeypatch.setattr(_pages, "one_page_area", lambda setup: None)
     # these measure the ink on paper: the sheet's printed name tag (above its
     # grid) is left off here and tested in test_name_tags.py
     window.document.settings.show_name_tags = False
@@ -291,12 +295,15 @@ def test_turning_a_page_turns_the_whole_run_and_reflows_the_breaks(w):
     assert run.paging.slices[0][1] + 1 < 52         # fewer rows down
 
 
-def test_a_copied_sheet_page_is_an_ordinary_page(w):
+def test_duplicate_page_on_a_sheet_page_copies_its_workbook(w):
+    """The user, 2026-10-22: Duplicate Page on a workbook "should insert a
+    whole new workbook" (tests/test_workbook_pages.py)."""
     run = sheet_page(w)
     w.duplicate_page(1)
     pump()
-    assert [p.sheet for p in w.document.pages] == [None, run.uid, None]
-    assert len(runs(w)) == 1
+    pages = w.document.pages
+    assert pages[1].sheet == run.uid and pages[2].sheet not in (None, run.uid)
+    assert len(runs(w)) == 2
 
 
 # -- what does not go on it -------------------------------------------------------------------------
@@ -527,7 +534,7 @@ def test_save_and_reopen_keep_the_run_its_cells_and_its_markups(w, tmp_path):
         assert "15" in doc[1].get_text()
 
 
-def test_down_or_enter_off_the_last_page_adds_a_page(window):
+def test_down_or_enter_off_the_last_page_adds_a_page(window, monkeypatch):
     """2026-10-10: ↓ or Enter on the last row of a spreadsheet's last page
     goes on to a new page, as Excel's page layout view always has one."""
     from PySide6.QtCore import Qt
@@ -535,6 +542,8 @@ def test_down_or_enter_off_the_last_page_adds_a_page(window):
     from PySide6.QtWidgets import QApplication
 
     from calcforge.items.sheetpage import SheetRunItem
+    from calcforge.ui import sheetpages as _pages
+    monkeypatch.setattr(_pages, "one_page_area", lambda setup: None)   # (its rows' pages)
     window.show()
     window.insert_sheet_page(0)
     QApplication.processEvents()
@@ -553,10 +562,12 @@ def test_down_or_enter_off_the_last_page_adds_a_page(window):
     assert len(window.document.pages) == pages, "one undo takes the page away"
 
 
-def test_pasting_more_than_a_page_holds_adds_pages(window):
+def test_pasting_more_than_a_page_holds_adds_pages(window, monkeypatch):
     from PySide6.QtWidgets import QApplication
 
     from calcforge.items.sheetpage import SheetRunItem
+    from calcforge.ui import sheetpages as _pages
+    monkeypatch.setattr(_pages, "one_page_area", lambda setup: None)   # (its rows' pages)
     window.show()
     window.insert_sheet_page(0)
     QApplication.processEvents()

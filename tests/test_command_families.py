@@ -181,7 +181,10 @@ def test_every_insert_is_offered_before_or_after_everywhere(window):
     window.add_page()
     # Document ▸ Insert: the five, each Before / After, dialogs with "…"
     insert = sub(top(window, "Document"), "Insert")
-    assert labels(insert) == INSERTS
+    # first the one-click Add Page, no dialog, no Before / After (the user,
+    # 2026-10-22: "There's no simple add page option")
+    assert labels(insert) == ["Add Page"] + INSERTS
+    assert entry(insert, "Add Page").menu() is None
     shapes = {name: labels(entry(insert, name).menu()) for name in INSERTS}
     assert shapes == {"Blank Page": ["Before…", "After…"], "Spreadsheet Page": ["Before", "After"],
                       "Pages": ["Before…", "After…"], "Image Page": ["Before…", "After…"],

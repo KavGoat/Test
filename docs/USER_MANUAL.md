@@ -744,21 +744,26 @@ tool set keep their own drawing.
 **Thumbnails panel** (`Alt+T`). A picture of every page, as many to a row as
 the panel has room for, with the page number (and label) centred under it and
 its scale under that when it has one; the page picked out is framed in blue.
+Pages are numbered as they print: a page that doesn't print (greyed, with the
+crossed-out printer) has no number, and the pages after it move up to fill the
+gap — the same number its "Page N" mark, the header and footer's `{page}` and the
+printed page carry. The page box goes on counting every page, so that each one
+can be gone to (a page's tooltip gives both).
 Click to go there; drag pages to reorder them (a run of picked pages moves
 together); drop a PDF file onto it to insert its pages there. `Ctrl`+wheel over
 the panel changes the picture size, as do **Larger Thumbnails** and **Smaller
 Thumbnails** (on the Window menu too). The panel's title, **Thumbnails ▾**, is
 its menu: every insert (Before or After), Duplicate Page, Extract Pages…, Split
 Document…, Delete Pages…, Crop Pages…, Rotate Pages, Page Setup…, Set Scale… and
-the two sizes. The buttons after it are **Insert Pages**, **Insert Blank Page**
-and **Insert Spreadsheet Page** (each with Before or After on its arrow; a click
-puts it after this page), **Duplicate Page** and **Delete Pages**; on a narrow
-panel they go on a line of their own under the title.
+the two sizes. The buttons after it are **Add Page**, **Insert Pages**, **Insert
+Blank Page** and **Insert Spreadsheet Page** (each with Before or After on its
+arrow; a click puts it after this page), **Duplicate Page** and **Delete Pages**;
+on a narrow panel they go on a line of their own under the title.
 
 **A workbook is one entry.** The pages of a workbook — an Excel workbook brought
 in, or spreadsheet pages made here side by side — show in Thumbnails as one
 entry: its first page on a stack of sheets, with **▸ Loads** over **pages 2–10**
-(the document's own page numbers, which stay as they are everywhere else).
+(numbered as they print; **doesn't print** when none of its sheets does).
 Click the picture to open the workbook (its first sheet, alone: see *The workbook
 view and sheet tabs*); click its name (the ▸) to show its
 pages one by one (**▾ Loads**, on a tinted band) and again to fold them back;
@@ -768,10 +773,17 @@ Cut, Copy, Move Up / Down, Extract Pages, Print Pages and dragging it act on all
 its pages; with its pages shown, a page picked is that page. Nothing goes between
 an Excel workbook's sheets: a page dragged there is refused (and said so in the
 status bar), and a page inserted after one of its sheets goes after the workbook.
+**Duplicate Page** on a workbook — its entry or any of its pages — copies the
+whole workbook in right after it, one undo step: every sheet with its cells,
+formats, names, print settings and Print / Don't Print. The copy is named as
+Excel names a copy (**Loads (2)**, its sheets **Loads (2)** and **Factors (2)**),
+its formulas read its own sheets, and it is a workbook of its own, with its own
+names and its own name for the equations (`Loads_2`), so equations reading the
+original go on reading the original.
 
 **A page's right-click menu** (also **Document ▸ Current Page**): Page Setup…,
 Set Scale…, Cut, Copy and Paste Pages (Before or After), Move Up, Move Down,
-Insert Blank Page, Insert Spreadsheet Page, Insert Pages, Insert Image Page and
+**Add Page**, Insert Blank Page, Insert Spreadsheet Page, Insert Pages, Insert Image Page and
 Insert Excel Workbook (each Before or After), Duplicate Page, Extract Pages…,
 Split Document…, Delete Pages…, Crop Pages…, Rotate Pages (Clockwise or
 Anticlockwise), Rename Page Label, Reset Page Label, Reset All Page Labels, Print
@@ -782,13 +794,19 @@ Grid, Header/Footer (Show Header, Show Footer, Headers & Footers…), Paper Size
 read out as markups).
 
 **The Document menu** has the same page commands for the whole document:
-Document Properties… (`Ctrl+D`), Page Setup…, Rotate Pages, **Insert** (Blank
-Page `Ctrl+Shift+N`, Spreadsheet Page, Pages `Ctrl+Shift+I`, Image Page, Excel
-Workbook — each Before or After), Extract Pages… (`Ctrl+Shift+X`), Split
+Document Properties… (`Ctrl+D`), Page Setup…, Rotate Pages, **Insert** (**Add
+Page** first, then Blank Page `Ctrl+Shift+N`, Spreadsheet Page, Pages
+`Ctrl+Shift+I`, Image Page and Excel Workbook — each of those Before or After),
+Extract Pages… (`Ctrl+Shift+X`), Split
 Document…, Delete Pages… (`Ctrl+Shift+D`), Crop Pages… (`Alt+Shift+O`),
 Headers & Footers…, Colour Processing…, Flatten… (`Ctrl+Shift+M`), Unflatten,
 Duplicate Page, Add Bookmark (`Ctrl+B`) and Table of Contents.
 
+- **Add Page** is one click: a blank page right after this one (after the whole
+  workbook when this page is one of a workbook's), on the same paper and the same
+  way round, no questions, one undo step — and it goes there. It has no key of its
+  own (`Ctrl+Shift+N` is Insert Blank Page…); give it one in **CalcForge ▸ Keyboard
+  Shortcuts…**.
 - **Insert Blank Page** asks the size, how many and where. New pages are A4
   portrait unless you choose otherwise (A0–A5, Letter, Legal, Tabloid, ANSI and
   ARCH sizes, portrait or landscape).
@@ -1726,7 +1744,10 @@ the equation and R² on the chart). The axis titles carry the cells' units.
 
 - **Print area**: right-click ▸ **Page Layout ▸ Print Area ▸ Set Print Area** /
   **Clear Print Area** (also **Calculation ▸ Page Layout**). A sheet prints only its
-  print area, and its pages and thumbnails follow it.
+  print area, and its pages and thumbnails follow it. A new sheet starts with a
+  print area of one page of cells from A1; Clear Print Area takes it off, and its
+  pages then follow the cells it uses. An Excel sheet keeps the print area it
+  came with, and one with none prints the cells it uses, as Excel does.
 - **Page breaks**: Excel's Page Break Preview — dashed blue where they fall by
   themselves, solid blue where you put them. **Insert Page Break**, **Remove Page
   Break** and **Reset All Page Breaks**; dragging an automatic break makes it
@@ -1750,8 +1771,10 @@ page box — and its sheet is shown alone, filling the document area: an endless
 grid from A1 with its row and column headings, which scrolls within that sheet
 only. There are no page edges and no other pages to scroll on to; scrolled or
 zoomed out, the grid goes on, and typing far down gives the rows the pages they
-need. Where the pages fall is shown as Excel's Normal view shows it: thin dashed
-lines at the page breaks and round what prints. Markups on the sheet's pages show
+need. Where the pages fall is shown as Excel's Normal view shows it: a print
+area outlined in a thin solid line, thin dashed lines at the page breaks (and
+round what prints when there is no print area), and each page's "Page N" faintly
+behind its cells. Markups on the sheet's pages show
 where they are over the cells and can be picked and changed as on the page
 (they belong to the cells under them). Each workbook keeps its own zoom
 (`Ctrl`+wheel zooms the grid), and each sheet where you left it and its active
@@ -1761,6 +1784,12 @@ The pages are still there: in the page view (anywhere else in the document) a
 workbook's pages show as they print — its Page Layout view — and **File ▸
 Print…**'s preview is its print preview. Thumbnails, Print, Export and the page
 numbers go on as before.
+
+**The select-all corner.** Where the row and column headings meet is Excel's
+select-all box: the headings' grey with a small triangle in its bottom right
+corner, darker under the pointer (and green while the whole sheet is picked). A
+click picks the whole sheet. It is there on a sheet's pages, in the workbook
+view, and on the headings kept in sight as the sheet scrolls.
 
 **Leaving it:** click any other page in Thumbnails or type its number in the page
 box; `Ctrl+Page Down` / `Ctrl+Page Up` go to the next or previous sheet, and past
@@ -1789,9 +1818,11 @@ browser neither shows nor prints them; CalcForge keeps them in the file's own
 record and puts them back where they were when it opens the file. The sheet is
 still part of the document: equations and other sheets read its cells as before.
 
-**Page numbers on a sheet's pages.** In the page view each page of a sheet shows
-its number in the document ("Page 4") faintly behind the cells; a page that
-doesn't print shows none.
+**Page numbers on a sheet's pages.** Each page of a sheet shows its number as
+printed ("Page 4") faintly behind the cells, in the page view and in the workbook
+view; a page that doesn't print shows none, and the pages after it are numbered
+as if it were not there. Ticking or unticking **Print** renumbers the marks and
+Thumbnails at once.
 
 ### Excel workbooks
 

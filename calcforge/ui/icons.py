@@ -746,6 +746,15 @@ def _draw(name: str, painter: QPainter) -> None:  # noqa: C901 - a flat icon tab
                 dy = math.sin(math.radians(angle)) * 3.2
                 painter.drawLine(QPointF(centre.x() - dx, centre.y() - dy),
                                  QPointF(centre.x() + dx, centre.y() + dy))
+    elif name == "add_page":
+        # Add Page, one click: a page with a plus on it
+        _pen(painter, INK, 1.3)
+        painter.drawPolygon(QPolygonF([QPointF(5.5, 2.5), QPointF(14.5, 2.5),
+                                       QPointF(18.5, 6.5), QPointF(18.5, 21.5),
+                                       QPointF(5.5, 21.5)]))
+        _pen(painter, WARM, 1.6)
+        painter.drawLine(QPointF(12, 9), QPointF(12, 17))
+        painter.drawLine(QPointF(8, 13), QPointF(16, 13))
     elif name == "duplicate_page":
         _pen(painter, INK, 1.3)
         painter.drawPolyline(QPolygonF([QPointF(8.5, 5.5), QPointF(8.5, 2.5),

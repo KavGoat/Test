@@ -33,7 +33,25 @@ class SheetHeadings(QWidget):
         view.horizontalScrollBar().valueChanged.connect(lambda _v: self.refresh())
         view.verticalScrollBar().valueChanged.connect(lambda _v: self.refresh())
         view.zoomChanged.connect(lambda _z: self.refresh())
+        # the pointer over the kept select-all corner lights it up (the strip
+        # itself lets the mouse through to the canvas)
+        self.corner_hot = False
+        self._viewport = view.viewport()
+        self._viewport.installEventFilter(self)
         self.hide()
+
+    def eventFilter(self, watched, event) -> bool:
+        from PySide6.QtCore import QEvent
+        # (the type first, and the viewport as kept: nothing asked of a view
+        # that is being taken down)
+        if event.type() in (QEvent.MouseMove, QEvent.Leave) and watched is self._viewport:
+            hot = event.type() == QEvent.MouseMove and any(
+                kind == "corner" and QRectF(rect).contains(event.position())
+                for _run, kind, rect in self._strips)
+            if hot != self.corner_hot:
+                self.corner_hot = hot
+                self.update()
+        return False
 
     def refresh_soon(self) -> None:
         self._soon.start()
@@ -87,6 +105,10 @@ class SheetHeadings(QWidget):
             bottom = min(bottom_right.y(), viewport.height())
             if top_left.x() - ROWNUM_W * k < -0.5 and 0 < bottom_right.x():
                 strips.append((run, "row", QRect(0, int(top), num_w, int(bottom - top))))
+            kinds = [kind for owner, kind, _rect in strips if owner is run]
+            if "col" in kinds and "row" in kinds:
+                # where the kept headings meet: Excel's select-all corner
+                strips.append((run, "corner", QRect(0, 0, num_w, head_h)))
         self._strips = strips
         if not strips:
             self.hide()
@@ -104,9 +126,11 @@ class SheetHeadings(QWidget):
         if not self.isVisible():
             return None
         point = QPointF(viewport_pos)
-        for run, kind, rect in self._strips:
+        for run, kind, rect in reversed(self._strips):     # (the corner over both)
             if not QRectF(rect).contains(point):
                 continue
+            if kind == "corner":
+                return run, ("corner",)
             scene = self.view.mapToScene(point.toPoint())
             local = run.mapFromScene(scene)
             xs, ys = run.edges()
@@ -127,6 +151,11 @@ class SheetHeadings(QWidget):
         painter.setFont(font)
         grid = QPen(QColor("#bdbdbd"), 1)
         for run, kind, rect in self._strips:
+            if kind == "corner":
+                from ..items.sheetpage import paint_corner
+                paint_corner(painter, QRectF(rect).adjusted(0, 0, -1, -1), self.corner_hot,
+                             run.everything_picked(), grid)
+                continue
             painter.save()
             painter.setClipRect(rect)
             painter.fillRect(rect, HEADING_BG)

@@ -48,7 +48,12 @@ def a_table_then_an_equation(win):
 
 
 def a_spreadsheet_of_three_pages(win):
-    sheetpages.insert_sheet_page(win, 0)
+    from unittest import mock
+
+    # a sheet whose pages follow its rows (a new one prints one page of
+    # cells, its print area, until that is cleared)
+    with mock.patch.object(sheetpages, "one_page_area", lambda setup: None):
+        sheetpages.insert_sheet_page(win, 0)
     win.rebuild_scenes()
     first = next(i for i, p in enumerate(win.document.pages) if p.sheet)
     item = run_item_for(win.document.pages[first].frame)

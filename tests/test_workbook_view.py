@@ -10,8 +10,8 @@ tabs at the bottom" — "Not full window, fits the document panel completely".
   past the last or first sheet (between sheets they change sheet), the ×.
 * Each workbook keeps its zoom; Ctrl+wheel zooms the grid.
 * Page breaks show as Excel's Normal view's dashed lines; "Page N" on a
-  sheet's pages is its number in the document, none on a page that
-  doesn't print.
+  sheet's pages is its number as printed, none on a page that doesn't
+  print (tests/test_workbook_pages.py).
 
 And the two bugs: stuck in a workbook — a click on its entry in Thumbnails
 from its second (Don't Print) sheet went nowhere; and tabs left showing
@@ -225,7 +225,7 @@ def test_each_workbook_keeps_its_zoom(w, wb):
     assert not others_in_sight(w)
 
 
-def test_page_breaks_show_dashed_and_no_page_numbers_in_the_workbook_view(w, wb):
+def test_page_breaks_show_dashed_and_the_page_numbers_stay_in_the_workbook_view(w, wb):
     loads = run_named(w, "Loads")
     assert loads._page_numbers() == (2, 3, 4, 5)
     assert run_named(w, "Factors")._page_numbers() == (0,), "it doesn't print: no number"
@@ -234,7 +234,8 @@ def test_page_breaks_show_dashed_and_no_page_numbers_in_the_workbook_view(w, wb)
     assert paper_words(run_named(w, "Factors")) == []
     click_thumbnail(w, wb.first)
     loads = run_named(w, "Loads")
-    assert loads.alone and paper_words(loads) == [], "the workbook view: no page numbers"
+    # "the background page number thing is lost" (the user, 2026-10-22)
+    assert loads.alone and paper_words(loads) == drawn, "the workbook view: numbered too"
     pens = break_pens(loads)
     assert pens and all(pen.style() == Qt.DashLine and pen.widthF() <= 1.0 for pen in pens)
 

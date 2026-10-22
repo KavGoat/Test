@@ -863,7 +863,7 @@ _SHORTCUT_GROUPS = {
     "group": "Markup", "ungroup": "Markup", "autosize": "Markup",
     "format_painter": "Markup", "hide": "Markup", "show_hidden": "Markup",
     "flatten": "Markup", "forget_defaults": "Markup",
-    "add_page": "Pages", "crop_page": "Pages", "extract_pages": "Pages",
+    "add_page": "Pages", "quick_add_page": "Pages", "crop_page": "Pages", "extract_pages": "Pages",
     "split_pages": "Pages", "duplicate_page": "Pages", "delete_page": "Pages",
     "page_setup": "Pages", "scale": "Pages", "viewports": "Pages", "header_footer": "Pages",
     "bookmark": "Pages", "contents": "Pages", "doc_props": "Pages",
@@ -1656,6 +1656,12 @@ class MainWindow(QMainWindow):
                   self.customise_toolbar,
                   tip="Pick which tools appear on the markup toolbar")
 
+        # one click, no dialog (the user, 2026-10-22: "There's no simple add
+        # page option"); no key of its own: Ctrl+Shift+N is Insert Blank Page…,
+        # and the free Ctrl+Alt ones type characters on Windows (AltGr)
+        self._act("quick_add_page", "Add Page", lambda: self.quick_add_page(),
+                  tip="Add Page: a blank page after this one (after the whole workbook on "
+                      "a workbook), the same paper, no questions; Insert Blank Page… asks")
         # Ctrl+Shift+N is Revu's Insert Blank Page (audit L2)
         self._act("add_page", "Blank Page", lambda: self.add_page(), "Ctrl+Shift+N",
                   name="Insert Blank Page",
@@ -2851,6 +2857,8 @@ class MainWindow(QMainWindow):
         fill(rotate_pages, (self.act_rotate_pages_cw, self.act_rotate_pages_acw))
         insert_pages = page_menu.addMenu("Insert")
         insert_pages.setObjectName("menuInsert")
+        # first, beside Blank Page…: the one click
+        insert_pages.addAction(self.act_quick_add_page)
         for entry in self.insert_family():
             insert_pages.addAction(getattr(self, f"act_{entry[0]}"))
         fill(page_menu, (self.act_extract_pages, self.act_split_pages, self.act_delete_page,
@@ -6095,6 +6103,29 @@ class MainWindow(QMainWindow):
             return
         self.finish_blank_page(dialog)
 
+    def quick_add_page(self, index: Optional[int] = None) -> int:
+        """Add Page: one blank page right after the page (after the whole
+        workbook when it is one of a workbook's), on the same paper and the
+        same way round, no dialog, one undo step — and it is gone to.
+        Says where it went."""
+        from .sheetpages import safe_target, section_of
+        which = self.page_index(index)
+        here = self.document.pages[which]
+        section = section_of(self.document, which)
+        target = safe_target(self.document, (section.last if section else which) + 1)
+        if here.sheet is None:
+            setup = PageSetup.from_dict(here.setup.to_dict())
+        else:
+            # a sheet's paper and turn, the margins a written page has
+            setup = PageSetup()
+            setup.size_name, setup.width_mm, setup.height_mm = (
+                here.setup.size_name, here.setup.width_mm, here.setup.height_mm)
+            setup.orientation = here.setup.orientation
+        self._insert_blank_pages(target, 1, setup)
+        self.go_to_page(target)
+        self.status_hint.setText(f"Added page {target + 1}")
+        return target
+
     def finish_blank_page(self, dialog) -> int:
         """Insert the pages *dialog* asked for, where it said; one undo step.
         Says where the first of them is."""
@@ -6142,8 +6173,10 @@ class MainWindow(QMainWindow):
 
     def duplicate_page(self, index: Optional[int] = None) -> None:
         """Copy the page — or the whole picked run — in after the last of it."""
-        from .sheetpages import fresh_item_ids, plain_copy, safe_target
+        from .sheetpages import duplicate_workbooks, fresh_item_ids, plain_copy, safe_target
         wanted = self.pages_acted_on(index)
+        if duplicate_workbooks(self, wanted):
+            return                       # a workbook's page: the whole workbook copied
         sources = [self.document.pages[which].to_dict() for which in wanted]
         if any(self.document.pages[which].sheet for which in wanted):
             sources = [plain_copy(source) for source in sources]
@@ -6891,6 +6924,10 @@ class MainWindow(QMainWindow):
         # one Before or After this page (the user, 2026-10-16), the same
         # family the Document menu's Insert ▸ offers (insert_family). On a
         # spreadsheet page Insert Spreadsheet Page is one more page of it.
+        # First the one-click Add Page.
+        quick = menu.addAction("Add Page", lambda: self.quick_add_page(index))
+        quick.setToolTip("A blank page after this one (after the whole workbook on a "
+                         "workbook), the same paper, no questions")
         for entry in self.insert_family():
             self.fill_insert_choice(menu.addMenu(entry[1]), entry, index)
         duplicate = menu.addAction("Duplicate Pages" if several else "Duplicate Page",
@@ -12458,6 +12495,10 @@ class MainWindow(QMainWindow):
         self._write_position(self._position_wanted)
 
     def _write_position(self, point: QPointF) -> None:
+        if getattr(self.scene, "sheet_view", None) is not None:
+            # the workbook view is cells, not paper (it said -3527644.4 mm)
+            self.status_position.setText("")
+            return
         scale = self.current_page().scale
         millimetres = f"{point.x() * PT_TO_MM:.1f}, {point.y() * PT_TO_MM:.1f} mm"
         if scale.is_calibrated():

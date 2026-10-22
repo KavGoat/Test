@@ -329,12 +329,13 @@ def test_every_header_button_works_by_mouse_and_by_key(window, monkeypatch):
     with_pages(window, 2)
     panel_width(window, 460)
     calls = []
-    for name in ("insert_pdf", "add_page", "insert_sheet_page", "duplicate_page",
-                 "delete_page"):
+    for name in ("quick_add_page", "insert_pdf", "add_page", "insert_sheet_page",
+                 "duplicate_page", "delete_page"):
         monkeypatch.setattr(window, name,
                             lambda *args, _n=name, **kwargs: calls.append(_n))
     buttons = window.pages_panel.page_buttons
-    wanted = {"insert_pdf": "insert_pdf", "add_page": "add_page",
+    wanted = {"quick_add_page": "quick_add_page", "insert_pdf": "insert_pdf",
+              "add_page": "add_page",
               "add_sheet_page": "insert_sheet_page", "duplicate_page": "duplicate_page",
               "delete_page": "delete_page"}
     # by mouse: a click on each button's face (not its arrow part)

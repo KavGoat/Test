@@ -3812,7 +3812,9 @@ class PageView(QGraphicsView):
         headings = getattr(self, "sheet_headings", None)
         hit = headings.hit(self.mapFromScene(scene_pos)) if headings is not None else None
         if hit is not None:
-            self.setCursor(excel_cursor(hit[1][0]))     # down a column, across a row
+            # down a column, across a row; the select-all corner the plain arrow
+            self.setCursor(excel_cursor(hit[1][0]) if hit[1][0] != "corner"
+                           else QCursor(Qt.ArrowCursor))
             return
         if getattr(self.window, "_held_style", None) is not None:
             # A format is held: the brush stays in hand wherever it goes.
@@ -6860,7 +6862,8 @@ class PageView(QGraphicsView):
             run, zone = hit
             if self.tables.item is not run:
                 self.tables.open(run, (0, 0))
-            self.tables.context_menu(event.globalPos(), heading=zone)
+            self.tables.context_menu(event.globalPos(),
+                                     heading=zone if zone[0] != "corner" else None)
             event.accept()
             return
         table = self.tables.item
