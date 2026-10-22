@@ -96,6 +96,13 @@ def test_in_normal_view_the_print_areas_edge_drags_straight_away(w, sheet):
     before" — Normal view too, not only Page Break Preview."""
     run = sheet
     assert run.normal_view
+    # zoomed out so the print area's edge and where it goes are both in
+    # view (past the view's edge the sheet scrolls by itself, as in Excel)
+    from calcforge.ui.sheetview import EXCEL_SCALE
+    w.view.set_zoom(EXCEL_SCALE * 0.6)
+    pump()
+    run = shown_run(w)
+    assert at(w, run, run.edges()[0][run.paging.last_col + 3], 0).x() < w.view.viewport().width()
     xs, ys = run.edges()
     edge = run.paging.last_col + 1             # the print area's right edge (J|K)
     on_line = at(w, run, xs[edge], (ys[9] + ys[10]) / 2)
@@ -111,6 +118,13 @@ def test_in_page_break_preview_it_drags_with_the_plain_double_arrow(w, sheet):
     pump()
     run = shown_run(w)
     assert not run.normal_view
+    # zoomed out so the print area's edge and where it goes are both in
+    # view (past the view's edge the sheet scrolls by itself, as in Excel)
+    from calcforge.ui.sheetview import EXCEL_SCALE
+    w.view.set_zoom(EXCEL_SCALE * 0.6)
+    pump()
+    run = shown_run(w)
+    assert at(w, run, run.edges()[0][run.paging.last_col + 3], 0).x() < w.view.viewport().width()
     xs, ys = run.edges()
     edge = run.paging.last_col + 1
     on_line = at(w, run, xs[edge], (ys[9] + ys[10]) / 2)
