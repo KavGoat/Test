@@ -3,6 +3,14 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-22 (evening) — grid snap, sharp markups zoomed out, the side toolbar preview, the cloud leader (pushed at b2d1651)
+
+- Full test run at 438564f: one failure (the window's right-click menu had lost the panel rails after the window restructure), fixed at b2d1651 and its tests rerun; 14/14 planted bugs caught.
+- Grid snap works on PDF pages: the nearer of the grid and the content snap wins; it is off on sheets.
+- Zoomed out, markups are drawn sharp; only the PDF's lines are softened, their thinnest line easing from 1.4 px just below 100% to 1 px at 25%.
+- A toolbar dragged to the left or right edge shows a live preview and the panel bar moves aside; side toolbars sit outside the panel bar.
+- Adding a cloud leader to an existing callout no longer moves its arrow leader.
+
 ## 2026-10-22 (later) — SMath unit typing in cells, named ranges coloured, the workbook view, Global (pushed at 392d905)
 
 - Full test run passed at 392d905 (`-n 3`, every-command tests included); 14/14 planted bugs caught.
