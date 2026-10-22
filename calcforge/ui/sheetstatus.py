@@ -84,7 +84,7 @@ def _widgets(window) -> Optional[dict]:
     # Excel's order at the right: the view buttons, the slider, the zoom
     # (the zoom box and the » taken off and put back after them)
     tail = [w for w in (window.zoom_combo, getattr(window, "status_more", None)) if w is not None]
-    shown = [w.isVisible() for w in tail]
+    shown = [not w.isHidden() for w in tail]      # (the window may not be on screen yet)
     for widget in tail:
         status.removeWidget(widget)
     status.addPermanentWidget(views)

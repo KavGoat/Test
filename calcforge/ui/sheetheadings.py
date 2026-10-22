@@ -111,6 +111,14 @@ class SheetHeadings(QWidget):
             if "col" in kinds and "row" in kinds:
                 # where the kept headings meet: Excel's select-all corner
                 strips.append((run, "corner", QRect(0, 0, num_w, head_h)))
+            elif "col" in kinds and top_left.x() - ROWNUM_W * k >= -0.5:
+                # the letters kept, the sheet's own row numbers in sight: the
+                # corner over them, not a row's number showing through (H2)
+                strips.append((run, "corner", QRect(int(top_left.x() - num_w), 0,
+                                                    num_w, head_h)))
+            elif "row" in kinds and top_left.y() - HEADING_H * k >= -0.5:
+                strips.append((run, "corner", QRect(0, int(top_left.y() - head_h),
+                                                    num_w, head_h)))
         self._strips = strips
         if not strips:
             self.hide()

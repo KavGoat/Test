@@ -130,6 +130,8 @@ def test_the_kept_headings_size_columns_from_their_edges(w, sheet):
     k = w.view.zoom()
     strip = next(rect for _run, kind, rect in headings._strips if kind == "col")
     assert strip.height() == round(HEADING_H * k), "the sheet's own heading height (H2)"
+    assert "corner" in [kind for _run, kind, _rect in headings._strips], \
+        "the corner over the row numbers, not a row's number showing through"
     run = shown_run(w)
     xs, _ys = run.edges()
     edge = QPoint(at(w, run, xs[2], 0).x(), strip.center().y())     # B|C

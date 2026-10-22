@@ -291,7 +291,7 @@ def test_dragging_the_thumb_says_the_row_at_the_top(w, book):
 # -- H1, K1, F6: Excel's zoom and wheel -------------------------------------------------------------
 def test_100_percent_is_excels_a_column_64_pixels_wide(w, book):
     run = shown_run(w)
-    assert w.zoom_combo.currentText() == "100%"
+    assert w.zoom_combo.currentText() == "100%" and w.zoom_combo.isVisible()
     xs, _ys = run.edges()
     width = w.view.mapFromScene(run.mapToScene(QPointF(xs[1], 0))).x() - \
         w.view.mapFromScene(run.mapToScene(QPointF(xs[0], 0))).x()
