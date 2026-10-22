@@ -116,7 +116,13 @@ def preview_check(w, bar, area, side_capable: bool, out: dict):
             assert central.left() > now.right()
         # the toolbar is shown standing in the room, not lying across the edge
         assert bar.windowOpacity() == 0.0, "the floating toolbar is not shown over the edge"
-        assert column.picture is not None and not column.picture.isNull()
+        # its own buttons, stood on end, as the rows along the top show it
+        stand = column.stand
+        assert stand is not None and stand.isVisible() and stand.orientation() == Qt.Vertical
+        from PySide6.QtWidgets import QWidgetAction
+        theirs = [a for a in bar.actions() if not a.isSeparator()
+                  and not isinstance(a, QWidgetAction) and a.isVisible()]
+        assert [a for a in stand.actions() if not a.isSeparator()] == theirs
         out["shown"] = shown
         out["picture"] = w.grab()
     return check

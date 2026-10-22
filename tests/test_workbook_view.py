@@ -472,3 +472,66 @@ def test_the_kept_headings_edges_are_on_the_grids_lines(w, zoom):
         numbers = _edges(lambda y: light(3, y), top, image.height() - 20)[:6]
         grid = _edges(lambda y: light(image.width() // 2 + 3, y), top, image.height() - 20)[:6]
         assert numbers and numbers == grid, f"scrolled {down}: {numbers} against {grid}"
+
+
+def _top_left_cell(w):
+    """(the cell at the grid's top left, where its corner is in the view)."""
+    from calcforge.ui.sheetview import zoom_anchor
+    view = w.view
+    item = next(i for i in view.scene().items() if isinstance(i, SheetRunItem)
+                and i.uid == shown(w))
+    at = zoom_anchor(view)
+    cell = item.cell_at(item.mapFromScene(view.mapToScene((at + QPointF(2, 2)).toPoint())))
+    corner = view.mapFromScene(item.mapToScene(item.cell_rect(*cell).topLeft()))
+    return cell, corner
+
+
+def test_a_zoom_keeps_the_top_left_cell_where_it_is_as_excels(w):
+    """The user, 2026-10-22: "doesn't zoom where I would expect it to, try
+    Excel's zoom and compare". Excel grows the sheet down and to the right
+    from the cell at the top left; it zoomed about the pointer, as a drawing
+    does. The Ctrl+wheel, the zoom box and the slider alike."""
+    w.act_add_sheet_page.trigger()
+    pump()
+    view = w.view
+    view.verticalScrollBar().setValue(view.verticalScrollBar().minimum() + 400)
+    view.horizontalScrollBar().setValue(view.horizontalScrollBar().minimum() + 300)
+    pump()
+    view.tables.select(_top_left_cell(w)[0])      # the active cell in sight, at the top left
+    pump()
+    from calcforge.ui.sheetview import zoom_anchor
+    before, _corner = _top_left_cell(w)           # (picking it brought it wholly in)
+    point = view.mapToScene(zoom_anchor(view).toPoint())
+    wheel(w, 2)                                   # Ctrl+wheel in, pointer mid-window
+    after, _landed = _top_left_cell(w)
+    assert after == before, "the same cell at the top left"
+    # the very point of the sheet that was at the headings' corner still is
+    # (they grow with the zoom, as Excel's do)
+    now = view.mapToScene(zoom_anchor(view).toPoint())
+    slack = 1.5 / view.zoom()
+    assert abs(now.x() - point.x()) <= slack and abs(now.y() - point.y()) <= slack
+    for zoom in (lambda: wheel(w, -1), lambda: wheel(w, -1), lambda: wheel(w, -1),
+                 lambda: view.set_zoom(view.zoom() * 1.3)):     # the zoom box, the slider
+        zoom()
+        pump()
+        now = view.mapToScene(zoom_anchor(view).toPoint())
+        slack = 1.5 / view.zoom()
+        assert abs(now.x() - point.x()) <= slack and abs(now.y() - point.y()) <= slack, \
+            "a run of zooms never creeps away from it"
+
+
+def test_a_zoom_brings_the_active_cell_back_into_sight(w):
+    w.act_add_sheet_page.trigger()
+    pump()
+    view = w.view
+    tables = view.tables
+    # an active cell at the bottom right of the window: zoomed in, it would go
+    port = view.viewport().rect()
+    item = tables.item
+    cell = item.cell_at(item.mapFromScene(view.mapToScene(port.width() - 60, port.height() - 40)))
+    tables.select(cell)
+    pump()
+    wheel(w, 4)
+    rect = view.mapFromScene(item.mapToScene(item.cell_rect(*cell))).boundingRect()
+    assert port.adjusted(-1, -1, 1, 1).intersects(rect) and rect.height() > 4, \
+        "still in sight after the zoom"

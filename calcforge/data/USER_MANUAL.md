@@ -1792,7 +1792,9 @@ keeps its own zoom, and each sheet where you left it and its active cell.
 drawn the size Excel draws them (a default column 64 pixels wide, a row 20, on a
 96 dpi screen); the pages and printing are as they always were. `Ctrl`+wheel
 zooms in Excel's steps of 15 % (100 %, 115 %, 130 %…, 10 % to 400 %), as does the
-footer's slider. A notch of the wheel scrolls three rows, `Shift`+wheel across.
+footer's slider; as in Excel, the zoom keeps the cell at the top left where it is
+(the sheet grows down and to the right from it), lands at once, and brings the
+active cell back into sight if it would leave the screen. A notch of the wheel scrolls three rows, `Shift`+wheel across.
 The scroll bars have their arrows at both ends; dragging a thumb says the row
 (or column) at the top. The grid is as big as the window and a little more,
 growing as you scroll on (`Page Down` a screenful at a time) and shrinking back as
@@ -2575,8 +2577,8 @@ drawn on it keeps its own colours.
   it stands on end in a column of its own at the window's edge, outside the
   panel strip, so the panels still open between the strip and the page. As along
   the top, room opens while you drag: near a side edge the panel strip, the panels
-  and the page move in, and the toolbar lands in the room they leave when you let
-  go. The Properties and Markup Styles toolbars go top or bottom only.
+  and the page move in, the toolbar stands in the room they leave with its own
+  buttons on end, and lands there when you let go. The Properties and Markup Styles toolbars go top or bottom only.
 - Panels: open and close them from the edge strips or **Window ▸ Panels**; drag an
   icon to the other side; pin, float or roll up a panel from its title bar.
   **Window ▸ Pin Panels** pins them all; **Reset Layout** puts every panel and

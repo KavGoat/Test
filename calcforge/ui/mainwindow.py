@@ -605,7 +605,7 @@ class _ToolbarDrags(QObject):
         faded = 0.0 if side is not None else 1.0
         if bar.windowOpacity() != faded:
             bar.setWindowOpacity(faded)
-        self._show(column, side, self.on_end(bar, column) if column is not None else None)
+        self._show(column, side, bar if column is not None else None)
 
     def column_for(self, bar, side) -> QRect:
         """Where *bar* will stand on end on *side*: a column of its own at
@@ -635,57 +635,14 @@ class _ToolbarDrags(QObject):
         room = margins.left() + margins.right() if margins is not None else 0
         return max(widest + room, 24)
 
-    def _show(self, column, side=None, picture=None) -> None:
+    def _show(self, column, side=None, bar=None) -> None:
         """Open room *column* wide outside *side*'s rail (None: close it),
-        with *picture* of the toolbar standing in it."""
+        *bar* standing in it."""
         room = self.room
         if room is None:
             room = self.room = _SideRoom(self.window)
-        room.picture = picture
+        room.bar = bar
         room.open(side, column.width() if column is not None else 0)
-
-    _pictures: dict = {}
-
-    def on_end(self, bar, column):
-        """*bar* as it will be stood on end in *column*: its buttons' icons
-        one under another, as a toolbar on a side edge shows them."""
-        from PySide6.QtGui import QIcon
-        from PySide6.QtWidgets import QToolButton
-        key = (id(bar), column.width(), self.window.devicePixelRatioF())
-        kept = self._pictures.get(key)
-        if kept is not None:
-            return kept
-        ratio = self.window.devicePixelRatioF()
-        icon = bar.iconSize()
-        step = icon.height() + 14           # (a button stood on end, its margins round it)
-        width = column.width()
-        picture = QPixmap(int(width * ratio), int(column.height() * ratio))
-        picture.setDevicePixelRatio(ratio)
-        picture.fill(Qt.transparent)
-        painter = QPainter(picture)
-        painter.setPen(self.window.palette().color(self.window.foregroundRole()).darker(150))
-        y = 2
-        for action in bar.actions():
-            if y + step > column.height():
-                break
-            if action.isSeparator():
-                painter.drawLine(6, y + 2, width - 6, y + 2)
-                y += 6
-                continue
-            widget = bar.widgetForAction(action)
-            if widget is None or not isinstance(widget, QToolButton) or widget.isHidden():
-                continue
-            shown = widget.icon() if not widget.icon().isNull() else action.icon()
-            if shown.isNull():
-                continue
-            shown.paint(painter, QRect((width - icon.width()) // 2, y + 4,
-                                       icon.width(), icon.height()),
-                        mode=QIcon.Normal if action.isEnabled() else QIcon.Disabled)
-            y += step
-        painter.end()
-        self._pictures.clear()
-        self._pictures[key] = picture
-        return picture
 
 
 class _SideRoom(QObject):
@@ -711,7 +668,7 @@ class _SideRoom(QObject):
         self.shown = 0                  # how far the room has opened
         self.placed = {}                # widget -> where the layout had it
         self.tint = None
-        self.picture = None             # the toolbar standing in it
+        self.bar = None                 # the toolbar held, to stand in it
         self.easing = None
 
     def rail(self, side):
@@ -800,7 +757,7 @@ class _SideRoom(QObject):
         else:
             column = QRect(rail.left(), rail.top(), by, rail.height())
         self.tint.setGeometry(column)
-        self.tint.picture = self.picture
+        self.tint.stand_in(self.bar, rail.height(), self.side)
         self.tint.setVisible(by > 0)
         self.tint.raise_()
         self.tint.update()
@@ -813,30 +770,65 @@ class _SideRoom(QObject):
             self._move(0)
         if self.tint is not None:
             self.tint.hide()
+            self.tint.stand_in(None)
         self.side = None
         self.width = 0
         self.placed = {}
 
 
 class _DropColumn(QWidget):
-    """The room a toolbar held at a side edge will land in, tinted."""
+    """The room a toolbar held at a side edge will land in, with the toolbar
+    standing in it as it will be — its own buttons, stood on end — the way
+    the rows along the top show a toolbar held over them in its place (the
+    user, 2026-10-22: "it shows a blue bar where the toolbar might go but
+    doesn't actually preview each item")."""
 
     def __init__(self, window):
         super().__init__(window)
         self.setObjectName("toolbarDropColumn")
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self.picture = None
+        self.stand = None               # the stand-in toolbar
+        self._for = None                # the toolbar it stands in for
         self.hide()
+
+    def stand_in(self, bar, height: int = 0, side=None) -> None:
+        """The toolbar *bar* on end in this room (None: put away)."""
+        from shiboken6 import isValid
+        if bar is None or not isValid(bar):
+            if self.stand is not None:
+                self.stand.hide()
+                self.stand.deleteLater()
+            self.stand = self._for = None
+            return
+        if self._for is not bar or self.stand is None:
+            self.stand_in(None)
+            from PySide6.QtWidgets import QToolBar, QWidgetAction
+            stand = QToolBar(self)
+            stand.setObjectName("toolbarDropStandIn")
+            stand.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            stand.setMovable(False)
+            stand.setFloatable(False)
+            stand.setOrientation(Qt.Vertical)
+            stand.setIconSize(bar.iconSize())
+            stand.setToolButtonStyle(Qt.ToolButtonIconOnly)
+            for action in bar.actions():
+                if action.isSeparator():
+                    stand.addSeparator()
+                elif not isinstance(action, QWidgetAction) and action.isVisible():
+                    stand.addAction(action)       # (the same command: its icon, its state)
+            self.stand, self._for = stand, bar
+        stand = self.stand
+        wide = max(stand.sizeHint().width(), 1)
+        # standing at the window's edge of the room, as it glides open
+        x = self.width() - wide if side == Qt.RightToolBarArea else 0
+        stand.setGeometry(x, 0, wide, max(height, 1))
+        stand.show()
 
     def paintEvent(self, _event) -> None:
         from PySide6.QtGui import QPalette
         painter = QPainter(self)
-        fill = QColor(self.palette().color(QPalette.Highlight))
-        fill.setAlpha(50)
-        painter.fillRect(self.rect(), fill)
-        if self.picture is not None:
-            # the toolbar, standing in its room (from the edge it glides in from)
-            painter.drawPixmap(0, 0, self.picture)
+        # the toolbars' own ground, under the stand-in (not a tint)
+        painter.fillRect(self.rect(), self.palette().color(QPalette.Window))
         painter.end()
 
 

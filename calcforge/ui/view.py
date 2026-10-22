@@ -1326,6 +1326,24 @@ class PageView(QGraphicsView):
             if not self.viewport().rect().contains(
                     self.viewport().mapFromParent(at)):
                 at = None
+        sheet_corner = None
+        if at is None and not anchor_mouse:
+            # a sheet shown alone zooms as Excel's does: its top-left cell
+            # stays where it is, at the corner of its headings — which grow
+            # with the zoom (sheetview.zoom_anchor)
+            from . import sheetview
+            sheet_corner = sheetview.zoom_anchor(self)
+            if sheet_corner is not None:
+                keep = self.mapToScene(sheet_corner.toPoint())
+                # a run of zooms keeps the very point it began with: each
+                # rounded to whole pixels, the corner crept a row a few notches on
+                kept = self.__dict__.get("_sheet_corner_kept")
+                if kept is not None and abs(kept[1] - self._zoom) < 1e-9 and \
+                        abs(kept[0].x() - keep.x()) * self._zoom <= 1.5 and \
+                        abs(kept[0].y() - keep.y()) * self._zoom <= 1.5:
+                    keep = kept[0]
+                self._sheet_corner_kept = (QPointF(keep), factor)
+                at = sheetview.zoom_anchor(self, factor)
         keep_view = QPointF(at) if at is not None else QPointF(
             self.viewport().rect().center())
         keep_scene = QPointF(keep) if keep is not None else \
@@ -1553,7 +1571,17 @@ class PageView(QGraphicsView):
                 # (The workbook view: Excel's steps of 15 %.)
                 from . import sheetview
                 step = sheetview.wheel_zoom_factor(self, delta) if pixels.isNull() else None
-                self.wheel_zoom(step if step is not None else 1.0015 ** delta, event.position())
+                if sheetview.zoom_anchor(self) is not None:
+                    # a sheet shown alone: about its top-left cell, as Excel
+                    # zooms (not about the pointer, as a drawing does), and at
+                    # once, Excel's having no glide
+                    self.glide.finish()
+                    self.zooming_by_hand()
+                    self.set_zoom(self._zoom * (step if step is not None else 1.0015 ** delta))
+                    sheetview.keep_active_in_view(self)
+                else:
+                    self.wheel_zoom(step if step is not None else 1.0015 ** delta,
+                                    event.position())
             event.accept()
             return
         if paged:

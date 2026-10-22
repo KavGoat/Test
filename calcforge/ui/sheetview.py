@@ -84,6 +84,56 @@ def wheel_zoom_factor(view, delta: int) -> Optional[float]:
     return wanted / now if now > 0 else None
 
 
+def zoom_anchor(view, zoom: Optional[float] = None):
+    """Where a zoom of the sheet shown alone keeps still, in the view's
+    pixels: its top-left cell's corner, just inside the headings kept along
+    the top and the left — Excel's zoom, which leaves the cell at the top
+    left where it is and grows the sheet down and to the right from it (the
+    user, 2026-10-22: "doesn't zoom where I would expect it to, try Excel's
+    zoom and compare"; about the pointer it zoomed as a drawing does). None
+    when no sheet is shown alone. *zoom*: where it will be at that zoom (the
+    headings grow with it: SheetHeadings.refresh's sizes)."""
+    if run_shown(view.scene()) is None:
+        return None
+    import math
+
+    from PySide6.QtCore import QPointF
+    from ..items.table import HEADING_H, ROWNUM_W
+    k = max(view.transform().m11() if zoom is None else zoom, 0.05)
+    return QPointF(max(1, math.ceil(ROWNUM_W * k - 0.01)), max(1, math.ceil(HEADING_H * k - 0.01)))
+
+
+def keep_active_in_view(view) -> None:
+    """After a zoom, the active cell still in sight: Excel moves the sheet
+    just enough when a zoom has taken it right off the screen (one still
+    partly in sight is left where it is)."""
+    tables = view.tables
+    item = tables.item
+    if item is None or run_shown(view.scene()) != getattr(item, "uid", None) or \
+            tables.active is None:
+        return
+    cell = item.mapRectToScene(item.cell_rect(*tables.active))
+    shown = view.mapToScene(view.viewport().rect()).boundingRect()
+    anchor = zoom_anchor(view)
+    k = max(view.zoom(), 1e-6)
+    inside = shown.adjusted(anchor.x() / k, anchor.y() / k, 0, 0)
+    if inside.intersects(cell) or cell.width() > inside.width() or cell.height() > inside.height():
+        return
+    fill(view, extra=cell.bottomRight())            # room to scroll it into sight
+    dx = dy = 0.0
+    if cell.left() < inside.left():
+        dx = cell.left() - inside.left()
+    elif cell.right() > inside.right():
+        dx = cell.right() - inside.right()
+    if cell.top() < inside.top():
+        dy = cell.top() - inside.top()
+    elif cell.bottom() > inside.bottom():
+        dy = cell.bottom() - inside.bottom()
+    for bar, by in ((view.horizontalScrollBar(), dx), (view.verticalScrollBar(), dy)):
+        if by:
+            bar.setValue(bar.value() + int(round(by * k + (2 if by > 0 else -2))))
+
+
 def wheel_pixels(view) -> Optional[float]:
     """How far a notch of the wheel scrolls in the workbook view: three of
     its rows (Excel's), in pixels at the zoom; None elsewhere."""
