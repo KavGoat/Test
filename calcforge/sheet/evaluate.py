@@ -529,7 +529,10 @@ def _name(n: F.Name, ctx: Ctx):
         global _compiled
         if _compiled is None:
             from .compiled import compiled as _compiled
-        return _compiled(parsed)(inner)
+        got = _compiled(parsed)(inner)
+        if isinstance(got, ErrorValue) and got.code == REF.code:
+            got = ErrorValue(got.code, _lost_name(n.name, dn, ctx))
+        return got
     if n.sheet is None:
         try:
             return _outside(n.name, ctx)
@@ -542,6 +545,24 @@ def _name(n: F.Name, ctx: Ctx):
             pass
         return NAME.because(not_known(n.name))
     return NAME.because(f"'{n.name}' isn't a defined name on {n.sheet}")
+
+
+def _lost_name(name: str, dn, ctx: Ctx) -> str:
+    """Why a defined name gives #REF!: the cells it named were deleted (Excel
+    keeps it so, Height = Calculations!#REF!) — and, when the equations have
+    a variable of that name, how to read theirs instead: a workbook's own
+    name comes first in its cells, as in Excel (the user, 2026-10-24: a
+    variable height on a page, =height in a cell of the Seismic Parts
+    workbook gave #REF!)."""
+    why = f"the defined name '{dn.name}' refers to cells that were deleted ({dn.refers_to})"
+    ask = ctx.wb.outside
+    if ask is not None:
+        try:
+            ask(ctx.sheet, name)
+        except (KeyError, SheetError):
+            return why
+        return why + f"; var({name}) reads the equations' {name}"
+    return why
 
 
 def not_known(name: str) -> str:

@@ -403,3 +403,88 @@ def test_undoing_a_name_given_a_new_place_puts_it_back_where_it_was(w, sheet):
     assert where() == [f"{first_name}!$B$4"], "back where it was"
     saved = [n for t in tables._all_tables() for n in t.serialize()["table"]["names"]]
     assert [n[1] for n in saved if n[0] == "Z"][:1] == [f"{first_name}!$B$4"]
+
+
+def test_the_view_buttons_stay_on_a_spreadsheets_pages(w, sheet):
+    """The user, 2026-10-24: "Spreadsheet page layout view, normal view etc
+    don't work, also currently not greying out stuff not in the print area."
+    Page Layout put Excel's view buttons away with the rest of its footer,
+    so there was no way back to Normal or Page Break Preview but a click on
+    a cell. They stay on a spreadsheet's pages, and each one works."""
+    from calcforge.ui import sheetview
+    buttons = w._sheet_status["buttons"]
+    views = w._sheet_status["views"]
+
+    def press(which):
+        QTest.mouseClick(buttons[which], Qt.LeftButton)
+        pump()
+        pump()
+    press("page_layout")
+    assert not sheetview.is_on(w) and views.isVisible(), "still there on its pages"
+    assert buttons["page_layout"].isChecked()
+    press("break_preview")
+    assert sheetview.is_on(w) and sheetview.current_view(w) == "break_preview"
+    # outside the print area grey, inside white
+    run = shown_run(w)
+    area = run.sheet.page["print_area"]
+    inside = at(w, run, area[0], area[1])
+    outside = at(w, run, area[0], area[3] + 2)
+    image = w.view.viewport().grab().toImage()
+    ratio = image.devicePixelRatio()
+
+    def shade(point):
+        c = image.pixelColor(int((point.x() + 6) * ratio), int(point.y() * ratio))
+        return c.red()
+    assert shade(inside) > shade(outside) + 8, "what doesn't print is grey"
+    press("page_layout")
+    press("normal")
+    assert sheetview.is_on(w) and sheetview.current_view(w) == "normal"
+    # off the spreadsheet's pages they go
+    sheetview.leave(w)
+    pump()
+    w.go_to_page(0)
+    pump()
+    pump()
+    assert not views.isVisible()
+
+
+def test_a_cell_reads_a_page_variable_and_says_why_a_lost_name_is_ref(w, sheet):
+    """The user, 2026-10-24: "I had a variable height in a page then tried
+    =height in a cell in a sheet but threw ref error (what's the proper way
+    to refer to this)". =height reads an equation's height defined before the
+    sheet. The Seismic Parts workbook has a name of its own, Height, which
+    Excel keeps as Calculations!#REF! (its cells were deleted), and in its
+    cells a workbook's own name comes first, as in Excel: the #REF! now says
+    so, and that var(height) reads the equation's."""
+    from tests.test_calc_editing import type_line
+    from tests.test_excel_footer_keys import key, typed
+    from calcforge.ui import sheetview
+    run = sheet
+    sheetview.leave(w)
+    w.go_to_page(0)
+    pump()
+    frame = w.document.pages[0].frame                  # a page before the sheet
+    w.toggle_calc_mode(True)
+    w.view.calc.place_cross(frame, QPointF(60, 80))
+    type_line(w, "height:3.5'm")
+    w.toggle_calc_mode(False)
+    pump()
+    sheetview.enter(w, run.uid)
+    pump()
+    run = shown_run(w)
+
+    def put(r, text):
+        click(w, at(w, run, r, 0))
+        typed(w, text)
+        key(w, Qt.Key_Return)
+        pump()
+        return run.sheet.cells[(r, 0)].value
+    got = put(0, "=height")
+    assert "3.5" in str(got) and "m" in str(got), got
+    # a broken name of the workbook's own comes first, and says what to do
+    run.sheet.workbook.define_name("Height", "Gone!#REF!")
+    got = put(1, "=height")
+    assert str(got) == "#REF!"
+    assert "var(height)" in got.reason and "deleted" in got.reason
+    got = put(2, "=var(height)")
+    assert "3.5" in str(got), got

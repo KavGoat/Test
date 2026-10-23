@@ -242,3 +242,55 @@ def test_let_go_at_a_side_it_is_never_seen_back_at_the_top(w, side):
     assert seen and set(seen) == {area}, "drawn only in its column, never back at the top"
     drag(w, bar, QPoint(w.width() // 2, 60))
     assert w.toolBarArea(bar) == Qt.TopToolBarArea
+
+
+@pytest.mark.parametrize("side", ["right", "left"])
+def test_toolbars_share_a_column_on_a_side_as_they_share_a_row_along_the_top(w, side):
+    """The user, 2026-10-24: "Doesn't allow me to stack toolbar on the sides,
+    only one bar per column, let me join like the top." Dropped over a
+    column of toolbars already on a side, a toolbar joins it, where the blue
+    gap shows; dropped at the window's very edge it has a column of its own."""
+    from PySide6.QtWidgets import QWidget
+    area = Qt.RightToolBarArea if side == "right" else Qt.LeftToolBarArea
+    edge = QPoint(w.width() - 3, w.height() // 2) if side == "right" else QPoint(3, w.height() // 2)
+    first = w.alignment_bar
+    drag(w, first, edge)
+    assert w.toolBarArea(first) == area
+    w.layout().activate()
+    column = first.geometry()
+    second = bar_named(w, "toolbar_measure")
+    under = QPoint(column.center().x(), min(column.bottom() + 30, w.height() - 40))
+    gaps = []
+
+    def look():
+        gap = getattr(w._toolbar_drags, "join_gap", None)
+        gaps.append(gap is not None and gap.isVisible() and gap.geometry())
+    drag(w, second, under, look)
+    assert gaps and gaps[0], "the blue gap shows where it will go in the column"
+    w.layout().activate()
+    assert w.toolBarArea(second) == area
+    assert second.geometry().x() == first.geometry().x(), "in the same column"
+    assert second.geometry().top() > first.geometry().top(), "under the one it was dropped under"
+    assert outside_the_rail(w, second, area)
+    # the first is not pushed into a column of its own again
+    w.arrange_side_toolbars()
+    pump()
+    w.layout().activate()
+    assert second.geometry().x() == first.geometry().x()
+    # at the very edge: a column of its own, outside theirs
+    third = bar_named(w, "toolbar_tools")
+    drag(w, third, edge)
+    w.layout().activate()
+    assert w.toolBarArea(third) == area
+    assert third.geometry().x() != first.geometry().x()
+    assert outside_the_rail(w, third, area)
+    if side == "right":
+        assert third.geometry().left() > first.geometry().right() - 2
+    else:
+        assert third.geometry().right() < first.geometry().left() + 2
+    # kept as they are through a saved layout
+    state = w.saveState()
+    w.restoreState(state)
+    pump()
+    w.layout().activate()
+    assert second.geometry().x() == first.geometry().x()

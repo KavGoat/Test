@@ -199,7 +199,19 @@ def refresh(window) -> None:
         elif made.get("handle_width") is not None:
             split.setHandleWidth(made.pop("handle_width"))
     if not on:
+        # on a spreadsheet's pages (its Page Layout view) Excel's view
+        # buttons stay, to go back to Normal or Page Break Preview: they went
+        # with the rest of Excel's footer, and there was no way back but a
+        # click on a cell (the user, 2026-10-24: "page layout view, normal
+        # view etc don't work")
+        here = _on_a_sheet_page(window)
+        made["views"].setVisible(here)
+        if here:
+            which = current_view(window)
+            for key, button in made["buttons"].items():
+                button.setChecked(key == which)
         return
+    made["views"].show()
     tables = window.view.tables
     made["mode"].setText(mode_of(tables))
     item = _item(window, run_shown(window.scene))
@@ -223,6 +235,12 @@ def refresh(window) -> None:
     made["quiet"] = True
     made["slider"].setValue(int(round(shown_zoom(window.view) * 100)))
     made["quiet"] = False
+
+
+def _on_a_sheet_page(window) -> bool:
+    pages = getattr(getattr(window, "document", None), "pages", None) or []
+    index = getattr(window, "current_index", -1)
+    return 0 <= index < len(pages) and pages[index].sheet is not None
 
 
 def picked_ranges(tables) -> list:

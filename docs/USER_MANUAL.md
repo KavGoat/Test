@@ -1,151 +1,127 @@
 # CalcForge User Manual
 
-CalcForge puts three tools an engineer uses every day into one document:
+CalcForge is one PDF document with three tools in it:
 
-- **Part 1 — Markup**, modelled on Bluebeam Revu: mark up and measure PDF drawings.
-- **Part 2 — Calculation**, modelled on SMath Studio: equations with units, typed
-  on the page and calculated live.
-- **Part 3 — Spreadsheets and tables**, modelled on Microsoft Excel: cells with
-  formulas, formats and units, as small tables on any page or as whole
+- **Part 1 — Markup**, as in Bluebeam Revu: mark up and measure drawings.
+- **Part 2 — Calculation**, as in SMath Studio: equations with units, typed on the page.
+- **Part 3 — Spreadsheets and tables**, as in Excel: tables on any page, or whole
   spreadsheet pages.
 
-The document **is a PDF**. It opens in any PDF reader exactly as it looks here;
-markups are ordinary PDF annotations, and equations, tables and charts are drawn
-into the page. Everything CalcForge needs to edit them again travels inside the
-same file, so a round trip through CalcForge loses nothing.
+The file is an ordinary PDF: any reader shows it as it looks here, and everything
+CalcForge needs to edit it again is inside it.
 
-**How to read this manual.** Menu paths are written **Menu ▸ Item**. Keys are
-written `Ctrl+Shift+K`. Every key in this manual is the default; all of them can
-be changed (see *Customisation ▸ Keyboard shortcuts*). The reference tables of
-functions, preferences and keys are generated from the program itself, so they
-always match the version you are using. Open this manual at any time with
-**Help ▸ User Manual** (`Ctrl+F1`); type in its search box to find a word, and
-pick a heading on its left to jump there.
+Menus are written **Menu ▸ Item** and keys `Ctrl+Shift+K`; every key can be changed
+(*Customisation ▸ Keyboard shortcuts*). Open this manual with **Help ▸ User Manual**
+(`Ctrl+F1`) and type in its search box to find a word.
 
 ## Getting started
 
-### Markup mode and Calc mode
+### The key things
 
-CalcForge has two modes, shown by the **Markup | Calc** pair of buttons at the
-right-hand end of the menu bar. `F12` switches between them.
+**Markup mode and Calc mode.** `F12`, or the **Markup | Calc** buttons at the right
+of the menu bar.
 
-- **Markup mode** is Revu: the markup tools have their single-letter keys
-  (`R` for a rectangle, `M` for a length measurement…), a click selects, and a
-  table is opened for its cells with a double-click.
-- **Calc mode** is SMath: a click on empty paper puts SMath's red cross there and
-  typing starts an equation. The markup tool letters are switched off (a letter
-  is the start of an equation), `"` starts Calculation text and `@` a plot. A
-  click on a table goes straight into its cells.
+- **Markup mode** (Revu): tool letters work (`R` rectangle, `M` length…), a click
+  selects, a double-click opens a table's cells.
+- **Calc mode** (SMath): click empty paper (a red cross) and type to start an
+  equation; a click on a table goes into its cells. In Markup mode, `'` starts an
+  equation where the pointer is.
 
-Equations, tables and markups all live on the same pages in both modes; the mode
-only decides what a click and a key press mean. In Markup mode you can still
-start an equation where the pointer is by typing `'`.
+**Pages.** The **Thumbnails** panel (`Alt+T`): click a page to go to it, drag pages
+to reorder them, `Delete` deletes the pages picked (it asks first), right-click for
+Insert, Duplicate, Rotate and the rest. **Document ▸ Insert ▸ Spreadsheet Page**
+adds a workbook.
+
+**Equations and spreadsheets read each other.**
+
+| In | To read | Write |
+| --- | --- | --- |
+| an equation | a cell | `Sheet1.A1` |
+| an equation | a named cell of a sheet | `Sheet1.Load` |
+| an equation | a name of an imported workbook | `Book.Name` |
+| a cell | an equation's variable | `=height` |
+| a cell whose workbook has a name of the same | the equation's variable | `=var(height)` |
+
+- A sheet name an equation can't hold is written with `_`: `Sheet1 (2)` is
+  `Sheet1_2`, `Seismic Actions` is `Seismic_Actions`.
+- A cell reads a variable defined **before** its sheet: on an earlier page, or
+  higher on the same page.
+- In a workbook's cells its **own names come first**, as in Excel. Imported
+  workbooks often have names Excel keeps as `#REF!` (their cells were deleted):
+  the Seismic Parts workbook's **Height** is one, so `=height` there is `#REF!`
+  (the error's tip says why) — `=var(height)` reads the equation's.
+- The **Variables** panel lists everything an equation can read; an imported
+  workbook's names are under its heading.
+
+**Spreadsheet views.** The buttons at the right of the status bar, whenever a
+spreadsheet page is in view (also **View ▸ Spreadsheet**):
+
+- **Normal** — the sheet alone, all white, as Excel opens it. The print area's edge
+  and the page breaks are blue lines; drag them.
+- **Page Layout** — the sheet's pages as they print.
+- **Page Break Preview** — what prints is white, everything else grey; drag the blue
+  lines to move the print area's edges and the breaks.
+
+To set the print area exactly, select the cells, then right-click ▸ **Page Layout ▸
+Print Area ▸ Set Print Area** (or **Calculation ▸ Page Layout ▸ Print Area**).
+
+**Toolbars.** Drag a toolbar by its grip to the top, the bottom, the left or the
+right of the window. Along the top they share rows. On a side, drop one onto a
+column of toolbars to join it (a blue gap shows where it will go), or at the
+window's very edge for a column of its own. **Tools ▸ Toolbars** turns each on or
+off; **Lock Toolbars** stops them moving.
+
+**Panels.** The strips of icons down the window's edges open the panels — left:
+Thumbnails, Bookmarks (`Alt+B`), Tool Chest (`Alt+X`), Search (`Alt+1`); right:
+Properties, Page (`Alt+U`), Maths, Variables; along the bottom the Markups List
+(`Alt+L`). Drag an icon to the other edge to move its panel; `Shift+F4` hides or
+shows them all.
+
+**Undo.** `Ctrl+Z`, `Ctrl+Y` (or `Ctrl+Shift+Z`) and **Edit ▸ Undo History**. In an
+equation `Ctrl+Z` takes back keystrokes first; with a markup half drawn it takes
+back that markup first.
+
+**Finding a command.** **Help ▸ Find Tools + Commands** (`Shift+F1`): type what you
+want to do. **CalcForge ▸ Keyboard Shortcuts** (`F1`) lists every command. While you
+type in a box, a cell or an equation, keys type; tool letters only act on the bare
+page.
 
 ### Opening, saving and starting a document
 
-- **File ▸ New PDF** (`Ctrl+N`) starts a blank A4 portrait page in Markup mode.
-  **File ▸ New Tab** (`Ctrl+T`) opens another document in a tab of its own, and
-  **File ▸ New Window** (`Ctrl+Alt+Shift+N`) a second window.
+- **File ▸ New PDF** (`Ctrl+N`), **New Tab** (`Ctrl+T`), **New Window**
+  (`Ctrl+Alt+Shift+N`).
 - **File ▸ Open** (`Ctrl+O`) opens a PDF, or an Excel workbook (`.xlsx`, `.xlsm`),
-  in a new tab. A PDF opens exactly as it was written: its pages stay its own line
-  work (sharp at any zoom), its bookmarks come into the Bookmarks panel, and the
-  markups someone else made come in as markups you can select, move and change.
-  **File ▸ Open Recent** lists the files opened lately.
-- **File ▸ Save** (`Ctrl+S`), **Save As** (`Ctrl+Shift+S`) and **Save All** write
-  a PDF. Every save is a fresh compact file; a digitally signed PDF is appended to
-  instead, so its signature still verifies.
-- **File ▸ Close** (`Ctrl+W`) and **Close All** close documents, asking about
-  unsaved changes. A document tab's right-click menu also has Close Others,
-  New Window, Open in Split View and Duplicate Tab.
-- **Tabs and windows.** A file open in two tabs — in one window, or each in a
-  window of its own — is **two views of one document**: an edit in either shows
-  in both at once, one undo history serves both (Undo in either undoes the
-  document's last step), one save saves it, and every tab of it shows the
-  unsaved-changes mark and, after **Save As**, the new name. Each tab keeps its
-  own zoom, scroll position, page and tool. Closing one of the tabs (or one of
-  the windows) asks nothing while another still shows the document; closing the
-  last one asks about unsaved changes. A tab's **New Window** and **Duplicate
-  Tab** give a document another view; so does **File ▸ Open** (or **Open
-  Recent**) of a file another window already has open — this window gets a tab
-  on that same document, its unsaved changes included, rather than a second copy
-  read from the disk. Opening a file already open in this window brings its tab
-  forward.
-- **Dragging tabs.** Drag a document tab out of the window to give it a window
-  of its own, or drop it on another CalcForge window (its tab bar, its page or
-  its empty workspace) to move it there with its pages, place, zoom, undo
-  history and selection. A tab is never merged into another: dropped on a window
-  (or the other pane of a Split View) that already shows the document, it stays
-  a tab of its own there, a second view of the same document. A window left with
-  no tab by the drag closes.
-- **Two copies of one file.** Two separate copies of the same file (one read
-  from the disk apart from the other, such as a recovered version) are never
-  merged: dropped on a window that holds the other copy, both tabs stay, the one
-  brought in marked **(2)** (for example `a.pdf (2)`), and the status bar says so
-  — save one with **Save As** so that neither is saved over the other.
-- **File ▸ Import** brings pages in: **Pages** (from another PDF), **Image Page**,
-  **Excel Workbook** and **Tool Set** (a Bluebeam `.btx`). Each page import offers
-  **Before** or **After** the current page.
-- **File ▸ Export** writes a plain **PDF** (`Ctrl+E`), **Images** of the pages,
-  or a **Markups Summary**.
+  in a new tab. Other people's markups come in as markups you can edit. **Open
+  Recent** lists the files opened lately.
+- **File ▸ Save** (`Ctrl+S`), **Save As** (`Ctrl+Shift+S`) and **Save All** write the
+  PDF. A digitally signed PDF is appended to, so its signature still verifies.
+- **File ▸ Close** (`Ctrl+W`) and **Close All** ask about unsaved changes.
+- **File ▸ Import**: **Pages** (from another PDF), **Image Page**, **Excel Workbook**
+  and **Tool Set** (a Bluebeam `.btx`), each **Before** or **After** the current page.
+- **File ▸ Export**: a plain **PDF** (`Ctrl+E`), **Images** of the pages, or a
+  **Markups Summary**.
+- **Tabs and windows.** A file open in two tabs or windows is one document seen
+  twice: an edit shows in both, one undo history, one save. Drag a tab out of the
+  window for a window of its own, or onto another window to move it there. Two
+  separate copies of one file are never merged: the second is marked **(2)**.
 
 ### The window
 
-**Menu bar.** Revu's menus — CalcForge (Preferences, Keyboard Shortcuts, Exit),
-File, Edit, View, Document, Batch, Tools, then **Calculation** (equations and
-spreadsheets), Window and Help. At its right end are the **Markup | Calc**
-switch and a **Search** box that finds tools, commands, markups and pages as you
-type.
-
-**Toolbars.** Main (new, open, save, insert pages, export, print, undo, redo),
-**Tools** (the markup tools), **Measure**, **Calculation**, **Markup Styles** and
-**Properties**. Turn each on or off in **Tools ▸ Toolbars**; drag a toolbar by its
-grip to the top or bottom of the window; **Lock Toolbars** stops them moving.
-When the window is too narrow for them, the toolbars wrap onto another row
-(and a bar too long for the window shows the rest on its » button).
-
-**Panels.** The panels sit behind two strips of icons down the window's edges,
-as in Revu. Left: **Thumbnails** (`Alt+T`), **Bookmarks** (`Alt+B`), **Tool
-Chest** (`Alt+X`) and **Search** (`Alt+1`). Right: **Properties**, **Page**
-(`Alt+U`), **Maths** and **Variables**. The **Markups List** (`Alt+L`) lies along
-the bottom. Click an icon to open or close its panel; drag an icon to the other
-edge to move the panel there. Each panel's title bar can roll it up, pin it where
-it is, float it and hide it. The edge of a panel column turns blue under the
-pointer and hides the column with one click. **Window ▸ Hide/Show Panels**
-(`Shift+F4`) clears them all away for room and brings them back. Changing
-anything in a panel — ticking an option, picking from a list, typing a value,
-picking a page, a tool or a search result — leaves the panel scrolled where it
-was and the keyboard with what you were using; only picking something else on
-the page starts the Properties panel at its top again.
-
-**Properties toolbar and Properties panel.** Whatever is selected — or the tool
-you are holding — is shown and changed on the **Properties toolbar** (Revu's bar
-above the page) and in more detail in the **Properties panel**. Both are
-described in *Part 1 ▸ Properties toolbar and panel*. With a table open, the
-toolbar shows Excel's cell controls instead.
-
-**Tool Chest.** Your own collections of ready-made markups and styles, kept
-between documents (see *Part 1 ▸ Tool Chest and tool sets*).
-
-**Status bar.** From the left: Show Grid, Snap to Grid, Snap to Content, Snap to
-Markup and Reuse toggles; what is happening and where the pointer is; Dim
-Content; the page's scale (**Scale Not Set** until one is set — click it to set
-one); the page navigation (first, previous, page number, next, last); Fit Width;
-the page layout (Continuous ▾); Snap ▾; Sync (link this view with other windows
-on the same document); the paper size (click it for Page Setup); and the zoom
-box. When the window narrows, the least-needed controls move onto the » menu.
-
-**Undo.** Every change is one step: **Edit ▸ Undo** (`Ctrl+Z`), **Redo**
-(`Ctrl+Y` or `Ctrl+Shift+Z`) and **Edit ▸ Undo History**, which lists the steps.
-Inside an equation, `Ctrl+Z` takes back keystrokes first; with a markup half drawn
-(a measurement waiting for its second click, say), it takes back that markup first.
-
-**Finding a command.** **Help ▸ Find Tools + Commands** (`Shift+F1`) — type what
-you want to do and it names the tool or command and its key. **CalcForge ▸
-Keyboard Shortcuts** (`F1`) lists every command.
-
-**Typing never fires a shortcut.** While you are typing in a text box, callout,
-note, equation, cell, formula bar or search box, a key types; tool keys and
-single-letter commands only act on the bare page.
+- **Menu bar**: CalcForge, File, Edit, View, Document, Batch, Tools, Calculation,
+  Window, Help; at its right end the **Markup | Calc** switch and a **Search** box
+  for tools, commands, markups and pages.
+- **Toolbars**: Main, **Tools** (the markup tools), **Measure**, **Calculation**,
+  **Markup Styles** and **Properties**. Too narrow a window wraps them onto another
+  row; a bar too long shows the rest on its » button.
+- **Properties toolbar and panel**: show and change whatever is selected, or the
+  tool in hand (*Part 1 ▸ Properties toolbar and panel*); with a table open, Excel's
+  cell controls.
+- **Status bar**, from the left: the grid and snap toggles, Reuse, what is
+  happening and where the pointer is, Dim Content, the page's scale (click to set
+  one), the page navigation, Fit Width, the page layout (Continuous ▾), Snap ▾,
+  Sync, the paper size (click for Page Setup) and the zoom. On a spreadsheet,
+  Excel's footer: Ready/Enter/Edit, the sums of the cells picked, the view buttons
+  and the zoom slider.
 
 ## Part 1 — Markup (Bluebeam Revu-style)
 

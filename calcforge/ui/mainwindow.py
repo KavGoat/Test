@@ -517,6 +517,9 @@ class _ToolbarDrags(QObject):
         # the side edge the held toolbar will go to if let go now, and the
         # one it is to go to once it has landed
         self.side = None
+        # the column of toolbars already on that side it is to join, and
+        # before which of them (its index), or None: a column of its own
+        self.join = None
         self.pending = None
         self.room = None
         self.still = None             # the window's animation, while it is held still
@@ -534,10 +537,11 @@ class _ToolbarDrags(QObject):
             self._follow(watched, event.globalPosition().toPoint())
         elif kind == QEvent.MouseButtonRelease and self.held is not None:
             if self.side is not None:
-                self.pending = (self.held, self.side)
+                self.pending = (self.held, self.side, self.join)
                 self._hold_still()
             self.held = None
             self.side = None
+            self.join = None
             self._show(None)
             QTimer.singleShot(0, self.window, self.window._after_toolbar_drag)
         return False
@@ -596,8 +600,63 @@ class _ToolbarDrags(QObject):
         if side is not None and not (top <= at.y() <= window.height()):
             side = None
         self.side = side
+        self.join = self.joining(bar, side, at) if side is not None else None
+        if self.join is not None:
+            self._show(None)
+            self._show_join(bar, side, *self.join)
+            return
+        self._hide_join()
         column = self.column_for(bar, side) if side is not None else None
         self._show(column, side)
+
+    #: how near the window's edge the pointer makes a column of its own,
+    #: outside the toolbars already there, rather than joining theirs
+    NEW_COLUMN_REACH = 8
+
+    def joining(self, bar, side, at):
+        """(the toolbars of the column under the pointer, top to bottom,
+        and where among them *bar* goes) when the pointer is over a column
+        of toolbars already on *side* — the toolbars share it, as along the
+        top they share a row (the user, 2026-10-24: "only one bar per
+        column, let me join like the top"); None for a column of its own:
+        at the window's very edge, or with none there yet."""
+        window = self.window
+        outer = window.contentsRect()
+        if side == Qt.RightToolBarArea and at.x() >= outer.right() - self.NEW_COLUMN_REACH:
+            return None
+        if side == Qt.LeftToolBarArea and at.x() <= outer.left() + self.NEW_COLUMN_REACH:
+            return None
+        for column in window.side_columns(side):
+            others = [other for other in column if other is not bar]
+            if not others:
+                continue
+            box = others[0].geometry()
+            if box.left() <= at.x() <= box.right():
+                index = sum(1 for other in others if other.geometry().center().y() < at.y())
+                return others, index
+        return None
+
+    def _show_join(self, bar, side, column, index) -> None:
+        """The blue gap where *bar* will go in *column*: above the toolbar
+        it will be put before, or under the last."""
+        window = self.window
+        if getattr(self, "join_gap", None) is None:
+            self.join_gap = _drop_gap(window)
+        box = column[0].geometry()
+        length = max(24, min(bar.sizeHint().width(), 160))
+        if index < len(column):
+            top = column[index].geometry().top()
+            gap = QRect(box.left(), max(box.top(), top - length // 2), box.width(), length)
+        else:
+            bottom = column[-1].geometry().bottom() + 1
+            gap = QRect(box.left(), bottom, box.width(), length)
+        self.join_gap.setGeometry(gap)
+        self.join_gap.show()
+        self.join_gap.raise_()
+
+    def _hide_join(self) -> None:
+        if getattr(self, "join_gap", None) is not None:
+            self.join_gap.hide()
 
     def column_for(self, bar, side) -> QRect:
         """Where *bar* will stand on end on *side*: a column of its own at
@@ -629,6 +688,8 @@ class _ToolbarDrags(QObject):
 
     def _show(self, column, side=None) -> None:
         """Open room *column* wide outside *side*'s rail (None: close it)."""
+        if column is None:
+            self._hide_join()
         room = self.room
         if room is None:
             room = self.room = _SideRoom(self.window)
@@ -5834,10 +5895,11 @@ class MainWindow(QMainWindow):
     # -- toolbars on the side edges ----------------------------------------
     # A toolbar can go to the left or right edge (the user, 2026-10-15:
     # "allow toolbars to be dragged to the side on their own column (can't
-    # join the panel column)"). There it is a column of its own between the
+    # join the panel column)"). There it is in a column between the
     # window's edge and the panel rail: never in the rail's column, never
-    # between the rail and its panels, never sharing a column with another
-    # toolbar. Qt's toolbar areas are outside the dock areas already, so a
+    # between the rail and its panels. Toolbars may share a column, as they
+    # share a row along the top (the user, 2026-10-24: "let me join like the
+    # top"). Qt's toolbar areas are outside the dock areas already, so a
     # side toolbar is always outside the panels; what is kept in order here
     # is the rail, which is a toolbar too and has to stay next to the panels.
     #: The toolbars that only go top or bottom: the Properties toolbar's boxes
@@ -5849,8 +5911,8 @@ class MainWindow(QMainWindow):
                 Qt.RightToolBarArea: self.right_rail_bar}
 
     def _side_columns_in_order(self, area) -> bool:
-        """Whether every toolbar in the side *area* is in a column of its own,
-        all of them outside the rail."""
+        """Whether every toolbar in the side *area* is in a column outside
+        the rail (toolbars may share one, as they share a row along the top)."""
         rail = self._side_rails()[area]
         bars = [bar for bar in self.toolbars if self.toolBarArea(bar) == area
                 and not bar.isHidden()]
@@ -5860,15 +5922,47 @@ class MainWindow(QMainWindow):
             return False
         self.layout().activate()
         left = area == Qt.LeftToolBarArea
-        columns = set()
         for bar in bars:
             x = bar.geometry().x()
-            if x in columns or abs(x - rail.geometry().x()) < 2:
+            if abs(x - rail.geometry().x()) < 2:
                 return False
             if (x > rail.geometry().x()) if left else (x < rail.geometry().x()):
                 return False
-            columns.add(x)
         return True
+
+    def side_columns(self, area) -> list:
+        """The columns of toolbars on the side *area*, from the window's edge
+        inwards, each its toolbars top to bottom (the rail left out)."""
+        bars = [bar for bar in self.toolbars if self.toolBarArea(bar) == area
+                and not bar.isHidden() and not bar.isFloating()]
+        columns: dict = {}
+        for bar in bars:
+            columns.setdefault(bar.geometry().x(), []).append(bar)
+        order = sorted(columns, reverse=area == Qt.RightToolBarArea)
+        return [sorted(columns[x], key=lambda bar: bar.geometry().y()) for x in order]
+
+    def _new_side_column(self, bar, side) -> None:
+        """*bar* in a column of its own at the window's edge, outside the
+        columns already on *side* — where its room was shown (appended, it
+        went in beside the rail, inside them)."""
+        columns = [column for column in self.side_columns(side)
+                   if any(other is not bar for other in column)]
+        if not columns:
+            self.addToolBar(side, bar)
+            return
+        outermost = next(other for other in columns[0] if other is not bar)
+        self.insertToolBar(outermost, bar)
+        self.insertToolBarBreak(outermost)
+
+    def _join_side_column(self, bar, column: list, index: int) -> None:
+        """*bar* into the side *column* of toolbars, before its *index*-th
+        (after the last when *index* is past them)."""
+        if index < len(column):
+            self.insertToolBar(column[index], bar)
+        else:
+            last = column[-1]
+            self.insertToolBar(last, bar)        # (before the last, in its column)
+            self.insertToolBar(bar, last)        # and the last back before it
 
     def _a_toolbar_is_held(self) -> bool:
         """A toolbar being dragged, or still gliding into its place after
@@ -5894,10 +5988,13 @@ class MainWindow(QMainWindow):
         try:
             if pending is not None:
                 drags.pending = None
-                bar, side = pending
+                bar, side, join = pending
                 from shiboken6 import isValid
                 if isValid(bar) and bar in self.toolbars:
-                    self.addToolBar(side, bar)
+                    if join is not None and all(isValid(other) for other in join[0]):
+                        self._join_side_column(bar, *join)
+                    else:
+                        self._new_side_column(bar, side)
             self.arrange_side_toolbars()
             self._wrap_toolbar_rows()
         finally:
@@ -5907,8 +6004,9 @@ class MainWindow(QMainWindow):
                 drags.move_on()
 
     def arrange_side_toolbars(self) -> None:
-        """Give each toolbar on a side edge a column of its own, outside the
-        rail; put one that cannot stand on end back at the top."""
+        """Keep the toolbars on a side edge in columns outside the rail
+        (several may share one); put one that cannot stand on end back at
+        the top."""
         if self._a_toolbar_is_held():
             return                     # done once it is let go (_ToolbarDrags)
         for bar in self.toolbars:
@@ -5918,12 +6016,17 @@ class MainWindow(QMainWindow):
         for area, rail in self._side_rails().items():
             if self._side_columns_in_order(area):
                 continue
-            bars = [bar for bar in self.toolbars if self.toolBarArea(bar) == area]
-            # the order they are in now, from the edge inwards
-            bars.sort(key=lambda bar: bar.geometry().x(),
-                      reverse=area == Qt.RightToolBarArea)
-            for bar in bars:
-                self.insertToolBar(rail, bar)
+            # the columns they are in now, from the edge inwards, each kept
+            # together (a toolbar in the rail's own column is given its own)
+            rail_x = rail.geometry().x()
+            for column in self.side_columns(area):
+                if abs(column[0].geometry().x() - rail_x) < 2:
+                    for bar in column:
+                        self.insertToolBar(rail, bar)
+                        self.insertToolBarBreak(rail)
+                    continue
+                for bar in column:
+                    self.insertToolBar(rail, bar)
                 self.insertToolBarBreak(rail)
         self._auto_breaks = {bar for bar in self._auto_breaks
                              if self.toolBarArea(bar) in (Qt.TopToolBarArea,
@@ -6126,6 +6229,8 @@ class MainWindow(QMainWindow):
         self.pages_panel.show_current(index, keep_run=True)
         self.refresh_scale_label()
         self.view_sync.paged(self.view, index)
+        from . import sheetstatus
+        sheetstatus.refresh_soon(self)    # (Excel's view buttons on a spreadsheet's page)
 
     def _structure_snapshot(self, reuse: Optional[dict] = None) -> dict:
         """Every page written out. With *reuse* (from the snapshot before a
