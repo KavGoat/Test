@@ -473,7 +473,7 @@ def calc_scenarios(walk):
     window.view.scene().clearSelection()
     for item in (equation, second):
         item.setSelected(True)
-    window.insert_block()
+    window.create_block()
     pump()
     from calcforge.items.calc import CalcBlockItem, CalcTextItem
     blocks = [i for i in window.view.scene().items() if isinstance(i, CalcBlockItem)]
@@ -496,15 +496,7 @@ def calc_scenarios(walk):
     window.show_panel("dock_variables", True)
     pump()
     tree = panel.tree
-    found = None
-    for r in range(tree.topLevelItemCount()):
-        top = tree.topLevelItem(r)
-        for node in [top] + [top.child(c) for c in range(top.childCount())]:
-            if panel.row_of(node) is not None:
-                found = node
-                break
-        if found is not None:
-            break
+    found = panel.first_row()             # (in a group: Blocks ▸ … opened to it)
     if found is not None:
         tree.scrollToItem(found)
         point = tree.visualItemRect(found).center()

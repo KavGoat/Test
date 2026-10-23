@@ -89,6 +89,28 @@ def fresh_modifiers(qapp):
         spare.deleteLater()
 
 
+@pytest.fixture(scope="session")
+def pointer_at_start(qapp):
+    """Where the pointer is before any test has moved it."""
+    from PySide6.QtGui import QCursor
+    return QCursor.pos()
+
+
+@pytest.fixture(autouse=True)
+def fresh_pointer(qapp, pointer_at_start):
+    """No test inherits where the one before left the pointer.
+
+    ``QTest.mouseMove`` moves the screen's pointer itself, and it stays
+    there. When a menu closes, Qt tells whatever is under that pointer it
+    has been entered, so a pointer left over the page by an earlier test
+    gave a later one's page view an Enter it never had alone — and with a
+    tool armed, the view took the keyboard away from the panel being used.
+    """
+    from PySide6.QtGui import QCursor
+    QCursor.setPos(pointer_at_start)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def fresh_settings(settings_sandbox):
     """Every test starts from the shipped defaults.

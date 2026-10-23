@@ -711,6 +711,22 @@ class VariablesPanel(QWidget):
             self.opened.add(key)
         self._fill()
 
+    def first_row(self):
+        """The first variable's row, at any depth, its groups opened so it
+        can be seen (and right-clicked); None when there is none."""
+        from PySide6.QtWidgets import QTreeWidgetItemIterator
+        found = QTreeWidgetItemIterator(self.tree)
+        while found.value() is not None:
+            node = found.value()
+            if self.row_of(node) is not None:
+                parent = node.parent()
+                while parent is not None:
+                    parent.setExpanded(True)
+                    parent = parent.parent()
+                return node
+            found += 1
+        return None
+
     def group_node(self, key: str):
         """The heading of group *key* ("blocks", "workbooks/self", "book:Name"…)."""
         from PySide6.QtWidgets import QTreeWidgetItemIterator

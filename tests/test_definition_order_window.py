@@ -283,7 +283,8 @@ def test_a_self_contained_block_reads_the_latest_above_it(w):
     w.view.scene().clearSelection()
     for item in inside:
         item.setSelected(True)
-    w.insert_block()
+    w.block_self_contained_answer = False          # made not self-contained, then ticked
+    w.create_block()
     (block,) = [i for i in w.view.scene().items() if isinstance(i, CalcBlockItem)]
     menu = w.build_context_menu(block, block.sceneBoundingRect().topLeft())
     (toggle,) = [a for a in menu.actions() if a.text() == "Self-Contained"]

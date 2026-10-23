@@ -2218,7 +2218,8 @@ def fx_equation_editing(win):
 
 def fx_calc_block(win):
     ctx = fx_two_equations(win)
-    win.insert_block()
+    from calcforge.items.calc import CalcItem
+    win.create_block([i for i in win.view.scene().items() if isinstance(i, CalcItem)])
     pump()
     from calcforge.items.calc import CalcBlockItem
     blocks = [i for i in win.view.scene().items() if isinstance(i, CalcBlockItem)]

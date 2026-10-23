@@ -68,7 +68,7 @@ def test_session(window, monkeypatch, tmp_path):
     items = sorted(getattr(sheet_for(window.document), "items", {}).values(), key=lambda i: i.region.y)
     window.view.scene().clearSelection()
     for it in items[3:5]: it.setSelected(True)
-    window.insert_block(); pump()
+    window.create_block(); pump()                  # right-click ▸ Create Block
     blocks = [i for i in window.view.scene().items() if type(i).__name__ == "CalcBlockItem"]
     window.set_block_self_contained(blocks, True); pump()
     snap(window, "03_block")
