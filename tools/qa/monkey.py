@@ -56,6 +56,7 @@ class Session:
         self.rng = random.Random(seed)
         self.out = out
         self.verbose = verbose
+        self.collect = bool(os.environ.get("MONKEY_GC"))
         self.log: list = []
         self.failures: list = []
         self.workbooks: list = []
@@ -147,6 +148,13 @@ class Session:
             (3, "zoom", self.a_zoom),
             (3, "scroll", self.a_scroll),
             (3, "menu command", self.a_menu_command),
+            (2, "calc mode on/off", self.a_calc_mode),
+            (3, "click-placed tool", self.a_click_tool),
+            (3, "text box", self.a_text_box),
+            (4, "pick a markup and press keys", self.a_markup_keys),
+            (3, "resize a markup by a handle", self.a_resize_markup),
+            (3, "edit an equation", self.a_edit_equation),
+            (4, "right-click menu entry", self.a_context_entry),
         ]
         if sheet_on or self.runs():
             acts += [
@@ -166,6 +174,7 @@ class Session:
                 (3, "drag print area / break", self.a_drag_area),
                 (3, "leave the sheet", self.a_leave_sheet),
                 (2, "select rows by heading", self.a_heading_select),
+                (3, "format cells (keys)", self.a_format_cells),
             ]
         return acts
 
@@ -636,9 +645,15 @@ class Session:
         from PySide6.QtCore import QPointF, Qt
         calc = self.view.calc
         calc.leave()
+        self.win.select_tool("select")
+        self.win.toggle_calc_mode(True)        # equations are typed in Calc mode
         self.view.scene().clearSelection()
         point = QPointF(self.rng.randrange(40, 400), self.rng.randrange(40, 700))
-        calc.place_cross(frame, point)
+        spot = frame.mapToScene(point)
+        self.view.centerOn(spot)
+        X.pump()
+        self._click(self.view.mapFromScene(spot))  # the red cross, where clicked
+        X.pump()
         from PySide6.QtGui import QKeyEvent
         from PySide6.QtCore import QEvent
         from PySide6.QtWidgets import QApplication
@@ -647,7 +662,216 @@ class Session:
             QApplication.sendEvent(target, QKeyEvent(QEvent.KeyPress, 0, Qt.NoModifier, ch))
             X.pump()
         calc.leave()
+        if self.rng.random() < 0.5:
+            self.win.toggle_calc_mode(False)
         return f"page {index}: {text}"
+
+    def a_calc_mode(self):
+        on = self.view.calc.mode != "calc"
+        self.win.toggle_calc_mode(on)
+        return "on" if on else "off"
+
+    def _blank_spot(self):
+        """A point in the viewport over the page in view."""
+        port = self.view.viewport()
+        return _pt(self.rng.randrange(60, max(61, port.width() - 200)),
+                   self.rng.randrange(60, max(61, port.height() - 150)))
+
+    def a_click_tool(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        tool = self.pick(["stamp", "note", "flag", "count", "checkbox", "stamp"])
+        self.win.select_tool(tool)
+        X.pump()
+        spot = self._blank_spot()
+        self._click(spot)
+        X.pump()
+        if tool == "count" and self.rng.random() < 0.6:
+            self._click(spot + _pt(40, 10))
+            X.pump()
+        if tool in ("note", "checkbox") and self.rng.random() < 0.6:
+            QTest.keyClicks(self.view.viewport(), self.pick(TEXTS))
+            X.pump()
+        QTest.keyClick(self.view.viewport(), Qt.Key_Escape)
+        self.win.select_tool("select")
+        return f"{tool} at {spot.x()},{spot.y()}{' on a sheet' if self.shown() else ''}"
+
+    def a_text_box(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        tool = self.pick(["text", "text", "callout"])
+        self.win.select_tool(tool)
+        X.pump()
+        spot = self._blank_spot()
+        if tool == "callout":
+            self._click(spot)                       # where the arrow points
+            X.pump()
+            self._drag(spot + _pt(60, -60), spot + _pt(180, -20))
+        else:
+            self._drag(spot, spot + _pt(self.rng.randrange(20, 160), self.rng.randrange(15, 80)))
+        X.pump()
+        words = self.pick(TEXTS + ["=Z*2", "Span 6 m", "Check"])
+        QTest.keyClicks(self.view.viewport(), words)
+        X.pump()
+        how = self.rng.random()
+        if how < 0.4:
+            QTest.keyClick(self.view.viewport(), Qt.Key_Escape)
+        elif how < 0.8:
+            self.win.select_tool("select")
+            self._click(self._blank_spot())          # clicked away
+        self.win.select_tool("select")
+        return f"{tool}: {words!r} {'Esc' if how < 0.4 else 'click away' if how < 0.8 else 'left typing'}"
+
+    def a_markup_keys(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        items = [m for m in self._markups() if m.isVisible()]
+        if not items:
+            return "none"
+        item = self.pick(items)
+        self.win.select_tool("select")
+        if self.rng.random() < 0.5:
+            self._click(self._markup_point(item))    # clicked on
+            how = "clicked"
+        else:
+            self.view.scene().clearSelection()       # as the Markups list picks it
+            item.setSelected(True)
+            self.win.refresh_selection()
+            how = "listed"
+        X.pump()
+        port = self.view.viewport()
+        keys = self.pick([
+            [(Qt.Key_Delete, Qt.NoModifier)],
+            [(Qt.Key_Right, Qt.NoModifier)] * 3,
+            [(Qt.Key_Up, Qt.ShiftModifier)],
+            [(Qt.Key_C, Qt.ControlModifier), (Qt.Key_V, Qt.ControlModifier)],
+            [(Qt.Key_X, Qt.ControlModifier), (Qt.Key_V, Qt.ControlModifier)],
+            [(Qt.Key_D, Qt.ControlModifier)],
+            [(Qt.Key_A, Qt.ControlModifier), (Qt.Key_Right, Qt.NoModifier)],
+            [(Qt.Key_Escape, Qt.NoModifier)],
+        ])
+        for key, mods in keys:
+            QTest.keyClick(port, key, mods)
+            X.pump()
+        names = {Qt.Key_Delete: "Del", Qt.Key_Right: "→", Qt.Key_Up: "↑", Qt.Key_C: "C",
+                 Qt.Key_V: "V", Qt.Key_X: "X", Qt.Key_D: "D", Qt.Key_A: "A", Qt.Key_Escape: "Esc"}
+        return f"{type(item).__name__} {how}: " + " ".join(
+            ("Ctrl+" if m == Qt.ControlModifier else "Shift+" if m == Qt.ShiftModifier else "")
+            + names[k] for k, m in keys)
+
+    def a_resize_markup(self):
+        items = [m for m in self._markups() if m.isVisible() and hasattr(m, "handle_points")]
+        if not items:
+            return "none"
+        item = self.pick(items)
+        self.win.select_tool("select")
+        self._click(self._markup_point(item))
+        X.pump()
+        try:
+            handles = item.handle_points()
+        except Exception:  # noqa: BLE001
+            return "no handles"
+        if not handles:
+            return "no handles"
+        name = self.pick(sorted(handles))
+        spot = item.mapToScene(handles[name])
+        self.view.centerOn(spot)
+        X.pump()
+        p = self.view.mapFromScene(spot)
+        dx, dy = self.rng.randrange(-60, 80), self.rng.randrange(-60, 80)
+        self._drag(p, p + _pt(dx, dy))
+        return f"{type(item).__name__} {name} by {dx},{dy}"
+
+    def a_edit_equation(self):
+        from PySide6.QtCore import QEvent, Qt
+        from PySide6.QtGui import QKeyEvent
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QApplication
+        regions = [m for f in getattr(self.win.scene, "frames", []) or [] for m in f.markups()
+                   if type(m).__name__ == "CalcItem" and m.isVisible()]
+        if not regions:
+            return "none"
+        region = self.pick(regions)
+        box = region.local_rect() if hasattr(region, "local_rect") else region.boundingRect()
+        spot = region.mapToScene(box.center())
+        self.view.centerOn(spot)
+        X.pump()
+        p = self.view.mapFromScene(spot)
+        QTest.mouseDClick(self.view.viewport(), Qt.LeftButton, Qt.NoModifier, p)
+        X.pump()
+        typed = self.pick(["+1", "*2", "\b\b", "'m", "^2"])
+        for ch in typed.replace("\b", "\x08"):
+            if ch == "\x08":
+                QTest.keyClick(self.view.viewport(), Qt.Key_Backspace)
+            else:
+                QApplication.sendEvent(self.view.viewport(), QKeyEvent(QEvent.KeyPress, 0, Qt.NoModifier, ch))
+            X.pump()
+        if self.rng.random() < 0.5:
+            QTest.keyClick(self.view.viewport(), Qt.Key_Escape)
+        else:
+            self._click(self._blank_spot())
+        self.view.calc.leave()
+        return f"{typed!r}"
+
+    SKIP_ENTRIES = ("print", "export", "save", "email", "send", "open", "properties",
+                    "keyboard", "customize", "add to tool chest", "set as default", "flatten")
+
+    def a_context_entry(self):
+        from PySide6.QtWidgets import QMenu
+        where = self.rng.random()
+        menu = None
+        what = ""
+        if where < 0.35 and self.view.tables.item is not None:
+            menu, what = self.view.tables.cell_menu(), "cell"
+        elif where < 0.65:
+            items = [m for m in self._markups() if m.isVisible()]
+            if items:
+                item = self.pick(items)
+                self.view.scene().clearSelection()
+                item.setSelected(True)
+                self.win.refresh_selection()
+                spot = item.mapToScene(item.boundingRect().center())
+                menu, what = self.win.build_context_menu(item, spot), type(item).__name__
+        elif where < 0.85:
+            index = self.rng.randrange(len(self.win.document.pages))
+            menu, what = self.win.page_menu(index), f"thumbnail {index}"
+        if menu is None:
+            frame = self.win.document.pages[self.win.current_index].frame
+            if frame is None:
+                return "none"
+            spot = frame.mapToScene(frame.page_rect().center())
+            menu, what = self.win.build_context_menu(None, spot), "page"
+        entries = []
+
+        def walk(m, path):
+            m.aboutToShow.emit()
+            for a in m.actions():
+                label = a.text().replace("&", "")
+                if a.menu() is not None:
+                    walk(a.menu(), path + [label])
+                elif label and a.isEnabled() and not a.isSeparator() \
+                        and not any(k in label.lower() for k in self.SKIP_ENTRIES):
+                    entries.append((path + [label], a))
+        walk(menu, [])
+        if not entries:
+            return f"{what}: nothing"
+        path, action = self.pick(entries)
+        action.trigger()
+        X.pump()
+        if isinstance(menu, QMenu):
+            menu.deleteLater()
+        return f"{what}: {' ▸ '.join(path)}"
+
+    def a_format_cells(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        at = self._select_some()
+        if at is None:
+            return "none"
+        key = self.pick([Qt.Key_B, Qt.Key_I, Qt.Key_U, Qt.Key_1, Qt.Key_5])
+        mods = Qt.ControlModifier | (Qt.ShiftModifier if key in (Qt.Key_1, Qt.Key_5) else Qt.NoModifier)
+        QTest.keyClick(self.view.viewport(), key, mods)
+        return f"{at} Ctrl+{'Shift+' if mods & Qt.ShiftModifier else ''}{chr(key.value)}"
 
     # the rest
     def a_undo(self):
@@ -757,12 +981,36 @@ class Session:
         return problems
 
     def signature(self) -> str:
-        return X.doc_signature(self.win)
+        draft = getattr(self.view, "_draft", None)
+        if draft is None or draft.scene() is None:
+            return X.doc_signature(self.win)
+        # a markup half drawn (a measurement waiting for its second click) is
+        # not the document's yet: an undo is not expected to bring it back
+        try:
+            data = self.win.document.to_dict()
+        except Exception as error:  # noqa: BLE001
+            return f"<to_dict raised {error!r}>"
+        uid = getattr(draft, "uid", None)
+        for page in data.get("pages", []):
+            page["items"] = [it for it in page.get("items") or []
+                             if not (isinstance(it, dict) and it.get("uid") == uid)]
+        return json.dumps(X._normal(data), sort_keys=True, default=str)
 
     # -- the run -----------------------------------------------------------------------
+    def settle(self) -> None:
+        """As Undo History settles the canvas before it undoes: the words
+        being typed end (joining the step that put their box down), a markup
+        half drawn goes. The checks below undo the stack itself."""
+        self.view.end_item_edit()
+        if self.view._draft is not None:
+            self.view.cancel_draft()
+        X.settle(5)
+
     def step(self, i: int, check_undo: bool) -> None:
         name, fn = self.choose()
         stack = self.win.undo_stack
+        if check_undo:
+            self.settle()
         before_sig = self.signature() if check_undo else None
         before_index = stack.index()
         X.CURRENT.clear()
@@ -779,6 +1027,10 @@ class Session:
         self.log.append(entry)
         if self.verbose:
             print(f"  {i:4d} {name}: {desc} ({took:.2f}s)", flush=True)
+        if self.collect:
+            # what the step let go of, looked over now: a crash in it is this step's
+            import gc
+            gc.collect()
         errors = list(X.CURRENT.get("errors") or [])
         qt_bad = [m for m in X.CURRENT.get("qt_messages") or [] if m.startswith(("critical", "fatal"))]
         if errors or qt_bad:
@@ -791,6 +1043,7 @@ class Session:
         if took > 4.0:
             self.fail(i, "slow", [f"{name} took {took:.1f}s"])
         if check_undo and name not in ("undo", "redo"):
+            self.settle()
             done = stack.index() - before_index
             if done > 0 and stack.index() == stack.count():
                 after_sig = self.signature()
@@ -900,7 +1153,10 @@ def _typed_badly(text: str) -> bool:
     return text.rstrip().endswith(("(", "+", "=", ",")) or text.strip() in ("=",)
 
 
-VOLATILE_KEYS = {"path", "modified", "revision", "doc_id", "saved_at", "file_time"}
+#: what a save and open changes on purpose: a page opened from the saved PDF
+#: is drawn on its own page of that PDF (its pdf_key, pdf_page_index)
+VOLATILE_KEYS = {"path", "modified", "revision", "doc_id", "saved_at", "file_time",
+                 "pdf_key", "pdf_page_index", "written_here"}
 
 
 def _comparable(data):
@@ -948,8 +1204,9 @@ def main(argv=None) -> int:
             X.dispose(session.win)
         print(f"MONKEY_DONE failures={len(total)}", flush=True)
         return 1 if total else 0
-    session = Session(args.seed, args.out, True)
-    session.run(args.upto + 1, stop_after=1)
+    session = Session(args.seed, args.out, args.verbose)
+    session.run(args.upto + 1, stop_after=10 ** 6)
+    print(f"MONKEY_DONE failures={len(session.failures)}", flush=True)
     return 0
 
 

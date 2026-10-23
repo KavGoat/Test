@@ -488,3 +488,15 @@ def test_deleting_a_page_names_the_variables_that_went(window, monkeypatch):
     type_line(window, "gone:1")
     window.delete_page(0)
     assert "gone" in window.status_hint.text()
+
+
+def test_a_snapshot_is_plain_svg_whatever_registered_a_namespace_first(window):
+    """A quick check run, 2026-10-24: ElementTree's namespace names are one
+    table for the whole program; after something registered a default
+    namespace of its own (an SMath worksheet written), a snapshot came out
+    as <ns0:svg><ns0:path…>. It is written as plain SVG whatever came first."""
+    import xml.etree.ElementTree as ET
+
+    import calcforge.io.pdfsnapshot  # noqa: F401  (registered SVG's name first)
+    ET.register_namespace("", "http://example.com/someone-else")
+    test_a_snapshot_copies_an_equation_as_line_work(window)

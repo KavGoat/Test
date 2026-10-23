@@ -2611,6 +2611,12 @@ class PageView(QGraphicsView):
         scene_pos = self.mapToScene(event.position().toPoint())
         self._press_scene = scene_pos
         self._press_view = event.position().toPoint()
+        # where the pointer is now, moved to or not: a press with no move
+        # before it (a workbook shown alone since, the page under a still
+        # pointer changed) used the last place a move was seen, and a call-out
+        # begun there drew a leader ten million points long, cut into 200,000
+        # pieces to repaint — seconds frozen (tools/qa/monkey.py, 2026-10-24)
+        self._last_scene_pos = scene_pos
         if event.button() == Qt.LeftButton:
             self.click_into_viewport(scene_pos)
             block = self.open_block()
@@ -2627,6 +2633,13 @@ class PageView(QGraphicsView):
             self.forget_insertion_marks()
 
         if self.tables.mouse_press(event, scene_pos):
+            if self.tables.markup_picked():
+                # the cells took the click: a markup picked lets go, as a shape
+                # does in Excel, or the keys typed next were its own
+                # (tools/qa/monkey.py, 2026-10-24)
+                for item in self.scene().selectedItems():
+                    if item is not self.tables.item:
+                        item.setSelected(False)
             event.accept()
             return
 
@@ -3140,6 +3153,9 @@ class PageView(QGraphicsView):
                 self.statusMessage.emit(
                     f"{tool.label}: now click where the words go · Esc to start again")
                 self._update_pointer_previews()       # the leader appears
+                # (its box drawn on what it points at faces no side yet: none
+                # is held for the first move to keep)
+                self._side_held = None
                 event.accept()
                 return
             self.place_callout(tool, point)
@@ -4265,6 +4281,17 @@ class PageView(QGraphicsView):
             self._draft.auto_width = True
             self._mode = "idle"
             self.finish_draft(self._draw_origin or self._press_scene)
+            event.accept()
+            return
+
+        if self._mode == "draw_drag" and self._is_a_click(scene_pos) \
+                and isinstance(self._draft, StampItem):
+            # Revu puts a stamp down where it is clicked, at its own size, and
+            # a drag sizes it. A click used to start a click-and-click box, so
+            # the stamp waited half-drawn and went with the next page turned
+            # to (tools/qa/monkey.py, 2026-10-24).
+            self._mode = "idle"
+            self.finish_draft(scene_pos)
             event.accept()
             return
 
@@ -5915,6 +5942,8 @@ class PageView(QGraphicsView):
 
     #: how long a stretch of a leader is repainted as one box, in the page's units
     LEADER_STRETCH = 48.0
+    #: and the most stretches a leader is cut into
+    LEADER_STRETCHES = 64
 
     def _callout_pieces(self, preview) -> list:
         """Where a call-out being placed is drawn, in the scene: its box, its
@@ -5933,7 +5962,10 @@ class PageView(QGraphicsView):
                       preview.side_point_of(leader)]
             for start, end in zip(points, points[1:]):
                 length = math.hypot(end.x() - start.x(), end.y() - start.y())
-                stretches = max(1, int(length // self.LEADER_STRETCH) + 1)
+                # (at most so many: a leader across far more than the screen
+                # repaints in long stretches, not hundreds of thousands)
+                stretches = max(1, min(int(length // self.LEADER_STRETCH) + 1,
+                                       self.LEADER_STRETCHES))
                 for k in range(stretches):
                     a = start + (end - start) * (k / stretches)
                     b = start + (end - start) * ((k + 1) / stretches)

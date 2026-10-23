@@ -1470,7 +1470,9 @@ class _TextBase(MarkupItem):
             "rect": [self._rect.x(), self._rect.y(), self._rect.width(), self._rect.height()],
             "html": self.doc.toHtml(),
             "auto_size": self.auto_size,
-            "written": self.written,
+            # the words as they stand: saved while still being typed, the
+            # copy taken when typing ended was out of date (monkey.py)
+            "written": self.doc.toPlainText() if self._editing else self.written,
             "digits": self.digits,
         })
         if getattr(self, "auto_bookmark", False):

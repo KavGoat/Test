@@ -17,6 +17,17 @@ ET.register_namespace("", "http://www.w3.org/2000/svg")
 ET.register_namespace("xlink", "http://www.w3.org/1999/xlink")
 
 
+def svg_text(root) -> str:
+    """*root* written out with SVG as the default namespace and xlink as
+    xlink, whatever has registered a default namespace since: the names are
+    one table for the whole program, and after an SMath worksheet was
+    written a snapshot came out as <ns0:svg><ns0:path…> (a quick check run,
+    2026-10-24)."""
+    ET.register_namespace("", "http://www.w3.org/2000/svg")
+    ET.register_namespace("xlink", "http://www.w3.org/1999/xlink")
+    return ET.tostring(root, encoding="unicode")
+
+
 def path_from(commands, even_odd=False):
     path = QPainterPath()
     path.setFillRule(Qt.OddEvenFill if even_odd else Qt.WindingFill)
@@ -205,7 +216,7 @@ class PdfSvgItem(MarkupItem):
         if image is not None:
             images(root)
         if changed:
-            self.svg = ET.tostring(root, encoding="unicode")
+            self.svg = svg_text(root)
             self._renderer = None
         return changed
 
@@ -291,7 +302,7 @@ def inline_glyphs(svg: str) -> str:
             node.set("stroke", "none")
             node.set("stroke-opacity", "0")
     root.set(NORMALISED_ATTRIBUTE, "2")
-    return ET.tostring(root, encoding="unicode")
+    return svg_text(root)
 
 
 def _svg_path(value):
@@ -368,7 +379,7 @@ def full_appearance(pdf_page, width, height):
                     or child.get("{http://www.w3.org/1999/xlink}href", "").lstrip("#") in empty):
                 parent.remove(child)
     item = PdfSvgItem()
-    item.svg = inline_glyphs(ET.tostring(root, encoding="unicode"))
+    item.svg = inline_glyphs(svg_text(root))
     item._rect = QRectF(0, 0, width, height)
     item.setZValue(-1000000)
     return item

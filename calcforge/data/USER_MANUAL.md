@@ -136,7 +136,8 @@ box. When the window narrows, the least-needed controls move onto the » menu.
 
 **Undo.** Every change is one step: **Edit ▸ Undo** (`Ctrl+Z`), **Redo**
 (`Ctrl+Y` or `Ctrl+Shift+Z`) and **Edit ▸ Undo History**, which lists the steps.
-Inside an equation, `Ctrl+Z` takes back keystrokes first.
+Inside an equation, `Ctrl+Z` takes back keystrokes first; with a markup half drawn
+(a measurement waiting for its second click, say), it takes back that markup first.
 
 **Finding a command.** **Help ▸ Find Tools + Commands** (`Shift+F1`) — type what
 you want to do and it names the tool or command and its key. **CalcForge ▸
@@ -295,7 +296,8 @@ its default (see *Markup styles and defaults*).
 - **Note** — click to drop a sticky note; double-click it (or use the Properties
   panel) to read and write what it says. Its **Icon** (Comment, Help, Insert, Key,
   New Paragraph, Note, Paragraph) is on the Properties toolbar.
-- **Stamp** (`S`) — drag a status stamp (see *Stamps*).
+- **Stamp** (`S`) — click to put a status stamp down at its own size, or drag one
+  to the size wanted (see *Stamps*).
 - **Flag** (`Shift+F`) — click to pin a flag to come back to.
 - **Image** — drag a box and choose a picture from disk (or paste one). Dragging a
   picture's corner keeps its proportions; hold `Shift` to stretch it freely. An
@@ -379,7 +381,10 @@ measurement extras too: cut-outs, Units, Caption and Totals.
 ### Selecting and editing markups
 
 - **Select**: click a markup. `Shift`+click adds or takes away, `Ctrl`+click adds.
-  **Edit ▸ Select All** (`Ctrl+A`) selects every markup on the page.
+  **Edit ▸ Select All** (`Ctrl+A`) selects every markup on the page. A markup
+  picked over a spreadsheet's open cells (from the Markups list, say) takes the
+  keys, as a picked shape does in Excel: `Delete` deletes it and leaves the cells
+  alone; a click on a cell gives the keys back to the cells.
 - **Move**: drag it (`Shift` keeps the move straight: across, down or at 45°).
   Over a markup the pointer is Revu's arrow with a small move sign. `Ctrl`+drag
   leaves a copy behind, from anywhere on the markup, its points included; the

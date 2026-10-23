@@ -6,7 +6,7 @@ added"; "Add charts to a normal sheet".
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QMessageBox
 
@@ -127,3 +127,206 @@ def test_a_chart_of_a_sheet_made_here_from_its_right_click(w, sheet):
     assert len(made) == 1 and made[0].spec["kind"] == "column"
     ys = [series["y"] for series in made[0].spec["series"]]
     assert [y.split("!")[1] for y in ys] == ["$A$1:$A$10", "$B$1:$B$10"], "a column each"
+
+
+def test_an_undo_snapshot_never_takes_another_pages_markups(w):
+    """tools/qa/monkey.py, 2026-10-24: undoing a page deleted lost a markup,
+    or brought back one never there. The snapshot kept each page's markups
+    written last time by id(page) and its count of changes; a page made
+    again by an undo took a freed one's id, and with each page's count
+    starting at 0 a match wrote the wrong markups. Now the page's own layer
+    must be the one the markups were written from."""
+    import weakref
+
+    from calcforge.items.shapes import RectItem
+    w.add_page()
+    pump()
+    snapshot = w._structure_snapshot()
+    old_layer = w.document.pages[0].frame.layer
+    stale = (weakref.ref(old_layer), old_layer.generation, [])     # written: no markups
+    w._restore_structure(snapshot)              # new Page objects, new frames, new layers
+    pump()
+    page = w.document.pages[0]
+    assert page.frame.layer is not old_layer
+    page.frame.add_markup(RectItem(), page.frame.page_rect().center())
+    pump()
+    page.frame.layer.generation = old_layer.generation   # its count happens to match
+    again = w._structure_snapshot(reuse={id(page): stale})         # and it took the freed id
+    types = [item.get("type") for item in again["pages"][0]["items"]]
+    assert types == ["rect"], "the page's own markups, not another page's written before"
+
+
+def test_a_markup_picked_while_cells_are_open_takes_delete(w, sheet):
+    """tools/qa/monkey.py, 2026-10-24: a markup picked while the cells were
+    open (from the Markups list) and Delete pressed cleared the cells and
+    left the markup. Now the picked markup goes and the cells stay; a click
+    on a cell afterwards gives the keys back to the cells."""
+    from calcforge.items.shapes import RectItem
+    from tests.test_excel_footer_keys import key, typed
+    run = sheet
+    click(w, at(w, run, 2, 1))
+    assert w.view.tables.item is run
+    frame = run.parentItem()
+    rect = RectItem()
+    frame.add_markup(rect, run.mapToItem(frame, run.cell_rect(12, 4).center()))
+    pump()
+    w.view.scene().clearSelection()
+    rect.setSelected(True)                       # as the Markups list picks it
+    w.refresh_selection()
+    pump()
+    before = run.sheet.input(2, 1)
+    key(w, Qt.Key_Delete)
+    assert rect.scene() is None, "the markup picked is the one deleted"
+    assert run.sheet.input(2, 1) == before, "and the cells are left alone"
+    # picked again, then a cell clicked: typing is the cell's
+    w.undo_stack.undo()
+    pump()
+    again = next(m for m in frame.markups() if isinstance(m, RectItem))
+    again.setSelected(True)
+    pump()
+    click(w, at(w, run, 3, 1))
+    typed(w, "7")
+    key(w, Qt.Key_Return)
+    assert run.sheet.input(3, 1) == "7"
+    assert again.scene() is not None
+
+
+def test_a_click_with_the_stamp_tool_puts_a_stamp_down(w):
+    """Revu puts a stamp down where it is clicked, at its own size. A click
+    used to start a click-and-click box: the stamp waited half drawn, and a
+    page turned to took it away (tools/qa/monkey.py, 2026-10-24)."""
+    from calcforge.items.text import StampItem
+    w.add_page()
+    pump()
+    w.go_to_page(0)
+    pump()
+    w.select_tool("stamp")
+    page = w.document.pages[0].frame
+    spot = w.view.mapFromScene(page.mapToScene(page.page_rect().center()))
+    click(w, spot)
+    stamps = [m for m in page.markups() if isinstance(m, StampItem)]
+    assert len(stamps) == 1 and w.view._draft is None, "down, not waiting for a second click"
+    size = stamps[0].local_rect()
+    assert (round(size.width()), round(size.height())) == (190, 58)
+    w.go_to_page(1)
+    pump()
+    assert stamps[0].scene() is not None, "still there after going to another page"
+    # dragged, it is the size dragged
+    w.select_tool("stamp")
+    w.go_to_page(0)
+    pump()
+    from tests.test_excel_footer_keys import drag
+    drag(w, spot + QPoint(-200, 150), spot + QPoint(-40, 230))
+    stamps = [m for m in page.markups() if isinstance(m, StampItem)]
+    assert len(stamps) == 2
+
+
+def test_undoing_a_column_deleted_puts_back_the_other_sheets_formulas(w):
+    """tools/qa/monkey.py, 2026-10-24: deleting a column wrote another
+    sheet's =Sheet1!B1 as =Sheet1!#REF!, and Undo put back only the sheet
+    the column came out of: the other kept #REF!. Excel's Undo puts back
+    both. Moving cells and inserting rows are recorded the same way."""
+    from calcforge.ui import sheetpages
+    from tests.test_excel_footer_keys import at, click, key, shown_run, typed
+    from tests.test_workbook_sections import pump
+    sheetpages.insert_sheet_page(w, 0, new_sheet=True)
+    pump()
+    w.go_to_page(1)
+    pump()
+    first = shown_run(w)
+    w.sheet_tabs.new_sheet()
+    pump()
+    second = shown_run(w)
+    assert second is not first
+    click(w, at(w, second, 0, 0))
+    typed(w, f"={first.sheet.name}!B1")
+    key(w, Qt.Key_Return)
+    assert second.sheet.input(0, 0) == f"={first.sheet.name}!B1"
+    from calcforge.ui import sheetview
+    sheetview.enter(w, first.uid)
+    pump()
+    first = shown_run(w)
+    click(w, at(w, first, 0, 1))
+    w.view.tables.select((0, 1), (5, 1))
+    w.view.tables.delete_cols()
+    pump()
+    assert second.sheet.input(0, 0) == f"={first.sheet.name}!#REF!"
+    w.undo_stack.undo()
+    pump()
+    assert second.sheet.input(0, 0) == f"={first.sheet.name}!B1", "both sheets put back"
+    w.undo_stack.redo()
+    pump()
+    assert second.sheet.input(0, 0) == f"={first.sheet.name}!#REF!"
+
+
+def test_undo_while_a_markup_is_half_drawn_takes_back_only_that(w):
+    """tools/qa/monkey.py, 2026-10-24: Undo with a measurement waiting for
+    its second click undid the step before it and left the tool holding a
+    markup no page had. Now Undo takes back the half-drawn markup first, as
+    it takes back the typing first."""
+    from calcforge.items.measure import MeasureItem
+    from calcforge.items.shapes import RectItem
+    page = w.document.pages[0].frame
+    w.view.begin_snapshot([page])
+    page.add_markup(RectItem(), page.page_rect().center())
+    w.view.commit_snapshot("Add")                  # a step to stay done
+    assert w.undo_stack.count() == 1
+    w.select_tool("measure_length")
+    where = page.mapToScene(page.page_rect().center()) + QPointF(-150, 100)
+    w.view.centerOn(where)
+    pump()
+    click(w, w.view.mapFromScene(where))           # the first point only
+    assert isinstance(w.view._draft, MeasureItem)
+    steps = w.undo_stack.index()
+    w.act_undo.trigger()
+    pump()
+    assert w.view._draft is None and w.view._mode == "idle"
+    assert not [m for m in page.markups() if isinstance(m, MeasureItem)]
+    assert w.undo_stack.index() == steps, "the step before it is still done"
+    assert [m for m in page.markups() if isinstance(m, RectItem)]
+
+
+def test_a_page_duplicated_while_a_blank_box_is_typed_never_brings_it_back(w):
+    """tools/qa/monkey.py, 2026-10-24: a text box left blank goes when its
+    typing ends; a page duplicated meanwhile took it into the step first,
+    so Undo then Redo brought the blank box back."""
+    from calcforge.items.text import TextItem
+    from tests.test_excel_footer_keys import drag
+    page = w.document.pages[0].frame
+    w.select_tool("text")
+    centre = w.view.mapFromScene(page.mapToScene(page.page_rect().center()))
+    drag(w, centre, centre + QPoint(120, 40))
+    assert w.view.editing_item() is not None
+    w.duplicate_page(0)
+    pump()
+    boxes = lambda: [m for f in w.scene.frames for m in f.markups() if isinstance(m, TextItem)]
+    assert not boxes() and len(w.document.pages) == 2
+    w.undo_stack.undo()
+    pump()
+    w.undo_stack.redo()
+    pump()
+    assert not boxes(), "never back"
+
+
+def test_a_callout_begun_without_a_move_first_is_quick(w):
+    """tools/qa/monkey.py, 2026-10-24: the Callout tool pressed with no move
+    before it (a workbook shown alone since, everything elsewhere) drew its
+    leader from the last place a move was seen, ten million points away, and
+    cut it into 200,000 pieces to repaint: seconds frozen. The press is where
+    the pointer is; and a leader is cut into a few dozen pieces at most."""
+    import time
+    page = w.document.pages[0].frame
+    w.select_tool("callout")
+    where = page.mapToScene(page.page_rect().center())
+    w.view.centerOn(where)
+    pump()
+    w.view._last_scene_pos = QPointF(-1e7, 0)      # a move seen long ago, far off
+    started = time.perf_counter()
+    click(w, w.view.mapFromScene(where))           # what it points at
+    took = time.perf_counter() - started
+    assert w.view._pending_anchor is not None
+    rects = w.view._pointer_preview_rects()
+    assert rects is not None and len(rects) < 200
+    assert took < 1.0
+    w.view._last_scene_pos = QPointF(-1e7, 0)      # a leader that long, even so
+    assert len(w.view._pointer_preview_rects()) < 200

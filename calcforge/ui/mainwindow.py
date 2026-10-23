@@ -4461,6 +4461,14 @@ class MainWindow(QMainWindow):
             if id(frame.page) not in live:
                 self.scene.frames.remove(frame)
                 self.scene.removeItem(frame)
+                # and each markup leaves the page: off the canvas, Python owns
+                # the page and the markups on it, and a markup something still
+                # held (a sheet's cells, a chart's listener) was freed by both
+                # — once with its page, once by itself — a segmentation fault
+                # some while after an undo of pages deleted or moved (found by
+                # tools/qa/monkey.py, 2026-10-24)
+                for child in frame.childItems():
+                    child.setParentItem(None)
         ordered = []
         # tables and sheets coming in are calculated once, all together, at
         # the end — not each again as the next sheet it reads arrives (a
@@ -6124,17 +6132,27 @@ class MainWindow(QMainWindow):
         change), a page whose markups have not changed since keeps the
         markups written then: adding a page to a sheet of a thousand markups
         wrote all thousand out twice (2026-10-05)."""
+        import weakref
         pages, written = [], {}
         for page in self.document.pages:
             frame = page.frame
-            generation = frame.layer.generation if frame is not None else None
+            layer = frame.layer if frame is not None else None
+            generation = layer.generation if layer is not None else None
             kept = (reuse or {}).get(id(page))
-            if kept is not None and generation is not None and kept[0] == generation:
-                entry = page.to_dict(items=kept[1])
+            # the same page's own markups, unchanged: its layer the very same
+            # one, not only its count of changes. Keyed by id() alone, a page
+            # made again by an undo took the id of one freed, and a count
+            # that happened to match — each page's starts at 0 — wrote the
+            # other page's markups for it: undoing a page deleted lost a
+            # markup, or brought back one never there (found by
+            # tools/qa/monkey.py, 2026-10-24)
+            if kept is not None and generation is not None and kept[0]() is layer \
+                    and kept[1] == generation:
+                entry = page.to_dict(items=kept[2])
             else:
                 entry = page.to_dict()
             if generation is not None:
-                written[id(page)] = (generation, entry["items"])
+                written[id(page)] = (weakref.ref(layer), generation, entry["items"])
             pages.append(entry)
         self._written_pages = written
         # and how the view was, so an undo or redo of the change shows the
@@ -6210,11 +6228,22 @@ class MainWindow(QMainWindow):
                                 window._restore_structure(snapshot, True))))
         self.mark_modified()
 
+    def settle_canvas(self) -> None:
+        """What is half done on the canvas is settled before the pages are
+        read or changed: words being typed end (a box left blank goes), a
+        markup half drawn is let go. Taken into a page change, a redo brought
+        back the blank box after it had gone, a duplicated page carried it,
+        and an undo made the half-drawn one real (tools/qa/monkey.py)."""
+        self.view.end_item_edit()
+        if self.view._draft is not None:
+            self.view.cancel_draft()
+
     def _structural_change(self, description: str, mutate,
                            preserve_view: bool = False, bookmarks: bool = False) -> bool:
         """Change the pages as one undo step; False if nothing changed (and
         nothing was recorded). With *bookmarks*, where the bookmarks point is
         part of the step too (Page Setup moves it)."""
+        self.settle_canvas()
         before = self._structure_snapshot()
         marks_before = [mark.to_dict() for mark in self.document.bookmarks]
         # the run picked out in Thumbnails, which a change to those pages that
@@ -6393,6 +6422,7 @@ class MainWindow(QMainWindow):
     def duplicate_page(self, index: Optional[int] = None) -> None:
         """Copy the page — or the whole picked run — in after the last of it."""
         from .sheetpages import duplicate_workbooks, fresh_item_ids, plain_copy, safe_target
+        self.settle_canvas()
         wanted = self.pages_acted_on(index)
         if duplicate_workbooks(self, wanted):
             return                       # a workbook's page: the whole workbook copied
@@ -6417,6 +6447,7 @@ class MainWindow(QMainWindow):
         Backgrounds and markups and all, so what is pasted is what was copied
         and not a page with its drawing missing.
         """
+        self.settle_canvas()
         wanted = self.pages_acted_on(index)
         keys: set = set()
         for which in wanted:
@@ -8794,6 +8825,13 @@ class MainWindow(QMainWindow):
                 self._refresh_undo_actions()
                 return
             calc.leave()
+        if self.view._draft is not None:
+            # a markup half drawn is taken back first, as the typing is: undone
+            # under it, the step's page came back without it while the tool
+            # still held it (tools/qa/monkey.py, 2026-10-24)
+            self.view.cancel_draft()
+            self._refresh_undo_actions()
+            return
         document = self._open_editor_document()
         if document is not None and document.isUndoAvailable():
             document.undo()
@@ -8807,6 +8845,8 @@ class MainWindow(QMainWindow):
         if self.view.calc.editing() and self.view.calc.redo():
             self._refresh_undo_actions()
             return
+        if self.view._draft is not None:
+            self.view.cancel_draft()          # (as Undo: the half-drawn markup goes)
         document = self._open_editor_document()
         if document is not None and document.isRedoAvailable():
             document.redo()
@@ -9729,7 +9769,7 @@ class MainWindow(QMainWindow):
         self.view.update_group_boxes()
 
     def delete_selection(self) -> None:
-        if self.view.tables.is_open():
+        if self.view.tables.is_open() and not self.view.tables.markup_picked():
             self.view.tables.clear("contents")
             return
         if self.view.editing_item() is not None:

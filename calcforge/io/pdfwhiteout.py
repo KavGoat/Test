@@ -10,7 +10,7 @@ import pymupdf
 from PySide6.QtCore import QBuffer, QIODevice, QRectF, Qt
 from PySide6.QtGui import QImage, QPainter, QPainterPath, QPainterPathStroker, QTransform
 
-from .pdfsnapshot import _svg_path
+from .pdfsnapshot import _svg_path, svg_text
 
 SVG = '{http://www.w3.org/2000/svg}'
 HREF = '{http://www.w3.org/1999/xlink}href'
@@ -144,7 +144,7 @@ def erase_region(pdf_page, box):
         for child in list(defs):
             if child.get('id') not in referenced:
                 defs.remove(child)
-    with pymupdf.open(stream=ET.tostring(root), filetype='svg') as svg:
+    with pymupdf.open(stream=svg_text(root).encode(), filetype='svg') as svg:
         return svg.convert_to_pdf()
 
 

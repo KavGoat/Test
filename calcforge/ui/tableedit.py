@@ -121,10 +121,13 @@ def _written_alike(wb, sheet, name: str):
                  and sheet_ident(s.name).lower() == ident), None)
 
 
-def _frames(item) -> list:
+def _frames(item, others: bool = False) -> list:
     """The pages a change to a table's cells can touch: its own, or every
     page of a spreadsheet (its markups move with the cells), and those of
-    the charts that read it (their ranges follow moved rows)."""
+    the charts that read it (their ranges follow moved rows). With *others*
+    (rows or cells inserted, deleted or moved), the pages of every table
+    whose formulas or names name its sheet too: they are written again, and
+    an undo that left them out kept them at #REF! (tools/qa/monkey.py)."""
     if getattr(item, "SHEET_RUN", False):
         frames = list(item.run_frames() or [item.parentItem()])
     else:
@@ -133,6 +136,7 @@ def _frames(item) -> list:
     scene = item.scene()
     if sheet is not None and scene is not None:
         from ..sheet.chartdata import sheets_read
+        named = _naming(sheet) if others else None
         for frame in getattr(scene, "frames", []) or []:
             if frame in frames:
                 continue
@@ -140,7 +144,39 @@ def _frames(item) -> list:
                 if getattr(other, "TYPE", "") == "chart" and sheet.name.lower() in sheets_read(other.spec):
                     frames.append(frame)
                     break
+                if named is not None and named(getattr(other, "sheet", None)):
+                    frames.append(frame)
+                    break
     return frames
+
+
+def _naming(sheet):
+    """A test of whether another sheet's formulas (or its workbook's names,
+    which every sheet of it carries) may name *sheet*."""
+    plain = sheet.name.lower()
+    spellings = (plain, plain.replace("'", "''"))
+    wb = sheet.workbook
+    by_name = any(any(w in dn.refers_to.lower() for w in spellings)
+                  for dn in getattr(wb, "names", {}).values()
+                  if hasattr(dn, "refers_to"))
+
+    def names(other) -> bool:
+        if other is None or other is sheet:
+            return False
+        if by_name and getattr(other, "workbook", None) is wb:
+            return True
+        for cell in other.cells.values():
+            if cell.is_formula:
+                text = cell.input.lower()
+                if any(w in text for w in spellings):
+                    return True
+        return False
+    return names
+
+
+#: changes that write other sheets' formulas again (their references follow)
+_WRITES_OTHERS = frozenset({"Insert rows", "Insert columns", "Delete rows", "Delete columns",
+                            "Insert cells", "Delete cells", "Move cells"})
 
 
 def _is_run(item) -> bool:
@@ -2685,10 +2721,22 @@ class TableEditing:
             return False
         return False
 
+    def markup_picked(self) -> bool:
+        """Whether a markup is picked while the cells are open (from the
+        Markups list, say): it takes the keys and Delete, as a picked shape
+        does in Excel. Delete went to the cells and cleared them, leaving the
+        markup (tools/qa/monkey.py, 2026-10-24)."""
+        item = self.item
+        return item is not None and self.editor is None and any(
+            other is not item and isinstance(other, MarkupItem)
+            for other in self.view.scene().selectedItems())
+
     def key_press(self, event) -> bool:
         """Keys while a table is open (not typing): Excel's."""
         item = self.item
         if item is None:
+            return False
+        if self.markup_picked():
             return False
         key, mods = event.key(), event.modifiers()
         ctrl = bool(mods & Qt.ControlModifier)
@@ -2931,7 +2979,7 @@ class TableEditing:
         if item is None or item.sheet is None:
             return
         view = self.view
-        view.begin_snapshot(_frames(item))
+        view.begin_snapshot(_frames(item, others=label in _WRITES_OTHERS))
         sheet = item.sheet
         change(sheet.workbook, sheet)
         item.layout_changed()
