@@ -185,3 +185,26 @@ def test_the_variables_panel_keeps_the_workbooks_names_under_its_heading(w, tmp_
     assert [n for n in names() if n.endswith(".Height1")] and [n for n in names() if n.endswith(".Fph_1")]
     assert [r for r in panel.rows if r.name.endswith("Gone") and "#REF!" in r.error]
     assert not [n for n in names() if n.endswith("Gone")], "a #REF! name is not listed"
+
+
+def test_cells_move_with_excels_deleted_names_about(w, tmp_path):
+    """The user, 2026-10-24 (a traceback): dragging cells of an imported
+    workbook crashed — "A sheet name must be followed by a cell or a name" —
+    on its names Excel keeps as Calculations!#REF!. They read #REF!, and
+    moving, inserting and renaming go on round them."""
+    imported(w, tmp_path)
+    calc = runs(w)["Calculations"].sheet
+    wb = calc.workbook
+    from dataclasses import replace
+    key, gone = next((k, dn) for k, dn in wb.names.items() if dn.name == "Gone")
+    wb.names[key] = gone = replace(gone, refers_to="Calculations!#REF!")   # as Excel keeps some
+    wb.set_input(calc, 20, 0, "=Gone")
+    wb.set_input(calc, 21, 0, "=Calculations!#REF!+1")
+    assert str(calc.cells[(20, 0)].value) == "#REF!" and str(calc.cells[(21, 0)].value) == "#REF!"
+    wb.move_block(calc, 1, 2, 1, 6, calc, 3, 2)            # C2:G2 two rows down
+    assert calc.cells[(3, 2)].value == "6months"
+    wb.insert_rows(calc, 0, 2)
+    wb.rename_sheet(calc, "Calcs")
+    assert gone.name in {dn.name for dn in wb.names.values()}
+    assert calc.cells[(23, 0)].input == "=Calcs!#REF!+1" or calc.cells[(23, 0)].input.endswith("!#REF!+1")
+    assert str(calc.cells[(22, 0)].value) == "#REF!"

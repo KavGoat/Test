@@ -249,3 +249,26 @@ def test_retyping_a_heading_renames_the_column_in_the_equations(v):
     got = equations(v)
     assert "s≔sum(T.Load_kN)" in got and got["s="] == "12"
     assert 'k≔T(6,"Load")' in got, "text in quotes is left alone"
+
+
+def test_a_deleted_reference_never_stops_the_next_move():
+    """The user, 2026-10-24 (a traceback): a row deleted that another sheet
+    read leaves =Data!#REF!*2, as Excel's does; the next move of any cells
+    crashed reading it back ("A sheet name must be followed by a cell or a
+    name"). It reads #REF! and the moves go on."""
+    from calcforge.sheet.workbook import Workbook
+    wb = Workbook()
+    data, calc = wb.add_sheet("Data"), wb.add_sheet("Calc")
+    wb.set_input(data, 0, 0, "5")
+    wb.set_input(data, 5, 0, "7")
+    wb.set_input(calc, 0, 0, "=Data!A1*2")
+    wb.set_input(calc, 1, 0, "=Data!A6")
+    wb.delete_rows(data, 0, 1)
+    assert calc.cells[(0, 0)].input == "=Data!#REF!*2"
+    assert str(calc.cells[(0, 0)].value) == "#REF!"
+    wb.move_block(data, 4, 0, 4, 0, data, 8, 1)              # A5 (the 7) to B9
+    assert calc.cells[(1, 0)].input == "=Data!B9" and calc.cells[(1, 0)].value == 7
+    wb.insert_rows(data, 0, 2)
+    wb.rename_sheet(data, "Inputs")
+    assert calc.cells[(0, 0)].input == "=Inputs!#REF!*2"
+    assert calc.cells[(1, 0)].input == "=Inputs!B11"

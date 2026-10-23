@@ -53,6 +53,10 @@ _RANGE_RE = re.compile(
 _NUMBER_RE = re.compile(r"(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 _NAME_RE = re.compile(r"[A-Za-z_\\À-￿][\w.À-￿]*")
 _ERROR_RE = re.compile(r"#(?:DIV/0!|N/A|NAME\?|NULL!|NUM!|REF!|VALUE!|SPILL!|CALC!|UNITS!|GETTING_DATA)", re.I)
+#: Sheet!#REF!: a reference or name whose cells were deleted in Excel —
+#: Excel keeps the sheet's name in front and the value is #REF!
+_SHEET_ERROR_RE = re.compile(r"((?:'(?:[^']|'')+'|[A-Za-z_\\À-￿][\w.À-￿]*)!)(" + _ERROR_RE.pattern + ")",
+                             re.I)
 _OPS = ("<>", "<=", ">=", "+", "-", "*", "/", "^", "&", "=", "<", ">", "%", ":")
 
 
@@ -92,6 +96,15 @@ def _tokenize(text: str) -> list[Token]:
             out.append(Token("end", "", lead, i))
             return out
         ch = text[i]
+        if ch == "'" or ch.isalpha() or ch == "_":
+            # Tables!#REF!, as Excel writes a name whose cells were deleted:
+            # its value #REF! (refused, any move of cells crashed on a
+            # workbook's names: the user, 2026-10-24)
+            m = _SHEET_ERROR_RE.match(text, i)
+            if m:
+                out.append(Token("err", m.group(1) + m.group(2).upper(), lead, i))
+                i = m.end()
+                continue
         # only where a reference can start (an operator never does): the
         # pattern was tried at every character (findings 5.5)
         m = _RANGE_RE.match(text, i) if (ch.isalpha() or ch in "$'_" or ch.isdigit()
@@ -555,7 +568,8 @@ class _Parser:
         if kind == "bool":
             return Bool(tok.text.upper() == "TRUE")
         if kind == "err":
-            return BadRef() if tok.text == "#REF!" else Err(tok.text)
+            code = tok.text[tok.text.rfind("!#") + 1:] if "!#" in tok.text else tok.text
+            return BadRef() if code == "#REF!" else Err(code)
         if kind == "unit":
             return Unit(tok.text[1:])
         if kind == "ref":
@@ -808,8 +822,11 @@ def rename_sheet_in(text: str, old: str, new: str) -> str:
             t.ref = replace(t.ref, sheet=new)
             t.text = t.ref.a1(True)
             changed = True
-        elif t.kind == "name" and "!" in t.text:
-            sheet, _, rest = t.text.partition("!")
+        elif t.kind in ("name", "err") and "!" in t.text and not t.text.startswith("#"):
+            # Old!Name, and Old!#REF! (a reference whose cells went: Excel's
+            # follows the sheet's new name too)
+            cut = t.text.rfind("!#") if t.kind == "err" else t.text.find("!")
+            sheet, rest = t.text[:cut], t.text[cut + 1:]
             from .refs import unquote_sheet
 
             if (unquote_sheet(sheet) or "").lower() == old.lower():

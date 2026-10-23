@@ -342,6 +342,17 @@ class _Transaction:
         self.steps: list = []            # (undo, redo) callables
 
 
+
+def _kept(rewrite, text: str, *args) -> str:
+    """*text* passed through one of formula.py's rewrites, or left as it is
+    when it can't be read: one formula Excel wrote that CalcForge can't parse
+    must never stop a move, an insert or a rename of every other (the user,
+    2026-10-24: moving cells crashed on a workbook's "Tables!#REF!" names)."""
+    try:
+        return rewrite(text, *args)
+    except F.FormulaError:
+        return text
+
 class Workbook:
     def __init__(self):
         self.sheets: list[Sheet] = []
@@ -510,16 +521,16 @@ class Workbook:
             for other in self.sheets:
                 for (row, col), cell in list(other.cells.items()):
                     if cell.is_formula and old.lower() in cell.input.lower():
-                        text = F.rename_sheet_in(cell.input[1:], old, new)
+                        text = _kept(F.rename_sheet_in, cell.input[1:], old, new)
                         if "=" + text != cell.input:
                             self._set_state(other, row, col, ("=" + text, cell.style, cell.comment))
             for key, dn in list(self.names.items()):
-                text = F.rename_sheet_in(dn.refers_to, old, new)
+                text = _kept(F.rename_sheet_in, dn.refers_to, old, new)
                 if text != dn.refers_to:
                     self._set_name(key, replace(dn, refers_to=text))
             for holder in list(self.outside_formulas):
                 texts = holder.formula_texts()
-                moved = [F.rename_sheet_in(t, old, new) if t else t for t in texts]
+                moved = [_kept(F.rename_sheet_in, t, old, new) if t else t for t in texts]
                 if moved != texts:
                     holder.set_formula_texts(moved)
 
@@ -566,7 +577,7 @@ class Workbook:
             for other in self.sheets:
                 for (row, col), cell in list(other.cells.items()):
                     if cell.is_formula and dn.name.lower() in cell.input.lower():
-                        text = F.rename_name_in(cell.input[1:], dn.name, new,
+                        text = _kept(F.rename_name_in, cell.input[1:], dn.name, new,
                                                 lambda written, o=other: uses(o, written))
                         if "=" + text != cell.input:
                             self._set_state(other, row, col, ("=" + text, cell.style, cell.comment))
@@ -575,7 +586,7 @@ class Workbook:
                     continue
                 reader = self.sheet_by_id(other_dn.sheet) if other_dn.sheet else \
                     (self.sheet_by_id(other_dn.home) if other_dn.home is not None else home)
-                text = F.rename_name_in(other_dn.refers_to, dn.name, new,
+                text = _kept(F.rename_name_in, other_dn.refers_to, dn.name, new,
                                         lambda written, r=reader: uses(r, written))
                 if text != other_dn.refers_to:
                     self._set_name(key, replace(other_dn, refers_to=text))
@@ -872,12 +883,12 @@ class Workbook:
         for other in self.sheets:
             for (row, c), cell in list(other.cells.items()):
                 if cell.is_formula and "[" in cell.input and lower in cell.input.lower():
-                    text = F.rename_column_in(cell.input[1:], sheet.name, other is sheet, old, new)
+                    text = _kept(F.rename_column_in, cell.input[1:], sheet.name, other is sheet, old, new)
                     if "=" + text != cell.input:
                         self._set_state(other, row, c, ("=" + text, cell.style, cell.comment))
         for key, dn in list(self.names.items()):
             if "[" in dn.refers_to and lower in dn.refers_to.lower():
-                text = F.rename_column_in(dn.refers_to, sheet.name, False, old, new)
+                text = _kept(F.rename_column_in, dn.refers_to, sheet.name, False, old, new)
                 if text != dn.refers_to:
                     self._set_name(key, replace(dn, refers_to=text))
         self._tell_references(("heading", sheet, old, new))
@@ -1604,12 +1615,12 @@ class Workbook:
             for (row, col), cell in list(other.cells.items()):
                 if not cell.is_formula or (other.id, row, col) in done:
                     continue
-                text = F.rewrite(cell.input[1:], lambda ref, s, o=other: change(ref, self.sheet(s) if s else o))
+                text = _kept(F.rewrite, cell.input[1:], lambda ref, s, o=other: change(ref, self.sheet(s) if s else o))
                 if "=" + text != cell.input:
                     self._set_state(other, row, col, ("=" + text, cell.style, cell.comment))
         for key, dn in list(self.names.items()):
             home = self.sheet_by_id(dn.sheet) if dn.sheet else None
-            text = F.rewrite(dn.refers_to, lambda ref, s, h=home: change(ref, self.sheet(s) if s else h))
+            text = _kept(F.rewrite, dn.refers_to, lambda ref, s, h=home: change(ref, self.sheet(s) if s else h))
             if text != dn.refers_to:
                 self._set_name(key, replace(dn, refers_to=text))
         for holder in list(self.outside_formulas):
@@ -1649,7 +1660,7 @@ class Workbook:
             if to != (row, col):
                 state = cell.state()
                 if change is not None and to is not None and cell.is_formula:
-                    text = F.rewrite(state[0][1:], lambda ref, s: change(
+                    text = _kept(F.rewrite, state[0][1:], lambda ref, s: change(
                         ref, self.sheet(s) if s else sheet))
                     state = ("=" + text, state[1], state[2])
                     done.add((sheet.id,) + to)
