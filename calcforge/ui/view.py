@@ -4244,7 +4244,7 @@ class PageView(QGraphicsView):
             self._handle_item = None
             if item is not None:
                 item.refresh(page=self.page_of(item) or self.page())
-                from ..items.calc import CalcBlockItem, keep_block_resize
+                from ..items.calc import keep_block_resize
                 if isinstance(item, CalcBlockItem):
                     said = keep_block_resize(item)
                     if said:
@@ -4285,11 +4285,12 @@ class PageView(QGraphicsView):
             return
 
         if self._mode == "draw_drag" and self._is_a_click(scene_pos) \
-                and isinstance(self._draft, StampItem):
+                and isinstance(self._draft, (StampItem, CalcBlockItem)):
             # Revu puts a stamp down where it is clicked, at its own size, and
             # a drag sizes it. A click used to start a click-and-click box, so
             # the stamp waited half-drawn and went with the next page turned
-            # to (tools/qa/monkey.py, 2026-10-24).
+            # to (tools/qa/monkey.py, 2026-10-24). A calculation block too,
+            # at the usual size (the user, 2026-10-24).
             self._mode = "idle"
             self.finish_draft(scene_pos)
             event.accept()
@@ -4682,6 +4683,8 @@ class PageView(QGraphicsView):
         if isinstance(item, RectItem) and item.kind == "marquee":
             # A region being chosen is not a markup and wears no markup style.
             return
+        if isinstance(item, CalcBlockItem):
+            return          # its own thin grey frame, as one made any other way
         # Revu fills Subject with the tool's name — "Cloud", "Cloud+",
         # "Callout", "Text Box" — as a measurement's already was ("Area");
         # a style or a tool-chest tool that carries its own still wins.
@@ -4871,6 +4874,9 @@ class PageView(QGraphicsView):
         if tool.key == "cutout_ellipse" and self.take_out_of_an_area(draft, tool):
             return
 
+        if isinstance(draft, CalcBlockItem) and not self._put_down_block(draft):
+            return
+
         if tool.mode == CLOUD:
             self.hand_the_cloud_to_the_note(draft, tool)
             return
@@ -4942,6 +4948,26 @@ class PageView(QGraphicsView):
         # Last word, so returning to the select tool does not wipe the notice.
         if note_scale:
             self.window.note_missing_scale()
+        if isinstance(draft, CalcBlockItem):
+            self.window.status_hint.setText(self.window.BLOCK_PUT_DOWN)
+
+    def _put_down_block(self, block: CalcBlockItem) -> bool:
+        """A calculation block drawn with its tool, put down: what it was
+        drawn over stays out of it (the user, 2026-10-24), and now the
+        calculations hear of it. False when it can't go there (a
+        spreadsheet page), and it is gone."""
+        from .sheetpages import blocks_calc
+        if blocks_calc(block.parentItem()):
+            detach(block)
+            self.forget_snapshot()
+            self.finish_tool()
+            self.statusMessage.emit("Calculation blocks don't go on spreadsheet pages")
+            return False
+        block.drafting = False
+        block.leave_out()
+        block._tell_the_sheet()
+        block.settle()
+        return True
 
     #: the size a text box or call-out lands at when it is not dragged out
     WORDS_SIZE = (170.0, 44.0)
@@ -4956,6 +4982,9 @@ class PageView(QGraphicsView):
             return PageView.WORDS_SIZE
         if isinstance(item, ImageItem):
             return 220.0, 160.0
+        if isinstance(item, CalcBlockItem):
+            usual = CalcBlockItem().local_rect()         # as Insert ▸ Calculation Block's
+            return usual.width(), usual.height()
         return 120.0, 80.0
 
     def hand_the_cloud_to_the_note(self, draft, tool: Tool) -> None:

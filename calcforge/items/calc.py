@@ -788,6 +788,10 @@ class CalcBlockItem(MarkupItem):
     # equations); double-clicked, it is open and what is in it is edited,
     # until a click outside it or Esc. Not part of the record.
     opened = False
+    # Being dragged out with the Calculation Block tool: the calculations
+    # hear of it once it is put down, so what it passes over on the way is
+    # never taken in, not even for a moment.
+    drafting = False
 
     def __init__(self, rect: Optional[QRectF] = None):
         super().__init__()
@@ -826,6 +830,8 @@ class CalcBlockItem(MarkupItem):
         return min(xs), min(ys), max(xs), max(ys)
 
     def _tell_the_sheet(self) -> None:
+        if self.drafting:
+            return
         frame = self._page_frame()
         if frame is None or self.scene() is None:
             self._leave_the_sheet()

@@ -219,6 +219,24 @@ TOOLS: list[Tool] = [
 
 TOOL_MAP = {tool.key: tool for tool in TOOLS}
 
+
+def _calc_block():
+    from ..items.calc import CalcBlockItem
+    block = CalcBlockItem()
+    block.drafting = True          # the calculations hear of it once it is down
+    return block
+
+
+#: Calculation ▸ Calculation Block, drawn as a rectangle is (the user,
+#: 2026-10-24: "like a rectangle or text block allowing me to place it
+#: anywhere"). Its button is the Calculation bar's, so it is not in TOOLS:
+#: not one of the Tools bar's markup tools, nor a second shortcut entry.
+TOOL_MAP["calc_block"] = Tool(
+    "calc_block", "Calculation Block", "calc_block", DRAG, "Calculation", "",
+    "Drag out a calculation block anywhere, or click for one of the usual size: what "
+    "you type in it is its own (Self-contained, on to start); equations it is drawn "
+    "over stay out", factory=_calc_block)
+
 CATEGORIES = ["Navigate", "Draw", "Annotate", "Measure", SKETCH]
 
 

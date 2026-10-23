@@ -426,12 +426,14 @@ def test_create_block_holds_only_the_equations_selected_and_asks_self_contained(
     assert len(blocks(v.window)) == 1
 
 
-def test_the_block_button_places_a_new_self_contained_block_over_nothing_of_its_own(v):
+def test_the_block_button_draws_a_new_self_contained_block_over_nothing_of_its_own(v):
     """The user, 2026-10-24: "if i have click an equaiton on the page and then
     click claculaiton block, currenlty it add that to the block, dont, click
     clauction block lets me place a new block and it cna ovelrap other
     things but wont include it until i type somethign in". Self-contained by
-    default."""
+    default. And later: "do not let me place unless there is an insertion
+    point and it always places it there. it should be like a rectangle or
+    text block allowing me to place it anywhere"."""
     for y, keys in ((18, "a:1"), (60, "b:a+1")):
         v.type_at(36, y, "")
         v.keys(keys)
@@ -440,13 +442,22 @@ def test_the_block_button_places_a_new_self_contained_block_over_nothing_of_its_
     first, second = sorted(equations(v.window), key=lambda i: i.pos().y())
     v.view.scene().clearSelection()
     first.setSelected(True)                       # an equation clicked
-    v.calc.place_cross(v.frame, first.pos())      # where the block goes: over it
-    v.window.act_insert_block.trigger()
+    button = v.window.act_insert_block
+    button.trigger()
+    assert v.view.tool_key == "calc_block" and button.isChecked(), "a tool, in hand"
+    # dragged out round the first equation, from nowhere near the red cross
+    start = v.frame.mapToScene(first.pos() + QPointF(-30, -12))
+    end = v.frame.mapToScene(first.pos() + QPointF(260, 30))
+    drag(v.view, start.x(), start.y(), end.x(), end.y())
     settle(v.window)
     (block,) = blocks(v.window)
+    box = block.mapRectToScene(block.local_rect())
+    assert abs(box.left() - start.x()) < 12 and abs(box.bottom() - end.y()) < 12, \
+        "where it was dragged"
     assert block.self_contained, "self-contained to start"
     assert first in block.inside() and block.members() == [], "over it, not holding it"
     assert v.window.undo_stack.undoText() == "Add calculation block"
+    assert v.view.tool_key == "select" and not button.isChecked(), "let go, as every tool"
     # the equation still calculates as before, and stays its own markup
     settle(v.window)
     assert shown(second) is None or "not defined" not in (shown(second) or "")
@@ -467,6 +478,34 @@ def test_the_block_button_places_a_new_self_contained_block_over_nothing_of_its_
     (block,) = blocks(v.window)
     assert [m.text() for m in block.members()] == ["c≔3"]
     assert {i.text() for i in block.inside()} >= {"a≔1", "c≔3"}
+
+
+def test_a_click_with_the_block_tool_puts_one_of_the_usual_size_there(v):
+    v.calc.leave()
+    v.window.act_insert_block.trigger()
+    at = v.frame.mapToScene(QPointF(300, 400))
+    drag(v.view, at.x(), at.y(), at.x(), at.y())
+    settle(v.window)
+    (block,) = blocks(v.window)
+    usual = CalcBlockItem().local_rect()
+    assert block.local_rect().size() == usual.size()
+    assert block.mapRectToScene(block.local_rect()).contains(at + QPointF(2, 2))
+    assert block.isSelected() and v.view.tool_key == "select"
+
+
+def test_the_block_tool_draws_none_on_a_spreadsheet_page(v):
+    from tests.test_definition_order_window import insert_sheet_page_after
+    run = insert_sheet_page_after(v.window, 0)
+    sheet_frame = run.parentItem()
+    v.window.go_to_page(1)
+    v.window.act_insert_block.trigger()
+    start = sheet_frame.mapToScene(QPointF(80, 80))
+    end = sheet_frame.mapToScene(QPointF(300, 200))
+    v.view.centerOn(start)
+    drag(v.view, start.x(), start.y(), end.x(), end.y())
+    settle(v.window)
+    assert blocks(v.window) == []
+    assert v.view.tool_key == "select"
 
 
 def test_a_pasted_block_brings_its_own_and_leaves_what_it_lands_on_out(v):

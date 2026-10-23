@@ -1716,11 +1716,13 @@ class MainWindow(QMainWindow):
                       "(Ctrl+M in Calc mode; in Markup mode Ctrl+M is Multiply)")
         self._act("insert_plot", "Plot", self.insert_plot,
                   tip="A 2-D plot at the red cross or the pointer (@ in Calc mode)")
-        self._act("insert_block", "Calculation Block", self.insert_block,
-                  tip="A new calculation block at the red cross: what you type in it is "
-                      "its own, moving, copying and deleting with it, and kept to itself "
-                      "(Self-contained, on to start). To make one of equations already "
-                      "there, select them and right-click ▸ Create Block")
+        self._act("insert_block", "Calculation Block",
+                  lambda _checked=False: self.select_tool("calc_block"),
+                  tip="Drag out a calculation block anywhere, or click for one of the usual "
+                      "size: what you type in it is its own, moving, copying and deleting "
+                      "with it, and kept to itself (Self-contained, on to start); equations "
+                      "it is drawn over stay out. To make one of equations already there, "
+                      "select them and right-click ▸ Create Block")
         self._act("insert_table", TOOL_MAP["table"].label, self.insert_table,
                   tip=TOOL_MAP["table"].hint)
         self._act("insert_chart", "Chart", lambda: self.insert_chart(),
@@ -2173,6 +2175,11 @@ class MainWindow(QMainWindow):
                 action.setProperty(bindable.COMMAND, f"tool.{tool.key}")
         tool_bar.addSeparator()
         tool_bar.addAction(self.act_sticky)
+        # The Calculation Block button is its tool, drawn as a rectangle is
+        # (the user, 2026-10-24): pressed in while it is in hand, let go
+        # with every other tool's
+        self.act_insert_block.setCheckable(True)
+        self.tool_group.addAction(self.act_insert_block)
         # The Calculation bar's Table is the Tools bar's Table — one button
         # in two places, so it reads, tips and lights up the same (novice 21)
         self.calculation_bar.insertAction(self.act_insert_table, self.tool_actions["table"])
@@ -8649,10 +8656,12 @@ class MainWindow(QMainWindow):
     def insert_block(self) -> None:
         """A new, empty calculation block at the red cross or under the
         pointer, whatever is selected (the user, 2026-10-24: with an equation
-        clicked, the block took it in — "dont"). It may lie over other
-        equations and leaves them out; what is typed in it is its own.
-        Self-contained to start. Right-click ▸ Create Block makes one of the
-        equations selected (create_block)."""
+        clicked, the block took it in — "dont"): the page's right-click
+        menu's. It may lie over other equations and leaves them out; what is
+        typed in it is its own. Self-contained to start. The Calculation
+        Block button draws one anywhere, as a rectangle (tools.TOOL_MAP);
+        right-click ▸ Create Block makes one of the equations selected
+        (create_block)."""
         from ..items.calc import CalcBlockItem
         from .calcedit import GRID_PT, snap
 
@@ -8677,9 +8686,10 @@ class MainWindow(QMainWindow):
         self.view.commit_snapshot("Add calculation block")
         calc.clear_cross()
         self.refresh_selection()
-        self.status_hint.setText(
-            "Calculation block (self-contained): what you type in it is its own; "
-            "equations it lies over stay out · right-click for Self-contained")
+        self.status_hint.setText(self.BLOCK_PUT_DOWN)
+
+    BLOCK_PUT_DOWN = ("Calculation block (self-contained): what you type in it is its own; "
+                      "equations it lies over stay out · right-click for Self-contained")
 
     def create_block(self, items: Optional[list] = None) -> Optional[object]:
         """Right-click ▸ Create Block: a calculation block round the

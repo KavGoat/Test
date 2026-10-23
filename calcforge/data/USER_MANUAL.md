@@ -899,9 +899,11 @@ equation it is never flattened or hidden.
 
 ### Calculation blocks
 
-**Calculation ▸ Calculation Block** puts a new, empty block at the red cross,
-whatever is selected; it is **self-contained** to start. It may lie over other
-equations: they stay out of it. What you type inside it is its own, and a block
+**Calculation ▸ Calculation Block** (or its button) is a tool, as Rectangle is:
+drag the block out anywhere on the page, or click for one of the usual size;
+then the tool is put away. A new block is empty and **self-contained** to start.
+It may lie over other equations: they stay out of it. (The page's right-click
+**Insert Here ▸ Calculation Block** puts one where you clicked.) What you type inside it is its own, and a block
 pasted or placed from My Tools brings its own equations (what it lands on stays
 out). To make a block of equations already there, select them and right-click
 ▸ **Create Block**: it asks whether the block is self-contained. A block's
