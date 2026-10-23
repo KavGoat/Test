@@ -67,8 +67,8 @@ adds a workbook.
 **Spreadsheet views.** The buttons at the right of the status bar, whenever a
 spreadsheet page is in view (also **View ▸ Spreadsheet**):
 
-- **Normal** — the sheet alone, all white, as Excel opens it. The print area's edge
-  and the page breaks are blue lines; drag them.
+- **Normal** — the sheet alone, all white, as Excel opens it: no grey, dashed blue
+  lines where the pages fall (the print area's edge and the breaks); drag them.
 - **Page Layout** — the sheet's pages as they print.
 - **Page Break Preview** — what prints is white, everything else grey; drag the blue
   lines to move the print area's edges and the breaks.

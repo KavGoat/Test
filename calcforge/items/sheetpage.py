@@ -691,7 +691,10 @@ class SheetRunItem(TableItem):
 
     def _paint_breaks(self, painter: QPainter) -> None:
         """Excel's Page Break Preview lines: the printed area's edge, and a
-        line where each page ends (dashed when it fell there by itself)."""
+        line where each page ends (dashed when it fell there by itself). In
+        Normal view every one is dashed, the pages told only by the dashed
+        lines on white (the user, 2026-10-24: "Normal view has no grey,
+        dashed lines to indicate page")."""
         xs, ys = self.edges()
         paging = self.paging
         c0, c1 = self._printed_cols()
@@ -705,6 +708,8 @@ class SheetRunItem(TableItem):
         solid.setCosmetic(True)
         dashed = QPen(BREAK_BLUE, 2.0, Qt.DashLine)
         dashed.setCosmetic(True)
+        if self.normal_view:
+            solid = dashed
         edge = solid
         top = ys[area[0]] if area else 0.0
         bottom = ys[min(area[1] + 1, len(ys) - 1)] if area else \

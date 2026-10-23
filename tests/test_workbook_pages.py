@@ -198,11 +198,22 @@ def test_a_new_sheet_prints_one_page_from_a1_outlined_solid_in_the_workbook_view
     w.go_to_page(1)
     pump()
     item = next(i for i in w.view.scene().items() if isinstance(i, SheetRunItem))
-    assert item.alone
+    assert item.alone and item.normal_view
     edge = outline_pen(item)
-    # the pages' blue line, to be dragged straight away (the user, 2026-10-22)
-    assert edge.style() == Qt.SolidLine and edge.isCosmetic() and edge.color() == BREAK_BLUE, \
-        "the print area: the pages' solid blue outline"
+    # the pages' blue line, to be dragged straight away (the user, 2026-10-22);
+    # dashed in Normal view, its pages told by dashed lines on white (the
+    # user, 2026-10-24: "Normal view has no grey, dashed lines to indicate page")
+    assert edge.style() == Qt.DashLine and edge.isCosmetic() and edge.color() == BREAK_BLUE, \
+        "Normal view: the print area's edge dashed blue"
+    w.act_sheet_break_preview.trigger()
+    pump()
+    item = next(i for i in w.view.scene().items() if isinstance(i, SheetRunItem))
+    edge = outline_pen(item)
+    assert edge.style() == Qt.SolidLine and edge.color() == BREAK_BLUE, \
+        "Page Break Preview: Excel's solid blue outline"
+    w.act_sheet_normal_view.trigger()
+    pump()
+    item = next(i for i in w.view.scene().items() if isinstance(i, SheetRunItem))
     # the new sheet's paper says where it prints: its number on it
     assert paper_words(item) == ["Page 2"]
     # saved and opened: still its print area
@@ -230,14 +241,15 @@ def test_an_imported_sheet_keeps_its_print_area_and_one_without_prints_its_cells
     pump()
     assert options(runs(w, "Set").sheet)["print_area"] == [0, 0, 11, 2]
     assert not options(runs(w, "Free").sheet)["print_area"]
+    assert outline_pen(runs(w, "Set")).style() == Qt.SolidLine, "on its pages: solid"
     w.go_to_page(1)
     pump()
-    assert outline_pen(runs(w, "Set")).style() == Qt.SolidLine
+    assert outline_pen(runs(w, "Set")).style() == Qt.DashLine, "Normal view: dashed"
     bar = w.sheet_tabs.bar
     QTest.mouseClick(bar, Qt.LeftButton, Qt.NoModifier, bar.tabRect(1).center())
     pump()
     assert runs(w, "Free").alone
-    assert outline_pen(runs(w, "Free")).style() == Qt.SolidLine, \
+    assert outline_pen(runs(w, "Free")).style() == Qt.DashLine, \
         "no print area: what prints (its cells) outlined, as on the pages"
     assert all(p.style() == Qt.DashLine for p in break_pens(runs(w, "Free")))
 
