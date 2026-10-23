@@ -376,3 +376,30 @@ def test_undoing_a_rename_that_changes_only_the_case(w, sheet):
     w.undo_stack.redo()
     pump()
     assert shown_run(w).sheet.name == old.upper()
+
+
+def test_undoing_a_name_given_a_new_place_puts_it_back_where_it_was(w, sheet):
+    """tools/qa/monkey.py, 2026-10-24: Z named on one sheet, then named
+    again on another: Undo recorded only the second sheet, and Z was lost
+    from the first, where it had been kept."""
+    first = sheet
+    first_name = first.sheet.name             # (put back, its item is made again)
+    tables = w.view.tables
+    click(w, at(w, first, 3, 1))
+    assert tables.define_name("Z")
+    pump()
+    w.sheet_tabs.new_sheet()
+    pump()
+    second = shown_run(w)
+    click(w, at(w, second, 5, 2))
+    assert tables.define_name("Z")
+    pump()
+    wb = second.sheet.workbook
+    second_name = second.sheet.name
+    where = lambda: [dn.refers_to for dn in wb.names.values() if dn.name == "Z"]
+    assert where() == [f"{second_name}!$C$6"]
+    w.undo_stack.undo()
+    pump()
+    assert where() == [f"{first_name}!$B$4"], "back where it was"
+    saved = [n for t in tables._all_tables() for n in t.serialize()["table"]["names"]]
+    assert [n[1] for n in saved if n[0] == "Z"][:1] == [f"{first_name}!$B$4"]

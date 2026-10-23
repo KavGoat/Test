@@ -3388,8 +3388,16 @@ class TableEditing:
         if (t, l) != (b, r):
             ref += f":${col_letters(r)}${b + 1}"
         wb = item.sheet.workbook
+        # a name is the workbook's, kept with the sheet it names: one given a
+        # new place leaves another sheet, and every page with a table is
+        # recorded (as the Name Manager's are), or Undo left it lost from
+        # where it was (tools/qa/monkey.py, 2026-10-24)
+        frames = []
+        for other in self._all_tables():
+            if other.parentItem() not in frames:
+                frames.append(other.parentItem())
         try:
-            self.view.begin_snapshot(_frames(item))
+            self.view.begin_snapshot(frames)
             wb.define_name(name, ref)
             item.update()
             self.view.commit_snapshot("Define name")
