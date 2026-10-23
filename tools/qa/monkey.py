@@ -697,7 +697,6 @@ class Session:
             "customize", "workspace", "plugin", "tool chest", "profile", "theme")
 
     def a_menu_command(self):
-        from PySide6.QtWidgets import QAction
         actions = []
 
         def walk(menu):
@@ -714,7 +713,6 @@ class Session:
             return "none"
         action = self.pick(actions)
         action.trigger()
-        _ = QAction
         return action.text().replace("&", "")
 
     # -- the checks --------------------------------------------------------------------
