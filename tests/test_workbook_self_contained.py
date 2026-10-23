@@ -204,9 +204,9 @@ def test_equations_read_its_cells_and_variables_but_never_its_excel_names(w, tmp
                              "q:Seismic_Actions.Z", "f:Tables.ReturnPeriodFactor", "y:Z"])
     got = results(w)
     assert got["a="] == "4", "B2 = Z*k, k the equation variable above the sheets"
-    for line in ("z≔Quake_Calc.Z", "q≔Seismic_Actions.Z", "f≔Tables.ReturnPeriodFactor",
-                 "y≔Z"):
-        assert got[line].endswith("not defined."), (line, got[line])
+    for line in ("z≔Quake_Calc.Z", "q≔Seismic_Actions.Z", "f≔Tables.ReturnPeriodFactor"):
+        assert "Quake_Calc is self-contained" in got[line], (line, got[line])
+    assert got["y≔Z"] == "Z - not defined."
     assert any("Sheet.H44" in line and "variable" in line for line in w._last_import_report)
     # an input changed: the cells and the equations below follow; undone, back
     sheet = runs(w)["Seismic Actions"].sheet
@@ -225,7 +225,7 @@ def test_the_sheet_tab_menu_changes_it_as_one_undo_step_and_it_is_saved(w, tmp_p
     last = with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")))
     type_equations(w, last, ["y:Seismic_Actions.Z", "y=", "b:Quake_Calc.Z", "b=",
                              "f:Tables.ReturnPeriodFactor", "f=", "n:Z"])
-    assert results(w)["y≔Seismic_Actions.Z"].endswith("not defined."), "can't dial in"
+    assert "self-contained" in results(w)["y≔Seismic_Actions.Z"], "can't dial in"
     w.go_to_page(1)                       # the workbook view: its tabs
     pump()
     menu = w.sheet_tabs.build_menu(0)
@@ -236,11 +236,11 @@ def test_the_sheet_tab_menu_changes_it_as_one_undo_step_and_it_is_saved(w, tmp_p
     pump()
     assert w.undo_stack.count() == steps + 1
     got = results(w)
-    assert got["y="] == "0.4" and got["b="] == "0.4" and got["f="] == "1.3", "dialled in"
+    assert got.get("y=") == "0.4" and got.get("b=") == "0.4" and got.get("f=") == "1.3", got
     assert got["n≔Z"] == "Z - not defined.", "never bare (the user, 2026-10-24)"
     w.undo_stack.undo()
     pump()
-    assert results(w)["y≔Seismic_Actions.Z"].endswith("not defined.")
+    assert "self-contained" in results(w)["y≔Seismic_Actions.Z"]
     w.undo_stack.redo()
     pump()
     path = str(tmp_path / "doc.pdf")
@@ -352,6 +352,31 @@ def test_imported_unticked_it_is_dialled_in_to(w, tmp_path):
     type_equations(w, last, ["y:Z", "q:Seismic_Actions.Z", "q="])
     got = results(w)
     assert got["y≔Z"] == "Z - not defined." and got["q="] == "0.4"
+
+
+def test_a_name_dialled_in_that_isnt_let_out_says_why(w, tmp_path):
+    """Sheet.Name= for a name the sheet doesn't let out stays a question
+    and says why (SMath's rule made it a definition waiting for a value:
+    "Fill in all empty elements")."""
+    from calcforge.ui.workbookscope import set_self_contained
+    path = quake(str(tmp_path / "Quake Calc.xlsx"))
+    book = openpyxl.load_workbook(path)
+    book["Tables"].defined_names["Kp"] = DefinedName("Kp", attr_text="Tables!$A$1")
+    book.save(path)
+    w.drive_workbook_chooser = untick
+    last = with_workbook(w, path)
+    type_equations(w, last, ["Seismic_Actions.Kp=", "Tables.Kp=", "Quake_Calc.Kp="])
+    got = results(w)
+    assert got["Tables.Kp="] == "3"
+    assert got["Seismic_Actions.Kp="] == \
+        "Kp isn't a name of Seismic Actions; Tables has one of its own: Tables.Kp."
+    assert got["Quake_Calc.Kp="] == "Kp isn't a name of Quake_Calc; Tables has one of its own: Tables.Kp."
+    sheet = runs(w)["Tables"].sheet
+    assert set_self_contained(w, sheet.book, True)
+    pump()
+    assert results(w)["Tables.Kp="] == (
+        "Kp: Quake_Calc is self-contained, so its Excel names are for its own cells "
+        "(untick Self-contained on its sheet tab to dial in).")
 
 
 def test_a_cell_named_as_a_variable_is_read_bare_below_and_after_reopening(w, tmp_path):

@@ -1615,6 +1615,33 @@ right-click menu or the Properties panel's **Workbook** section):
   `Seismic_Actions_NZS1170_5.Cd` in an equation, `='Seismic Actions'!Cd` in
   another sheet's cell. So they never clash with the document's names.
 
+The two scopes Excel gives a name, dialled in (workbook `Quake_Calc`, sheets
+`Seismic Actions` and `Tables`):
+
+| The name | In an equation | In another workbook's cell |
+| --- | --- | --- |
+| workbook-wide, `Z` | `Quake_Calc.Z`, or through any of its sheets: `Tables.Z` | `='Seismic Actions'!Z` |
+| `Tables`' own, `Kp` | `Tables.Kp` only | `=Tables!Kp` |
+| both: the workbook's `RPF` and `Tables`' own `RPF` | `Tables.RPF` is `Tables`' own; `Quake_Calc.RPF` and `Seismic_Actions.RPF` the workbook's | as Excel: `=Tables!RPF` is `Tables`' own |
+
+A name dialled in that the sheet or workbook doesn't let out says why under the
+equation: `Seismic_Actions.Kp` — "Kp isn't a name of Seismic Actions; Tables has
+one of its own: Tables.Kp."; any name in a self-contained workbook — "… is
+self-contained, so its Excel names are for its own cells".
+
+**Names spelt the same.**
+
+- An equation's bare `Z` is always CalcForge's variable (an equation's, or a cell
+  named in its **Variable** box), never a workbook's Excel name.
+- A workbook's own cell reads its Excel names first, as in Excel: the sheet's own,
+  then the workbook's, then CalcForge's variable; `=var(Z)` always reads
+  CalcForge's.
+- `NAME(…)` in a cell is always the Excel function (`=MAX(1,5)`); a bare `NAME` is
+  a name or variable, so a CalcForge variable `max` is read by `=max`. In an
+  equation, `max(…)` is SMath's function and `max` alone the variable.
+- Two CalcForge variables of the same name: the latest defined before the
+  equation wins, whichever kind it is (an equation, or a cell's **Variable**).
+
 ### Spreadsheet functions
 
 Type `=` and the function's name; the tip shows its arguments (optional ones in

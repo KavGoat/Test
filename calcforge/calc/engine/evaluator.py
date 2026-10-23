@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from . import ast as A
-from .errors import MESSAGES, SMathError, err
+from .errors import MESSAGES, NotDefined, SMathError, err
 from .units import Quantity, is_unit, unit_offset, unit_quantity
 from .values import (Matrix, Q, String, add, compare, cross, div, mul, need_int, need_real, neg,
                      power, sub, truth)
@@ -491,7 +491,7 @@ class Evaluator:
                 return self.eval(v.node, ctx)
             except SMathError as e:
                 if e.node is not None and not _inside(e.node, n):
-                    raise SMathError(e.message, n)
+                    raise type(e)(e.message, n)      # NotDefined stays so
                 raise
         return v
 
@@ -652,7 +652,7 @@ def _has_placeholder(n: A.Node) -> bool:
 
 
 def _is_not_defined(e: SMathError) -> bool:
-    return e.message.endswith("not defined.")
+    return isinstance(e, NotDefined) or e.message.endswith("not defined.")
 
 
 def _inside(inner, outer) -> bool:

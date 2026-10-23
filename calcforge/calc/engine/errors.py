@@ -15,6 +15,12 @@ class SMathError(Exception):
         self.node = node
 
 
+class NotDefined(SMathError):
+    """A name not defined here, for the reason its message gives (a name
+    dialled in to a sheet that doesn't let it out): kept and worked out
+    later as any name not defined is, so x:=Sheet.Name stays x's."""
+
+
 MESSAGES = {
     "not_defined": "{0} - not defined.",  # observed: "y - not defined."
     "function_not_defined": "{0} - function is not defined.",  # observed: "f(#) - function is not defined."

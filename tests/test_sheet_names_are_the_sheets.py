@@ -44,7 +44,7 @@ def test_the_sheet_is_the_one_whose_cells_it_names():
     other = on_page(calc, 1, 60, "Sheet1.y+0=")
     calc.recalculate()
     assert answer(asked) == "7"
-    assert answer(other) == "Sheet1.y - not defined."
+    assert answer(other) == "y isn't a name of Sheet1; Loads has one of its own: Loads.y."
     assert book.written_as(book.workbook.names[("y", None)]) == "Loads.y"
 
 

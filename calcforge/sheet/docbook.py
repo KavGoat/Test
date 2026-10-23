@@ -523,17 +523,65 @@ class DocumentBook:
 
     def has(self, name: str, at_key=None) -> bool:
         """Whether a table before *at_key* defines *name* — known from an
-        earlier section too: its value then says why it can't be read."""
+        earlier section too: its value then says why it can't be read. So
+        is a name dialled in to a sheet or workbook before it that doesn't
+        let it out: ``Sheet.Name=`` stays a question and says why, where
+        SMath's rule would have made it a definition waiting for a value."""
         at_key = self.reading_at if at_key is None else at_key
         got = self._named(name, at_key)
-        return got is not None and self._before(got[0], at_key) is not None
+        if got is None:
+            return self.refused(name, at_key) is not None
+        return self._before(got[0], at_key) is not None
+
+    def refused(self, name: str, at_key=None) -> Optional[str]:
+        """Why *name*, dialled in as Sheet.Name or Book.Name to a sheet or
+        workbook before *at_key*, can't be read; None when it can, or when
+        *name* isn't a dial-in to anything here."""
+        if "." not in name or self._named(name, at_key) is not None:
+            return None
+        wb = self.workbook
+        prefix, _, rest = name.partition(".")
+        sheet = sheet_named(wb, prefix)
+        if sheet is not None:
+            if self._before(sheet, at_key) is None:
+                return None
+            book = wb.books.get(sheet.book) if sheet.book else None
+            shown = sheet.name
+        else:
+            book = book_named(wb, prefix)
+            if book is None or not any(s.book == book.id and self._before(s, at_key) is not None
+                                       for s in wb.sheets):
+                return None
+            shown = book.name
+        if book is not None and book.self_contained:
+            return (f"{rest}: {book.name} is self-contained, so its Excel names are for its "
+                    f"own cells (untick Self-contained on its sheet tab to dial in).")
+        lower = rest.lower()
+        owners = [s for s in wb.sheets if (lower, s.id) in wb.names and
+                  (book is None or s.book == book.id) and s is not sheet]
+        kept = wb.names.get((lower, None))
+        if book is None and kept is not None and not kept.variable:
+            home = self._kept_on(kept)          # a spreadsheet's own name, kept with another
+            if home is not None and home is not sheet:
+                owners.insert(0, home)
+        if owners:
+            owner = sheet_ident(owners[0].name)
+            return f"{rest} isn't a name of {shown}; {owner} has one of its own: {owner}.{rest}."
+        return f"{rest} isn't a name of {shown}."
 
     def value(self, name: str, at_key=None):
         """The value of a table's *name* for the equation at *at_key*: None
         when no table before it defines the name (it is "not defined" there)."""
         at_key = self.reading_at if at_key is None else at_key
         got = self._named(name, at_key)
-        if got is None or self._before(got[0], at_key) is None:
+        if got is None:
+            why = self.refused(name, at_key)
+            if why is not None:
+                from calcforge.calc.engine.errors import NotDefined
+
+                raise NotDefined(why)
+            return None
+        if self._before(got[0], at_key) is None:
             return None
         if self._seen(got, at_key) is None:
             from calcforge.calc.engine.errors import SMathError
