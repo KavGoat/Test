@@ -3,6 +3,14 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-24 (midday) — dial-in reasons, the block tool, the Variables panel in reading order, saving (pushed at 1c8f111…ed919a2)
+
+- The quick check passed on ed919a2 before it was pushed (20.7 min, `-n 3`). The run before it, on 2fd3001, failed only tests/test_callout_placing.py's drag on the graphics card under load (79 moves handed over in 1.2 s, 100 wanted); alone it hands over about 335 both on 2fd3001 and on 2348cc6, so nothing here slowed it.
+- A name dialled in that a sheet or workbook doesn't let out says why (Seismic_Actions.Kp: "Kp isn't a name of Seismic Actions; Tables has one of its own: Tables.Kp."; any in a self-contained workbook: "… is self-contained …"), and Sheet.Name= stays a question instead of becoming a definition waiting for a value: tests/test_workbook_self_contained.py, tests/test_sheet_names_are_the_sheets.py. The rules for Excel's two scopes and names spelt the same were checked in the window on a synthetic workbook (scratchpad probe) and written into the manual.
+- The Calculation Block button is a tool: a block dragged out anywhere, or clicked for the usual size; what it is drawn over stays out; none on a spreadsheet page: tests/test_calc_blocks.py.
+- The Variables panel: each block and each workbook a section where it comes in the document (a block after a workbook after it); a self-contained workbook's CalcForge variables in its section, its Excel names greyed under Its own cells only, with no Make Global: tests/test_variables_panel.py, tests/test_workbook_self_contained.py, tests/test_xlsx_drawings.py.
+- Saving: a read-only file, a file held by another program (Try Again), a folder gone (Save As… elsewhere, or Cancel keeping the name), Save As over a document open in another tab, Split asking before replacing, Export to PDF into a missing folder, the Markups List's CSV no longer raising: tests/test_saving.py.
+
 ## 2026-10-24 (late morning) — Excel names only dialled in, sheet tabs, blocks, the Variables panel's groups, a chart on a page, the Table tool (pushed at f6f3007…2348cc6)
 
 - The quick check passed on 2348cc6 before it was pushed (33.2 min, `-n 3`).
