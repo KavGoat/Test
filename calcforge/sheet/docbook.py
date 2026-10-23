@@ -48,7 +48,6 @@ class DocumentBook:
         self.workbook.journal = False           # the window's undo stack records pages
         self.workbook.outside = self._outside
         self.workbook.reach = self._reach
-        self.workbook.order_key = self._key
         # SMath's custom units: a quantity the equations define is a unit in the cells
         import weakref
 
@@ -280,18 +279,19 @@ class DocumentBook:
         """(sheet, RefValue or value) for a name the equations use, or None.
 
         A bare name is a CalcForge variable named cell (DefinedName.variable),
-        or a name of an imported workbook that isn't self-contained (the
-        latest before *at_key* in reading order). A spreadsheet's own names
-        are its sheets' (the user, 2026-10-21: "not a variable name I can
-        access outside by itself, only Sheet.name"), read only qualified:
-        ``Sheet.Name`` (the name as that sheet's cells read it: the sheet's
-        own, then its workbook's, then a name kept with that sheet) or
-        ``Book.Name`` (a workbook's that isn't self-contained). A sheet's
-        cell is ``Sheet.H44``; a table's column ``Table.Heading``.
+        nothing else. A spreadsheet's own names are its sheets' (the user,
+        2026-10-21: "not a variable name I can access outside by itself, only
+        Sheet.name"), an imported workbook's too (2026-10-24: "un self
+        contained workbook variable names (like spreadsheet names) should not
+        be accessible from outside unless I dial in like sheet1.variable"),
+        read only dialled in: ``Sheet.Name`` (the name as that sheet's cells
+        read it: the sheet's own, then its workbook's, then a name kept with
+        that sheet) or ``Book.Name`` (a workbook's own). A sheet's cell is
+        ``Sheet.H44``; a table's column ``Table.Heading``.
         A self-contained workbook is closed as a self-contained calculation
-        block is (the user, 2026-10-24): from outside, only its CalcForge
-        variables and its cells as Sheet.H44 are read; its Excel names are
-        for its own cells.
+        block is ("selfcontained shows nothing and cant dial in"): from
+        outside, only its CalcForge variables and its cells as Sheet.H44 are
+        read; its Excel names are for its own cells.
         Sheets are written as their names, or with each run of spaces and
         other characters an equation can't hold as one _ (Seismic Actions:
         Seismic_Actions)."""
@@ -300,9 +300,6 @@ class DocumentBook:
         dn = wb.names.get((lower, None))
         if dn is not None and not dn.variable:
             dn = None                    # a spreadsheet's own name: Sheet.Name
-        other = wb.open_book_name(lower, None, at_key) if wb.books else None
-        if other is not None and (dn is None or self._later(other, dn, at_key)):
-            dn = other                   # (both: the latest before the equation)
         if dn is not None:
             return self._name_value(dn)
         if "." in name:
@@ -415,19 +412,6 @@ class DocumentBook:
                     if tok.kind == "ident" and not defines:
                         out.add(str(tok.value).lower())
         return out
-
-    def _later(self, a, b, at_key) -> bool:
-        """Whether defined name *a* is defined after *b* (where their sheets
-        are) and still before *at_key*: the one an equation there reads."""
-        wb = self.workbook
-
-        def key(dn):
-            home = wb.sheet_by_id(dn.home) if dn.home is not None else None
-            return self._key(home) if home is not None else (float("inf"),)
-        ka, kb = key(a), key(b)
-        if at_key is not None and not kb < tuple(at_key):
-            return True
-        return kb < ka and (at_key is None or ka < tuple(at_key))
 
     def _name_value(self, dn):
         """(sheet, RefValue or value) of a defined name, as the equations read it."""
@@ -591,12 +575,13 @@ class DocumentBook:
         return look
 
     def written_as(self, dn) -> str:
-        """How an equation writes a defined name: bare (a CalcForge variable,
-        or a name of a workbook that isn't self-contained), Sheet.Name (a
-        spreadsheet's own name, of the sheet it is kept with, or a sheet's
-        local name on an imported sheet); "" for a name the equations can't
-        read: a self-contained workbook's Excel names, and a sheet's local
-        name on a sheet or table made here (Excel's scope only)."""
+        """How an equation writes a defined name: bare (a CalcForge
+        variable), Book.Name (a workbook's own, one that isn't
+        self-contained), Sheet.Name (a spreadsheet's own name, of the sheet
+        it is kept with, or a sheet's local name on an imported sheet); ""
+        for a name the equations can't read: a self-contained workbook's
+        Excel names, and a sheet's local name on a sheet or table made here
+        (Excel's scope only)."""
         wb = self.workbook
         if dn.sheet is not None:
             home = wb.sheet_by_id(dn.sheet)
@@ -605,7 +590,7 @@ class DocumentBook:
             return f"{sheet_ident(home.name)}.{dn.name}"
         book = wb.books.get(dn.book) if dn.book else None
         if book is not None:
-            return "" if book.self_contained else dn.name
+            return "" if book.self_contained else f"{book.name}.{dn.name}"
         if dn.variable:
             return dn.name
         home = self._kept_on(dn)

@@ -34,6 +34,15 @@ def test_rewriting_keeps_what_was_typed():
         "'New sheet'!A1+'New sheet'!B2+Other!C3+'New sheet'!Name"
 
 
+def test_a_name_on_a_quoted_sheet_reads_as_excels():
+    # 'Seismic Actions'!Z is a name of that sheet, as in Excel (it was read
+    # as a unit and refused); 'Sheet'!A1 stays a reference, 5'kN a unit
+    kinds = [(t.kind, t.text) for t in F.tokenize("'Seismic Actions'!Z*'It''s'!A1+5'kN")]
+    assert kinds[:5] == [("name", "'Seismic Actions'!Z"), ("op", "*"), ("ref", "'It''s'!A1"),
+                         ("op", "+"), ("num", "5")]
+    assert F.rename_sheet_in("'Seismic Actions'!Z+1", "Seismic Actions", "Quake") == "Quake!Z+1"
+
+
 def test_f4_cycles_the_reference_at_the_caret():
     text, caret = "A1+B2", 4
     seen = []

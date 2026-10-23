@@ -61,7 +61,6 @@ class ImportedSheet:
 class Imported:
     sheets: list
     left_out: list = field(default_factory=list)       # what could not come across, in words
-    renamed: dict = field(default_factory=dict)        # workbook names given a prefix: old -> new
 
 
 # -- colours --------------------------------------------------------------------------------------
@@ -1021,77 +1020,3 @@ def workbook_names(imported: Imported) -> list:
     """The workbook-wide names of *imported* (not those local to a sheet)."""
     return [entry[0] for sheet in imported.sheets for entry in sheet.data.get("names", [])
             if not entry[2]]
-
-
-def name_clashes(imported: Imported, taken: dict) -> list:
-    """(name, what it clashes with) for each of the workbook's own names
-    already used in the document: *taken* maps a lower-case name to what
-    has it ("an equation variable", "a name of Table1"...)."""
-    out = []
-    for name in workbook_names(imported):
-        why = taken.get(name.lower())
-        if why:
-            out.append((name, why))
-    return sorted(out, key=lambda e: e[0].lower())
-
-
-def suggested_prefix(book_name: str) -> str:
-    """A prefix to tell the workbook's names apart: its name's first part
-    (Seismic_Actions_NZS1170_5: Seismic_)."""
-    first = re.split(r"_+", book_name.strip("_"))[0] or "Wb"
-    return first + "_"
-
-
-def prefix_names(imported: Imported, names, prefix: str) -> dict:
-    """Renames the workbook names *names* to *prefix* + name, and every
-    formula, name, rule and validation of the workbook that reads them
-    (a sheet's own name of the same spelling, which wins on its sheet, is
-    left alone). Returns {old: new}."""
-    wanted = {n.lower(): prefix + n for n in names}
-    if not wanted:
-        return {}
-    local = {s.name.lower(): {e[0].lower() for e in s.data.get("names", []) if e[2]}
-             for s in imported.sheets}
-
-    def renamed(text: str, sheet: str) -> str:
-        if not text or not any(n in text.lower() for n in wanted):
-            return text
-        try:
-            tokens = F.tokenize(text)
-        except F.FormulaError:
-            return text
-        changed = False
-        for t in tokens:
-            if t.kind != "name":
-                continue
-            where, bang, name = t.text.rpartition("!")
-            on = where.strip("'").replace("''", "'").lower() if bang else sheet.lower()
-            new = wanted.get(name.lower())
-            if new is None or name.lower() in local.get(on, ()):
-                continue
-            t.text = where + bang + new
-            changed = True
-        return F.join(tokens) if changed else text
-
-    def formula(text, sheet):
-        if isinstance(text, str) and text.startswith("="):
-            return "=" + renamed(text[1:], sheet)
-        return text
-
-    for sheet in imported.sheets:
-        data = sheet.data
-        for entry in data.get("cells", []):
-            entry[2] = formula(entry[2], sheet.name)
-        for entry in data.get("names", []):
-            entry[1] = renamed(entry[1], sheet.name)
-            if not entry[2] and entry[0].lower() in wanted:
-                entry[0] = wanted[entry[0].lower()]
-        for rule in data.get("cond_rules", []):
-            for key in ("formula", "a", "b"):
-                if key in rule:
-                    rule[key] = formula(rule[key], sheet.name)
-        for rule in data.get("validations", []):
-            for key in ("source", "formula", "a", "b"):
-                if key in rule:
-                    rule[key] = formula(rule[key], sheet.name)
-    return {n: wanted[n.lower()] for n in names}

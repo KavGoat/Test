@@ -12,9 +12,10 @@ tick in the chooser) it is closed, as a self-contained calculation block is
 (the user, 2026-10-24): its Excel names are for its own cells, and the
 equations read it only by its CalcForge variables (a cell named in the
 Variable box) and by sheet and cell (Sheet.H44). Unticked, its Excel names
-are document variables (and Sheet.Name reads one); names already used in the
-document are listed, to keep it self-contained, rename them with a prefix, or
-go ahead (reading order then decides).
+can be dialled in to as well — Sheet.Name or Book.Name from an equation,
+=Sheet!Name from a cell — but never read bare, as a spreadsheet's own names
+aren't (the user: "un self contained workbook variable names (like
+spreadsheet names) should not be accessible from outside unless I dial in").
 """
 from __future__ import annotations
 
@@ -35,8 +36,8 @@ OPEN_FILTER = ("Documents and Excel workbooks (*.pdf *.xlsx *.xlsm *.xltx *.xltm
 SELF_CONTAINED_SAYS = ("Self-contained: its Excel names are for its own cells. Equations below "
                        "read a cell you name as a variable (right-click ▸ Variable), or any cell "
                        "as Sheet.H44.")
-OPEN_SAYS = ("Not self-contained: its Excel names are document variables, each defined where "
-             "its sheet is, and Sheet.Name reads one.")
+OPEN_SAYS = ("Not self-contained: equations below can also dial in to its Excel names, "
+             "Sheet.Name (never bare); cells too, =Sheet!Name.")
 
 
 def is_workbook(path: str) -> bool:
@@ -143,35 +144,6 @@ def _taken(document) -> set:
     return {s.name for s in book_for(document).workbook.sheets}
 
 
-def taken_names(document, leave_out: Optional[str] = None) -> dict:
-    """Names a workbook that isn't self-contained would clash with: lower
-    case -> what has it (equation variables, the document's defined names,
-    other workbooks' names that are document names, SMath's constants);
-    *leave_out*: a workbook's own id, when asking about it."""
-    from ..calc.engine.evaluator import BUILTIN_CONSTANTS
-    from ..sheet.docbook import book_for
-
-    out = {name.lower(): "an SMath constant" for name in BUILTIN_CONSTANTS}
-    if document is None:
-        return out
-    book = book_for(document)
-    try:
-        variables = book._calc().worksheet.index.vars
-    except Exception:  # noqa: BLE001  (no equations to read)
-        variables = {}
-    for name in variables:
-        out[name.lower()] = "an equation variable"
-    wb = book.workbook
-    for (lower, scope), dn in wb.names.items():
-        if scope is None:
-            home = wb.sheet_by_id(dn.home) if dn.home is not None else None
-            out.setdefault(lower, f"a name on {home.name}" if home else "a defined name")
-        elif isinstance(scope, str) and scope != leave_out and scope in wb.books \
-                and not wb.books[scope].self_contained:
-            out.setdefault(lower, f"a name of the workbook {wb.books[scope].name}")
-    return out
-
-
 def book_name_for(document, path: str, imported) -> str:
     """The workbook's name for the equations, unique in the document."""
     from ..sheet.docbook import book_for, sheet_ident
@@ -238,9 +210,6 @@ def report(window, imported) -> str:
             lines.append(SELF_CONTAINED_SAYS)
         else:
             lines.append(OPEN_SAYS)
-    renamed = imported.renamed
-    if renamed:
-        lines.append("Renamed: " + ", ".join(f"{a} → {b}" for a, b in sorted(renamed.items())) + ".")
     if imported.left_out:
         lines.append("Left out: " + "; ".join(imported.left_out) + ".")
     if differ:
@@ -312,13 +281,12 @@ class SheetChooser:
     to bring in only some, and each with Print or Don't Print (Print to
     start; the user, 2026-10-21: "on import of Excel let me select print or
     not print a sheet individually"); and whether the workbook is
-    self-contained (its names its own; ticked to start), with the names
-    that would clash when it isn't."""
+    self-contained (closed even to dialling in; ticked to start)."""
 
-    KEEP, RENAME, AHEAD = "self-contained", "rename", "go ahead"
+    KEEP, OPEN = "self-contained", "open"
     PRINT, NO_PRINT = "Print", "Don't Print"
 
-    def __init__(self, parent, imported, taken: Optional[dict] = None, book_name: str = "Workbook"):
+    def __init__(self, parent, imported, book_name: str = "Workbook"):
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
                                        QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
@@ -377,7 +345,7 @@ class SheetChooser:
         self.warning.hide()
         layout.insertWidget(layout.count() - 1, self.warning)
         tree.itemChanged.connect(self._changed)
-        self._scope_part(layout, taken or {}, book_name)
+        self._scope_part(layout, book_name)
         dialog.resize(max(dialog.sizeHint().width(), 460), dialog.sizeHint().height())
 
     def _changed(self, item, column: int) -> None:
@@ -411,73 +379,35 @@ class SheetChooser:
             if self.list.item(i).data(Qt.UserRole) == name:
                 self.list.item(i).set_prints(on)
 
-    def _scope_part(self, layout, taken: dict, book_name: str) -> None:
-        """The Self-contained tick box, and under it (when unticked and some
-        of the workbook's names are already used here) those names with
-        what to do about them."""
-        from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QGroupBox, QHBoxLayout, QLabel,
-                                       QLineEdit, QPushButton, QRadioButton, QVBoxLayout)
+    def _scope_part(self, layout, book_name: str) -> None:
+        """The Self-contained tick box, and under it what it means."""
+        from PySide6.QtWidgets import QCheckBox, QLabel
 
-        from ..sheet.xlsx import name_clashes, suggested_prefix, workbook_names
+        from ..sheet.xlsx import workbook_names
         self.book_name = book_name
-        self.clashes = name_clashes(self.imported, taken)
         count = len(workbook_names(self.imported))
         self.self_contained = QCheckBox("Self-contained")
         self.self_contained.setChecked(True)
         self.self_contained.setToolTip(
-            f"Its {count} Excel name{'s' * (count != 1)} stay its own, for its cells only. "
-            f"{SELF_CONTAINED_SAYS[len('Self-contained: '):]} Untick to make its Excel names "
-            "document variables.")
+            f"Its {count} Excel name{'s' * (count != 1)} are its own, for its cells. "
+            f"{SELF_CONTAINED_SAYS[len('Self-contained: '):]} Untick to let equations dial in "
+            "to its Excel names.")
         at = layout.count() - 1
         layout.insertWidget(at, self.self_contained)
         self.scope_note = QLabel("")
         self.scope_note.setWordWrap(True)
         layout.insertWidget(at + 1, self.scope_note)
-        self.clash_box = box = QGroupBox("Names already used in this document")
-        inner = QVBoxLayout(box)
-        shown = self.clashes[:12]
-        lines = [f"{name} — {why}" for name, why in shown]
-        if len(self.clashes) > len(shown):
-            lines.append(f"and {len(self.clashes) - len(shown)} more")
-        self.clash_list = QLabel("\n".join(lines))
-        self.clash_list.setWordWrap(True)
-        inner.addWidget(self.clash_list)
-        self.keep_button = QPushButton("Keep self-contained")
-        self.keep_button.clicked.connect(lambda: self.self_contained.setChecked(True))
-        inner.addWidget(self.keep_button)
-        self.rename_radio = QRadioButton("Rename them with the prefix")
-        self.prefix = QLineEdit(suggested_prefix(book_name))
-        self.prefix.setMaximumWidth(160)
-        row = QHBoxLayout()
-        row.addWidget(self.rename_radio)
-        row.addWidget(self.prefix)
-        row.addStretch(1)
-        inner.addLayout(row)
-        self.ahead_radio = QRadioButton("Go ahead (reading order decides which is read)")
-        inner.addWidget(self.ahead_radio)
-        self._how = QButtonGroup(box)
-        self._how.addButton(self.rename_radio)
-        self._how.addButton(self.ahead_radio)
-        self.rename_radio.setChecked(True)
-        self.prefix.textEdited.connect(lambda _t: self.rename_radio.setChecked(True))
-        layout.insertWidget(at + 2, box)
-        box.hide()
         self.self_contained.toggled.connect(lambda _on: self._scope_shown())
         self._scope_shown()
 
     def _scope_shown(self) -> None:
         on = self.self_contained.isChecked()
-        self.clash_box.setVisible(not on and bool(self.clashes))
         self.scope_note.setText(SELF_CONTAINED_SAYS if on else OPEN_SAYS)
         self.dialog.adjustSize()
 
-    def scope(self) -> tuple:
-        """(KEEP, RENAME or AHEAD, the prefix): what the reader chose."""
-        if self.self_contained.isChecked():
-            return self.KEEP, ""
-        if self.clashes and self.rename_radio.isChecked() and self.prefix.text().strip():
-            return self.RENAME, self.prefix.text().strip()
-        return self.AHEAD, ""
+    def scope(self) -> str:
+        """KEEP (self-contained) or OPEN: what the reader chose."""
+        return self.KEEP if self.self_contained.isChecked() else self.OPEN
 
     def _tick_all(self, state) -> None:
         for i in range(self.list.count()):
@@ -536,11 +466,11 @@ def choose_sheets(window, imported, path: str = "", document=None) -> bool:
     (``make_book``). False when the reader cancels."""
     import os
 
-    from ..sheet.xlsx import keep_only, make_book, prefix_names, workbook_names
+    from ..sheet.xlsx import keep_only, make_book, workbook_names
 
     names = [s.name for s in imported.sheets]
     book_name = book_name_for(document, path or "Workbook", imported)
-    how, prefix = SheetChooser.KEEP, ""
+    how = SheetChooser.KEEP
     pick = getattr(window, "choose_workbook_sheets", None)    # a test's stand-in for the dialog
     drive = getattr(window, "drive_workbook_chooser", None)   # a test's hand on the dialog
     chooser = None
@@ -550,7 +480,7 @@ def choose_sheets(window, imported, path: str = "", document=None) -> bool:
                             (len(names) < 2 and not workbook_names(imported))):
         chosen = names
     else:
-        chooser = SheetChooser(window, imported, taken_names(document), book_name)
+        chooser = SheetChooser(window, imported, book_name)
         if drive is not None:
             drive(chooser)
             accepted = chooser.dialog.result()
@@ -559,14 +489,12 @@ def choose_sheets(window, imported, path: str = "", document=None) -> bool:
         if not accepted:
             return False
         chosen = chooser.chosen()
-        how, prefix = chooser.scope()
+        how = chooser.scope()
     if not chosen:
         return False
     keep_only(imported, chosen)
     # the worksheets chosen as Don't Print (pages_for): its pages come in not printing
     imported.no_print = set(chooser.no_print()) & set(chosen) if chooser is not None else set()
-    if how == SheetChooser.RENAME:
-        imported.renamed = prefix_names(imported, [n for n, _why in chooser.clashes], prefix)
     make_book(imported, book_name, shown_file(document, os.path.basename(path or "")),
               how == SheetChooser.KEEP)
     return True

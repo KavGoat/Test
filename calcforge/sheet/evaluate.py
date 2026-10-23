@@ -508,6 +508,13 @@ def _name(n: F.Name, ctx: Ctx):
         if sheet is None:
             raise failed(REF, f"there's no sheet or table called '{unquote_sheet(n.sheet)}'")
     dn = ctx.wb.find_name(n.name, sheet)
+    if dn is not None and n.sheet is not None:
+        closed = ctx.wb.closed_to(dn, ctx.sheet)
+        if closed is not None:
+            # dialled in from outside a self-contained workbook: its names
+            # are its cells' only (the user, 2026-10-24)
+            return NAME.because(f"{n.name} is a name of {closed.name}, which is self-contained: "
+                                f"only its own cells read its names")
     if dn is not None:
         if ctx.depth > 40:
             raise failed(NUM, f"the name '{n.name}' refers to itself, round and round")

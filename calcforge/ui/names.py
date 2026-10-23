@@ -281,13 +281,13 @@ def delete(tables, dn) -> Optional[str]:
 
 def scope_text(wb, dn) -> str:
     """The Name Manager's Scope: a sheet's own name says the sheet; an
-    imported workbook's says the workbook (and whether its names are its
-    own); any other is the document's, Excel's Workbook."""
+    imported workbook's says the workbook (and that it is self-contained:
+    no dialling in); any other is the document's, Excel's Workbook."""
     if dn.sheet is not None and wb.sheet_by_id(dn.sheet) is not None:
         return wb.sheet_by_id(dn.sheet).name
     book = wb.books.get(dn.book) if dn.book else None
     if book is not None:
-        return f"{book.name} ({'its cells only' if book.self_contained else 'document variable'})"
+        return f"{book.name} (self-contained)" if book.self_contained else book.name
     return "Workbook (CalcForge variable)" if dn.variable else "Workbook"
 
 

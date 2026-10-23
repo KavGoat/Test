@@ -85,10 +85,13 @@ class DefinedName:
 @dataclass
 class Book:
     """An imported Excel workbook: its sheets share its names (Excel's
-    workbook scope). Self-contained (the default), those names are its own:
-    its cells read them, and the equations only by qualifying them
-    (``Book.Name``, ``Sheet.Name``); otherwise they are document names, read
-    by the equations bare, each defined where its sheet is in reading order."""
+    workbook scope), and they are its own: its cells read them bare, and
+    nothing outside does (the user, 2026-10-24: "un self contained workbook
+    variable names (like spreadsheet names) should not be accessible from
+    outside unless I dial in like sheet1.variable ... selfcontained shows
+    nothing and cant dial in"). Not self-contained, outside reads them only
+    by dialling in: an equation as ``Sheet.Name`` or ``Book.Name``, a cell
+    as ``=Sheet!Name``. Self-contained (the default), not even that."""
 
     id: str
     name: str                            # how equations qualify its names (an identifier)
@@ -360,10 +363,6 @@ class Workbook:
         self.styles = StyleTable()
         self.names: dict[tuple, DefinedName] = {}    # DefinedName.key -> the name
         self.books: dict[str, Book] = {}              # imported workbooks by Book.id
-        # where a sheet is in the document's reading order (the document sets
-        # it): a name of a workbook that isn't self-contained is read by
-        # other sheets only from after it
-        self.order_key: Optional[Callable] = None
         self.day_first = True
         # asked for a document variable: outside(sheet, name) -> value; raises KeyError
         self.outside: Optional[Callable] = None
@@ -693,8 +692,9 @@ class Workbook:
     def find_name(self, name: str, sheet: Optional[Sheet]) -> Optional[DefinedName]:
         """The defined name a formula on *sheet* means by *name*, Excel's way:
         the sheet's own (local) name, then its workbook's, then a document
-        name; then a name of a workbook that isn't self-contained, from a
-        sheet after it in reading order."""
+        name. Another workbook's names are its own (Book): a formula
+        elsewhere reaches one only as ``Sheet!Name``, *sheet* being that
+        workbook's sheet (``closed_to`` says when even that is refused)."""
         lower = name.lower()
         names = self.names
         if sheet is not None:
@@ -705,43 +705,34 @@ class Workbook:
                 mine = names.get((lower, sheet.book))
                 if mine is not None:
                     return mine
-        found = names.get((lower, None))
-        if found is not None or not self.books:
-            return found
-        return self.open_book_name(lower, sheet)
+        return names.get((lower, None))
 
-    def open_book_name(self, lower: str, reader: Optional[Sheet], at_key=None):
-        """A name of a workbook that isn't self-contained, read from *reader*
-        (a sheet of another workbook, or none) or from reading key *at_key*:
-        the latest such definition before it in reading order (any, when
-        neither is known)."""
-        best = best_key = None
-        order = self.order_key
-        if at_key is None and reader is not None and order is not None:
-            at_key = order(reader)
-        for book in self.books.values():
-            if book.self_contained or (reader is not None and reader.book == book.id):
-                continue
-            dn = self.names.get((lower, book.id))
-            if dn is None:
-                continue
-            if order is None or at_key is None:
-                return dn
-            home = self.sheet_by_id(dn.home) if dn.home is not None else None
-            key = order(home) if home is not None else None
-            if key is None or not key < tuple(at_key):
-                continue
-            if best_key is None or key > best_key:
-                best, best_key = dn, key
-        return best
+    def closed_to(self, dn: DefinedName, reader: Optional[Sheet]) -> Optional[Book]:
+        """The self-contained workbook *dn* is the own name of, when *reader*
+        (a sheet outside it, or none) dials in to it: refused, as from an
+        equation (the user, 2026-10-24: "selfcontained ... cant dial in").
+        None when *reader* may read it."""
+        if dn.book is not None:
+            book_id = dn.book
+        elif dn.sheet is not None:
+            home = self.sheet_by_id(dn.sheet)
+            book_id = home.book if home is not None else None
+        else:
+            return None
+        book = self.books.get(book_id) if book_id else None
+        if book is None or not book.self_contained:
+            return None
+        if reader is not None and reader.book == book_id:
+            return None
+        return book
 
     def book_names(self, book_id: str) -> list:
         """The names of an imported workbook (its own scope, not sheet-local)."""
         return [dn for (lower, scope), dn in self.names.items() if scope == book_id]
 
     def set_self_contained(self, book_id: str, on: bool) -> None:
-        """Whether a workbook's names are its own (one undo step); every
-        formula that reads a name is worked out again."""
+        """Whether a workbook is closed even to dialling in (one undo step);
+        every formula that reads a name is worked out again."""
         book = self.books.get(book_id)
         if book is None or book.self_contained == bool(on):
             return

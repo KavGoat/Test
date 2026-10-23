@@ -52,6 +52,8 @@ _RANGE_RE = re.compile(
     r"(?![\w.(À-￿!\[])")
 _NUMBER_RE = re.compile(r"(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 _NAME_RE = re.compile(r"[A-Za-z_\\À-￿][\w.À-￿]*")
+# 'Seismic Actions'!Z: a defined name on a sheet whose name is quoted
+_QUOTED_NAME_RE = re.compile(r"'(?:[^']|'')+'![A-Za-z_\\À-￿][\w.À-￿]*")
 _ERROR_RE = re.compile(r"#(?:DIV/0!|N/A|NAME\?|NULL!|NUM!|REF!|VALUE!|SPILL!|CALC!|UNITS!|GETTING_DATA)", re.I)
 #: Sheet!#REF!: a reference or name whose cells were deleted in Excel —
 #: Excel keeps the sheet's name in front and the value is #REF!
@@ -151,7 +153,13 @@ def _tokenize(text: str) -> list[Token]:
             i = m.end()
             continue
         if ch == "'":
-            # 'Sheet name'!... was taken above as a reference; here it's a unit
+            # 'Sheet name'!A1 was taken above as a reference; 'Sheet name'!Name
+            # is a name of that sheet, as Excel has it; else it's a unit
+            q = _QUOTED_NAME_RE.match(text, i)
+            if q:
+                out.append(Token("name", q.group(0), lead, i))
+                i = q.end()
+                continue
             m = _NAME_RE.match(text, i + 1)
             j = i + 1
             if m is None:
@@ -587,7 +595,7 @@ class _Parser:
             text = tok.text
             sheet = None
             if "!" in text:
-                sheet, _, text = text.partition("!")
+                sheet, _, text = text.rpartition("!")
             self.names.add(text)
             return Name(text, sheet)
         if kind == "func":
@@ -825,7 +833,7 @@ def rename_sheet_in(text: str, old: str, new: str) -> str:
         elif t.kind in ("name", "err") and "!" in t.text and not t.text.startswith("#"):
             # Old!Name, and Old!#REF! (a reference whose cells went: Excel's
             # follows the sheet's new name too)
-            cut = t.text.rfind("!#") if t.kind == "err" else t.text.find("!")
+            cut = t.text.rfind("!#") if t.kind == "err" else t.text.rfind("!")
             sheet, rest = t.text[:cut], t.text[cut + 1:]
             from .refs import unquote_sheet
 

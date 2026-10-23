@@ -1,5 +1,5 @@
-"""An imported Excel workbook is self-contained, or its names are the
-document's (the user's answers by pop-up, 2026-10-19).
+"""An imported Excel workbook is self-contained, or open to dialling in
+(the user's answers by pop-up, 2026-10-19, and the user, 2026-10-24).
 
 * Self-contained (the default): its Excel names are its own. Its cells read
   them first (a sheet's own name wins on its sheet, as in Excel), else the
@@ -10,10 +10,14 @@ document's (the user's answers by pop-up, 2026-10-19).
   cell (Seismic_Actions.H44) — never its Excel names, bare, as Sheet.Name or
   as Book.Name (the workbook's name: its file name as an identifier, unique
   in the document).
-* Not self-contained: its names are document variables, each defined where
-  its sheet is in reading order. The import lists the names that clash with
-  the document's, to keep it self-contained, rename them with a prefix, or
-  go ahead.
+* Not self-contained: its Excel names are read from outside only dialled
+  in, as a spreadsheet's own names are ("un self contained workbook variable
+  names (like spreadsheet names) should not be accessible from outside
+  unless I dial in like sheet1.variable ... otherwise dont show"): an
+  equation's Seismic_Actions.Z or Quake_Calc.Z, a cell's ='Seismic
+  Actions'!Z — never bare, so they never clash with the document's.
+  Self-contained, not even dialled in ("selfcontained shows nothing and cant
+  dial in").
 * The choice is a tick in the import chooser, changeable later from the
   sheet tab's right-click menu and the Properties panel, one undo step,
   saved with the document. Two workbooks with the same names stay apart.
@@ -88,13 +92,20 @@ def test_two_self_contained_workbooks_with_the_same_names_stay_apart(tmp_path):
     # a sheet's own name wins on its sheet; the workbook's elsewhere
     assert one["Tables"].cells[(1, 1)].value == pytest.approx(2.6)
     assert one["Seismic Actions"].cells[(2, 1)].value == pytest.approx(1.0)
-    # a sheet made here doesn't see a self-contained workbook's names
+    # a sheet made here doesn't see a workbook's names, nor dial in to a
+    # self-contained one's
     plain = wb.add_sheet("Mine")
     wb.set_input(plain, 0, 0, "=Z")
+    wb.set_input(plain, 1, 0, "='Seismic Actions'!Z")
+    wb.set_input(plain, 2, 0, "='Seismic Actions'!A1")
     assert plain.cells[(0, 0)].value.code == "#NAME?"
-    # one not self-contained: its names are the document's
+    gone = plain.cells[(1, 0)].value
+    assert gone.code == "#NAME?" and "self-contained" in gone.reason
+    assert plain.cells[(2, 0)].value == pytest.approx(0.4), "its cells always"
+    # one not self-contained: dialled in, never bare
     wb.set_self_contained(next(b.id for b in wb.books.values() if b.name == "Quake_Calc"), False)
-    assert plain.cells[(0, 0)].value == pytest.approx(0.4)
+    assert plain.cells[(0, 0)].value.code == "#NAME?", "never bare"
+    assert plain.cells[(1, 0)].value == pytest.approx(0.4)
     assert two["Tables (2)"].cells[(0, 1)].value == pytest.approx(0.26), "its own names first"
 
 
@@ -212,7 +223,9 @@ def test_equations_read_its_cells_and_variables_but_never_its_excel_names(w, tmp
 def test_the_sheet_tab_menu_changes_it_as_one_undo_step_and_it_is_saved(w, tmp_path):
     from tests.test_calc_saving import reopen, save_to
     last = with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")))
-    type_equations(w, last, ["y:Z", "y="])
+    type_equations(w, last, ["y:Seismic_Actions.Z", "y=", "b:Quake_Calc.Z", "b=",
+                             "f:Tables.ReturnPeriodFactor", "f=", "n:Z"])
+    assert results(w)["y≔Seismic_Actions.Z"].endswith("not defined."), "can't dial in"
     w.go_to_page(1)                       # the workbook view: its tabs
     pump()
     menu = w.sheet_tabs.build_menu(0)
@@ -222,10 +235,12 @@ def test_the_sheet_tab_menu_changes_it_as_one_undo_step_and_it_is_saved(w, tmp_p
     tick.trigger()
     pump()
     assert w.undo_stack.count() == steps + 1
-    assert results(w)["y="] == "0.4", "its names are document variables now"
+    got = results(w)
+    assert got["y="] == "0.4" and got["b="] == "0.4" and got["f="] == "1.3", "dialled in"
+    assert got["n≔Z"] == "Z - not defined.", "never bare (the user, 2026-10-24)"
     w.undo_stack.undo()
     pump()
-    assert results(w)["y≔Z"] == "Z - not defined."
+    assert results(w)["y≔Seismic_Actions.Z"].endswith("not defined.")
     w.undo_stack.redo()
     pump()
     path = str(tmp_path / "doc.pdf")
@@ -258,95 +273,66 @@ def test_the_properties_panel_ticks_it_by_mouse(w, tmp_path):
     assert w.undo_stack.count() == steps + 1
 
 
-def test_unticking_later_with_clashes_asks_first(w, tmp_path, monkeypatch):
+def test_unticked_its_names_never_clash_with_the_documents(w, tmp_path, monkeypatch):
+    """Z:7 above and the workbook's own Z: unticking asks nothing (its Z is
+    never read bare), the equations' Z stays 7 and its own is dialled in."""
     from PySide6.QtWidgets import QMessageBox
     from calcforge.ui.workbookscope import set_self_contained
     type_equations(w, 0, ["Z:7", "k:10"])
-    with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")), k_first=False)
+    last = with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")), k_first=False)
     sheet = runs(w)["Tables"].sheet
     w.interactive_prompts = True
-    said = []
-
-    def answer(label):
-        def exec_(box):
-            said.append(box.text())
-            box._clicked = next(b for b in box.buttons() if b.text() == label)
-            return 0
-        return exec_
-    monkeypatch.setattr(QMessageBox, "clickedButton", lambda box: box._clicked)
-    monkeypatch.setattr(QMessageBox, "exec", answer("Keep self-contained"))
-    assert not set_self_contained(w, sheet.book, False)
-    assert "Z — an equation variable" in said[0]
-    assert sheet.workbook.books[sheet.book].self_contained
-    monkeypatch.setattr(QMessageBox, "exec", answer("Go ahead"))
+    asked = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: asked.append(box.text()) or 0)
     assert set_self_contained(w, sheet.book, False)
-    assert not sheet.workbook.books[sheet.book].self_contained
+    assert not asked and not sheet.workbook.books[sheet.book].self_contained
+    w.interactive_prompts = False
+    type_equations(w, last, ["y:Z", "y=", "q:Seismic_Actions.Z", "q="])
+    got = results(w)
+    assert got["y="] == "7" and got["q="] == "0.4"
+    assert runs(w)["Seismic Actions"].sheet.cells[(1, 1)].value == pytest.approx(4.0), \
+        "its cells read its own Z (and the equations' k)"
 
 
-def chooser_for(w, tmp_path, taken):
+def chooser_for(w, tmp_path):
     from calcforge.ui.xlsximport import SheetChooser
     got = read_workbook(quake(str(tmp_path / "Quake Calc.xlsx")))
-    chooser = SheetChooser(w, got, taken, "Quake_Calc")
+    chooser = SheetChooser(w, got, "Quake_Calc")
     chooser.dialog.show()
     pump()
     return chooser
 
 
-def test_the_chooser_has_the_tick_and_lists_clashes_when_unticked(w, tmp_path):
-    chooser = chooser_for(w, tmp_path, {"z": "an equation variable"})
-    assert chooser.self_contained.isChecked() and chooser.clash_box.isHidden()
+def test_the_chooser_has_the_tick_and_says_what_it_means(w, tmp_path):
+    from calcforge.ui.xlsximport import OPEN_SAYS, SELF_CONTAINED_SAYS
+    chooser = chooser_for(w, tmp_path)
+    assert chooser.self_contained.isChecked() and chooser.scope() == chooser.KEEP
+    assert chooser.scope_note.text() == SELF_CONTAINED_SAYS
     tick(chooser.self_contained)
     pump()
-    assert not chooser.self_contained.isChecked() and chooser.clash_box.isVisible()
-    assert chooser.clash_list.text() == "Z — an equation variable"
-    assert chooser.prefix.text() == "Quake_" and chooser.rename_radio.isChecked()
-    assert chooser.scope() == (chooser.RENAME, "Quake_")
-    QTest.mouseClick(chooser.ahead_radio, Qt.LeftButton)
-    assert chooser.scope() == (chooser.AHEAD, "")
-    QTest.mouseClick(chooser.keep_button, Qt.LeftButton)
-    pump()
-    assert chooser.self_contained.isChecked() and chooser.clash_box.isHidden()
-    assert chooser.scope() == (chooser.KEEP, "")
+    assert not chooser.self_contained.isChecked() and chooser.scope() == chooser.OPEN
+    assert chooser.scope_note.text() == OPEN_SAYS and "never bare" in OPEN_SAYS
     QTest.mouseClick(chooser.buttons.button(QDialogButtonBox.Ok), Qt.LeftButton)
     assert chooser.dialog.result()
 
 
-def drive(choice: str, prefix: str = ""):
-    """A hand on the import chooser: untick Self-contained and choose."""
-    def go(chooser):
-        chooser.dialog.show()
-        tick(chooser.self_contained)
-        if choice == "rename":
-            chooser.prefix.clear()
-            QTest.keyClicks(chooser.prefix, prefix)
-        elif choice == "ahead":
-            QTest.mouseClick(chooser.ahead_radio, Qt.LeftButton)
-        QTest.mouseClick(chooser.buttons.button(QDialogButtonBox.Ok), Qt.LeftButton)
-    return go
+def untick(chooser):
+    """A hand on the import chooser: Self-contained unticked, then OK."""
+    chooser.dialog.show()
+    tick(chooser.self_contained)
+    QTest.mouseClick(chooser.buttons.button(QDialogButtonBox.Ok), Qt.LeftButton)
 
 
-def test_renamed_with_a_prefix_its_formulas_follow(w, tmp_path):
-    type_equations(w, 0, ["Z:7", "k:10"])
-    w.drive_workbook_chooser = drive("rename", "Qk_")
+def test_imported_unticked_it_is_dialled_in_to(w, tmp_path):
+    type_equations(w, 0, ["k:10"])
+    w.drive_workbook_chooser = untick
     last = with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")), k_first=False)
-    sa = runs(w)["Seismic Actions"].sheet
-    assert sa.cells[(1, 1)].input == "=Qk_Z*k" and sa.cells[(1, 1)].value == pytest.approx(4.0)
-    assert runs(w)["Tables"].sheet.cells[(1, 1)].input == "=ReturnPeriodFactor*2", \
-        "a sheet's own name is left alone"
-    assert any("Z → Qk_Z" in line for line in w._last_import_report)
-    type_equations(w, last, ["y:Qk_Z", "y=", "zz:Z", "zz="])
-    got = results(w)
-    assert got["y="] == "0.4" and got["zz="] == "7"
-
-
-def test_go_ahead_reading_order_decides(w, tmp_path):
-    type_equations(w, 0, ["Z:7", "k:10"])
-    w.drive_workbook_chooser = drive("ahead")
-    last = with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")), k_first=False)
-    type_equations(w, last, ["y:Z", "y="])
-    assert results(w)["y="] == "0.4", "the workbook's Z is the latest before it"
     sheet = runs(w)["Tables"].sheet
     assert not sheet.workbook.books[sheet.book].self_contained
+    assert any("Not self-contained" in line for line in w._last_import_report)
+    type_equations(w, last, ["y:Z", "q:Seismic_Actions.Z", "q="])
+    got = results(w)
+    assert got["y≔Z"] == "Z - not defined." and got["q="] == "0.4"
 
 
 def test_a_cell_named_as_a_variable_is_read_bare_below_and_after_reopening(w, tmp_path):
@@ -397,35 +383,39 @@ def test_variables_panel_and_name_manager_show_the_workbook(w, tmp_path):
     from calcforge.ui.names import scope_text
     from calcforge.ui.variablespanel import table_rows
     with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")), k_first=False)
-    # self-contained: its Excel names are none of the equations', so not listed
+    # self-contained: its Excel names are none of the equations', so not
+    # listed ("selfcontained shows nothing", the user, 2026-10-24)
     assert not [r for r in table_rows(w.document)
                 if "Z" in r.name or "ReturnPeriodFactor" in r.name]
     wb = runs(w)["Tables"].sheet.workbook
     scopes = sorted(scope_text(wb, dn) for dn in wb.names.values())
-    assert scopes == ["Quake_Calc (its cells only)", "Quake_Calc (its cells only)", "Tables"]
+    assert scopes == ["Quake_Calc (self-contained)", "Quake_Calc (self-contained)", "Tables"]
     wb.set_self_contained(runs(w)["Tables"].sheet.book, False)
     pump()
     rows = table_rows(w.document)
-    assert {r.name for r in rows if r.group} == {"Tables.ReturnPeriodFactor"}
-    assert {"Z", "ReturnPeriodFactor"} <= {r.name for r in rows if not r.group}, \
-        "not self-contained: its names are document variables"
+    # not self-contained: only as dialled in, under the workbook
+    assert {r.name for r in rows if r.group} == {"Quake_Calc.Z", "Quake_Calc.ReturnPeriodFactor",
+                                                 "Tables.ReturnPeriodFactor"}
+    assert not [r for r in rows if not r.group and r.name in ("Z", "ReturnPeriodFactor")], \
+        "never as a variable of its own"
     w.variables_panel.refresh()
 
     def heads():
         tree = w.variables_panel.tree
         return [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
     # the user's choice, 2026-10-23: under the workbook's heading, closed to start
-    head_text = next(h for h in heads() if h.startswith("▸ Workbook Quake_Calc"))
-    assert "Tables.ReturnPeriodFactor" not in heads()
+    assert "▸ Workbook Quake_Calc (3 names)" in heads()
+    head_text = "▸ Workbook Quake_Calc (3 names)"
+    assert "Tables.ReturnPeriodFactor" not in heads() and "Z" not in heads()
     head = next(w.variables_panel.tree.topLevelItem(i)
                 for i in range(w.variables_panel.tree.topLevelItemCount())
                 if w.variables_panel.tree.topLevelItem(i).text(0) == head_text)
     w.variables_panel.go_to(head)                  # a click on the heading opens it
     assert "▾" + head_text[1:] in heads()
-    assert "Tables.ReturnPeriodFactor" in heads()
+    assert {"Quake_Calc.Z", "Quake_Calc.ReturnPeriodFactor", "Tables.ReturnPeriodFactor"} \
+        <= set(heads())
     scopes = sorted(scope_text(wb, dn) for dn in wb.names.values())
-    assert scopes == ["Quake_Calc (document variable)", "Quake_Calc (document variable)",
-                      "Tables"]
+    assert scopes == ["Quake_Calc", "Quake_Calc", "Tables"]
 
 
 def test_a_second_import_of_the_same_workbook_is_another_workbook(w, tmp_path):

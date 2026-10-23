@@ -10,12 +10,13 @@ give the equations: each defined name (W_total) and each column a table's
 headings name (Loads.Load), with its value; clicking one goes to its cells.
 A self-contained imported workbook's Excel names are not listed: they are
 for its own cells, and the equations read it only by its CalcForge variables
-and as Sheet.H44 (the user, 2026-10-24). A workbook that isn't
-self-contained has its names listed as the document variables they are, and
-its sheets' own names (Tables.ReturnPeriodFactor) under its heading, closed
-to start (▸, its count of names): click the heading to open it (the user's
-choice, 2026-10-23). Finding a variable looks in closed ones too. A name
-Excel itself has as #REF! (its cells deleted in Excel) is not listed.
+and as Sheet.H44 (the user, 2026-10-24: "selfcontained shows nothing"). One
+that isn't self-contained has its names listed only as they are dialled in
+(Seismic_Actions_NZS1170_5.Z, a sheet's own Tables.ReturnPeriodFactor),
+never bare, under its heading, closed to start (▸, its count of names):
+click the heading to open it (the user's choice, 2026-10-23). Finding a
+variable looks in closed ones too. A name Excel itself has as #REF! (its
+cells deleted in Excel) is not listed.
 
 A name defined twice has two rows: SMath allows redefining, and which
 definition an equation sees depends on where it is — the latest one before
@@ -195,6 +196,9 @@ def table_rows(document) -> list:
         if book is not None and home is not None:
             name = f"{sheet_ident(home.name)}.{dn.name}"     # a sheet's own name: Sheet.Name
             group = book.name
+        elif book is not None:
+            name = f"{book.name}.{dn.name}"                  # the workbook's: Book.Name
+            group = book.name
         elif book is None and home is None and not dn.variable:
             if docbook.closed(docbook._kept_on(dn)):
                 continue                                     # kept with a self-contained workbook
@@ -222,7 +226,7 @@ def table_rows(document) -> list:
             rows.append(VariableRow(f"{sheet.name}.{_ident(cell.value)}", text, unit, page,
                                     f"Page {page}" if page else "", error, -1, "Table",
                                     cells, **placed(sheet, cells), key=book_key(sheet)))
-    # a workbook's own sheet names (one that isn't self-contained), under the workbook
+    # the names of a workbook that isn't self-contained, as dialled in, under the workbook
     return rows + sorted(own, key=lambda r: (r.group.lower(), r.name.lower()))
 
 

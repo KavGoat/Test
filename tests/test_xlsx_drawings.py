@@ -169,9 +169,9 @@ def test_imported_twice_each_copy_reads_its_own_and_is_named_2(w, tmp_path):
 def test_the_variables_panel_lists_a_workbooks_names_only_when_equations_read_them(w, tmp_path):
     """The user, 2026-10-24: a self-contained workbook is closed as a
     self-contained calculation block is, so its Excel names are none of the
-    equations' and the Variables panel leaves them out (the earlier choice,
-    2026-10-23, listed them under its heading). Not self-contained, they are
-    document variables, listed as such; a name Excel has as #REF! is not
+    equations' and the Variables panel leaves them out. Not self-contained,
+    they are listed only as dialled in, under its heading, closed until
+    clicked (the choice of 2026-10-23); a name Excel has as #REF! is not
     listed."""
     imported(w, tmp_path)
     panel = w.variables_panel
@@ -185,7 +185,12 @@ def test_the_variables_panel_lists_a_workbooks_names_only_when_equations_read_th
     sheet.workbook.set_self_contained(sheet.book, False)
     pump()
     panel.refresh()
-    assert "Height1" in names() and "Fph_1" in names()
+    assert not [n for n in names() if n in ("Height1", "Fph_1")], "never bare"
+    (head,) = [n for n in names() if "Workbook" in n]
+    assert head.startswith("▸ Workbook Parts_Coefficient (")
+    panel.go_to(next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
+                     if "Workbook" in tree.topLevelItem(i).text(0)))
+    assert "Parts_Coefficient.Height1" in names() and "Parts_Coefficient.Fph_1" in names()
     assert [r for r in panel.rows if r.name.endswith("Gone") and "#REF!" in r.error]
     assert not [n for n in names() if n.endswith("Gone")], "a #REF! name is not listed"
 

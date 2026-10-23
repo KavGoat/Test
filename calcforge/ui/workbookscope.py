@@ -6,10 +6,8 @@ section, as one undo step, saved with the document.
 Self-contained, a workbook is closed as a self-contained calculation block
 is: its Excel names are for its own cells, and the equations read it only by
 its CalcForge variables and as Sheet.H44 (xlsximport.SELF_CONTAINED_SAYS).
-Unticked, its Excel names are document variables, each defined where its
-sheet is in reading order; names already used in the document are listed
-first, to go ahead or keep it self-contained (renaming them is offered when
-it is imported).
+Unticked, its Excel names can be dialled in to as well (Sheet.Name), never
+read bare, so they never clash with the document's (OPEN_SAYS).
 """
 from __future__ import annotations
 
@@ -35,26 +33,9 @@ def runs_of(window, book_id: str) -> list:
     return out
 
 
-def clashes(window, book) -> list:
-    """(name, what has it) for the workbook's names already used in the
-    document, were they document variables."""
-    from .xlsximport import taken_names
-    taken = taken_names(window.document, leave_out=book.id)
-    wb = None
-    for item in runs_of(window, book.id):
-        wb = item.sheet.workbook
-        break
-    if wb is None:
-        return []
-    out = [(dn.name, taken[dn.name.lower()]) for dn in wb.book_names(book.id)
-           if dn.name.lower() in taken]
-    return sorted(out, key=lambda e: e[0].lower())
-
-
-def set_self_contained(window, book_id: str, on: bool, ask: bool = True) -> bool:
-    """Makes the workbook self-contained (or not) as one undo step. Turning
-    it off with names already used in the document asks first (when *ask*
-    and prompts are on). False when nothing changed."""
+def set_self_contained(window, book_id: str, on: bool) -> bool:
+    """Makes the workbook self-contained (or not) as one undo step. False
+    when nothing changed."""
     runs = runs_of(window, book_id)
     if not runs:
         return False
@@ -62,10 +43,6 @@ def set_self_contained(window, book_id: str, on: bool, ask: bool = True) -> bool
     book = wb.books.get(book_id)
     if book is None or book.self_contained == bool(on):
         return False
-    if not on and ask and getattr(window, "interactive_prompts", True):
-        found = clashes(window, book)
-        if found and not _go_ahead(window, book, found):
-            return False
     view = window.view
     frames = []
     for item in runs:
@@ -80,21 +57,6 @@ def set_self_contained(window, book_id: str, on: bool, ask: bool = True) -> bool
     window.status_hint.setText(f"{book.name}: " + (SELF_CONTAINED_SAYS if on else OPEN_SAYS))
     _refresh(window)
     return True
-
-
-def _go_ahead(window, book, found: list) -> bool:
-    from PySide6.QtWidgets import QMessageBox
-    shown = "\n".join(f"{name} — {why}" for name, why in found[:12])
-    if len(found) > 12:
-        shown += f"\nand {len(found) - 12} more"
-    box = QMessageBox(QMessageBox.Warning, "Self-contained",
-                      f"These names of {book.name} are already used in this document:\n\n"
-                      f"{shown}\n\nAs document variables, reading order decides which one an "
-                      f"equation or cell reads.", parent=window)
-    ahead = box.addButton("Go ahead", QMessageBox.AcceptRole)
-    box.addButton("Keep self-contained", QMessageBox.RejectRole)
-    box.exec()
-    return box.clickedButton() is ahead
 
 
 def _refresh(window) -> None:
@@ -137,7 +99,7 @@ def add_panel_section(panel, sheet) -> None:
     name = QLabel(book.name)
     name.setObjectName("workbookName")
     name.setToolTip("How equations name this workbook, when it isn't self-contained: "
-                    "Book.Name reads one of its Excel names")
+                    "Book.Name dials in to one of its Excel names")
     form.addRow("Name:", name)
     if book.file:
         form.addRow("From:", QLabel(book.file))
@@ -145,7 +107,7 @@ def add_panel_section(panel, sheet) -> None:
     tick.setObjectName("workbookSelfContained")
     tick.setChecked(book.self_contained)
     from .xlsximport import SELF_CONTAINED_SAYS
-    tick.setToolTip(SELF_CONTAINED_SAYS + " Untick to make its Excel names document variables.")
+    tick.setToolTip(SELF_CONTAINED_SAYS + " Untick to let equations dial in to its Excel names.")
     window = panel.window
 
     def toggled(on, book_id=book.id):
@@ -167,6 +129,6 @@ def tab_action(menu, sheet, window) -> Optional[object]:
     act.setCheckable(True)
     act.setChecked(book.self_contained)
     from .xlsximport import SELF_CONTAINED_SAYS
-    act.setToolTip(SELF_CONTAINED_SAYS + " Untick to make its Excel names document variables.")
+    act.setToolTip(SELF_CONTAINED_SAYS + " Untick to let equations dial in to its Excel names.")
     act.triggered.connect(lambda on, book_id=book.id: set_self_contained(window, book_id, on))
     return act
