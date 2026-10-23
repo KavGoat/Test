@@ -85,6 +85,25 @@ def test_the_tabs_take_six_tenths_of_the_row_the_scroll_bar_the_rest(w, book):
     assert w.view.horizontalScrollBar().width() >= ROOMY_BAR - 30
 
 
+def test_a_tab_keeps_its_width_whichever_sheet_is_shown(w, book):
+    """The user, 2026-10-24: "tabs for spreadsheet still buggy, theres so
+    much space but it gets cut off". The current tab is drawn bold and grew,
+    pushing the last tab out of sight; and the scroll bar kept 200 px."""
+    tabs = book
+    w.view.tables.rename_to(tabs._item(tabs.entries[1][0]), "Calculations and checks")
+    tabs.entries = []
+    tabs.refresh()
+    pump()
+    widths = []
+    for k in range(tabs.bar.count()):
+        tabs.go(k)
+        pump()
+        widths.append([tabs.bar.tabRect(i).width() for i in range(tabs.bar.count())])
+        assert tabs.clip.width() >= tabs.bar.tabRect(tabs.bar.count() - 1).right(), \
+            "every tab in sight, the row having room"
+    assert all(row == widths[0] for row in widths), widths
+
+
 def drag_splitter(w, tabs, dx, double=False):
     splitter = tabs.splitter
     at = splitter.rect().center()

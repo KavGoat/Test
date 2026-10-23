@@ -238,11 +238,15 @@ class _ThumbnailDelegate(QStyledItemDelegate):
         left = cell.left() + (cell.width() - size.width()) // 2
         return QRect(left, cell.top() + self.TOP, size.width(), size.height())
 
-    def picture_rect(self, cell: QRect, picture) -> QRect:
+    def picture_rect(self, cell: QRect, picture, collapsed: bool = False) -> QRect:
         """The page itself: its own shape fitted into the room and centred
         in it, so a row of portrait and landscape sheets keeps its words on
-        one line."""
+        one line. A workbook's entry (*collapsed*) leaves room in it for the
+        sheets stacked behind its page: they stood out of the cell's top, and
+        the blue frame round them was cut off there (the user, 2026-10-24)."""
         room = self.picture_room(cell)
+        if collapsed:
+            room = room.adjusted(0, 2 * self.STACK, -2 * self.STACK, 0)
         sizes = picture.availableSizes() if isinstance(picture, QIcon) else []
         if not sizes or sizes[-1].width() <= 0 or sizes[-1].height() <= 0:
             return room
@@ -284,18 +288,18 @@ class _ThumbnailDelegate(QStyledItemDelegate):
             return       # a page hidden behind its workbook's entry: Qt still asks
         picture = index.data(Qt.DecorationRole)
         picture = picture if isinstance(picture, QIcon) else None
-        page = self.picture_rect(cell, picture)
+        section = index.data(SECTION_ROLE) or {}
+        collapsed = bool(section.get("collapsed"))
+        page = self.picture_rect(cell, picture, collapsed)
         painter.save()
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         picked = bool(option.state & QStyle.State_Selected)
         hovered = bool(option.state & QStyle.State_MouseOver)
-        section = index.data(SECTION_ROLE) or {}
         if section.get("member"):
             # a workbook's pages, shown: a band behind them says which they are
             band = QColor(colours["accent_soft"])
             band.setAlpha(150)
             painter.fillRect(cell.adjusted(0, 2, 0, -2), band)
-        collapsed = bool(section.get("collapsed"))
         if picked or hovered:
             frame = self.stack_rect(page, collapsed).adjusted(-self.FRAME, -self.FRAME,
                                                                self.FRAME, self.FRAME)
@@ -407,7 +411,9 @@ class PageListWidget(QListWidget):
         entry = self.item(row)
         if entry is None:
             return QRect()
-        return self.delegate.picture_rect(self.visualItemRect(entry), entry.icon())
+        section = entry.data(SECTION_ROLE) or {}
+        return self.delegate.picture_rect(self.visualItemRect(entry), entry.icon(),
+                                          bool(section.get("collapsed")))
 
     def in_view_frame(self) -> QRect:
         """Where the outline goes: round the page's picture, just outside
@@ -1562,12 +1568,20 @@ class PagesPanel(QWidget):
 
     def add_section_entries(self, menu: QMenu, index: int) -> None:
         """A page of a workbook's menu: Expand Section (its pages one by one
-        in Thumbnails) or Collapse Section (one entry again)."""
+        in Thumbnails) or Collapse Section (one entry again), and an imported
+        workbook's Self-contained tick, as on its sheet tab (the user,
+        2026-10-24: "right click on workbook in thumbnail wont let me
+        selection self contained vs not")."""
         from .sheetpages import section_of
         document = getattr(self.window, "document", None)
         section = section_of(document, index) if document is not None else None
         if section is None:
             return
+        from ..sheet.docbook import book_for
+        from .workbookscope import tab_action
+        sheet = next((s for s in (book_for(document).by_uid.get(uid) for uid in section.runs)
+                      if s is not None), None)
+        tab_action(menu, sheet, self.window)
         if self.is_collapsed(section.key):
             entry = menu.addAction("Expand Section",
                                    lambda: self.set_expanded(section.key, True))

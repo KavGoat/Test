@@ -79,6 +79,13 @@ def test_a_picked_workbook_is_framed_all_round_its_stack(w):
     assert blue(page.left() - 2, mid_y) and blue(mid_x, page.bottom() + 2)
     assert blue(mid_x, stack_top - 2), "along the top of the stack"
     assert blue(stack_right + 2, mid_y), "down the right of the stack"
+    # all of it in the entry's own cell: the stack stood out of the cell's
+    # top and its frame was cut off there (the user, 2026-10-24, a photo)
+    cell = strip.visualItemRect(strip.item(row))
+    frame = d.stack_rect(page, True).adjusted(-d.FRAME, -d.FRAME, d.FRAME, d.FRAME)
+    assert cell.contains(frame), (cell, frame)
+    strip.set_in_view(row)
+    assert cell.contains(strip.in_view_frame()), (cell, strip.in_view_frame())
 
 
 def test_the_drop_line_is_as_long_as_a_page_in_the_gap(w):

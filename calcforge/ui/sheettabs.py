@@ -42,8 +42,10 @@ TAB_RATIO = 0.6
 
 #: The scroll bar keeps at least this much of the row (px), the tabs their splitter.
 MIN_BAR = 24
-#: what the scroll bar keeps at least while the tabs take what they need
-ROOMY_BAR = 200
+#: what the scroll bar keeps at least while the tabs take what they need (it
+#: kept 200 px and tabs went out of sight beside it: the user, 2026-10-24,
+#: "there's so much space but it gets cut off")
+ROOMY_BAR = 96
 
 
 
@@ -77,6 +79,20 @@ class _TabBar(QTabBar):
     def __init__(self, owner: "SheetTabs"):
         super().__init__()
         self.owner = owner
+
+    def tabSizeHint(self, index: int) -> QSize:              # noqa: N802 - Qt's name
+        """As wide as its name in bold, as the current tab draws it: a tab
+        keeps its width whichever sheet is shown (the current one grew, and
+        the tabs after it were pushed out of sight)."""
+        from PySide6.QtGui import QFont, QFontMetrics
+        hint = super().tabSizeHint(index)
+        bold = QFont(self.font())
+        bold.setBold(True)
+        width = QFontMetrics(bold).horizontalAdvance(self.tabText(index)) + 24
+        if not self.tabIcon(index).isNull():
+            width += self.iconSize().width() + 4
+        hint.setWidth(width)
+        return hint
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)

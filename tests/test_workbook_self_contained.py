@@ -257,6 +257,25 @@ def test_the_sheet_tab_menu_changes_it_as_one_undo_step_and_it_is_saved(w, tmp_p
     assert not [a for a in menu.actions() if a.text() == "Self-contained"][0].isChecked()
 
 
+def test_its_thumbnails_entry_has_the_tick_too(w, tmp_path):
+    """The user, 2026-10-24: "right click on workbook in thumbnail wont let
+    me selection self contained vs not"."""
+    with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")), k_first=False)
+    sheet = runs(w)["Tables"].sheet
+    first = next(i for i, p in enumerate(w.document.pages) if p.sheet is not None)
+    menu = w.page_menu(first)
+    (act,) = [a for a in menu.actions() if a.text() == "Self-contained"]
+    assert act.isCheckable() and act.isChecked()
+    steps = w.undo_stack.count()
+    act.trigger()
+    pump()
+    assert not sheet.workbook.books[sheet.book].self_contained
+    assert w.undo_stack.count() == steps + 1
+    assert w.document.pages[0].sheet is None
+    assert not [a for a in w.page_menu(0).actions() if a.text() == "Self-contained"], \
+        "a plain page has none"
+
+
 def test_the_properties_panel_ticks_it_by_mouse(w, tmp_path):
     from PySide6.QtWidgets import QCheckBox
     with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")), k_first=False)
