@@ -340,14 +340,20 @@ def test_dragging_the_thumb_says_the_row_at_the_top(w, book):
 
 
 # -- H1, K1, F6: Excel's zoom and wheel -------------------------------------------------------------
-def test_100_percent_is_excels_a_column_64_pixels_wide(w, book):
+def test_100_percent_is_the_pages_a_column_as_wide_as_on_its_page(w, book):
+    # the user, 2026-10-23: the workbook view's zoom is the pages' (it was
+    # Excel's, cells at 96 px an inch, and a sheet's page looked smaller)
     run = shown_run(w)
+    w.zoom_combo.setCurrentText("100%")
+    w._zoom_chosen(0)
+    pump()
     assert w.zoom_combo.currentText() == "100%" and w.zoom_combo.isVisible()
+    assert w.view.zoom() == pytest.approx(1.0)
     xs, _ys = run.edges()
     width = w.view.mapFromScene(run.mapToScene(QPointF(xs[1], 0))).x() - \
         w.view.mapFromScene(run.mapToScene(QPointF(xs[0], 0))).x()
-    assert width == pytest.approx(64, abs=1)
-    # the zoom box's 50 % is Excel's 50 %
+    assert width == pytest.approx(48, abs=1), "a default column's 48 points, as on its page"
+    # the zoom box's 50 % is the pages' 50 %
     w.zoom_combo.setCurrentText("50%")
     w._zoom_chosen(0)
     pump()
@@ -372,6 +378,9 @@ def wheel(w, notches, mods=Qt.NoModifier):
 
 
 def test_ctrl_wheel_steps_fifteen_percent(w, book):
+    w.zoom_combo.setCurrentText("100%")
+    w._zoom_chosen(0)
+    pump()
     shown = []
     for _ in range(2):
         wheel(w, 1, Qt.ControlModifier)

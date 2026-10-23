@@ -1354,6 +1354,11 @@ class PageView(QGraphicsView):
         self._zoom = factor
         self.apply_view_transform()
         self._update_desk_margin(keep_centre=False)
+        if sheet_corner is not None:
+            # zoomed out, the grid grows first: scrolled back to the corner
+            # within the grid it had, the corner was held at its edge and crept
+            from . import sheetview
+            sheetview.fill(self, extra=keep_scene)
         # Where that page point landed, and how far it has to come back.
         landed = self.viewportTransform().map(keep_scene)
         drift = landed - keep_view

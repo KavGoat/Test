@@ -2004,7 +2004,6 @@ class DocumentScene(QGraphicsScene):
         self.sheet_view: Optional[str] = None
         self.sheet_extent = (0, 0)
         self.sheet_return: Optional[dict] = None
-        self.sheet_zooms: dict = {}          # workbook key -> its zoom
         self.sheet_places: dict = {}         # run id -> (canvas point at the top left, cell)
         self._pages_rect = QRectF()
         self._desk_margin = QPointF(PAGE_GAP, PAGE_GAP)
@@ -2282,6 +2281,15 @@ class DocumentScene(QGraphicsScene):
             if sheet(frame):
                 return frame.sheet_rect.height()
             return frame.page.width_pt if turned else frame.page.height_pt
+
+        # each page over the ones after it: a markup hanging down or across
+        # from its page (a chart under a sheet's table, past its last page) is
+        # drawn over the next page, not under it — with every page level,
+        # whichever was made last covered it, so it vanished and came back as
+        # pages were rebuilt (the user, 2026-10-23)
+        count = len(self.frames)
+        for index, frame in enumerate(self.frames):
+            frame.setZValue(-1000.0 + (count - index) * 1e-4)
 
         paired = self.page_mode in ("side", "continuous_side")
         # the rows of pages: one page a row, or two side by side — odd pages

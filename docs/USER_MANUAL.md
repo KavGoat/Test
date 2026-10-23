@@ -755,7 +755,8 @@ crossed-out printer) has no number, and the pages after it move up to fill the
 gap — the same number its "Page N" mark, the header and footer's `{page}` and the
 printed page carry. The page box goes on counting every page, so that each one
 can be gone to (a page's tooltip gives both).
-Click to go there; drag pages to reorder them (a run of picked pages moves
+Click to go there; `Delete` deletes the pages picked (after asking; a workbook's
+entry is all its pages); drag pages to reorder them (a run of picked pages moves
 together; a short blue line in the gap, as tall as a page, shows where they go);
 drop a PDF file onto it to insert its pages there. `Ctrl`+wheel over the panel
 changes the picture size, and as many pages go to a row as fit — as do **Larger
@@ -1800,12 +1801,15 @@ in solid blue, the page breaks dashed blue (solid where you put them), each to b
 dragged, and each page's "Page N" faintly behind its cells. Markups on the sheet's pages show
 where they are over the cells and can be picked and changed as on the page
 (they belong to the cells under them). The page rulers are not shown over the
-cells, as Excel's Normal view has none; they come back as you leave. Each workbook
-keeps its own zoom, and each sheet where you left it and its active cell.
+cells, as Excel's Normal view has none; they come back as you leave. A markup
+over the cells — a chart, a box — is picked and dragged with a click, even with the
+cells open under it; elsewhere a click picks a cell. Each sheet keeps where you
+left it and its active cell.
 
-**Zoom and scrolling, as Excel's.** The zoom box's 100 % is Excel's 100 %: cells
-drawn the size Excel draws them (a default column 64 pixels wide, a row 20, on a
-96 dpi screen); the pages and printing are as they always were. `Ctrl`+wheel
+**Zoom and scrolling, as Excel's.** A workbook opens at the zoom the pages are
+seen at, and the zoom box says the same percentage for both: a sheet's cells are
+as big as on its pages. (Its pages look larger only because they carry their
+margins round the cells.) `Ctrl`+wheel
 zooms in Excel's steps of 15 % (100 %, 115 %, 130 %…, 10 % to 400 %), as does the
 footer's slider; as in Excel, the zoom keeps the cell at the top left where it is
 (the sheet grows down and to the right from it), lands at once, and brings the

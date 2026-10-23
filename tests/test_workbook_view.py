@@ -154,9 +154,10 @@ def test_the_close_button_goes_back_to_the_page_you_came_from(w, wb):
     before = (view.zoom(), view.horizontalScrollBar().value(),
               view.verticalScrollBar().value(), w.current_index)
     click_thumbnail(w, wb.first)
-    # Excel's 100 % (the user, H1): cells drawn at 96 px an inch
-    assert shown(w) is not None and view.zoom() == pytest.approx(EXCEL_SCALE)
-    assert w.zoom_combo.currentText() == "100%"
+    # the pages' own zoom: a sheet's page as big as the page it is (the
+    # user, 2026-10-23; it used to open at Excel's 100 %)
+    assert shown(w) is not None and view.zoom() == pytest.approx(0.6)
+    assert w.zoom_combo.currentText() == "60%"
     QTest.mouseClick(w.sheet_tabs.close_button, Qt.LeftButton)
     pump()
     assert shown(w) is None and w.sheet_tabs.isHidden() and not bar_shown(w)
@@ -210,23 +211,25 @@ def wheel(w, notches: int, mods=Qt.ControlModifier) -> None:
     pump()
 
 
-def test_each_workbook_keeps_its_zoom(w, wb):
+def test_a_workbook_opens_at_the_pages_zoom(w, wb):
+    """The user, 2026-10-23: "adjust spreadsheet scale so that one page is
+    the same size as the typical page". A workbook opens at the zoom the
+    pages are seen at, its cells as big as on their pages, the zoom box
+    saying the same; back on the pages, their zoom is as it was."""
     view = w.view
     view.set_zoom(0.7)
+    pump()
     click_thumbnail(w, wb.first)
-    assert view.zoom() == pytest.approx(EXCEL_SCALE)
+    assert view.zoom() == pytest.approx(0.7) and w.zoom_combo.currentText() == "70%"
     wheel(w, 2)
-    zoomed = view.zoom()
-    assert zoomed > EXCEL_SCALE
+    assert view.zoom() > 0.7
     assert not others_in_sight(w)
     click_thumbnail(w, 0)                       # out: the pages' own zoom
     assert shown(w) is None and view.zoom() == pytest.approx(0.7)
-    click_thumbnail(w, wb.first)                # in again: the workbook's
-    assert view.zoom() == pytest.approx(zoomed)
-    wheel(w, -6)                                # zoomed right out: still all grid
-    assert view.sceneRect().height() >= seen_rect(w).height() - 1
-    assert not others_in_sight(w)
-
+    view.set_zoom(1.25)
+    pump()
+    click_thumbnail(w, wb.first)                # in again: the pages' zoom now
+    assert view.zoom() == pytest.approx(1.25)
 
 def test_page_breaks_show_dashed_and_the_page_numbers_stay_in_the_workbook_view(w, wb):
     loads = run_named(w, "Loads")

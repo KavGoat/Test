@@ -357,6 +357,8 @@ class PageListWidget(QListWidget):
     STEP = 1.15
 
     zoomed = Signal(float)
+    #: Delete pressed over the strip: the pages picked out are to go
+    delete_pressed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -536,6 +538,18 @@ class PageListWidget(QListWidget):
             size = QSize(room, max(int(wanted.height() * room / wanted.width()), 20))
         if size != self.iconSize():
             QListWidget.setIconSize(self, size)
+
+    def keyPressEvent(self, event) -> None:
+        """Delete (or Backspace) deletes the pages picked out, as in Revu's
+        Thumbnails (the user, 2026-10-23: "can't press delete to delete
+        pages")."""
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace) and \
+                not (event.modifiers() & (Qt.ControlModifier | Qt.AltModifier | Qt.ShiftModifier)):
+            if self.selectedItems():
+                self.delete_pressed.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def wheelEvent(self, event) -> None:
         """Ctrl and the wheel makes the pages bigger and smaller.
@@ -814,6 +828,7 @@ class PagesPanel(QWidget):
         self.list.itemSelectionChanged.connect(self._picked_in_strip)
         self.list.scale = self._remembered_scale()
         self.list.zoomed.connect(self.set_thumbnail_scale)
+        self.list.delete_pressed.connect(self.delete_picked)
         # Sheets are drawn as they are scrolled to rather than all at once.
         self.list.verticalScrollBar().valueChanged.connect(
             lambda _value: self._draw_what_is_on_screen())
@@ -1561,6 +1576,13 @@ class PagesPanel(QWidget):
             entry = menu.addAction("Collapse Section",
                                    lambda: self.set_expanded(section.key, False))
             entry.setToolTip(f"Show {section.label()} as one entry in Thumbnails")
+
+    def delete_picked(self) -> None:
+        """The pages picked out deleted, after asking ("Delete these 3
+        pages?"); a workbook's entry is all its pages."""
+        rows = self.picked_rows()
+        if rows:
+            self.window.delete_page(pages=rows)
 
     def picked_rows(self) -> list:
         """The pages picked out: a workbook's entry, picked in the strip,

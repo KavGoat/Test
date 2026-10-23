@@ -34,14 +34,16 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QObject, QPointF, Qt, QTimer
 
 
-#: Excel's 100 %: its cells drawn at 96 pixels an inch, where the canvas
-#: draws a point a pixel (72 an inch). In the workbook view the zoom box's
-#: 100 % is Excel's — a default column 64 px wide, a row 20 px — and the
-#: pages and printing stay as they are (the user's answer, H1).
-EXCEL_SCALE = 96.0 / 72.0
+#: The workbook view's zoom against the pages': the same (the user,
+#: 2026-10-23: "adjust spreadsheet scale so that one page is the same size
+#: as the typical page" — the view opened at Excel's 100 %, cells at 96
+#: pixels an inch, beside pages zoomed to fit, and a sheet's page looked
+#: another size than the page it is). A sheet's cells are as big shown alone
+#: as on its pages, and the zoom box says the same percentage for both.
+EXCEL_SCALE = 1.0
 
 #: Excel's Ctrl+wheel zoom: steps of 15 %, 10 % to 400 % (K1)
 WHEEL_STEP, ZOOM_MIN, ZOOM_MAX = 15, 10, 400
@@ -175,8 +177,7 @@ def _corner(view) -> QPointF:
 
 
 def _keep_place(window) -> None:
-    """Remember where the sheet shown was scrolled to, its active cell and
-    its workbook's zoom."""
+    """Remember where the sheet shown was scrolled to and its active cell."""
     scene, view = window.scene, window.view
     uid = run_shown(scene)
     item = _item(window, uid)
@@ -186,7 +187,6 @@ def _keep_place(window) -> None:
     cell = tables.active if tables.item is item else None
     corner = item.mapFromScene(_corner(view))
     scene.sheet_places[uid] = (corner, cell)
-    scene.sheet_zooms[_section_key(window, uid)] = view.zoom()
 
 
 # -- in and out -----------------------------------------------------------------------------------
@@ -220,9 +220,9 @@ def enter(window, uid: str, cell: Optional[tuple] = None, page: Optional[int] = 
     item._edges = None
     item.relayout()                        # (lays the canvas out again)
     _bars(window)
-    zoom = scene.sheet_zooms.get(_section_key(window, uid))
-    # Excel's 100 % to start (a click on its page keeps the zoom it was seen at)
-    view.set_zoom(zoom if zoom is not None else (view.zoom() if keep is not None else EXCEL_SCALE))
+    # the zoom the pages were seen at: the cells as big as on their pages
+    # (changing to another sheet keeps the zoom it is at)
+    view.set_zoom(view.zoom())
     fill(view)
     kept = scene.sheet_places.get(uid)
     if keep is not None:
@@ -782,17 +782,10 @@ def _open_alone(view, item) -> None:
     page = item.page_index_of_row(cell[0], cell[1]) if item.paging else 0
     pages = run_pages(window.document, item.uid)
     index = pages[min(page, len(pages) - 1)] if pages else window.current_index
-    # the sheet stays where it is on the screen (the pages round it go), or
-    # at the workbook's own zoom the cell clicked stays under the pointer
-    zoom = window.scene.sheet_zooms.get(_section_key(window, item.uid))
-    if zoom is None or abs(zoom - view.zoom()) < 1e-6:
-        local = item.mapFromScene(_corner(view))
-        where = QPointF(0, 0)
-    else:
-        local = item.cell_rect(cell[0], cell[1]).center()
-        where = QPointF(view.mapFromScene(item.mapToScene(local)))
-        if not QRectF(view.viewport().rect()).contains(where):
-            where = QPointF(view.viewport().rect().center())
+    # the sheet stays where it is on the screen, at the zoom it is seen at
+    # (the pages round it go)
+    local = item.mapFromScene(_corner(view))
+    where = QPointF(0, 0)
     rows, cols = item.size
     enter(window, item.uid, keep=(local, where))   # (the cells picked by the click stay picked)
     _reveal(view, item, cell)

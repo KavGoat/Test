@@ -1222,6 +1222,13 @@ class TableEditing:
                 self.close()
                 # and the click goes on to whatever is there
             else:
+                if _is_run(item) and view.tool_key == "select" and not view.calc.calc_mode() \
+                        and self.editor is None and self._markup_over(item, scene_pos):
+                    # a chart or other markup over the open cells is picked and
+                    # dragged, as on a sheet not open yet (the user, 2026-10-23:
+                    # an Excel workbook's chart could not be moved)
+                    self.close()
+                    return False
                 zone = self._zone(item, local)
                 if event.button() == Qt.RightButton:
                     if zone and zone[0] == "cell" and not self._in_selection(zone[1], zone[2]):
@@ -1242,11 +1249,8 @@ class TableEditing:
         if _is_run(target) and not view.calc.calc_mode():
             # a spreadsheet page: a markup over the cells is picked first,
             # and anywhere else is a cell (the user's choice)
-            for other in view.scene().items(scene_pos):
-                if other is target:
-                    break
-                if isinstance(other, MarkupItem) and other.isVisible():
-                    return False
+            if self._markup_over(target, scene_pos):
+                return False
             local = target.mapFromScene(scene_pos)
             if self._press_edge(target, local, event, scene_pos):
                 return True
@@ -1271,6 +1275,16 @@ class TableEditing:
         return False
 
     HEADING_ZONES = ("row", "col", "corner", "row_edge", "col_edge")
+
+    def _markup_over(self, run, scene_pos: QPointF) -> bool:
+        """Whether a markup is over spreadsheet *run*'s cells at *scene_pos*:
+        it is picked rather than the cell under it."""
+        for other in self.view.scene().items(scene_pos):
+            if other is run:
+                return False
+            if isinstance(other, MarkupItem) and other.isVisible() and not _is_run(other):
+                return True
+        return False
 
     def _press_run_heading(self, event, scene_pos: QPointF) -> bool:
         """A spreadsheet page not open yet, pressed on its row numbers or
