@@ -3,6 +3,15 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-24 (morning) — six workbooks against LibreOffice, a self-contained workbook closed, PGA, the Variable box, FORECAST, Normal view (pushed at 2c9bc11 and 6e06f3a)
+
+- The quick check passed on 6e06f3a before it was pushed (14.6 min, `-n 3`).
+- Each user workbook was recalculated in LibreOffice (headless, through UNO) for every choice of each drop-down list and each numeric input changed (×1.25, ×0.6), and every formula cell compared with CalcForge's, imported in the real window; any difference was judged against Excel's own saved value in the file. Seismic Actions: 319 sets of inputs, 1,682,406 values, none differ. Snow Load 41 sets, Shallow Foundation 31, Equivalent Static 9 (an .xltx), Load Take Down 9: none differ. Bolt Capacity (39 sets, 165,048 values) and Probable Strength (31 sets, 126,914 values): every difference is LibreOffice's #NAME? where Excel's saved value is CalcForge's #REF! (cells reading Calculations!#REF!), or its other pick of two errors in MIN. Seismic Parts (earlier): 160 sets, none differ, imported twice too. No exceptions in any.
+- Every drop-down choice of the seven workbooks and Seismic Parts picked in the window from its cell's list, then undone: 511 picks, each one undo step, the cell given back, no exception and no Qt warning.
+- FORECAST, SLOPE, CORREL passing an error in a series on (Bolt Capacity's FORECAST over #REF! cells gave #DIV/0!): tests/sheet/test_functions_untested.py.
+- A cell named PGA in its Variable box on a self-contained workbook's sheet read by an equation below, made global, saved and reopened; one an older version kept with its workbook opening as the document's; a self-contained workbook's Excel names not read by equations (bare, Sheet.Name, Book.Name) and left out of the Variables panel, its cells read as Sheet.H44: tests/test_workbook_self_contained.py, tests/test_xlsx_drawings.py.
+- The Variable box taking the keys with the menu holding the keyboard (as on Windows), a click beside it keeping the menu: tests/test_sheet_markups_and_pages.py. An .xltx opening as a workbook: tests/test_xlsx_open.py. Normal view's dashed print area edge, Page Break Preview's solid one: tests/test_workbook_pages.py.
+
 ## 2026-10-24 (later night) — side toolbar columns, the spreadsheet view buttons, a lost name's #REF!, the manual's key things (pushed at 6998233 and a57aabf)
 
 - The full check passed on 1106906 (PYTEST_EXIT=0, 14/14 planted bugs caught); the quick check passed on 6998233 before it was pushed; a57aabf changed the manual only.
