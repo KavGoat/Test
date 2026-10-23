@@ -330,3 +330,49 @@ def test_a_callout_begun_without_a_move_first_is_quick(w):
     assert took < 1.0
     w.view._last_scene_pos = QPointF(-1e7, 0)      # a leader that long, even so
     assert len(w.view._pointer_preview_rects()) < 200
+
+
+def test_ordering_a_markup_changes_its_own_page_only(w):
+    """tools/qa/monkey.py, 2026-10-24: Bring to Front and Send to Back put a
+    markup in order with every markup of every page, renumbering others'
+    pages too, while Undo recorded only its own page: the others stayed
+    renumbered. Order is each page's own."""
+    from calcforge.items.shapes import RectItem
+    w.add_page()
+    pump()
+    first, second = (p.frame for p in w.document.pages[:2])
+    elsewhere = RectItem()
+    first.add_markup(elsewhere, first.page_rect().center())
+    elsewhere.setZValue(0.5)      # low: a renumbering moves it
+    mine = RectItem()
+    second.add_markup(mine, second.page_rect().center())
+    mine.setZValue(1.0)
+    pump()
+    for mode in ("back", "front", "forward", "backward"):
+        w.view.scene().clearSelection()
+        mine.setSelected(True)
+        w.reorder(mode)
+        assert elsewhere.zValue() == 0.5, f"{mode}: another page's markup renumbered"
+    w.reorder("back")
+    z = mine.zValue()
+    w.undo_stack.undo()
+    pump()
+    assert elsewhere.zValue() == 0.5
+    assert w.undo_stack.canUndo()
+
+
+def test_undoing_a_rename_that_changes_only_the_case(w, sheet):
+    """tools/qa/monkey.py, 2026-10-24: Sheet1 renamed SHEET1 could not be
+    undone: putting the sheet back, its old name was looked up regardless
+    of case, found the sheet itself, and was refused."""
+    run = sheet
+    old = run.sheet.name
+    assert w.view.tables.rename_to(run, old.upper())
+    pump()
+    assert run.sheet.name == old.upper()
+    w.undo_stack.undo()
+    pump()
+    assert shown_run(w).sheet.name == old
+    w.undo_stack.redo()
+    pump()
+    assert shown_run(w).sheet.name == old.upper()

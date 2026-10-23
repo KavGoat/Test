@@ -155,6 +155,8 @@ class Session:
             (3, "resize a markup by a handle", self.a_resize_markup),
             (3, "edit an equation", self.a_edit_equation),
             (4, "right-click menu entry", self.a_context_entry),
+            (3, "style a markup", self.a_style),
+            (1, "select all and delete", self.a_select_all_delete),
         ]
         if sheet_on or self.runs():
             acts += [
@@ -812,6 +814,45 @@ class Session:
             self._click(self._blank_spot())
         self.view.calc.leave()
         return f"{typed!r}"
+
+    def a_style(self):
+        items = [m for m in self._markups() if m.isVisible()]
+        if not items:
+            return "none"
+        picked = [self.pick(items) for _ in range(self.rng.randrange(1, 3))]
+        self.view.scene().clearSelection()
+        for item in picked:
+            item.setSelected(True)
+        self.win.refresh_selection()
+        X.pump()
+        win = self.win
+        change = self.pick([
+            ("line colour", lambda: win._style_stroke(self.pick(["#e03131", "#1c7ed6", "#000000"]))),
+            ("fill", lambda: win._style_fill(self.pick(["#ffd43b", "#ffffff", ""]))),
+            ("width", lambda: win._style_width(self.pick([0.5, 1.5, 4.0]))),
+            ("opacity", lambda: win._style_opacity(self.pick([20, 60, 100]))),
+            ("dash", lambda: win._style_dash(self.pick(["dashed 1", "dashed 4", "solid"]))),
+            ("font", lambda: win._style_font(self.pick([8.0, 12.0, 20.0]))),
+            ("hatch", lambda: win._style_hatch(self.pick(["", "brick", "up"]))),
+        ])
+        change[1]()
+        return f"{change[0]} of {', '.join(type(i).__name__ for i in picked)}"
+
+    def a_select_all_delete(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        if self.shown() is not None and self.rng.random() < 0.5:
+            from calcforge.ui import sheetview
+            sheetview.leave(self.win)
+            X.pump()
+        self.win.select_tool("select")
+        port = self.view.viewport()
+        QTest.keyClick(port, Qt.Key_Escape)
+        QTest.keyClick(port, Qt.Key_A, Qt.ControlModifier)
+        X.pump()
+        picked = len(self.view.scene().selectedItems())
+        QTest.keyClick(port, Qt.Key_Delete)
+        return f"{picked} picked"
 
     SKIP_ENTRIES = ("print", "export", "save", "email", "send", "open", "properties",
                     "keyboard", "customize", "add to tool chest", "set as default", "flatten")

@@ -309,7 +309,11 @@ class TableItem(MarkupItem):
             load_sheet(sheet, data)
             book.settle_old_names()
             wanted = data.get("name")
-            if wanted and wanted != sheet.name and book.workbook.sheet(wanted) is None:
+            # (the sheet found by that name may be this one: names are told
+            # apart regardless of case, and an undo of Sheet1 renamed SHEET1
+            # found itself and kept SHEET1: tools/qa/monkey.py, 2026-10-24)
+            if wanted and wanted != sheet.name \
+                    and book.workbook.sheet(wanted) in (None, sheet):
                 sheet.name = wanted
         elif sheet.size is None:
             self._start_empty(sheet)

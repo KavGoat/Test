@@ -11005,40 +11005,46 @@ class MainWindow(QMainWindow):
         items = [i for i in self.selected_items() if not i.from_drawing]
         if not items:
             return
-        scene = self.view.scene()
-        self.view.begin_snapshot()
-        # Only against what somebody drew. The page's own line work is the
-        # page, so "send to back" means behind the other markups — not under
-        # the drawing, where nothing would be seen of it again.
-        others = [i for i in scene.markups()
-                  if i not in items and not i.from_drawing]
-        floor = max((i.zValue() for i in scene.markups() if i.from_drawing),
-                    default=0.0)
-        if mode == "front":
-            top = max((i.zValue() for i in others), default=floor)
-            for offset, item in enumerate(items, start=1):
-                item.setZValue(top + offset)
-        elif mode == "back":
-            bottom = min((i.zValue() for i in others), default=floor + 1.0)
-            for offset, item in enumerate(items, start=1):
-                item.setZValue(bottom - offset)
-        else:
-            step = 1.5 if mode == "forward" else -1.5
-            for item in items:
-                item.setZValue(item.zValue() + step)
-        self._keep_the_markups_over_the_drawing(floor)
+        # Each page's markups in order among themselves: they were put in
+        # front of (or renumbered with) every markup of every page, while the
+        # undo step held only the pages picked from, so an undo left markups
+        # on other pages renumbered (tools/qa/monkey.py, 2026-10-24).
+        by_page: dict = {}
+        for item in items:
+            by_page.setdefault(item.parentItem(), []).append(item)
+        self.view.begin_snapshot([page for page in by_page if page is not None])
+        for page, chosen in by_page.items():
+            on_page = page.markups() if hasattr(page, "markups") else list(chosen)
+            # Only against what somebody drew. The page's own line work is the
+            # page, so "send to back" means behind the other markups — not
+            # under the drawing, where nothing would be seen of it again.
+            others = [i for i in on_page if i not in chosen and not i.from_drawing]
+            floor = max((i.zValue() for i in on_page if i.from_drawing), default=0.0)
+            if mode == "front":
+                top = max((i.zValue() for i in others), default=floor)
+                for offset, item in enumerate(chosen, start=1):
+                    item.setZValue(top + offset)
+            elif mode == "back":
+                bottom = min((i.zValue() for i in others), default=floor + 1.0)
+                for offset, item in enumerate(chosen, start=1):
+                    item.setZValue(bottom - offset)
+            else:
+                step = 1.5 if mode == "forward" else -1.5
+                for item in chosen:
+                    item.setZValue(item.zValue() + step)
+            self._keep_the_markups_over_the_drawing(floor, on_page)
         self.view.commit_snapshot("Change order")
 
-    def _keep_the_markups_over_the_drawing(self, floor: float) -> None:
+    @staticmethod
+    def _keep_the_markups_over_the_drawing(floor: float, on_page: list) -> None:
         """Nothing drawn on the page ends up under the page's own line work.
 
         Send the only markup on a sheet to the back and there is nothing to go
         behind, so it would go below the drawing itself and not be seen again.
-        When an order change pushes anything down that far, the whole pile is
+        When an order change pushes anything down that far, the page's pile is
         renumbered from just above the drawing, keeping the order it has now.
         """
-        drawn = [item for item in self.view.scene().markups()
-                 if not item.from_drawing]
+        drawn = [item for item in on_page if not item.from_drawing]
         if not drawn or min(item.zValue() for item in drawn) > floor:
             return
         for step, item in enumerate(sorted(drawn, key=lambda i: i.zValue()),
