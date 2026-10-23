@@ -108,6 +108,12 @@ page.
   Recent** lists the files opened lately.
 - **File ▸ Save** (`Ctrl+S`), **Save As** (`Ctrl+Shift+S`) and **Save All** write the
   PDF. A digitally signed PDF is appended to, so its signature still verifies.
+- **When a file can't be saved** — it is read-only, open in another program, its
+  folder has gone, the disk is full — CalcForge says which, and offers **Try
+  Again**, **Save As…** or **Cancel**; the file that was there is never touched.
+  The same goes for every export. Save As won't write over a document open in
+  another tab or window, and files named for you (Split Document, Extract Pages
+  as separate files, Export Images) are asked about before they are replaced.
 - **File ▸ Close** (`Ctrl+W`) and **Close All** ask about unsaved changes.
 - **File ▸ Import**: **Pages** (from another PDF), **Image Page**, **Excel Workbook**
   and **Tool Set** (a Bluebeam `.btx`), each **Before** or **After** the current page.

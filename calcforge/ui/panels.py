@@ -3029,11 +3029,18 @@ class MarkupsPanel(QWidget):
                                               "CSV files (*.csv)")
         if not path:
             return
-        with open(path, "w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(self.COLUMNS)
-            writer.writerows(getattr(self, "_rows", []))
-        QMessageBox.information(self, "Export markups", f"Saved {path}")
+        from . import saving
+
+        def write(target):
+            with open(target, "w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(self.COLUMNS)
+                writer.writerows(getattr(self, "_rows", []))
+        # as every save: why it couldn't be, Try Again or Save As… (it raised)
+        done = saving.write_until_done(self.window, path, write, "Export markups",
+                                       "CSV files (*.csv)")
+        if done is not None:
+            self.window.status_hint.setText(f"Saved {done[0]}")
 
 
 _SWATCHES: dict = {}

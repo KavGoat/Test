@@ -5033,11 +5033,22 @@ class MainWindow(QMainWindow):
         if not self.document.doc_id:
             self.document.doc_id = str(uuid.uuid4())
         self.document.revision += 1
-        try:
-            note = project_io.save_document(self.document, self.document.path)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Save", f"Could not save:\n{exc}")
-            return False
+        from . import saving
+        while True:
+            try:
+                saving.check_writable(self.document.path)
+                note = project_io.save_document(self.document, self.document.path)
+                break
+            except Exception as exc:  # noqa: BLE001
+                # why, in plain words, and Try Again or Save As… (the user,
+                # 2026-10-24); the file that was there is as it was
+                answer = saving.after_failure(self, self.document.path, exc, "Save")
+                if answer == saving.RETRY:
+                    continue
+                self.document.revision -= 1
+                if answer == saving.SAVE_AS:
+                    return self.save_document_as()
+                return False
         self.undo_stack.setClean()
         # what was deleted elsewhere is not in the file saved now: nothing to
         # bring back from it any more
@@ -5048,6 +5059,21 @@ class MainWindow(QMainWindow):
         said = f"Saved {self.document.path}"
         self.status_hint.setText(f"{said} — {note}" if note else said)
         return True
+
+    def _open_elsewhere(self, path: str):
+        """Another document open at *path* (in another tab or window), or None."""
+        import shiboken6
+        if not path.lower().endswith(project_io.EXTENSION):
+            path += project_io.EXTENSION
+        wanted = os.path.normcase(os.path.abspath(path))
+        for window in list(type(self)._windows):
+            if not shiboken6.isValid(window) or getattr(window, "_closed_for_good", True):
+                continue
+            for shown, _scene, _stack in window.shown_states():
+                if shown is not self.document and shown.path and \
+                        os.path.normcase(os.path.abspath(shown.path)) == wanted:
+                    return shown
+        return None
 
     def _retitle_views_of(self, document) -> None:
         """Every other window showing *document* names it afresh: one save
@@ -5071,12 +5097,21 @@ class MainWindow(QMainWindow):
         sheet.recalculate(force=True)
 
     def save_document_as(self) -> bool:
+        from . import saving
         suggested = project_io.suggested_name(self.document)
-        path, _ = QFileDialog.getSaveFileName(self, "Save document as",
-                                              in_start_folder(suggested, self.document),
-                                              project_io.FILTER)
-        if not path:
-            return False
+        start = in_start_folder(suggested, self.document)
+        while True:
+            path = saving.ask_where(self, "Save document as", start, project_io.FILTER)
+            if not path:
+                return False
+            if self._open_elsewhere(path) is None:
+                break
+            # as Excel: never over a document open in another tab or window,
+            # whose next save would put it back (the user, 2026-10-24)
+            start = path
+            saving.tell(self, "Save document as",
+                        f"{os.path.basename(path)} is open in another tab or window: save "
+                        f"under another name, or close it there first.")
         old_path, old_title = self.document.path, self.document.title
         old_recovery = self.autosave_path()
         self.document.path = path
@@ -5085,7 +5120,7 @@ class MainWindow(QMainWindow):
         if not self.save_document():
             self.document.path, self.document.title = old_path, old_title
             return False
-        remember_recent_file(path)
+        remember_recent_file(self.document.path)     # (Save As… again on a failure: its)
         if os.path.exists(old_recovery):
             try:
                 os.remove(old_recovery)
@@ -10228,7 +10263,7 @@ class MainWindow(QMainWindow):
                 return []
         if dialog.separate.isChecked():
             stem = os.path.splitext(path)[0]
-            made, used = [], set()
+            targets, used = [], set()
             for which in indices:
                 name = str(which + 1)
                 if dialog.use_labels.isChecked():
@@ -10237,7 +10272,12 @@ class MainWindow(QMainWindow):
                 while name in used:
                     name += f" ({which + 1})"
                 used.add(name)
-                made.append(self._extract([which], f"{stem} {name}.pdf"))
+                targets.append((which, f"{stem} {name}.pdf"))
+            # named here, not in a save dialog: asked about before any is replaced
+            from . import saving
+            if not saving.confirm_replace(self, [t for _w, t in targets], "Extract Pages"):
+                return []
+            made = [self._extract([which], target) for which, target in targets]
             made = [one for one in made if one]
             self.status_hint.setText(f"Extracted {len(made)} file(s) beside "
                                      f"{os.path.basename(stem)}")
@@ -10267,7 +10307,12 @@ class MainWindow(QMainWindow):
                 self, "Extract Pages", f"{base} extract.pdf", "PDF files (*.pdf)")
             if not path:
                 return ""
-        lost = self._save_pages_as(indices, path)
+        from . import saving
+        done = saving.write_until_done(self, path, lambda p: self._save_pages_as(indices, p),
+                                       "Extract Pages", "PDF files (*.pdf)")
+        if done is None:
+            return ""
+        path, lost = done
         self.status_hint.setText(f"Saved {len(indices)} page(s) to {os.path.basename(path)}")
         self.warn_undefined(lost, f"In {os.path.basename(path)}, defined on pages left behind")
         return path
@@ -10315,14 +10360,23 @@ class MainWindow(QMainWindow):
         return self._split(dialog.page_count.value(), folder, dialog.file_name)
 
     def _split(self, every: int, folder: str, file_name) -> list[str]:
+        from . import saving
         total = len(self.document.pages)
         every = max(int(every), 1)
         written = []
         warned: list = []
-        for number, start in enumerate(range(0, total, every), start=1):
-            chunk = list(range(start, min(start + every, total)))
-            path = os.path.join(folder, file_name(number))
-            lost = self._save_pages_as(chunk, path)
+        parts = [(list(range(start, min(start + every, total))),
+                  os.path.join(folder, file_name(number)))
+                 for number, start in enumerate(range(0, total, every), start=1)]
+        if not saving.confirm_replace(self, [path for _chunk, path in parts], "Split Document"):
+            return []
+        for chunk, path in parts:
+            done = saving.write_until_done(self, path,
+                                           lambda p, chunk=chunk: self._save_pages_as(chunk, p),
+                                           "Split Document", "PDF files (*.pdf)")
+            if done is None:
+                break                      # given up: the parts written so far stay
+            path, lost = done
             if lost:
                 warned.append(f"{os.path.basename(path)}: {', '.join(lost)}")
             written.append(path)
@@ -12665,12 +12719,12 @@ class MainWindow(QMainWindow):
                                               "PDF files (*.pdf)")
         if not path:
             return
-        try:
-            export_io.export_pdf(self.document, path)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Export to PDF", str(exc))
-            return
-        self.status_hint.setText(f"Exported {path}")
+        from . import saving
+        done = saving.write_until_done(self, path,
+                                       lambda p: export_io.export_pdf(self.document, p),
+                                       "Export to PDF", "PDF files (*.pdf)")
+        if done is not None:
+            self.status_hint.setText(f"Exported {done[0]}")
 
     def export_images(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Choose a folder for the images")
@@ -12679,12 +12733,19 @@ class MainWindow(QMainWindow):
         dpi, ok = QInputDialog.getInt(self, "Export Images", "Resolution (dpi):", 200, 72, 600)
         if not ok:
             return
-        try:
-            written = export_io.export_images(self.document, folder, dpi,
-                                              self.document.title or "page")
-        except Exception as exc:
-            QMessageBox.critical(self, "Export images", str(exc))
+        from . import saving
+        prefix = self.document.title or "page"
+        if not saving.confirm_replace(self, export_io.image_paths(self.document, folder, prefix),
+                                      "Export Images"):
             return
+        while True:
+            try:
+                written = export_io.export_images(self.document, folder, dpi, prefix)
+                break
+            except Exception as exc:  # noqa: BLE001
+                if saving.after_failure(self, folder, exc, "Export Images",
+                                        can_save_as=False) != saving.RETRY:
+                    return
         self.status_hint.setText(f"Wrote {len(written)} image(s) to {folder}")
 
     def export_markups(self) -> None:
@@ -12693,12 +12754,12 @@ class MainWindow(QMainWindow):
                                               "CSV files (*.csv)")
         if not path:
             return
-        try:
-            count = export_io.export_markups_csv(self.document, path)
-        except Exception as exc:
-            QMessageBox.critical(self, "Summary", str(exc))
-            return
-        self.status_hint.setText(f"Exported {count} markup(s)")
+        from . import saving
+        done = saving.write_until_done(self, path,
+                                       lambda p: export_io.export_markups_csv(self.document, p),
+                                       "Summary", "CSV files (*.csv)")
+        if done is not None:
+            self.status_hint.setText(f"Exported {done[1]} markup(s)")
 
 
     def open_print_dialog(self, selected=None, which: Optional[str] = None) -> "PrintDialog":

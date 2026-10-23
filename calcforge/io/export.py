@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import os
 from typing import Iterable, Optional
 
 from PySide6.QtCore import QMarginsF, QRectF, QSizeF
@@ -507,18 +508,26 @@ def print_document(document: Document, printer: QPrinter,
     paint_pages(printer, document, chosen, printer.resolution(), per_page_layout=False)
 
 
-def export_images(document: Document, folder: str, dpi: float = 200.0,
-                  prefix: str = "page") -> list[str]:
+def image_paths(document: Document, folder: str, prefix: str = "page") -> list[str]:
+    """Where export_images writes each printable page: page_01.png…"""
     import re
     prefix = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", prefix).strip(" .") or "page"
+    return [f"{folder}/{prefix}_{index + 1:02d}.png"
+            for index, page in enumerate(document.pages)
+            if page.frame is not None and page.printable]
+
+
+def export_images(document: Document, folder: str, dpi: float = 200.0,
+                  prefix: str = "page") -> list[str]:
+    import errno
     written = []
-    for index, page in enumerate(document.pages):
-        if page.frame is None or not page.printable:
-            continue
+    pages = [page for page in document.pages if page.frame is not None and page.printable]
+    for page, path in zip(pages, image_paths(document, folder, prefix)):
         image = page.frame.render_image(dpi=dpi, for_print=True)
-        path = f"{folder}/{prefix}_{index + 1:02d}.png"
         if not image.save(path, "PNG"):
-            raise OSError(f"Could not write {path}")
+            # why, as the operating system would say it (saving.why)
+            code = errno.ENOENT if not os.path.isdir(folder) else errno.EACCES
+            raise OSError(code, f"Could not write {path}", path)
         written.append(path)
     return written
 
