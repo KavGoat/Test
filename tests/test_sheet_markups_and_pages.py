@@ -488,3 +488,36 @@ def test_a_cell_reads_a_page_variable_and_says_why_a_lost_name_is_ref(w, sheet):
     assert "var(height)" in got.reason and "deleted" in got.reason
     got = put(2, "=var(height)")
     assert "3.5" in str(got), got
+
+
+def test_the_cells_variable_box_takes_typing_and_clicks_in_its_menu(w, sheet):
+    """The user, 2026-10-24: "right click on a cell should let me direct type
+    into the variable name, currently I can't even click on the variable name
+    input without the context menu disappearing". On Windows the menu took the
+    keyboard once it was on screen (the letters picked its entries) and a
+    click on the box's row beside the box chose the row. The box is the
+    menu's current entry with the keys once it shows; its whole row goes to
+    the box."""
+    from PySide6.QtWidgets import QApplication, QLabel
+    run = sheet
+    click(w, at(w, run, 2, 1))
+    menu = w.view.tables.cell_menu()
+    menu.popup(w.view.viewport().mapToGlobal(at(w, run, 2, 1)))
+    menu.setFocus()                      # as the menu takes the keyboard on Windows
+    pump()
+    pump()
+    field = w.view.tables.name_field
+    assert menu.isVisible() and QApplication.focusWidget() is field, "the box has the keys"
+    QTest.keyClicks(QApplication.focusWidget(), "PG")
+    label = next(l for l in field.parentWidget().findChildren(QLabel) if l.text() == "Variable")
+    QTest.mouseClick(label, Qt.LeftButton)       # beside the box, on its row
+    pump()
+    assert menu.isVisible(), "a click on the row keeps the menu"
+    QTest.mouseClick(field, Qt.LeftButton)
+    pump()
+    assert menu.isVisible() and field.hasFocus()
+    QTest.keyClicks(field, "A")
+    QTest.keyClick(field, Qt.Key_Return)
+    pump()
+    assert not menu.isVisible()
+    assert w.view.tables.selection_name().name == "PGA"

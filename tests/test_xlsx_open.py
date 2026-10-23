@@ -352,6 +352,29 @@ def test_opening_an_xlsx_gives_its_worksheets_as_spreadsheet_pages(w, tmp_path):
     assert any("Hidden in Excel" in line for line in w._last_import_report)
 
 
+def test_an_excel_template_opens_as_a_workbook(w, tmp_path):
+    """A user's Equivalent Static calculation came as an .xltx: File ▸ Open
+    and Insert offer templates (.xltx, .xltm) and open them as workbooks."""
+    import openpyxl
+    from PySide6.QtWidgets import QApplication
+    from calcforge.ui.xlsximport import EXCEL_FILTER, OPEN_FILTER, is_workbook
+    book = openpyxl.load_workbook(a_workbook(str(tmp_path / "beams.xlsx")))
+    book.template = True
+    path = str(tmp_path / "Beams template.xltx")
+    book.save(path)
+    assert is_workbook(path) and is_workbook("x.XLTM")
+    assert "*.xltx" in OPEN_FILTER and "*.xltm" in EXCEL_FILTER
+    w.interactive_prompts = False
+    w.open_from_command_line(path)
+    QApplication.processEvents()
+    QApplication.processEvents()
+    got = runs(w)
+    assert set(got) == {"Beams", "Load Cases"}
+    assert value(got["Beams"], 0, 6) == 217.5
+    (book,) = got["Beams"].sheet.workbook.books.values()
+    assert book.name == "Beams_template"
+
+
 def test_insert_excel_puts_the_worksheets_after_the_page_as_one_undo_step(w, tmp_path):
     from PySide6.QtWidgets import QApplication
     path = a_workbook(str(tmp_path / "beams.xlsx"))

@@ -1,13 +1,15 @@
 """An imported Excel workbook is self-contained, or its names are the
 document's (the user's answers by pop-up, 2026-10-19).
 
-* Self-contained (the default): its names are its own. Its cells read them
-  first (a sheet's own name wins on its sheet, as in Excel), else the
+* Self-contained (the default): its Excel names are its own. Its cells read
+  them first (a sheet's own name wins on its sheet, as in Excel), else the
   equation variable defined above the sheet; var(X) still reads the equation
-  variable. Equations below read any of its cells by sheet and cell
-  (Seismic_Actions.H44) and its names only qualified: Book.Name (the
-  workbook's name: its file name as an identifier, unique in the document)
-  or Sheet.Name; never bare.
+  variable. It is closed as a self-contained calculation block is (the user,
+  2026-10-24): equations below read only its CalcForge variables (a cell
+  named in its Variable box, read bare) and any of its cells by sheet and
+  cell (Seismic_Actions.H44) — never its Excel names, bare, as Sheet.Name or
+  as Book.Name (the workbook's name: its file name as an identifier, unique
+  in the document).
 * Not self-contained: its names are document variables, each defined where
   its sheet is in reading order. The import lists the names that clash with
   the document's, to keep it self-contained, rename them with a prefix, or
@@ -185,16 +187,16 @@ def with_workbook(w, path, k_first=True):
     return len(w.document.pages) - 1
 
 
-def test_equations_read_its_cells_and_qualified_names_never_bare(w, tmp_path):
+def test_equations_read_its_cells_and_variables_but_never_its_excel_names(w, tmp_path):
     last = with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")))
-    type_equations(w, last, ["a:Seismic_Actions.B2", "a=", "z:Quake_Calc.Z", "z=",
-                             "q:Seismic_Actions.Z", "q=", "f:Tables.ReturnPeriodFactor", "f=",
-                             "y:Z"])
+    type_equations(w, last, ["a:Seismic_Actions.B2", "a=", "z:Quake_Calc.Z",
+                             "q:Seismic_Actions.Z", "f:Tables.ReturnPeriodFactor", "y:Z"])
     got = results(w)
     assert got["a="] == "4", "B2 = Z*k, k the equation variable above the sheets"
-    assert got["z="] == "0.4" and got["q="] == "0.4" and got["f="] == "1.3"
-    assert got["y≔Z"] == "Z - not defined.", "a self-contained workbook's names are its own"
-    assert any("Quake_Calc.Name" in line for line in w._last_import_report)
+    for line in ("z≔Quake_Calc.Z", "q≔Seismic_Actions.Z", "f≔Tables.ReturnPeriodFactor",
+                 "y≔Z"):
+        assert got[line].endswith("not defined."), (line, got[line])
+    assert any("Sheet.H44" in line and "variable" in line for line in w._last_import_report)
     # an input changed: the cells and the equations below follow; undone, back
     sheet = runs(w)["Seismic Actions"].sheet
     w.view.begin_snapshot([runs(w)["Seismic Actions"].parentItem()])
@@ -347,37 +349,83 @@ def test_go_ahead_reading_order_decides(w, tmp_path):
     assert not sheet.workbook.books[sheet.book].self_contained
 
 
+def test_a_cell_named_as_a_variable_is_read_bare_below_and_after_reopening(w, tmp_path):
+    """The user, 2026-10-24: "Made a cell PGA in a self contained workbook and
+    this was not defined at all. Even when made global." A name made in the
+    Variable box on a workbook's sheet was kept as that workbook's, so the
+    equations never found it. A CalcForge variable is the document's."""
+    from tests.test_calc_saving import reopen, save_to
+    from calcforge.ui import calcsections
+    last = with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")), k_first=False)
+    run = runs(w)["Seismic Actions"]
+    w.view.tables.open(run, (0, 0))
+    pump()
+    assert w.view.tables.name_selection("PGA")
+    pump()
+    dn = run.sheet.workbook.names[("pga", None)]
+    assert dn.variable and dn.book is None
+    w.view.tables.close()
+    pump()
+    type_equations(w, last, ["p:PGA", "p="])
+    assert results(w)["p="] == "0.4"
+    # made global (for the sections after a section break): still read
+    calcsections.set_cells_global(w, run, (0, 0, 0, 0), True)
+    pump()
+    assert results(w)["p="] == "0.4"
+    path = str(tmp_path / "doc.pdf")
+    save_to(w, path)
+    reopen(w, path)
+    pump()
+    pump()
+    assert results(w)["p="] == "0.4"
+    wb = runs(w)["Seismic Actions"].sheet.workbook
+    assert wb.names[("pga", None)].variable
+
+
+def test_a_variable_kept_with_its_workbook_by_an_older_version_comes_back_the_documents():
+    wb = Workbook()
+    sheet = wb.add_sheet("Seismic Actions")
+    load_sheet(sheet, {"book": {"id": "book-1", "name": "Quake_Calc", "self_contained": True},
+                       "cells": [[0, 0, "0.4", 0]],
+                       "names": [["PGA", "'Seismic Actions'!$A$1", False, "", True],
+                                 ["Z", "'Seismic Actions'!$A$1", False, "", False]]})
+    assert wb.names[("pga", None)].book is None
+    assert wb.names[("z", "book-1")].book == "book-1", "an Excel name stays the workbook's"
+
+
 def test_variables_panel_and_name_manager_show_the_workbook(w, tmp_path):
     from calcforge.ui.names import scope_text
     from calcforge.ui.variablespanel import table_rows
     with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")), k_first=False)
-    rows = [r for r in table_rows(w.document) if r.group]
-    assert {r.name for r in rows} == {"Quake_Calc.Z", "Quake_Calc.ReturnPeriodFactor",
-                                      "Tables.ReturnPeriodFactor"}
-    assert not [r for r in table_rows(w.document) if r.name == "Z"], "not a document variable"
+    # self-contained: its Excel names are none of the equations', so not listed
+    assert not [r for r in table_rows(w.document)
+                if "Z" in r.name or "ReturnPeriodFactor" in r.name]
+    wb = runs(w)["Tables"].sheet.workbook
+    scopes = sorted(scope_text(wb, dn) for dn in wb.names.values())
+    assert scopes == ["Quake_Calc (its cells only)", "Quake_Calc (its cells only)", "Tables"]
+    wb.set_self_contained(runs(w)["Tables"].sheet.book, False)
+    pump()
+    rows = table_rows(w.document)
+    assert {r.name for r in rows if r.group} == {"Tables.ReturnPeriodFactor"}
+    assert {"Z", "ReturnPeriodFactor"} <= {r.name for r in rows if not r.group}, \
+        "not self-contained: its names are document variables"
     w.variables_panel.refresh()
 
     def heads():
         tree = w.variables_panel.tree
         return [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
     # the user's choice, 2026-10-23: under the workbook's heading, closed to start
-    assert "▸ Workbook Quake_Calc (3 names)" in heads()
-    assert "Quake_Calc.Z" not in heads()
+    head_text = next(h for h in heads() if h.startswith("▸ Workbook Quake_Calc"))
+    assert "Tables.ReturnPeriodFactor" not in heads()
     head = next(w.variables_panel.tree.topLevelItem(i)
                 for i in range(w.variables_panel.tree.topLevelItemCount())
-                if w.variables_panel.tree.topLevelItem(i).text(0).startswith("▸ Workbook"))
+                if w.variables_panel.tree.topLevelItem(i).text(0) == head_text)
     w.variables_panel.go_to(head)                  # a click on the heading opens it
-    assert "▾ Workbook Quake_Calc (3 names)" in heads()
-    assert {"Quake_Calc.Z", "Quake_Calc.ReturnPeriodFactor", "Tables.ReturnPeriodFactor"} <= set(heads())
-    w.variables_panel.filter.setText("ReturnPeriod")
-    w.variables_panel.go_to(next(w.variables_panel.tree.topLevelItem(i)
-                                 for i in range(w.variables_panel.tree.topLevelItemCount())
-                                 if "Workbook" in w.variables_panel.tree.topLevelItem(i).text(0)))
-    assert "Tables.ReturnPeriodFactor" in heads(), "Find a variable looks in a closed one too"
-    w.variables_panel.filter.setText("")
-    wb = runs(w)["Tables"].sheet.workbook
+    assert "▾" + head_text[1:] in heads()
+    assert "Tables.ReturnPeriodFactor" in heads()
     scopes = sorted(scope_text(wb, dn) for dn in wb.names.values())
-    assert scopes == ["Quake_Calc (self-contained)", "Quake_Calc (self-contained)", "Tables"]
+    assert scopes == ["Quake_Calc (document variable)", "Quake_Calc (document variable)",
+                      "Tables"]
 
 
 def test_a_second_import_of_the_same_workbook_is_another_workbook(w, tmp_path):

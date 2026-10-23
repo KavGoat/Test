@@ -3,11 +3,13 @@ came in (the user's answers, 2026-10-19): from its sheet tab's right-click
 menu (Self-contained, a tick) and from the Properties panel's Workbook
 section, as one undo step, saved with the document.
 
-Self-contained, a workbook's names are its own: its cells read them, the
-equations only qualified (Book.Name, Sheet.Name). Unticked, they are
-document variables, each defined where its sheet is in reading order; names
-already used in the document are listed first, to go ahead or keep it
-self-contained (renaming them is offered when it is imported).
+Self-contained, a workbook is closed as a self-contained calculation block
+is: its Excel names are for its own cells, and the equations read it only by
+its CalcForge variables and as Sheet.H44 (xlsximport.SELF_CONTAINED_SAYS).
+Unticked, its Excel names are document variables, each defined where its
+sheet is in reading order; names already used in the document are listed
+first, to go ahead or keep it self-contained (renaming them is offered when
+it is imported).
 """
 from __future__ import annotations
 
@@ -74,9 +76,8 @@ def set_self_contained(window, book_id: str, on: bool, ask: bool = True) -> bool
     view.commit_snapshot("Self-contained" if on else "Not self-contained")
     for item in runs:
         item.update()
-    window.status_hint.setText(
-        f"{book.name}: self-contained — equations read its names as {book.name}.Name"
-        if on else f"{book.name}: its names are document variables")
+    from .xlsximport import OPEN_SAYS, SELF_CONTAINED_SAYS
+    window.status_hint.setText(f"{book.name}: " + (SELF_CONTAINED_SAYS if on else OPEN_SAYS))
     _refresh(window)
     return True
 
@@ -135,16 +136,16 @@ def add_panel_section(panel, sheet) -> None:
     form = panel._group("Workbook")
     name = QLabel(book.name)
     name.setObjectName("workbookName")
-    name.setToolTip("How equations name this workbook: Book.Name reads one of its names")
+    name.setToolTip("How equations name this workbook, when it isn't self-contained: "
+                    "Book.Name reads one of its Excel names")
     form.addRow("Name:", name)
     if book.file:
         form.addRow("From:", QLabel(book.file))
     tick = QCheckBox("Self-contained")
     tick.setObjectName("workbookSelfContained")
     tick.setChecked(book.self_contained)
-    tick.setToolTip("Its names are its own: its cells read them, and equations below read "
-                    f"them as {book.name}.Name or Sheet.Name. Untick to make them document "
-                    "variables. Any cell can be read as Sheet.H44 either way.")
+    from .xlsximport import SELF_CONTAINED_SAYS
+    tick.setToolTip(SELF_CONTAINED_SAYS + " Untick to make its Excel names document variables.")
     window = panel.window
 
     def toggled(on, book_id=book.id):
@@ -165,7 +166,7 @@ def tab_action(menu, sheet, window) -> Optional[object]:
     act = menu.addAction("Self-contained")
     act.setCheckable(True)
     act.setChecked(book.self_contained)
-    act.setToolTip(f"{book.name}'s names are its own (equations read them as {book.name}.Name); "
-                   "untick to make them document variables")
+    from .xlsximport import SELF_CONTAINED_SAYS
+    act.setToolTip(SELF_CONTAINED_SAYS + " Untick to make its Excel names document variables.")
     act.triggered.connect(lambda on, book_id=book.id: set_self_contained(window, book_id, on))
     return act

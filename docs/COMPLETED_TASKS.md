@@ -3,6 +3,15 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-24 (later night) — side toolbar columns, the spreadsheet view buttons, a lost name's #REF!, the manual's key things (pushed at 6998233 and a57aabf)
+
+- The full check passed on 1106906 (PYTEST_EXIT=0, 14/14 planted bugs caught); the quick check passed on 6998233 before it was pushed; a57aabf changed the manual only.
+- Toolbars joining a side column, a column of its own at the window's edge: tests/test_toolbar_docking.py. The view buttons staying on a spreadsheet's pages, and a page variable read by =height with var() named in the #REF!'s tip: tests/test_sheet_markups_and_pages.py. The manual's top-level headings and every tool label: tests/test_user_manual.py.
+
+## 2026-10-24 (night, later) — page ordering, a case-only rename, Define Name's undo (pushed at cdf6633 and 1106906)
+
+- Found by tools/qa/monkey.py, seeds 7–12 and 17. Ordering each page's own and recorded per page, Sheet1 renamed SHEET1 undone, a name defined again on another sheet put back by Undo: tests/test_sheet_markups_and_pages.py. The full check passed on 1106906.
+
 ## 2026-10-24 (night) — bugs found by random sessions (pushed at 1649f97)
 
 - The quick check passed on 1649f97 before it was pushed (15.5 min, `-n 3`).

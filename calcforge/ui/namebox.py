@@ -21,7 +21,7 @@ from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen
-from PySide6.QtWidgets import QApplication, QLineEdit
+from PySide6.QtWidgets import QApplication, QLineEdit, QWidget
 
 from ..calc.editor import MathEditor
 from ..calc.engine.model import GREEK
@@ -53,6 +53,47 @@ def name_char_ok(name: str, at: int, ch: str) -> bool:
     if ch.isdigit():
         return at > 0
     return ch.isalpha() or ch in GREEK or ch == "_"
+
+
+def typed_in_a_menu(menu, action, holder, field) -> None:
+    """A text box in a menu (the Variable box of a cell's or a measurement's
+    right-click) that takes the keys and the clicks, on every platform.
+
+    The menu took the keyboard once it was on screen, so the letters typed
+    picked its entries and closed it; and a click on the box's row beside
+    the box (its label, its margin) chose the row, which closed the menu too
+    (the user, 2026-10-24: "I can't even click on the variable name input
+    without the context menu disappearing"). The box is made the menu's
+    current entry and given the keys once the menu shows, and a click
+    anywhere on its row goes to the box."""
+    from PySide6.QtCore import QEvent, QObject, QTimer
+
+    class _Row(QObject):
+        def eventFilter(self, watched, event):           # noqa: N802 - Qt's name
+            if event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
+                                QEvent.MouseButtonDblClick):
+                field.setFocus(Qt.MouseFocusReason)
+                return True
+            return False
+    row = _Row(holder)
+    holder.installEventFilter(row)
+    for child in holder.findChildren(QWidget):
+        if child is not field:
+            child.installEventFilter(row)
+    holder.setFocusProxy(field)
+
+    def take_the_keys():
+        try:
+            if menu.isVisible():
+                menu.setActiveAction(action)
+                field.setFocus(Qt.PopupFocusReason)
+        except RuntimeError:
+            pass                                          # the menu gone already
+
+    def shown():
+        field.setFocus(Qt.PopupFocusReason)
+        QTimer.singleShot(0, take_the_keys)
+    menu.aboutToShow.connect(shown)
 
 
 class SMathNameEdit(QLineEdit):

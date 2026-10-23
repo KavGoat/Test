@@ -8,14 +8,14 @@ it has one. Clicking a row goes to the equation that defines it.
 Below them, under Tables (the user's choice, 2026-10-10), what the tables
 give the equations: each defined name (W_total) and each column a table's
 headings name (Loads.Load), with its value; clicking one goes to its cells.
-A self-contained imported workbook's names come last, under the workbook,
-written as the equations read them (Seismic_Actions_NZS1170_5.Z; a sheet's
-own name as Tables.ReturnPeriodFactor) — they are not document variables.
-Each workbook's names sit under its heading, closed to start (▸, its count
-of names): click the heading to open it (the user's choice, 2026-10-23: the
-names listed as equations write them, out of the way until wanted). Finding
-a variable looks in closed ones too. A name Excel itself has as #REF! (its
-cells deleted in Excel) is not listed.
+A self-contained imported workbook's Excel names are not listed: they are
+for its own cells, and the equations read it only by its CalcForge variables
+and as Sheet.H44 (the user, 2026-10-24). A workbook that isn't
+self-contained has its names listed as the document variables they are, and
+its sheets' own names (Tables.ReturnPeriodFactor) under its heading, closed
+to start (▸, its count of names): click the heading to open it (the user's
+choice, 2026-10-23). Finding a variable looks in closed ones too. A name
+Excel itself has as #REF! (its cells deleted in Excel) is not listed.
 
 A name defined twice has two rows: SMath allows redefining, and which
 definition an equation sees depends on where it is — the latest one before
@@ -56,7 +56,7 @@ class VariableRow:
     section: int = 1            # the calc section it is in (1-based)
     is_global: bool = False     # read by later sections too
     key: Optional[tuple] = None  # where it is defined in reading order
-    group: str = ""             # a self-contained workbook's name, for its own heading
+    group: str = ""             # the workbook a sheet's own name is under, for its heading
     sheet_name: bool = False    # a spreadsheet's own name (Define Name), not a Variable box's
 
 
@@ -173,6 +173,8 @@ def table_rows(document) -> list:
         home = wb.sheet_by_id(scope) if isinstance(scope, int) else None
         book = wb.books.get(scope) if isinstance(scope, str) else \
             (wb.books.get(home.book) if home is not None and home.book else None)
+        if book is not None and book.self_contained:
+            continue                   # its Excel names are its cells' own, not the equations'
         try:
             got = ev(F.parse(dn.refers_to).tree, Ctx(wb, home or (wb.sheets[0] if wb.sheets else None), 0, 0))
         except (F.FormulaError, SheetError, AttributeError) as e:
@@ -193,10 +195,9 @@ def table_rows(document) -> list:
         if book is not None and home is not None:
             name = f"{sheet_ident(home.name)}.{dn.name}"     # a sheet's own name: Sheet.Name
             group = book.name
-        elif book is not None and book.self_contained:
-            name = f"{book.name}.{dn.name}"                  # the workbook's: Book.Name
-            group = book.name
         elif book is None and home is None and not dn.variable:
+            if docbook.closed(docbook._kept_on(dn)):
+                continue                                     # kept with a self-contained workbook
             written = docbook.written_as(dn)
             if written:
                 name = written                               # a spreadsheet's own: Sheet.Name
@@ -221,7 +222,7 @@ def table_rows(document) -> list:
             rows.append(VariableRow(f"{sheet.name}.{_ident(cell.value)}", text, unit, page,
                                     f"Page {page}" if page else "", error, -1, "Table",
                                     cells, **placed(sheet, cells), key=book_key(sheet)))
-    # a self-contained workbook's names, under the workbook
+    # a workbook's own sheet names (one that isn't self-contained), under the workbook
     return rows + sorted(own, key=lambda r: (r.group.lower(), r.name.lower()))
 
 

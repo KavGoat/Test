@@ -3710,8 +3710,10 @@ class TableEditing:
             menu.close()
         field.returnPressed.connect(on_enter)
         menu.aboutToHide.connect(commit)
-        # the box takes the keys as soon as the menu opens, as the measurement's
-        menu.aboutToShow.connect(lambda: field.setFocus(Qt.PopupFocusReason))
+        # the box takes the keys as soon as the menu opens, and the clicks, as
+        # the measurement's
+        from .namebox import typed_in_a_menu
+        typed_in_a_menu(menu, action, holder, field)
         self.name_field = field
         # then, as at the top of an equation's menu (the user, 2026-10-19):
         # how many decimal places the cells show, whether those count

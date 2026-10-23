@@ -197,13 +197,20 @@ here is new.
   in equations as its name, or, when its name holds spaces or other such
   characters, with each run of them one `_` (`Seismic Actions` is
   `Seismic_Actions`, `Tables (2)` is `Tables_2`); its exact name still
-  works. In an equation:
+  works. A self-contained workbook is closed, as a self-contained
+  calculation block is (the user, 2026-10-24): equations read it only by
+  `Sheet.H44` and by its CalcForge variables (a cell named in its Variable
+  box is always a document name, `DefinedName.variable`, read bare); its
+  Excel names, `Sheet.Name`, `Book.Name` and its headings are not read from
+  outside. In an equation:
     - `Sheet.H44` — that cell of the sheet (a table's too: `Loads.D12`);
     - `Sheet.Name` — the defined name as that sheet's cells read it: the
       sheet's own name first, then its workbook's (so any sheet of the
       workbook qualifies a workbook name; a sheet-local name needs its own
-      sheet: `Tables.ReturnPeriodFactor`);
-    - `Book.Name` — the workbook's own (workbook-wide) name;
+      sheet: `Tables.ReturnPeriodFactor`) — not on a self-contained
+      workbook's sheet;
+    - `Book.Name` — the workbook's own (workbook-wide) name, of a workbook
+      that isn't self-contained;
     - `Table.Heading` — a table's column, as before (a defined name of the
       same spelling on that sheet wins);
     - a bare `Name` — a document name: one defined on a table or sheet made
@@ -222,10 +229,10 @@ here is new.
   the workbook (`"book": {"id", "name", "file", "self_contained"}`) in its
   record, so it is saved with the document and undone with the pages
   (`Workbook.books`, `Sheet.book`, `DefinedName.book`; a workbook name's key
-  is `(name, book id)`). The Variables panel lists a self-contained
-  workbook's names last, under "Workbook <name>", written as the equations
-  read them; the Name Manager's Scope says "<name> (self-contained)" or
-  "<name> (document variables)". Renaming at import changes the clashing
+  is `(name, book id)`). The Variables panel leaves a self-contained
+  workbook's Excel names out, and lists a sheet's own names of one that
+  isn't under "Workbook <name>"; the Name Manager's Scope says "<name> (its
+  cells only)" or "<name> (document variable)". Renaming at import changes the clashing
   workbook names and every formula, name, rule and validation of the
   workbook that reads them (a sheet's own name of the same spelling is left
   alone); unticking later lists the clashes and asks to go ahead.

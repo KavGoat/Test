@@ -2699,6 +2699,9 @@ def _pairs(ys, xs):
         raise SheetError(NA)
     px, py = [], []
     for x, y in zip(X, Y):
+        for v in (y, x):            # an error in either series is the answer, as Excel's
+            if isinstance(v, ErrorValue):
+                raise SheetError(v)
         if is_number(x) and is_number(y):
             px.append(x)
             py.append(y)
@@ -2737,8 +2740,8 @@ def INTERCEPT(ys, xs):
 
 @fn("FORECAST", "FORECAST.LINEAR", least=3, most=3)
 def FORECAST(x, ys, xs):
-    slope, b, _sx, _sy, (dx, _ux), (dy, uy) = _fit(ys, xs)
     v = num(x)
+    slope, b, _sx, _sy, (dx, _ux), (dy, uy) = _fit(ys, xs)
     vd = v.dims if isinstance(v, Qty) else NODIM
     if vd != dx:
         return UNITS_ERR

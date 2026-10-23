@@ -37,10 +37,21 @@ adds a workbook.
 | In | To read | Write |
 | --- | --- | --- |
 | an equation | a cell | `Sheet1.A1` |
-| an equation | a named cell of a sheet | `Sheet1.Load` |
-| an equation | a name of an imported workbook | `Book.Name` |
+| an equation | a cell named as a **variable** (right-click ▸ **Variable**) | `Load` |
+| an equation | an **Excel name** of a sheet (not in a self-contained workbook) | `Sheet1.Load` |
 | a cell | an equation's variable | `=height` |
 | a cell whose workbook has a name of the same | the equation's variable | `=var(height)` |
+
+- **Two kinds of named cell.** A **variable** is CalcForge's: name a cell in its
+  right-click **Variable** box and every equation after it reads it bare (`PGA`),
+  wherever the cell is. An **Excel name** is the spreadsheet's own (the Name Box,
+  the Name Manager, or one the file came with): its cells' formulas read it, and
+  equations only as `Sheet1.Load`.
+- An imported workbook is **self-contained** to start: closed, as a self-contained
+  calculation block is. Equations reach it only through its variables and its
+  cells (`Seismic_Actions.H44`), never through its Excel names. Untick
+  **Self-contained** (its sheet tab's right-click menu) to make its Excel names
+  document variables.
 
 - A sheet name an equation can't hold is written with `_`: `Sheet1 (2)` is
   `Sheet1_2`, `Seismic Actions` is `Seismic_Actions`.
@@ -50,8 +61,8 @@ adds a workbook.
   workbooks often have names Excel keeps as `#REF!` (their cells were deleted):
   the Seismic Parts workbook's **Height** is one, so `=height` there is `#REF!`
   (the error's tip says why) — `=var(height)` reads the equation's.
-- The **Variables** panel lists everything an equation can read; an imported
-  workbook's names are under its heading.
+- The **Variables** panel lists everything an equation can read; a
+  self-contained workbook's Excel names are not in it.
 
 **Spreadsheet views.** The buttons at the right of the status bar, whenever a
 spreadsheet page is in view (also **View ▸ Spreadsheet**):
@@ -90,8 +101,8 @@ page.
 
 - **File ▸ New PDF** (`Ctrl+N`), **New Tab** (`Ctrl+T`), **New Window**
   (`Ctrl+Alt+Shift+N`).
-- **File ▸ Open** (`Ctrl+O`) opens a PDF, or an Excel workbook (`.xlsx`, `.xlsm`),
-  in a new tab. Other people's markups come in as markups you can edit. **Open
+- **File ▸ Open** (`Ctrl+O`) opens a PDF, or an Excel workbook (`.xlsx`, `.xlsm`,
+  or a template, `.xltx`, `.xltm`), in a new tab. Other people's markups come in as markups you can edit. **Open
   Recent** lists the files opened lately.
 - **File ▸ Save** (`Ctrl+S`), **Save As** (`Ctrl+Shift+S`) and **Save All** write the
   PDF. A digitally signed PDF is appended to, so its signature still verifies.
@@ -919,13 +930,13 @@ in red. The definition in force at the selected equation is bold. Click a row to
 go to the equation; **Find a variable** narrows the list; right-click ▸ **Go to**
 or **Make Global**. Under **Tables** are what the tables give the equations: each
 defined name and each column a table's headings name (`Loads.Load`), with its
-value. A self-contained workbook's names sit under its heading, **▸ Workbook
-Seismic_Actions (126 names)**, closed to start: click the heading to open or close
-it. They are written as equations read them (`Seismic_Actions.Z`, a sheet's own as
-`Tables.Z`), and equations reach them only that way, never bare. **Find a variable**
-looks in closed workbooks too. A name Excel itself has as `#REF!` (its cells
-deleted in Excel) is not listed. With calc section breaks the rows come section
-by section.
+value. A self-contained workbook's Excel names are not listed (equations can't
+read them); a workbook that isn't self-contained has its names listed as document
+variables, and its sheets' own names under its heading, **▸ Workbook
+Seismic_Actions (3 names)**, closed to start: click the heading to open or close
+it. **Find a variable** looks in closed workbooks too. A name Excel itself has as
+`#REF!` (its cells deleted in Excel) is not listed. With calc section breaks the
+rows come section by section.
 
 ### Plots
 
@@ -988,10 +999,11 @@ is its top-left corner):
 - **a cell**: `Table1.D12`, `Seismic_Actions.H44` (spaces and other characters an
   equation can't hold become one `_`: `Tables (2)` is `Tables_2`);
 - **a named cell**: `W_total` for a cell named as a CalcForge variable (its
-  right-click **Variable** box); `Loads.W_total` for a spreadsheet's own name —
-  never read bare;
-- **an imported workbook's name**: `Seismic_Actions_NZS1170_5.Z` or
-  `Seismic_Actions.Z` (see Part 3, *Excel workbooks*);
+  right-click **Variable** box); `Loads.W_total` for a spreadsheet's own Excel
+  name — never read bare, and not at all in a self-contained workbook;
+- **an imported workbook's Excel name**: bare (`Z`) when the workbook isn't
+  self-contained, and `Seismic_Actions.Z` for a sheet's own (see Part 3, *Excel
+  workbooks*);
 - **a column as a vector**: `Loads.Load` is the column under the heading "Load"
   (the heading's first word) — `sum(Loads.Load)`;
 - **the table as an interpolating lookup** (in a straight line between rows, never
@@ -1301,14 +1313,16 @@ function's arguments with the current one in bold.
 A **name** stands for a cell, a block or a constant (`W_total`,
 `Loads!$B$2:$B$9`, `g = 9.81`). There are two kinds:
 
-- **a spreadsheet's own name** — made with Define Name, the Name Box, the Name
-  Manager or Create from Selection (and an Excel file's names). It is the sheet's:
-  the cells' formulas use it as Excel's do, and the equations and other pages read
-  it only with its sheet's name, `Loads.W_total` (the sheet the cells it names are
-  on). A bare `W_total` in an equation does not reach it. It carries no name tag;
+- **an Excel name** (a spreadsheet's own) — made with Define Name, the Name Box,
+  the Name Manager or Create from Selection (and an Excel file's names). It is the
+  sheet's: the cells' formulas use it as Excel's do, and the equations and other
+  pages read it only with its sheet's name, `Loads.W_total` (the sheet the cells it
+  names are on) — and not at all in a self-contained imported workbook. A bare
+  `W_total` in an equation does not reach it. It carries no name tag;
 - **a CalcForge variable** — a cell or block named with its right-click
-  **Variable** box. The equations read it bare, `W_total`, as any variable, and its
-  name is tagged on the cells (View ▸ Name Tags).
+  **Variable** box. The equations read it bare, `W_total`, as any variable,
+  whatever workbook its cells are part of, and its name is tagged on the cells
+  (View ▸ Name Tags).
 
 The Name Manager lists both; its Scope says *Workbook (CalcForge variable)* for a
 variable. Editing a name there keeps its kind. In a document saved before names had
@@ -1553,7 +1567,7 @@ number ("Page 4") faintly behind the cells.
 
 ### Excel workbooks
 
-**File ▸ Open** an `.xlsx` or `.xlsm` for a new document of it, or **File ▸ Import ▸
+**File ▸ Open** an `.xlsx`, `.xlsm`, `.xltx` or `.xltm` for a new document of it, or **File ▸ Import ▸
 Excel Workbook** to add one before or after the current page. A workbook with
 several worksheets asks which to bring in and whether each prints. Each worksheet
 becomes spreadsheet pages with its cells, formulas, formats, sizes, merges, names,
@@ -1572,15 +1586,17 @@ gives `#REF!`, as in Excel.
 **Self-contained** (the import window's tick, on to start; later on a sheet tab's
 right-click menu or the Properties panel's **Workbook** section):
 
-- **Self-contained**: the workbook's names are its own. Its cells read its names
-  first, then equation variables (`var(X)` always reads the equation's X).
-  Equations read its cells as `Seismic_Actions.H44` and its names only qualified:
-  `Seismic_Actions_NZS1170_5.Cd` (the workbook, named after its file) or
-  `Seismic_Actions.Cd` (a sheet). The Variables panel lists them under the
-  workbook's heading.
-- **Not self-contained**: its names are document variables, read bare. Names
-  already used in the document are listed first, with **Keep self-contained**,
-  **Rename them with the prefix** or **Go ahead**.
+- **Self-contained**: the workbook is closed, as a self-contained calculation
+  block is. Its Excel names are for its own cells: they read them first, then
+  equation variables (`var(X)` always reads the equation's X). Equations reach it
+  only two ways: a cell you name as a **variable** (right-click ▸ **Variable**,
+  read bare: `PGA`), or any cell by sheet and cell, `Seismic_Actions.H44`. Its
+  Excel names (`Cd`, `Seismic_Actions.Cd`) are not the equations', and the
+  Variables panel leaves them out.
+- **Not self-contained**: its Excel names are document variables, read bare, and a
+  sheet's own as `Seismic_Actions.Cd`. Names already used in the document are
+  listed first, with **Keep self-contained**, **Rename them with the prefix** or
+  **Go ahead**.
 
 ### Spreadsheet functions
 

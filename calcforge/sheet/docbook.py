@@ -119,8 +119,8 @@ class DocumentBook:
             return
         self._parked[uid] = sheet
         from .store import name_key, names_homed_on
-        for name, _refers, local, *_rest in names_homed_on(sheet):
-            self.workbook.names.pop(name_key(sheet, name, local), None)
+        for name, _refers, local, _comment, variable in names_homed_on(sheet):
+            self.workbook.names.pop(name_key(sheet, name, local, variable), None)
             self.workbook._name_dirty(name.lower())
         if sheet in self.workbook.sheets:
             self.workbook.sheets.remove(sheet)
@@ -286,8 +286,12 @@ class DocumentBook:
         access outside by itself, only Sheet.name"), read only qualified:
         ``Sheet.Name`` (the name as that sheet's cells read it: the sheet's
         own, then its workbook's, then a name kept with that sheet) or
-        ``Book.Name`` (a self-contained workbook's). A sheet's cell is
-        ``Sheet.H44``; a table's column ``Table.Heading``.
+        ``Book.Name`` (a workbook's that isn't self-contained). A sheet's
+        cell is ``Sheet.H44``; a table's column ``Table.Heading``.
+        A self-contained workbook is closed as a self-contained calculation
+        block is (the user, 2026-10-24): from outside, only its CalcForge
+        variables and its cells as Sheet.H44 are read; its Excel names are
+        for its own cells.
         Sheets are written as their names, or with each run of spaces and
         other characters an equation can't hold as one _ (Seismic Actions:
         Seismic_Actions)."""
@@ -310,6 +314,8 @@ class DocumentBook:
                 ref = parse_cell(rest)
                 if ref is not None and not ref.row_abs and not ref.col_abs:
                     return sheet, RefValue(sheet, ref.row, ref.col, ref.row, ref.col)
+                if self.closed(sheet):
+                    return None
                 local = self._sheets_name(sheet, rest)
                 if local is not None:
                     return self._name_value(local)
@@ -317,11 +323,18 @@ class DocumentBook:
                 if column is not None:
                     return sheet, column
             book = book_named(wb, table)
-            if book is not None:
+            if book is not None and not book.self_contained:
                 own = wb.names.get((rest.lower(), book.id))
                 if own is not None:
                     return self._name_value(own)
         return None
+
+    def closed(self, sheet: Optional[Sheet]) -> bool:
+        """Whether *sheet* is part of a self-contained workbook: its names
+        and headings aren't the equations' (only its cells, as Sheet.H44,
+        and its CalcForge variables)."""
+        book = self.workbook.books.get(sheet.book) if sheet is not None and sheet.book else None
+        return book is not None and book.self_contained
 
     def _sheets_name(self, sheet: Sheet, name: str):
         """The defined name *Sheet.name* means: the sheet's own (local)
@@ -579,26 +592,31 @@ class DocumentBook:
 
     def written_as(self, dn) -> str:
         """How an equation writes a defined name: bare (a CalcForge variable,
-        or a name of a workbook that isn't self-contained), Book.Name (a
-        self-contained workbook's), Sheet.Name (a spreadsheet's own name, of
-        the sheet it is kept with, or a sheet's local name on an imported
-        sheet); "" for a sheet's local name on a sheet or table made here
-        (Excel's scope only)."""
+        or a name of a workbook that isn't self-contained), Sheet.Name (a
+        spreadsheet's own name, of the sheet it is kept with, or a sheet's
+        local name on an imported sheet); "" for a name the equations can't
+        read: a self-contained workbook's Excel names, and a sheet's local
+        name on a sheet or table made here (Excel's scope only)."""
         wb = self.workbook
         if dn.sheet is not None:
             home = wb.sheet_by_id(dn.sheet)
-            return f"{sheet_ident(home.name)}.{dn.name}" if home is not None and home.book else ""
+            if home is None or not home.book or self.closed(home):
+                return ""
+            return f"{sheet_ident(home.name)}.{dn.name}"
         book = wb.books.get(dn.book) if dn.book else None
         if book is not None:
-            return f"{book.name}.{dn.name}" if book.self_contained else dn.name
+            return "" if book.self_contained else dn.name
         if dn.variable:
             return dn.name
         home = self._kept_on(dn)
-        return f"{sheet_ident(home.name)}.{dn.name}" if home is not None else ""
+        return f"{sheet_ident(home.name)}.{dn.name}" if home is not None and not self.closed(home) \
+            else ""
 
     def names(self) -> set:
         out = {self.written_as(dn) for dn in self.workbook.names.values()} - {""}
         for sheet in self.workbook.sheets:
+            if self.closed(sheet):
+                continue
             for (row, col), cell in sheet.cells.items():
                 if row == 0 and isinstance(cell.value, str) and _ident(cell.value):
                     out.add(f"{sheet.name}.{_ident(cell.value)}")

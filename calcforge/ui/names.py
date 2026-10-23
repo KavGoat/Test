@@ -287,7 +287,7 @@ def scope_text(wb, dn) -> str:
         return wb.sheet_by_id(dn.sheet).name
     book = wb.books.get(dn.book) if dn.book else None
     if book is not None:
-        return f"{book.name} ({'self-contained' if book.self_contained else 'document variables'})"
+        return f"{book.name} ({'its cells only' if book.self_contained else 'document variable'})"
     return "Workbook (CalcForge variable)" if dn.variable else "Workbook"
 
 

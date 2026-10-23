@@ -632,8 +632,10 @@ class Workbook:
         F.parse(refers_to)              # raises FormulaError if it can't be read
         where = home or sheet or self._first_sheet_read(refers_to)
         # a name made on an imported workbook's sheet is that workbook's (as
-        # a new name in Excel is the workbook's)
-        book = None if sheet is not None or where is None else where.book
+        # a new name in Excel is the workbook's); a CalcForge variable is the
+        # document's, read bare by the equations whatever its cells are part
+        # of (PGA named on a self-contained workbook was read by nothing)
+        book = None if variable or sheet is not None or where is None else where.book
         dn = DefinedName(name, refers_to, sheet.id if sheet else None, comment,
                          where.id if where else None, book, variable)
         with self.transaction("Define name"):

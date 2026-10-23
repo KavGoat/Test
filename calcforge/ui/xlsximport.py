@@ -8,12 +8,13 @@ when it opens.
 
 A workbook comes in as one (docs/SPREADSHEET_DESIGN.md, the user's answers
 of 2026-10-19): its sheets share its names. Self-contained (the default, a
-tick in the chooser) its names are its own — its cells read them first, the
-equations only qualified (Book.Name, Sheet.Name) — while any of its cells is
-still read by sheet and cell (Sheet.H44). Unticked, its names are document
-variables; names already used in the document are listed, to keep it
-self-contained, rename them with a prefix, or go ahead (reading order then
-decides).
+tick in the chooser) it is closed, as a self-contained calculation block is
+(the user, 2026-10-24): its Excel names are for its own cells, and the
+equations read it only by its CalcForge variables (a cell named in the
+Variable box) and by sheet and cell (Sheet.H44). Unticked, its Excel names
+are document variables (and Sheet.Name reads one); names already used in the
+document are listed, to keep it self-contained, rename them with a prefix, or
+go ahead (reading order then decides).
 """
 from __future__ import annotations
 
@@ -21,12 +22,25 @@ from typing import Optional
 
 from ..core.document import LANDSCAPE, PORTRAIT, Page, PageSetup
 
-OPEN_FILTER = ("Documents and Excel workbooks (*.pdf *.xlsx *.xlsm);;PDF documents (*.pdf);;"
-               "Excel workbooks (*.xlsx *.xlsm);;All files (*)")
+# an Excel template (.xltx, .xltm) is a workbook too, opened as one (a user's
+# Equivalent Static calculation came as one)
+EXCEL_FILTER = "Excel workbooks (*.xlsx *.xlsm *.xltx *.xltm)"
+OPEN_FILTER = ("Documents and Excel workbooks (*.pdf *.xlsx *.xlsm *.xltx *.xltm);;"
+               "PDF documents (*.pdf);;" + EXCEL_FILTER + ";;All files (*)")
+
+
+# what a workbook's Self-contained tick means, said the same way everywhere:
+# a CalcForge variable (a cell named in its Variable box, read bare by the
+# equations) is not an Excel name (the workbook's own, from its Name Manager)
+SELF_CONTAINED_SAYS = ("Self-contained: its Excel names are for its own cells. Equations below "
+                       "read a cell you name as a variable (right-click ▸ Variable), or any cell "
+                       "as Sheet.H44.")
+OPEN_SAYS = ("Not self-contained: its Excel names are document variables, each defined where "
+             "its sheet is, and Sheet.Name reads one.")
 
 
 def is_workbook(path: str) -> bool:
-    return str(path).lower().endswith((".xlsx", ".xlsm"))
+    return str(path).lower().endswith((".xlsx", ".xlsm", ".xltx", ".xltm"))
 
 
 def _setup_for(sheet, base: PageSetup) -> PageSetup:
@@ -221,10 +235,9 @@ def report(window, imported) -> str:
     book = (imported.sheets[0].data.get("book") if imported.sheets else None) or {}
     if book.get("name"):
         if book.get("self_contained", True):
-            lines.append(f"Self-contained: equations below read its cells as Sheet.H44 and its "
-                         f"names as {book['name']}.Name.")
+            lines.append(SELF_CONTAINED_SAYS)
         else:
-            lines.append("Its names are document variables, each defined where its sheet is.")
+            lines.append(OPEN_SAYS)
     renamed = imported.renamed
     if renamed:
         lines.append("Renamed: " + ", ".join(f"{a} → {b}" for a, b in sorted(renamed.items())) + ".")
@@ -412,9 +425,9 @@ class SheetChooser:
         self.self_contained = QCheckBox("Self-contained")
         self.self_contained.setChecked(True)
         self.self_contained.setToolTip(
-            f"Its {count} name{'s' * (count != 1)} stay its own: its cells read them, and "
-            f"equations below read them as {book_name}.Name or Sheet.Name. Any cell can still "
-            f"be read as Sheet.H44. Untick to make its names document variables.")
+            f"Its {count} Excel name{'s' * (count != 1)} stay its own, for its cells only. "
+            f"{SELF_CONTAINED_SAYS[len('Self-contained: '):]} Untick to make its Excel names "
+            "document variables.")
         at = layout.count() - 1
         layout.insertWidget(at, self.self_contained)
         self.scope_note = QLabel("")
@@ -455,9 +468,7 @@ class SheetChooser:
     def _scope_shown(self) -> None:
         on = self.self_contained.isChecked()
         self.clash_box.setVisible(not on and bool(self.clashes))
-        self.scope_note.setText(
-            f"Equations below read its cells as Sheet.H44 and its names as {self.book_name}.Name."
-            if on else "Its names are document variables, each defined where its sheet is.")
+        self.scope_note.setText(SELF_CONTAINED_SAYS if on else OPEN_SAYS)
         self.dialog.adjustSize()
 
     def scope(self) -> tuple:
@@ -587,8 +598,7 @@ def insert_workbook(window, path: Optional[str] = None, index: Optional[int] = N
 
     if path is None:
         from PySide6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getOpenFileName(window, "Insert Excel workbook", "",
-                                              "Excel workbooks (*.xlsx *.xlsm)")
+        path, _ = QFileDialog.getOpenFileName(window, "Insert Excel workbook", "", EXCEL_FILTER)
         if not path:
             return False
     try:

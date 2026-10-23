@@ -8764,8 +8764,9 @@ class MainWindow(QMainWindow):
             menu.close()
         field.returnPressed.connect(on_enter)
         menu.aboutToHide.connect(commit)
-        # the box takes the keys as soon as the menu opens
-        menu.aboutToShow.connect(lambda: field.setFocus(Qt.PopupFocusReason))
+        # the box takes the keys as soon as the menu opens, and the clicks
+        from .namebox import typed_in_a_menu
+        typed_in_a_menu(menu, action, holder, field)
         return action
 
     def _select_block_members(self, block) -> None:

@@ -108,10 +108,13 @@ def names_homed_on(sheet) -> list:
     return out
 
 
-def name_key(sheet, name: str, local: bool) -> tuple:
+def name_key(sheet, name: str, local: bool, variable: bool = False) -> tuple:
     """The key in Workbook.names of a name recorded with *sheet*: local to
-    it, its imported workbook's, or the document's."""
-    return (name.lower(), sheet.id if local else sheet.book)
+    it, its imported workbook's, or the document's (a CalcForge variable
+    always, one recorded with a workbook before 2026-10-24 too)."""
+    if local:
+        return (name.lower(), sheet.id)
+    return (name.lower(), None if variable else sheet.book)
 
 
 def put_book(sheet, data: dict) -> None:
@@ -156,12 +159,12 @@ def load_sheet(sheet, data: dict) -> None:
                 local = bool(entry[2]) if len(entry) > 2 else False
                 comment = entry[3] if len(entry) > 3 else ""
                 variable = bool(entry[4]) if len(entry) > 4 else False
-                key = name_key(sheet, name, local)
+                key = name_key(sheet, name, local, variable)
                 if key not in wb.names:
                     from .workbook import DefinedName
                     wb.names[key] = DefinedName(name, refers_to, sheet.id if local else None,
-                                                comment or "", sheet.id,
-                                                None if local else sheet.book, variable)
+                                                comment or "", sheet.id, key[1] if not local else None,
+                                                variable)
                     if len(entry) <= 4 and key[1] is None:
                         # recorded before names had two kinds: which it is
                         # is settled once the equations are known

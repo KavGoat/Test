@@ -136,6 +136,20 @@ def test_na_is_the_na_error(book):
     assert isinstance(got, ErrorValue) and got.code == "#N/A"
 
 
+@pytest.mark.parametrize("formula, code", [
+    ("FORECAST(1/0,E1:E3,D1:D3)", "#DIV/0!"),       # the x read first
+    ("FORECAST(NA(),{1,2},{3,4})", "#N/A"),
+    ("FORECAST(2,{1;2;3},F1:F3)", "#DIV/0!"),       # F2 is =1/0
+    ("SLOPE(F1:F3,{1;2;3})", "#DIV/0!"),
+    ("CORREL(F1:F3,{1;2;3})", "#DIV/0!"),
+])
+def test_two_series_functions_pass_errors_on(book, formula, code):
+    # an error in a series is the answer in Excel; it used to be skipped and
+    # FORECAST over cells all #REF! gave #DIV/0! (a user's bolt workbook)
+    got = calc(book, formula)
+    assert isinstance(got, ErrorValue) and got.code == code, got
+
+
 ARRAYS = [
     ("CHOOSECOLS({1,2,3;4,5,6},3,1)", [[3, 1], [6, 4]]),
     ("CHOOSEROWS({1,2,3;4,5,6},2)", [[4, 5, 6]]),
