@@ -3,6 +3,11 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-23 (late night) — workbooks in Thumbnails: names, the picked frame, the drop line, zoom (pushed at 8329075)
+
+- Full test run at 8329075 passed (`-n 3`, every-command tests included); 14/14 planted bugs caught.
+- Every workbook made here is "Workbook", "Workbook (2)"…, a copy's copy the next free number; a picked workbook framed all round its stack; the drop line as tall as a page, half way in the gap; pages fitted to a narrow panel when zoomed in: tests/test_thumbnails_workbooks.py.
+
 ## 2026-10-23 (night) — a new workbook beside a workbook, Excel's charts and pictures, INDEX, the Variables panel (pushed at 2371d49)
 
 - Full test run at 704b0a8 passed (`-n 3`); 14/14 planted bugs caught. The quick check passed on 2371d49 before it was pushed.
