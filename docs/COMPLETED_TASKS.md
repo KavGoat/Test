@@ -3,6 +3,16 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-24 (late morning) — Excel names only dialled in, sheet tabs, blocks, the Variables panel's groups, a chart on a page, the Table tool (pushed at f6f3007…2348cc6)
+
+- The quick check passed on 2348cc6 before it was pushed (33.2 min, `-n 3`).
+- A not-self-contained workbook's Excel names read from outside only dialled in (Sheet.Name, Book.Name in equations; ='Quoted sheet'!Name in cells), never bare; a self-contained one's not even dialled in to (not defined; #NAME? with the reason): tests/test_workbook_self_contained.py, tests/test_xlsx_drawings.py, tests/sheet/test_formula_and_inputs.py.
+- Sheet tabs keep their width as one is picked (bold), so none is cut off beside room to spare; Self-contained on a workbook's Thumbnails menu; a picked stack's frame inside its cell: tests/test_excel_tab_row.py, tests/test_thumbnails_workbooks.py, tests/test_workbook_self_contained.py.
+- The Calculation Block button puts down a new empty, self-contained block that leaves the equations it lies over out; pasted and My Tools blocks keep their own; Create Block on selected equations asks Self-contained or not: tests/test_calc_blocks.py, tests/test_definition_order_window.py. The Table tool lets go after one table: tests/test_tables.py.
+- Calculation ▸ Chart with no cells picked puts a chart on the page in view and opens the Chart dialog: tests/test_charts.py.
+- The Variables panel's Blocks and Workbooks groups, each split Self-contained / Not self-contained, closed until clicked, empty ones hidden: tests/test_variables_panel.py, tests/test_workbook_self_contained.py.
+- The Tool Chest focus test failed only after a calc-mode test (also on a57aabf): QTest.mouseMove leaves the screen's pointer where it was, and a closing menu sent the page view under it an Enter. Each test now starts with the pointer where a fresh session has it (tests/conftest.py, `fresh_pointer`).
+
 ## 2026-10-24 (morning) — six workbooks against LibreOffice, a self-contained workbook closed, PGA, the Variable box, FORECAST, Normal view (pushed at 2c9bc11 and 6e06f3a)
 
 - The quick check passed on 6e06f3a before it was pushed (14.6 min, `-n 3`).
