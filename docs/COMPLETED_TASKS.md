@@ -3,6 +3,12 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-24 (night) — bugs found by random sessions (pushed at 1649f97)
+
+- The quick check passed on 1649f97 before it was pushed (15.5 min, `-n 3`).
+- tools/qa/monkey.py: seeded random sessions in the real window, checked after every step (exceptions, the document's invariants, undo and redo giving back exactly what was there, save and reopen); seeds 1–6, 250 steps each, came back clean of everything but one slow step, since fixed.
+- A crash some while after undoing pages deleted or moved, an undo that wrote another page's markups, Delete over open cells clearing the cells, a Stamp click leaving it half drawn, Undo while drawing, typing taken into page changes, other sheets' formulas left at #REF! by Undo, a callout freeze and a snapshot written as <ns0:svg>: tests/test_sheet_markups_and_pages.py, tests/test_calc_editing.py.
+
 ## 2026-10-23 (late night) — workbooks in Thumbnails: names, the picked frame, the drop line, zoom (pushed at 8329075)
 
 - Full test run at 8329075 passed (`-n 3`, every-command tests included); 14/14 planted bugs caught.
