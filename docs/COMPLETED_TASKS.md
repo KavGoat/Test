@@ -3,6 +3,13 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-23 (night) — a new workbook beside a workbook, Excel's charts and pictures, INDEX, the Variables panel (pushed at 2371d49)
+
+- Full test run at 704b0a8 passed (`-n 3`); 14/14 planted bugs caught. The quick check passed on 2371d49 before it was pushed.
+- Insert ▸ Spreadsheet Page on a workbook inserts another workbook, "Workbook (2)", after the whole one (or before it): tests/test_workbook_view.py, tests/test_command_families.py.
+- An Excel workbook's XY scatter, line and column charts and its pictures come in where Excel anchors them, moving with their cells; INDEX with its row left out reads as Excel; the same workbook brought in twice is shown "Name (2)": tests/test_xlsx_drawings.py (a synthetic workbook), tests/test_xlsx_open.py.
+- The Variables panel keeps a workbook's names under its heading, closed until clicked; #REF! names left out: tests/test_xlsx_drawings.py, tests/test_workbook_self_contained.py.
+
 ## 2026-10-23 (later) — the side toolbar's blue gap, a sheet name already taken refused
 
 - The quick check passed on 8982328 before it was pushed.
