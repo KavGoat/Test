@@ -764,9 +764,12 @@ def default_block_style():
 class CalcBlockItem(MarkupItem):
     """A calculation block: a markup of its own that holds equations.
 
-    The equations whose top-left is inside it are its members: they calculate
-    exactly as any other equation does, and move, copy and delete with the
-    block. With Self-contained on, what they define stays inside the block —
+    The equations whose top-left is inside it are its members — but those it
+    was put down over (its outsiders: the user, 2026-10-24, a new block "can
+    overlap other things but wont include it until I type something in"):
+    they calculate exactly as any other equation does, and move, copy and
+    delete with the block. Self-contained to start (the user, 2026-10-24).
+    With Self-contained on, what they define stays inside the block —
     the block still reads everything defined above it, but nothing after it
     sees its names (the same design check twice on one sheet, with the same
     names). Like an equation it is page drawing, never an annotation, and it
@@ -790,7 +793,9 @@ class CalcBlockItem(MarkupItem):
         super().__init__()
         self._rect = QRectF(rect) if rect else QRectF(0, 0, 36 * GRID_PX * PT_PER_PX,
                                                       12 * GRID_PX * PT_PER_PX)
-        self.self_contained = False
+        self.self_contained = True
+        # the uids of equations inside its box that aren't its own
+        self.outsiders: set = set()
         self.style = default_block_style()
         self._sheet = None
         # Its box (scene) and rect at the end of the last gesture: what it held
@@ -829,7 +834,7 @@ class CalcBlockItem(MarkupItem):
             self._sheet = sheet_for(frame.document)
             _connect(self._sheet, frame.scene())
         self._sheet.set_block(self.uid, frame.page.uid, self.reading_rect_px(frame),
-                              self.self_contained)
+                              self.self_contained, self.outsiders)
 
     def _leave_the_sheet(self) -> None:
         if self._sheet is not None:
@@ -863,7 +868,12 @@ class CalcBlockItem(MarkupItem):
         self._tell_the_sheet()
 
     def members(self) -> list:
-        """The equations and Calculation text whose top-left is inside it."""
+        """The equations and Calculation text whose top-left is inside it,
+        but its outsiders."""
+        return [item for item in self.inside() if item.uid not in self.outsiders]
+
+    def inside(self) -> list:
+        """The equations and Calculation text whose top-left is inside its box."""
         frame = self._page_frame()
         if frame is None:
             return []
@@ -875,6 +885,22 @@ class CalcBlockItem(MarkupItem):
             if box.contains(item.pos()):
                 found.append(item)
         return found
+
+    def leave_out(self, items=None) -> None:
+        """What is inside its box now (or *items*) stays out of it: it was
+        put down over them."""
+        chosen = self.inside() if items is None else items
+        uids = {item.uid for item in chosen}
+        if uids - self.outsiders:
+            self.outsiders |= uids
+            self._tell_the_sheet()
+
+    def forget_outsiders(self) -> None:
+        """Outsiders no longer inside its box are none of its business."""
+        inside = {item.uid for item in self.inside()}
+        if self.outsiders - inside:
+            self.outsiders &= inside
+            self._tell_the_sheet()
 
     # -- geometry and drawing ------------------------------------------------------
     def local_rect(self) -> QRectF:
@@ -960,11 +986,14 @@ class CalcBlockItem(MarkupItem):
         data = self.base_dict()
         data["rect"] = [self._rect.x(), self._rect.y(), self._rect.width(), self._rect.height()]
         data["self_contained"] = self.self_contained
+        if self.outsiders:
+            data["outsiders"] = sorted(self.outsiders)
         return data
 
     def deserialize(self, data: dict) -> None:
         self._rect = QRectF(*data.get("rect", [0, 0, 100, 60]))
         self.self_contained = bool(data.get("self_contained", False))
+        self.outsiders = set(data.get("outsiders", ()))
         self.load_base(data)
 
 
@@ -985,6 +1014,27 @@ def closed_block_of(item):
                                  < found._rect.width() * found._rect.height()):
                 found = other
     return found
+
+
+def blocks_put_down(placed: list) -> None:
+    """Blocks just put down — pasted, placed from My Tools, copied onto
+    other pages — hold what came with them, and what they land on stays out
+    of them (the user, 2026-10-24: a block "wont include it until i type
+    somethign in or unless i copy paste a block or my tool a lbock")."""
+    came = {id(i) for i in placed}
+    for item in placed:
+        if isinstance(item, CalcBlockItem):
+            item.outsiders = set()          # the copied block's were its original's
+            item.leave_out([i for i in item.inside() if id(i) not in came])
+            item._tell_the_sheet()
+            item.settle()
+            # and its equations are its own, not those of a block they land in
+            frame = item.parentItem()
+            own = item.members()
+            for other in (frame.markups() if frame is not None else ()):
+                if isinstance(other, CalcBlockItem) and other is not item \
+                        and id(other) not in came:
+                    other.leave_out([m for m in own if m in other.inside()])
 
 
 def with_block_members(items: list) -> list:
@@ -1124,9 +1174,13 @@ def _corner(item) -> QPointF:
     return parent.mapToScene(item.pos()) if parent is not None else item.pos()
 
 
-def _holder(blocks, point: QPointF, settled: bool):
+def _holder(blocks, point: QPointF, settled: bool, uid: Optional[str] = None):
+    """The block holding an equation at *point* (its uid *uid*: a block it is
+    an outsider of doesn't hold it)."""
     found, area = None, None
     for block in blocks:
+        if uid is not None and uid in block.outsiders:
+            continue
         box = block._settled_box if settled else block.scene_box()
         if box is not None and box.contains(point):
             size = box.width() * box.height()
@@ -1145,7 +1199,7 @@ def blocks_holding(scene, moved: list) -> dict:
     held = {}
     for item, _origin in moved:
         if isinstance(item, (CalcItem, CalcTextItem)) and item.parentItem() is not None:
-            block = _holder(blocks, _corner(item), settled=True)
+            block = _holder(blocks, _corner(item), settled=True, uid=item.uid)
             if block is not None and id(block) not in moving:
                 held[id(item)] = block
     return held
@@ -1169,8 +1223,10 @@ def stay_in_block(item, block) -> None:
 def keep_blocks_whole(scene, moved: list) -> str:
     """After a drag or nudge (*moved*: [(item, origin)], origin in the item's
     parent): an equation that was in a block stays in it, one that wasn't
-    can't be dropped into one, and a block can't land on equations that
-    aren't its own. Returns what to tell the user ('' if nothing was undone)."""
+    can't be dropped into one, and a block put down over equations that
+    aren't its own leaves them out (the user, 2026-10-24: it "can overlap
+    other things but wont include it"). Returns what to tell the user ('' if
+    nothing was undone)."""
     blocks = [i for i in scene.items() if isinstance(i, CalcBlockItem)]
     if not blocks:
         return ""
@@ -1186,56 +1242,59 @@ def keep_blocks_whole(scene, moved: list) -> str:
 
     calc_items = [i for i in scene.items() if isinstance(i, (CalcItem, CalcTextItem))
                   and i.parentItem() is not None]
-    # a block put down over equations that aren't its own: the whole move goes back
+    # a block put down over equations that aren't its own: they stay out of it
     for block in blocks:
         if id(block) not in origin_of:
             continue
         own = {id(i) for i in calc_items if block._settled_box is not None
-               and _holder([block], before_point(i), settled=True) is block}
-        if any(id(i) not in own and block.scene_box().contains(_corner(i)) for i in calc_items):
-            for item, origin in moved:
-                item.setPos(origin)
-            said = "A block can't be put down over equations that aren't its own"
-            break
-    else:
-        for item, origin in moved:
-            if not isinstance(item, (CalcItem, CalcTextItem)):
-                continue
-            before = _holder(blocks, before_point(item), settled=True)
-            now = _holder(blocks, _corner(item), settled=False)
-            if before is now:
-                continue
-            if before is None:
-                item.setPos(origin)                    # not dragged into a block
-                said = "Equations can't be dragged into a block — type them inside it"
-                continue
-            # dragged out of its block: kept inside it, at the nearest place
-            box = item.parentItem().mapRectFromScene(before.scene_box())
-            size = item.local_rect()
-            x = min(max(item.pos().x(), box.left()), box.right() - min(size.width(), box.width()) - 1)
-            y = min(max(item.pos().y(), box.top()), box.bottom() - min(size.height(), box.height()) - 1)
-            item.setPos(QPointF(max(x, box.left()), max(y, box.top())))
-            said = "Equations stay in their block — it is a page of its own"
+               and _holder([block], before_point(i), settled=True, uid=i.uid) is block}
+        over = [i for i in calc_items
+                if id(i) not in own and block.scene_box().contains(_corner(i))]
+        if over:
+            block.leave_out(over)
+    for item, origin in moved:
+        if not isinstance(item, (CalcItem, CalcTextItem)):
+            continue
+        before = _holder(blocks, before_point(item), settled=True, uid=item.uid)
+        now = _holder(blocks, _corner(item), settled=False, uid=item.uid)
+        if before is now:
+            continue
+        if before is None:
+            item.setPos(origin)                    # not dragged into a block
+            said = "Equations can't be dragged into a block — type them inside it"
+            continue
+        # dragged out of its block: kept inside it, at the nearest place
+        box = item.parentItem().mapRectFromScene(before.scene_box())
+        size = item.local_rect()
+        x = min(max(item.pos().x(), box.left()), box.right() - min(size.width(), box.width()) - 1)
+        y = min(max(item.pos().y(), box.top()), box.bottom() - min(size.height(), box.height()) - 1)
+        item.setPos(QPointF(max(x, box.left()), max(y, box.top())))
+        said = "Equations stay in their block — it is a page of its own"
     for block in blocks:
+        block.forget_outsiders()
         block.settle()
     return said
 
 
 def keep_block_resize(block) -> str:
-    """After a block's frame is dragged: it may not take in equations that
-    weren't its own, or leave its own out. If it would, the resize goes back."""
+    """After a block's frame is dragged: it may not leave its own equations
+    out (the resize goes back); stretched over equations that weren't its
+    own, it leaves them out (the user, 2026-10-24)."""
     scene = block.scene()
     if scene is None or block._settled_box is None:
         return ""
     calc_items = [i for i in scene.items() if isinstance(i, (CalcItem, CalcTextItem))
-                  and i.parentItem() is not None]
+                  and i.parentItem() is not None and i.uid not in block.outsiders]
     before = {id(i) for i in calc_items if block._settled_box.contains(_corner(i))}
     now = {id(i) for i in calc_items if block.scene_box().contains(_corner(i))}
-    if before == now:
+    if before - now:
+        block.set_local_rect(QRectF(block._settled_rect))
+        block.setPos(block._settled_pos)
         block.settle()
-        return ""
-    block.set_local_rect(QRectF(block._settled_rect))
-    block.setPos(block._settled_pos)
+        return "A block can't be made smaller than what is in it"
+    over = [i for i in calc_items if id(i) in now - before]
+    if over:
+        block.leave_out(over)
+    block.forget_outsiders()
     block.settle()
-    return ("A block can't be made smaller than what is in it" if before - now
-            else "A block can't be stretched over equations that aren't its own")
+    return ""

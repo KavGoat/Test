@@ -375,6 +375,7 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'canvas.select_its_equations': ('Select Its Equations', 'Calculation', 'always'),
     'canvas.remove_block_keep_equations':
         ('Remove Block, Keep Equations', 'Calculation', 'always'),
+    'canvas.create_block': ('Create Block', 'Calculation', 'always'),
     # -- menu ------------------------------------------------------------------
     'menu.file.open_recent.clear_recent_files': ('Clear Recent Files', 'File', 'always'),
     'menu.view.dimmer.0_pct': ('Dimmer 0%', 'View', 'always'),

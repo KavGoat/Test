@@ -898,10 +898,15 @@ equation it is never flattened or hidden.
 
 ### Calculation blocks
 
-**Calculation ▸ Calculation Block** puts a thin grey frame round the selected
-equations (or starts an empty block at the red cross). The equations and text
-whose top-left corner is inside are its members: they move, copy and delete with
-it. Click the frame to select it; double-click to go inside.
+**Calculation ▸ Calculation Block** puts a new, empty block at the red cross,
+whatever is selected; it is **self-contained** to start. It may lie over other
+equations: they stay out of it. What you type inside it is its own, and a block
+pasted or placed from My Tools brings its own equations (what it lands on stays
+out). To make a block of equations already there, select them and right-click
+▸ **Create Block**: it asks whether the block is self-contained. A block's
+equations move, copy and delete with it; it can be moved or stretched over other
+equations, which stay out, but not shrunk off its own. Click the frame to select
+it; double-click to go inside.
 
 Right-click a block: **Self-Contained** keeps what its equations define to itself
 — nothing after the block sees those names, and a small *Self-contained* label

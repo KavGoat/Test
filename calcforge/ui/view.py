@@ -4640,6 +4640,8 @@ class PageView(QGraphicsView):
             item.setSelected(True)
             placed.append(item)
         self._onto_the_calc_grid(placed)
+        from ..items.calc import blocks_put_down
+        blocks_put_down(placed)
         self.commit_snapshot(f"Place {entry.label}")
         self.selectionChanged.emit()
         self._pending_stamp = None

@@ -126,6 +126,11 @@ def fill(window, menu: QMenu, item) -> None:
                         lambda r, on=not region.is_global: setattr(r, "is_global", on),
                         "Make global" if not region.is_global else "Make local")
     made_global.setToolTip("Equations after a section break can use this too")
+    # a block of the equations selected, asked whether self-contained (the
+    # user, 2026-10-24); the Calculation Block button makes an empty one
+    block = menu.addAction("Create Block", lambda: window.create_block(list(items)))
+    block.setToolTip("A calculation block of the selected equations: they move, copy and "
+                     "delete with it; asks whether what they define stays inside it")
     menu.addSeparator()
     equation = menu.addMenu("Equation")
     # first (the user, 2026-10-19): as Edit Text, Edit Table and Edit Chart…

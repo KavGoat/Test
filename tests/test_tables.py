@@ -616,3 +616,35 @@ def test_a_typed_number_widens_a_never_sized_column(w):
     type_text(w, "a long piece of text")
     enter(w)
     assert table.sheet.width(2) == 48, "text runs on instead"
+
+
+def test_in_calc_mode_the_table_button_places_one_table_then_lets_go(w):
+    """The user, 2026-10-24: "in calculation mode if I draw a table and am
+    done, the table icon is still selected and lets me place one ... I had to
+    press the button multiple times for it to let me start placing a table".
+    The canvas went back to Select but the button stayed in."""
+    w.toggle_calc_mode(True)
+    pump()
+    action = w.tool_actions["table"]
+    button = w.calculation_bar.widgetForAction(action)
+    assert button is not None
+
+    def place(x, y):
+        a, b = page_to_scene(w, x, y), page_to_scene(w, x + 140, y + 60)
+        w.view.centerOn(a)
+        drag(w.view, a.x(), a.y(), b.x(), b.y())
+        pump()
+    QTest.mouseClick(button, Qt.LeftButton)
+    pump()
+    assert w.view.tool_key == "table" and action.isChecked()
+    place(72, 100)
+    assert len(tables(w)) == 1
+    assert w.view.tool_key == "select" and not action.isChecked() \
+        and w.tool_actions["select"].isChecked(), "the tool let go, button and all"
+    w.view.tables.close()
+    pump()
+    QTest.mouseClick(button, Qt.LeftButton)          # one press: the next table
+    pump()
+    assert w.view.tool_key == "table" and action.isChecked()
+    place(72, 400)
+    assert len(tables(w)) == 2

@@ -51,7 +51,8 @@ class DocumentSheet:
         # Asked to call settle() soon (the UI posts it to the event loop).
         self.request_settle: Optional[Callable[[], None]] = None
         # Calculation blocks (items/calc.py CalcBlockItem): block uid ->
-        # (page uid, (left, top, right, bottom) in reading pixels, self-contained)
+        # (page uid, (left, top, right, bottom) in reading pixels, self-contained,
+        # the uids of the equations inside its box that aren't its own)
         self.blocks: dict[str, tuple] = {}
         self._blocks_dirty = False
 
@@ -247,10 +248,12 @@ class DocumentSheet:
 
     # -- calculation blocks ------------------------------------------------------------
     def set_block(self, uid: str, page_uid: Optional[str], rect_px: tuple,
-                  self_contained: bool) -> None:
-        """A calculation block is here (or has moved, been resized or had
-        Self-contained turned on or off)."""
-        said = (page_uid, tuple(float(v) for v in rect_px), bool(self_contained))
+                  self_contained: bool, outsiders=()) -> None:
+        """A calculation block is here (or has moved, been resized, had
+        Self-contained turned on or off, or been put over equations that stay
+        out of it: *outsiders*, their item uids)."""
+        said = (page_uid, tuple(float(v) for v in rect_px), bool(self_contained),
+                frozenset(outsiders))
         if self.blocks.get(uid) == said:
             return
         self.blocks[uid] = said
@@ -272,15 +275,22 @@ class DocumentSheet:
     def block_of(self, region: Region, contained_only: bool = False) -> Optional[str]:
         """The block a region is inside (the smallest, when blocks overlap;
         only self-contained ones if asked): a region is inside when its
-        top-left is."""
+        top-left is, unless the block was put over it (an outsider: the user,
+        2026-10-24, a new block "can overlap other things but wont include
+        it")."""
         page = self._page_of.get(region.id)
         at = self._local.get(region.id)
         if page is None or at is None:
             return None
         x, y = at
+        item = (getattr(self, "items", None) or {}).get(region.id)
+        own_uid = getattr(item, "uid", None)
         best, area = None, None
-        for uid, (block_page, (left, top, right, bottom), contained) in self.blocks.items():
+        for uid, (block_page, (left, top, right, bottom), contained, outsiders) \
+                in self.blocks.items():
             if contained_only and not contained:
+                continue
+            if own_uid is not None and own_uid in outsiders:
                 continue
             if block_page == page and left <= x < right and top <= y < bottom:
                 size = (right - left) * (bottom - top)
@@ -289,7 +299,7 @@ class DocumentSheet:
         return best
 
     def _scopes(self) -> dict:
-        if not any(on for (_p, _r, on) in self.blocks.values()):
+        if not any(on for (_p, _r, on, _out) in self.blocks.values()):
             return {}
         scopes = {}
         for region in self.worksheet.regions:

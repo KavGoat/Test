@@ -2063,8 +2063,11 @@ class TableEditing:
         self.view.begin_snapshot([frame])
         frame.add_markup(item, rect.topLeft())
         self.view.commit_snapshot("Add table")
-        self.view.set_tool("select")
-        window.sync_tool_buttons() if hasattr(window, "sync_tool_buttons") else None
+        # done with the tool as with any other (kept in hand only when the
+        # tool is locked): the toolbar's Table goes out too, so one press
+        # starts the next table (the user, 2026-10-24: "the table icon is
+        # still select ... I had to press the button multiple times")
+        self.view.finish_tool()
         self.open(item, (0, 0))
 
     # -- typing into a cell --------------------------------------------------------------------

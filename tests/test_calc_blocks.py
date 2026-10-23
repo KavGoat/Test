@@ -57,7 +57,9 @@ def two_checks(v):
     v.view.scene().clearSelection()
     for item in inside:
         item.setSelected(True)
-    v.window.insert_block()
+    # right-click ▸ Create Block, answered Not self-contained (2026-10-24)
+    v.window.block_self_contained_answer = False
+    v.window.create_block()
     (block,) = blocks(v.window)
     settle(v.window)
     return block, made[18], inside, [made[360], made[396]]
@@ -344,7 +346,9 @@ def test_moving_inside_the_block_is_fine(v):
     assert member.pos().x() > inside[1].pos().x()
 
 
-def test_a_block_cant_be_stretched_over_other_equations_or_shrunk_off_its_own(v):
+def test_a_block_stretched_over_other_equations_leaves_them_out_but_cant_shrink_off_its_own(v):
+    """The user, 2026-10-24: a block "can overlap other things but wont
+    include it" (it used to refuse the stretch)."""
     block, outside, inside, after = two_checks(v)
     rect = QRectF(block.local_rect())
     v.window.select_tool("select")
@@ -353,7 +357,15 @@ def test_a_block_cant_be_stretched_over_other_equations_or_shrunk_off_its_own(v)
     corner = block.mapToScene(block.local_rect().bottomRight())
     drag(v.view, corner.x(), corner.y(), corner.x(), corner.y() + 300)   # over x= and y=
     settle(v.window)
-    assert block.local_rect() == rect and len(block.members()) == 3
+    assert block.local_rect().height() > rect.height()
+    assert set(block.members()) == set(inside), "x= and y= under it stay out"
+    assert set(after) <= set(block.inside())
+    assert shown(after[0]) == "5" and shown(after[1]) == "2"
+    v.window.undo_stack.undo()
+    settle(v.window)
+    (block,) = blocks(v.window)
+    assert block.local_rect() == rect and not block.outsiders
+    block.setSelected(True)
     corner = block.mapToScene(block.local_rect().bottomRight())
     drag(v.view, corner.x(), corner.y(), corner.x(), corner.y() - 80)    # off its own
     settle(v.window)
@@ -375,7 +387,12 @@ def test_typing_inside_a_block_puts_the_equation_in_it(v):
     assert len(block.members()) == 4
 
 
-def test_a_block_says_when_its_box_takes_in_more_than_was_selected(v):
+def test_create_block_holds_only_the_equations_selected_and_asks_self_contained(v, monkeypatch):
+    """The user, 2026-10-24: "if i select an equation or a bunch of equations
+    and right click and create a block, it will create a block and ask if it
+    is supposed to be self contained or not". One between them in its box
+    stays out (it used to be taken in, with a note)."""
+    from PySide6.QtWidgets import QMessageBox
     for y, keys in ((18, "x:1"), (60, "y:2"), (100, "z:3")):
         v.type_at(36, y, "")
         v.keys(keys)
@@ -385,9 +402,87 @@ def test_a_block_says_when_its_box_takes_in_more_than_was_selected(v):
     v.view.scene().clearSelection()
     made[0].setSelected(True)
     made[2].setSelected(True)
-    v.window.insert_block()
-    assert "also holds 1 more" in v.window.status_hint.text()
-    assert "y≔2" in v.window.status_hint.text()
+    menu = v.window.build_context_menu(made[0], made[0].sceneBoundingRect().center())
+    (create,) = [a for a in menu.actions() if a.text() == "Create Block"]
+    v.window.interactive_prompts = True
+    asked = []
+
+    def answer(box):
+        asked.append(box.text())
+        return QMessageBox.No                          # not self-contained
+    monkeypatch.setattr(QMessageBox, "exec", answer)
+    create.trigger()
+    settle(v.window)
+    v.window.interactive_prompts = False
+    assert asked and "self-contained" in asked[0]
+    (block,) = blocks(v.window)
+    assert set(block.members()) == {made[0], made[2]} and made[1] in block.inside()
+    assert not block.self_contained
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: QMessageBox.Cancel)
+    v.window.interactive_prompts = True
+    made[1].setSelected(True)
+    assert v.window.create_block([made[1]]) is None, "Cancel makes none"
+    v.window.interactive_prompts = False
+    assert len(blocks(v.window)) == 1
+
+
+def test_the_block_button_places_a_new_self_contained_block_over_nothing_of_its_own(v):
+    """The user, 2026-10-24: "if i have click an equaiton on the page and then
+    click claculaiton block, currenlty it add that to the block, dont, click
+    clauction block lets me place a new block and it cna ovelrap other
+    things but wont include it until i type somethign in". Self-contained by
+    default."""
+    for y, keys in ((18, "a:1"), (60, "b:a+1")):
+        v.type_at(36, y, "")
+        v.keys(keys)
+        v.press(Qt.Key_Return)
+    v.calc.leave()
+    first, second = sorted(equations(v.window), key=lambda i: i.pos().y())
+    v.view.scene().clearSelection()
+    first.setSelected(True)                       # an equation clicked
+    v.calc.place_cross(v.frame, first.pos())      # where the block goes: over it
+    v.window.act_insert_block.trigger()
+    settle(v.window)
+    (block,) = blocks(v.window)
+    assert block.self_contained, "self-contained to start"
+    assert first in block.inside() and block.members() == [], "over it, not holding it"
+    assert v.window.undo_stack.undoText() == "Add calculation block"
+    # the equation still calculates as before, and stays its own markup
+    settle(v.window)
+    assert shown(second) is None or "not defined" not in (shown(second) or "")
+    # typed into the block: that one is its own
+    open_by_double_click(v, block)
+    box = block.local_rect()
+    point = block.mapToParent(QPointF(box.right() - 40, box.bottom() - 14))
+    v.calc.place_cross(v.frame, point)
+    v.keys("c:3")
+    v.press(Qt.Key_Return)
+    v.calc.leave()
+    settle(v.window)
+    assert [m.text() for m in block.members()] == ["c≔3"]
+    # saved with the page and brought back: still out, still in
+    v.window.undo_stack.undo()
+    v.window.undo_stack.redo()
+    settle(v.window)
+    (block,) = blocks(v.window)
+    assert [m.text() for m in block.members()] == ["c≔3"]
+    assert {i.text() for i in block.inside()} >= {"a≔1", "c≔3"}
+
+
+def test_a_pasted_block_brings_its_own_and_leaves_what_it_lands_on_out(v):
+    block, outside, inside, after = two_checks(v)
+    v.view.scene().clearSelection()
+    block.setSelected(True)
+    v.window.copy_selection()
+    v.window.view.scene().clearSelection()
+    v.calc.leave()
+    before = set(blocks(v.window))
+    v.window.paste_in_place()                     # right over the original
+    settle(v.window)
+    (copy,) = [b for b in blocks(v.window) if b not in before]
+    assert len(copy.members()) == 3, "its own three came with it"
+    assert not set(copy.members()) & set(inside), "not the original's"
+    assert set(block.members()) == set(inside), "nor the copy's the original's"
 
 
 def test_a_blocks_menu_and_properties_offer_what_applies_to_it(v):

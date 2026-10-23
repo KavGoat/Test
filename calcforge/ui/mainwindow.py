@@ -1717,9 +1717,10 @@ class MainWindow(QMainWindow):
         self._act("insert_plot", "Plot", self.insert_plot,
                   tip="A 2-D plot at the red cross or the pointer (@ in Calc mode)")
         self._act("insert_block", "Calculation Block", self.insert_block,
-                  tip="A calculation block round the selected equations, or at the red "
-                      "cross: its equations move, copy and delete with it, and it can "
-                      "keep what they define to itself (Self-contained)")
+                  tip="A new calculation block at the red cross: what you type in it is "
+                      "its own, moving, copying and deleting with it, and kept to itself "
+                      "(Self-contained, on to start). To make one of equations already "
+                      "there, select them and right-click ▸ Create Block")
         self._act("insert_table", TOOL_MAP["table"].label, self.insert_table,
                   tip=TOOL_MAP["table"].hint)
         self._act("insert_chart", "Chart", lambda: self.insert_chart(),
@@ -8644,50 +8645,104 @@ class MainWindow(QMainWindow):
         done_with(dialog)
 
     def insert_block(self) -> None:
-        """A calculation block round the selected equations (on the page of the
-        first), or a new empty one at the red cross or under the pointer."""
-        from ..items.calc import CalcBlockItem, CalcItem, CalcTextItem
+        """A new, empty calculation block at the red cross or under the
+        pointer, whatever is selected (the user, 2026-10-24: with an equation
+        clicked, the block took it in — "dont"). It may lie over other
+        equations and leaves them out; what is typed in it is its own.
+        Self-contained to start. Right-click ▸ Create Block makes one of the
+        equations selected (create_block)."""
+        from ..items.calc import CalcBlockItem
         from .calcedit import GRID_PT, snap
 
         calc = self.view.calc
         calc.leave()
-        chosen = [i for i in self.selected_items()
-                  if isinstance(i, (CalcItem, CalcTextItem)) and i.parentItem() is not None]
-        if chosen:
-            frame = chosen[0].parentItem()
-            chosen = [i for i in chosen if i.parentItem() is frame]
-            box = QRectF()
-            for item in chosen:
-                box = box.united(item.mapRectToParent(item.local_rect()))
-            left, top = snap(box.left() - GRID_PT), snap(box.top() - GRID_PT)
-            right = snap(box.right() + 2 * GRID_PT)
-            bottom = snap(box.bottom() + 2 * GRID_PT)
-        else:
-            frame, point = calc._where_typing_starts()
-            if frame is None:
-                return
-            left, top = snap(point.x()), snap(point.y())
-            right, bottom = left + 36 * GRID_PT, top + 12 * GRID_PT
-        block = CalcBlockItem(QRectF(0, 0, right - left, bottom - top))
+        frame, point = calc._where_typing_starts()
+        if frame is None:
+            return
+        from .sheetpages import blocks_calc
+        if blocks_calc(frame):
+            self.status_hint.setText("Calculation blocks don't go on spreadsheet pages")
+            return
+        left, top = snap(point.x()), snap(point.y())
+        block = CalcBlockItem(QRectF(0, 0, 36 * GRID_PT, 12 * GRID_PT))
         block.author = self.document.settings.default_author or self.document.author
         self.view.begin_snapshot([frame])
         frame.add_markup(block, QPointF(left, top))
+        block.leave_out()                      # what it was put down over stays out
+        block.settle()
         self.view.scene().clearSelection()
         block.setSelected(True)
         self.view.commit_snapshot("Add calculation block")
         calc.clear_cross()
         self.refresh_selection()
-        # a box takes in whatever is inside it: say so when that is more than
-        # what was selected
-        extra = [i for i in block.members() if i not in chosen]
-        if chosen and extra:
-            names = ", ".join(i.text() if hasattr(i, "text") and callable(i.text) else "text"
-                              for i in extra[:3])
-            self.status_hint.setText(
-                f"The block also holds {len(extra)} more inside its box: {names}")
-        else:
-            self.status_hint.setText("Calculation block: its equations stay in it; "
-                                     "right-click for Self-contained")
+        self.status_hint.setText(
+            "Calculation block (self-contained): what you type in it is its own; "
+            "equations it lies over stay out · right-click for Self-contained")
+
+    def create_block(self, items: Optional[list] = None) -> Optional[object]:
+        """Right-click ▸ Create Block: a calculation block round the
+        equations selected (on the page of the first), asking whether it is
+        self-contained (the user, 2026-10-24). Other equations inside its box
+        stay out of it. The block, or None (cancelled, or nothing to put in)."""
+        from ..items.calc import CalcBlockItem, CalcItem, CalcTextItem
+        from .calcedit import GRID_PT, snap
+
+        calc = self.view.calc
+        calc.leave()
+        chosen = [i for i in (items if items is not None else self.selected_items())
+                  if isinstance(i, (CalcItem, CalcTextItem)) and i.parentItem() is not None]
+        if not chosen:
+            self.status_hint.setText("Create Block: select the equations to put in it first")
+            return None
+        frame = chosen[0].parentItem()
+        chosen = [i for i in chosen if i.parentItem() is frame]
+        contained = self._ask_block_self_contained(len(chosen))
+        if contained is None:
+            return None
+        box = QRectF()
+        for item in chosen:
+            box = box.united(item.mapRectToParent(item.local_rect()))
+        left, top = snap(box.left() - GRID_PT), snap(box.top() - GRID_PT)
+        right = snap(box.right() + 2 * GRID_PT)
+        bottom = snap(box.bottom() + 2 * GRID_PT)
+        block = CalcBlockItem(QRectF(0, 0, right - left, bottom - top))
+        block.self_contained = contained
+        block.author = self.document.settings.default_author or self.document.author
+        self.view.begin_snapshot([frame])
+        frame.add_markup(block, QPointF(left, top))
+        mine = {id(i) for i in chosen}
+        block.leave_out([i for i in block.inside() if id(i) not in mine])
+        block.settle()
+        self.view.scene().clearSelection()
+        block.setSelected(True)
+        self.view.commit_snapshot("Create block")
+        self.refresh_selection()
+        self.status_hint.setText(
+            f"Calculation block of {len(chosen)} equation{'s' * (len(chosen) != 1)}"
+            + (", self-contained" if contained else ""))
+        return block
+
+    def _ask_block_self_contained(self, count: int) -> Optional[bool]:
+        """Whether a block made of *count* equations is self-contained: asked
+        (Yes, No, Cancel: None); self-contained when nobody is there to ask."""
+        answer = getattr(self, "block_self_contained_answer", None)   # a test's answer
+        if answer is not None:
+            return answer
+        if not getattr(self, "interactive_prompts", True):
+            return True
+        from PySide6.QtWidgets import QMessageBox
+        box = QMessageBox(QMessageBox.Question, "Create Block",
+                          f"Make the block of {count} equation{'s' * (count != 1)} "
+                          "self-contained?\n\nSelf-contained: what its equations define "
+                          "stays inside it; nothing after the block sees those names.",
+                          QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, self)
+        box.setDefaultButton(QMessageBox.Yes)
+        box.button(QMessageBox.Yes).setText("Self-contained")
+        box.button(QMessageBox.No).setText("Not self-contained")
+        got = box.exec()
+        if got == QMessageBox.Cancel:
+            return None
+        return got == QMessageBox.Yes
 
     def set_measure_variable(self, item, name: str) -> bool:
         """Name a measurement's value for the calculations (decision 24), or
@@ -10711,6 +10766,7 @@ class MainWindow(QMainWindow):
         renamed: dict = {}
         frame = self.view.typing_frame()
         placed = 0
+        items = []
         for entry in payload:
             copy = dict(entry)
             copy["uid"] = os.urandom(8).hex()
@@ -10722,7 +10778,10 @@ class MainWindow(QMainWindow):
                 item.load_from_document(self.document)
             frame.add_markup(item)
             item.setSelected(True)
+            items.append(item)
             placed += 1
+        from ..items.calc import blocks_put_down
+        blocks_put_down(items)
         self.view.commit_snapshot("Paste in place")
         self.refresh_selection()
         self.status_hint.setText(
@@ -11014,6 +11073,7 @@ class MainWindow(QMainWindow):
         # A pasted group is a group of its own: the members stay together, but
         # they are not the same group as the ones they were copied from.
         renamed: dict[str, str] = {}
+        placed = []
         for entry in payload:
             copy = dict(entry)
             copy["uid"] = os.urandom(8).hex()
@@ -11028,6 +11088,9 @@ class MainWindow(QMainWindow):
                 item.load_from_document(self.document)
             frame.add_markup(item)
             item.setSelected(True)
+            placed.append(item)
+        from ..items.calc import blocks_put_down
+        blocks_put_down(placed)
         self.view.commit_snapshot("Paste")
         self.refresh_selection()
 
@@ -12138,14 +12201,18 @@ class MainWindow(QMainWindow):
                   if self.document.pages[index].frame is not None]
         self.view.begin_snapshot(frames)
         from ..items.base import rename_groups
+        from ..items.calc import blocks_put_down
         for frame in frames:
             renamed: dict = {}            # one fresh group per page
+            placed = []
             for payload, where in payloads:
                 data = dict(payload, uid=os.urandom(8).hex())
                 rename_groups(data, renamed)
                 copy = build_item(data)
                 if copy is not None:
                     frame.add_markup(copy, where)
+                    placed.append(copy)
+            blocks_put_down(placed)
         self.view.commit_snapshot("Apply to Pages")
         self.status_hint.setText(f"Copied onto {len(frames)} page(s)")
         return len(frames)
