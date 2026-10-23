@@ -73,12 +73,15 @@ def spec_from_selection(sheet, block: tuple, kind: str, lines: bool = False,
 
 
 def insert_chart(tables, kind: str = "scatter", lines: bool = False, markers: bool = True):
-    """Chart the selection of the open table; the chart goes beside it."""
+    """Chart the selection of the open table; the chart goes beside it. With
+    no cells open, a chart on the page in view, at the red cross or the
+    middle of what is in sight, and the Chart dialog to say which cells it
+    charts — any sheet's or table's (decision of 2026-10-10: charts go on
+    any page; the user, 2026-10-24: "cant insert chart into a normal page")."""
     item = tables.item
     view = tables.view
     if item is None or item.sheet is None:
-        view.statusMessage.emit("Pick out cells in a table first, then Insert ▸ Chart")
-        return None
+        return _chart_on_the_page(view, kind, lines, markers)
     block = tables.selection()
     if block[0] == block[2] and block[1] == block[3]:
         used = item.sheet.data_area() if hasattr(item.sheet, "data_area") else None
@@ -98,6 +101,40 @@ def insert_chart(tables, kind: str = "scatter", lines: bool = False, markers: bo
     refresh = getattr(window, "refresh_selection", None)
     if refresh is not None:
         refresh()
+    return chart
+
+
+def _chart_on_the_page(view, kind: str, lines: bool, markers: bool):
+    """An empty chart on the page in view, its data chosen in the dialog."""
+    window = view.window
+    calc = getattr(view, "calc", None)
+    cross = getattr(calc, "cross", None)
+    if cross is not None and cross[0].scene() is not None:
+        frame, where = cross
+    else:
+        frame = view.frame()
+        if frame is None:
+            return None
+        middle = frame.mapFromScene(view.mapToScene(view.viewport().rect().center()))
+        page = frame.page_rect()
+        where = QPointF(max(page.left() + 18, middle.x() - 180),
+                        max(page.top() + 18, middle.y() - 108))
+    spec = new_spec(kind)
+    spec["lines"], spec["markers"] = lines, markers
+    spec["series"] = [new_series()]            # its cells to say, in the dialog
+    chart = ChartItem(spec)
+    chart.author = window.document.settings.default_author or window.document.author
+    view.begin_snapshot([frame])
+    frame.add_markup(chart, where)
+    view.commit_snapshot("Insert chart")
+    view.scene().clearSelection()
+    chart.setSelected(True)
+    refresh = getattr(window, "refresh_selection", None)
+    if refresh is not None:
+        refresh()
+    view.statusMessage.emit("Chart: say which cells it charts (Series: X and Y values, "
+                            "e.g. Loads!$A$2:$A$9) · double-click it to change it")
+    edit_chart(window, chart)
     return chart
 
 

@@ -231,3 +231,35 @@ def test_double_click_opens_the_chart_dialog(w):
     click(w, pos, double=True)
     assert getattr(w, "_last_chart_dialog", None) is not None
     assert w.view.tables.item is None
+
+
+def test_a_chart_goes_on_a_normal_page_its_cells_chosen_in_the_dialog(w):
+    """The user, 2026-10-24: "cant insert chart into a normal page still" —
+    Insert ▸ Chart wanted a table's cells open. With none, a chart goes on
+    the page in view and the Chart dialog asks which cells it charts (the
+    decision of 2026-10-10: charts on any page, reading any sheet or table)."""
+    from calcforge.ui.chartdialog import apply_dialog
+    table = deflections(w)
+    w.view.tables.close()
+    w.add_page()
+    pump()
+    w.go_to_page(1)
+    pump()
+    w.interactive_prompts = False
+    chart = w.insert_chart()
+    pump()
+    assert chart is not None and chart in charts(w)
+    assert chart.parentItem() is w.document.pages[1].frame, "on the page in view"
+    assert w.undo_stack.undoText() == "Insert chart"
+    assert ink(chart) >= 0, "an empty chart draws without its cells"
+    dialog = w._last_chart_dialog
+    dialog.series_list.setCurrentRow(0)
+    name = table.sheet.name
+    from calcforge.sheet.refs import quote_sheet
+    dialog.s_x.setText(f"{quote_sheet(name)}!$A$2:$A$6")
+    dialog.s_y.setText(f"{quote_sheet(name)}!$B$2:$B$6")
+    apply_dialog(w, chart, dialog)
+    pump()
+    (chart,) = charts(w)
+    assert chart.spec["series"][0]["y"].endswith("!$B$2:$B$6")
+    assert ink(chart) > 500, "it charts the table's cells from another page"

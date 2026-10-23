@@ -1724,9 +1724,11 @@ class MainWindow(QMainWindow):
         self._act("insert_table", TOOL_MAP["table"].label, self.insert_table,
                   tip=TOOL_MAP["table"].hint)
         self._act("insert_chart", "Chart", lambda: self.insert_chart(),
-                  tip="A chart of the cells picked out in a table: XY scatter, line or "
-                      "column, with log axes, error bars and trendlines (double-click it "
-                      "to change it)")
+                  tip="A chart of the cells picked out in a table or sheet, beside them; "
+                      "with none picked, on the page in view, its cells chosen in the "
+                      "Chart dialog (any sheet's or table's). XY scatter, line or column, "
+                      "with log axes, error bars and trendlines (double-click it to "
+                      "change it)")
         self._act("calc_rules", "Conditional Formatting…", self.conditional_formatting_rules,
                   tip="Presets of rules that colour and size equations by their result "
                       "(DCR > 1 red…), and which variable names use them")

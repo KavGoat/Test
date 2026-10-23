@@ -1490,7 +1490,10 @@ Pick cells and choose **Calculation ▸ Chart**, right-click ▸ **Insert ▸ Ch
 (XY Scatter, Scatter with Lines, Line, Column), or press `Alt+F1`. The first
 column is x (or the categories), each other column a series, and headings in the
 first row name the series. A chart goes anywhere — over a sheet's cells (moving
-with them) or on any page — and follows its cells as they change.
+with them) or on any page — and follows its cells as they change. With no cells
+picked, **Calculation ▸ Chart** puts a chart on the page in view and opens the
+Chart dialog: give its **X values** and **Y values** (`Loads!$A$2:$A$9`, any sheet
+or table) under **Series**.
 
 Double-click a chart (or Properties ▸ **Edit Chart…**) for the **Chart** dialog:
 **Type** (XY scatter, Scatter with lines, Scatter with lines only, Line, Line with
