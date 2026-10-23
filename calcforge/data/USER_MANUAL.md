@@ -142,18 +142,12 @@ page.
 After one markup the tool goes back to Select. Turn on **Reuse** (Tools menu or
 status bar) to keep drawing with the same tool.
 
-**Snapping.** While you draw, the pointer catches corners, midpoints, centres
-and line ends of markups (**Snap to Markup**), of the PDF's own drawing (**Snap
-to Content**) and the page grid (**Snap to Grid**); **Align to Markups** and
-**Align to Content** line a new point up level with or under one already there.
-What has been caught is marked with a small orange square and named in the
-status bar. With **Snap to Grid** on, every point drawn, moved or resized goes
-on the grid (6.75 pt, SMath's): a corner or a line end is caught only where the
-pointer is nearer to it than to the grid's nearest point, and a point lined up
-one way stays on the grid the other way; the marker shows the grid point. It
-does not apply on a spreadsheet's pages, which have cells instead (as in Excel).
-Hold `Ctrl` while dragging to let go of snapping for that drag. All of these are
-on **View** and on the status bar's **Snap ▾**.
+**Snapping.** While you draw, the pointer catches corners, midpoints, centres and
+line ends of markups (**Snap to Markup**), of the PDF's drawing (**Snap to
+Content**) and the grid (**Snap to Grid**, 6.75 pt, as SMath's; not on spreadsheet
+pages); **Align to Markups** and **Align to Content** line a point up with one
+already there. An orange square marks what was caught. Hold `Ctrl` while dragging
+to drop snapping for that drag. All are on **View** and the status bar's **Snap ▾**.
 
 **Typing straight onto the page.** On bare paper in Markup mode, `"` starts a
 text box where the pointer is, `|` a note and `@` a callout. Any other letter
@@ -200,11 +194,8 @@ its default (see *Markup styles and defaults*).
   the size on the page.
 - **Polygon** (`P`) — click each corner, double-click to close.
 - **Cloud** (`C`) — a revision cloud: drag a rectangle, or click corner by corner
-  for a free-form cloud; a double-click, a click on the first corner again,
-  `Enter` or a right-click closes it. As in Revu, the cloud is a ring of
-  overlapping scallops centred on the outline, one on every corner and the rest
-  spaced evenly along each side, each tucked behind the one before;
-  **Cloud intensity** sets how big they are.
+  for a free-form one (a double-click, the first corner again, `Enter` or a
+  right-click closes it). **Cloud intensity** sets the scallops' size.
 - **Highlight Area** (`J`) — drag over anything to highlight it. It darkens what is
   underneath rather than covering it.
 - **Mark for Redaction** — an opaque box over what is to be removed. Nothing is
@@ -215,60 +206,22 @@ its default (see *Markup styles and defaults*).
 
 #### Annotate
 
-- **Text Box** (`T`) — drag the box, then type. With Autosize text on
-  (Preferences) the box grows as you type; **Auto-Size** (`Alt+Z`) brings it back
-  round the words, at their line spacing and margins (the font size stays as it
-  is). It works on text boxes, typewriter text, callouts and Cloud+ notes; the
-  callout's Properties toolbar also has it as **Fit to text**. Double-click to
-  edit the words again.
-- **Callout** (`Q`) — click what it points at, then click where the words go. The
-  first click snaps to what is drawn; the box for the words follows the pointer
-  exactly and lands where it was shown (on the grid when you snap to it), and its
-  leader keeps to the side it leaves by until another side clearly faces what it
-  points at, so it does not jump from side to side. The same goes for Cloud+. Drag
+- **Text Box** (`T`) — drag the box, then type; double-click to edit again.
+  **Auto-Size** (`Alt+Z`) fits the box round the words (also on callouts and
+  Cloud+, where it is **Fit to text**).
+- **Callout** (`Q`) — click what it points at, then click where the words go. Drag
   the orange diamonds to move the leader. Right-click for **Add Arrow Leader**,
-  **Add Cloud Leader** and **Remove Leader**. **Add Cloud Leader** draws the
-  cloud by hand, as the Cloud tool does: press and drag a rectangle round the
-  area, or click its corners for a free-form one; the leader then joins it, in
-  one undo step. `Esc` puts it down with nothing changed. A cloud leader ends on
-  the cloud's scalloped edge.
-- **Cloud+** (`Shift+Q`) — a cloud and its note as one markup, drawn as in Revu:
-  press and drag for a rectangular cloud of that size, or click its corners for a
-  free-form one (a double-click, a click on the first corner again, `Enter` or a
-  right-click closes it); then click where the words go — the leader joins them —
-  and type. The cloud, its leader and the words are one undo step. A Cloud+ kept
-  in a tool set to draw with its properties is drawn with the Cloud+ tool.
-- **Checkbox** — options with a box to tick beside each, as on a review stamp, all
-  in one markup typed like a text box. Click to put one down with one option
-  (Option 1) picked ready to type over; it is not dragged to a size. Each line
-  you type is one option: `Enter` adds the next, `Backspace` at the start of a line
-  joins it to the one above, and a tick stays with its option as lines are added,
-  joined or taken away. With Select, a click **on a box** ticks or unticks it (one
-  undo step) — also inside a group, unless it is locked; a click anywhere else
-  picks the markup up as usual, and a double-click on the words edits them. It is
-  only the options: no heading or caption of its own (group it with a text box or
-  other markups to build a stamp). Making it narrower wraps an option's words onto
-  the next line, hanging under the words rather than the box; only the font size
-  makes the boxes, and the whole Checkbox, bigger; `Alt+Z` fits it round its
-  options. Its settings are in the Properties panel's **Checkbox** section:
-  **Options** (tick, or double-click to rename, each option; **Add Option**,
-  **Remove Option**, **Move Up**, **Move Down**), **Box** (Square, Rounded square,
-  Circle, Diamond), **Mark** (Tick — a heavy tick, as made by hand, running out past
-  the box on both sides — Cross, Filled, Dot), **Multiple Selection** (on:
-  several may be ticked; off: ticking one unticks the others), **Box Colour** and
-  **Mark Colour** (the words' colour to begin with), **Option Spacing** (the space
-  between options, as a share of the font size) and **Line Spacing**; Box ▾, Mark ▾
-  and Multiple are on the Properties toolbar too. Everything a text box has also
-  applies: border colour, width and line style (none to begin with), fill,
-  opacity, font, size, colour, bold, italic and underline, alignment and margin.
-  The ticked options are its **Checked** property, shown in the Markups List's
-  Checked column ("Satisfactory", or "A; C" for several); the Subject is Checkbox.
-  A Checkbox style (Markup Styles, Tool Chest) keeps its box, mark and Multiple
-  Selection. Saved to PDF it is a stamp annotation drawn exactly as here: in other
-  PDF readers it shows as drawn and can be moved or resized, but its options and
-  ticks are changed only in CalcForge (its contents read "☑ Satisfactory",
-  "☐ Rejected" … for searching); moved or resized there, it opens here where it
-  was put.
+  **Add Cloud Leader** (drag or click a cloud round the area) and **Remove Leader**.
+- **Cloud+** (`Shift+Q`) — a cloud and its note as one markup: drag or click the
+  cloud, then click where the words go, and type.
+- **Checkbox** — options with a box to tick beside each, in one markup typed like
+  a text box: click to put one down, type one option a line (`Enter` for the next);
+  with Select a click on a box ticks it. The Properties panel's **Checkbox**
+  section has the **Options**, **Box** (Square, Rounded square, Circle, Diamond),
+  **Mark** (Tick, Cross, Filled, Dot), **Multiple Selection**, **Box Colour**,
+  **Mark Colour**, **Option Spacing** and **Line Spacing**. The ticked options are
+  its **Checked** property in the Markups List. Other PDF readers show it as drawn;
+  its ticks change only in CalcForge.
 - **Note** — click to drop a sticky note; double-click it (or use the Properties
   panel) to read and write what it says. Its **Icon** (Comment, Help, Insert, Key,
   New Paragraph, Note, Paragraph) is on the Properties toolbar.
@@ -356,106 +309,50 @@ measurement extras too: cut-outs, Units, Caption and Totals.
 
 ### Selecting and editing markups
 
-- **Select**: click a markup. `Shift`+click adds or takes away, `Ctrl`+click adds.
-  **Edit ▸ Select All** (`Ctrl+A`) selects every markup on the page. A markup
-  picked over a spreadsheet's open cells (from the Markups list, say) takes the
-  keys, as a picked shape does in Excel: `Delete` deletes it and leaves the cells
-  alone; a click on a cell gives the keys back to the cells.
-- **Move**: drag it (`Shift` keeps the move straight: across, down or at 45°).
-  Over a markup the pointer is Revu's arrow with a small move sign. `Ctrl`+drag
-  leaves a copy behind, from anywhere on the markup, its points included; the
-  arrow carries a copy sign while `Ctrl` is held, and `Ctrl`+click adds the
-  markup to the selection. A drag with `Shift`, `Ctrl` or `Alt` held never
-  changes the markup's shape. Drag it onto another page and it belongs to that
-  page. The arrow keys nudge by 1 mm — with **Snap to Grid** on, to the grid's
-  next line that way — and `Shift`+arrow by 1 pt.
-- **Resize**: drag a handle; the arrows on the pointer lie the way the handle
-  pulls, turned with a turned markup. `Shift` on a corner keeps the proportions.
-  The blue dot on a dashed stalk turns the markup;
-  **Properties panel ▸ Layout** has its exact position, size and rotation.
+- **Select**: click a markup; `Shift`+click adds or takes away, `Ctrl`+click adds;
+  `Ctrl+A` selects every markup on the page. Over a spreadsheet's open cells, a
+  picked markup takes the keys (`Delete` deletes it, not the cells).
+- **Move**: drag it (`Shift` keeps it straight); `Ctrl`+drag leaves a copy; drag it
+  onto another page and it belongs there. Arrow keys nudge 1 mm (to the next grid
+  line with **Snap to Grid**), `Shift`+arrow 1 pt.
+- **Resize**: drag a handle (`Shift` on a corner keeps the proportions); the blue
+  dot on the dashed stalk turns it. **Properties panel ▸ Layout** has the exact
+  position, size and rotation.
 - **Control points** (lines, polylines, polygons, clouds, rectangles…): drag a
-  point to move it — over a single point, a leader's arrow head or its hinge the
-  pointer is a thin crosshair. A *click* (not a drag) with a key held reshapes
-  the selected outline, and the arrow's sign says what it will do:
-  `Shift`+click on a side puts a point in where you click (a small "+"), on a
-  point takes it out (a "−"); `Alt`+click on a corner rounds it off (or sharpens
-  it again), on a side bends it into an arc (or straightens it) (a small arc).
-  Pressed and dragged instead, the same keys move the markup. A double-click on
-  a polyline or polygon adds a point too. Right-click ▸
-  **Control Point** has **Add Control Point**, **Insert Break**, **Subtract Control
-  Point** and **Round Corner**; there are also **Arc Segment**, **Round All
-  Corners** and, for a rectangle or ellipse, **Convert to Polygon**.
+  point. `Shift`+click on a side adds a point, on a point removes it; `Alt`+click
+  rounds a corner or bends a side into an arc. Right-click ▸ **Control Point** has
+  **Add Control Point**, **Insert Break**, **Subtract Control Point** and **Round
+  Corner**; also **Arc Segment**, **Round All Corners** and **Convert to Polygon**.
 - **Cut, Copy, Paste** (`Ctrl+X`, `Ctrl+C`, `Ctrl+V`); **Paste in Place**
-  (`Ctrl+Shift+V`) puts it back where it was on this page; **Paste Here…**
-  (`Ctrl+Alt+V`) carries it on the pointer until you click; **Duplicate**
-  (`Ctrl+J`) makes a copy a little down and to the right; **Delete** removes it.
-- **Offset** (`O`) — Revu's Offset: a copy of the selected markup a set distance
-  away, on the side the pointer is (inside or outside a closed shape). Its toolbar
-  has **Distance** (in the page's units), **Replace Markup** (the original goes)
-  and **Angle Miter Limit**. Click to put the copy down; `Esc` stops.
-- **Multiply…** (`Ctrl+M` in Markup mode) — repeat the selection at a fixed
-  spacing: **Across (x)**, **Down (y)** (real distances on a scaled page, paper
-  distances otherwise, typed with a unit such as `3 m` or `25 mm`), **Times**, and
-  **Duplicate** or **Move**.
-- **Group** (`Ctrl+G`) makes several markups select and move as one;
-  **Ungroup** (`Ctrl+Shift+G`).
-- **Order** — **Bring to Front** (`Ctrl+Shift+]`), **Bring Forward** (`Ctrl+]`),
-  **Send Backward** (`Ctrl+[`), **Send to Back** (`Ctrl+Shift+[`). The PDF's own
-  drawing always stays underneath.
-- **Alignment** — Revu's Align Markups, on **Edit ▸ Alignment**, a selection's
-  right-click ▸ **Alignment** and the **Alignment** toolbar (**Tools ▸ Toolbars ▸
-  Alignment**). With several selected, the first one picked is the **primary
-  markup**: its control points are yellow, the others' green; click a
-  green-pointed markup to make it the primary.
-  - **Align Left**, **Align Centre**, **Align Right**, **Align Top**, **Align
-    Middle**, **Align Bottom** (two or more): each lines up with the primary's
-    edge or centre line.
-  - **Align Width**, **Align Height**, **Align Size** (two or more): each takes the
-    primary's width, height or both, its top left corner staying put (equations,
-    tables, notes and counts keep the size of what they hold).
-  - **Distribute Horizontally**, **Distribute Vertically** (three or more): the
-    centres equally spaced between the two outermost, which stay.
-  - **Centre in Document** (one or more): each markup's centre on its page's
-    centre.
-  - **Flip Horizontal**, **Flip Vertical** (one or more that flip): each mirrored
-    about its own centre — images, snapshots, stamps, polylines, polygons,
-    clouds, pen and highlighter ink, and groups (a group turns over as one). A
-    callout flips as in Revu: its box goes to the other side of its leader and
-    the leader is mirrored, but the words stay readable. A text box does not
-    flip; picked with others, it is left as it is.
+  (`Ctrl+Shift+V`); **Paste Here…** (`Ctrl+Alt+V`, carried on the pointer);
+  **Duplicate** (`Ctrl+J`); **Delete**.
+- **Offset** (`O`): a copy a set **Distance** away on the pointer's side
+  (**Replace Markup** drops the original). **Multiply…** (`Ctrl+M`): repeat the
+  selection **Across (x)** and **Down (y)** so many **Times**.
+- **Group** (`Ctrl+G`) / **Ungroup** (`Ctrl+Shift+G`).
+- **Order**: **Bring to Front** (`Ctrl+Shift+]`), **Bring Forward** (`Ctrl+]`),
+  **Send Backward** (`Ctrl+[`), **Send to Back** (`Ctrl+Shift+[`) — among the
+  markups of the same page; the PDF's own drawing stays underneath.
+- **Alignment** (**Edit ▸ Alignment**, the right-click menu, the **Alignment**
+  toolbar): the first markup picked is the primary (yellow points) the others line
+  up with. **Align Left**, **Align Centre**, **Align Right**, **Align Top**, **Align
+  Middle**, **Align Bottom**, **Align Width**, **Align Height**, **Align Size**,
+  **Distribute Horizontally**, **Distribute Vertically**, **Centre in Document**,
+  **Flip Horizontal** and **Flip Vertical**. Each is greyed until enough is picked;
+  none has a key out of the box.
+- **Lock** (`Ctrl+Shift+L` or `Ctrl+L`), **Hide** / **Show Hidden**, **Flatten**
+  (part of the page drawing) / **Unflatten** (`Ctrl+Shift+U`). Equations, tables
+  and charts are never hidden or flattened.
+- **Edit ▸ Edit Selected** (`F2`) opens a text box, callout, equation or table for
+  typing.
+- **Format Painter** (`Ctrl+Shift+C`): click or drag over markups to give them the
+  selected one's look; `Esc` stops.
+- **Change Colours…** (several selected): one colour to another in all of them.
+- **Apply to Pages…**: a copy on all or chosen pages.
+- **Set as Default**, **Save as Markup Style**, **Add to Tool Chest**, **Properties**.
 
-  A group counts as one markup and a calculation block takes its equations with
-  it; equations, tables and markups align together. Each is one undo step. A
-  command is greyed — on the toolbar, in both menus and for its key — until
-  enough is picked (two for the aligns and sizes, three to distribute, one for
-  Centre in Document, one that flips for a flip), and its tip says what it
-  needs. None has a key out of the box — Revu's (`Ctrl+Alt+L`, `E`, `R`, `T`, `M`,
-  `B`, `H`, `V`) are CalcForge's symbol and Paste Here keys — but any key can be
-  given to each in Keyboard Shortcuts (group **Alignment**).
-- **Lock** (`Ctrl+Shift+L` or `Ctrl+L`) stops a markup being moved or changed;
-  again to unlock.
-- **Hide** takes a markup off the screen and out of print without deleting it;
-  **Show Hidden** brings every hidden one back.
-- **Flatten** makes the markup part of the page drawing; it can then no longer be
-  moved. **Unflatten** (`Ctrl+Shift+U`) brings flattened markups back when they
-  were flattened with recovery allowed (see *Files* below). Equations,
-  Calculation text, calculation blocks, tables and charts are never hidden or
-  flattened, so neither is offered for them.
-- **Edit ▸ Edit Selected** (`F2`) opens the one selected text box, callout,
-  Calculation text, equation or table for typing, as a double-click does (a
-  table at A1). In an open table `F2` edits the cell, as in Excel.
-- **Format Painter** (`Ctrl+Shift+C`) — takes the selected markup's look; click
-  another markup (or drag over several) to paint it on. It stays armed until
-  `Esc`.
-- **Change Colours…** — with several markups selected (or a group), change one
-  colour they use — line, fill, text or hatch — to another in all of them.
-- **Apply to Pages…** — a copy of the markup on All Pages or chosen pages.
-- **Set as Default**, **Save as Markup Style** and **Add to Tool Chest** keep the
-  look for later (see below).
-- **Properties** opens the Properties panel.
-
-The same commands are on **Edit**, on **Tools ▸ Selected Markups** and on a
-markup's right-click menu.
+The same commands are on **Edit**, **Tools ▸ Selected Markups** and a markup's
+right-click menu.
 
 ### Properties toolbar and panel
 
@@ -512,14 +409,9 @@ The **Properties panel** has the same and more, in sections:
   Default** when the kind has one).
 
 The panel shows what is selected or, with nothing selected, what you are working
-in: the equation or text being typed in, or the table or spreadsheet page open
-for its cells — in Markup and Calc mode alike. A change made in the panel to an
-equation being typed in finishes the typing first (its own undo step), then makes
-the change (another).
-
-With several markups selected, a change applies to all of them in one undo step.
-Text inside a text box can be styled a word at a time: select the words while
-typing and use **Edit ▸ Text** (Bold, `Ctrl+I` Italic, `Ctrl+U` Underline,
+in (the equation or text being typed, the table open). With several markups
+selected, a change applies to all of them in one undo step. Words in a text box
+are styled a word at a time: select them while typing and use **Edit ▸ Text** (Bold, `Ctrl+I` Italic, `Ctrl+U` Underline,
 Strikethrough, Superscript, Subscript, Align Left `Ctrl+Alt+Left`, Align Centre
 `Ctrl+Alt+Home`, Align Right `Ctrl+Alt+Right`, Increase and Decrease Font Size
 `Ctrl+Alt+Up` and `Ctrl+Alt+Down`).
@@ -728,102 +620,52 @@ tool set keep their own drawing.
 
 ### Pages
 
-**Thumbnails panel** (`Alt+T`). A picture of every page, as many to a row as
-the panel has room for, with the page number (and label) centred under it and
-its scale under that when it has one; the page picked out is framed in blue.
-Pages are numbered as they print: a page that doesn't print (greyed, with the
-crossed-out printer) has no number, and the pages after it move up to fill the
-gap — the same number its "Page N" mark, the header and footer's `{page}` and the
-printed page carry. The page box goes on counting every page, so that each one
-can be gone to (a page's tooltip gives both).
-Click to go there; `Delete` deletes the pages picked (after asking; a workbook's
-entry is all its pages); drag pages to reorder them (a run of picked pages moves
-together; a short blue line in the gap, as tall as a page, shows where they go);
-drop a PDF file onto it to insert its pages there. `Ctrl`+wheel over the panel
-changes the picture size, and as many pages go to a row as fit — as do **Larger
-Thumbnails** and **Smaller Thumbnails** (on the Window menu too); a page never
-grows wider than the panel. The panel's title, **Thumbnails ▾**, is
-its menu: every insert (Before or After), Duplicate Page, Extract Pages…, Split
-Document…, Delete Pages…, Crop Pages…, Rotate Pages, Page Setup…, Set Scale… and
-the two sizes. The buttons after it are **Add Page**, **Insert Pages**, **Insert
-Blank Page** and **Insert Spreadsheet Page** (each with Before or After on its
-arrow; a click puts it after this page), **Duplicate Page** and **Delete Pages**;
-on a narrow panel they go on a line of their own under the title.
+**Thumbnails panel** (`Alt+T`). Click a page to go to it; `Delete` deletes the pages
+picked (it asks first); drag pages to reorder them (a blue line in the gap shows
+where); drop a PDF on it to insert its pages. `Ctrl`+wheel, **Larger Thumbnails**
+and **Smaller Thumbnails** change the picture size. **Thumbnails ▾** is its menu;
+the buttons after it are **Add Page**, **Insert Pages**, **Insert Blank Page**,
+**Insert Spreadsheet Page**, **Duplicate Page** and **Delete Pages**. Pages are
+numbered as they print: one that doesn't print (greyed, a crossed-out printer)
+has no number.
 
-**A workbook is one entry.** The pages of a workbook — an Excel workbook brought
-in, or spreadsheet pages made here side by side — show in Thumbnails as one
-entry: its first page on a stack of sheets, framed all round when picked, with
-**▸ Loads** over **pages 2–10** (numbered as they print; **doesn't print** when
-none of its sheets does). An Excel workbook is named after its file; one made
-here is **Workbook**, the next **Workbook (2)** and so on, whether it has one
-sheet or many.
-Click the picture to open the workbook (its first sheet, alone: see *The workbook
-view and sheet tabs*); click its name (the ▸) to show its
-pages one by one (**▾ Loads**, on a tinted band) and again to fold them back;
-**Expand Section** / **Collapse Section** on a page's right-click menu do the
-same. It starts folded. Picked, the entry is the whole workbook: Delete Pages,
-Cut, Copy, Move Up / Down, Extract Pages, Print Pages and dragging it act on all
-its pages; with its pages shown, a page picked is that page. Nothing goes between
-an Excel workbook's sheets: a page dragged there is refused (and said so in the
-status bar), and a page inserted after one of its sheets goes after the workbook.
-**Duplicate Page** on a workbook — its entry or any of its pages — copies the
-whole workbook in right after it, one undo step: every sheet with its cells,
-formats, names, print settings and Print / Don't Print. The copy is named as
-Excel names a copy (**Loads (2)**, its sheets **Loads (2)** and **Factors (2)**),
-its formulas read its own sheets, and it is a workbook of its own, with its own
-names and its own name for the equations (`Loads_2`), so equations reading the
-original go on reading the original.
+**A workbook is one entry**: its first page on a stack, **▸ Loads** over **pages
+2–10**. Click the picture to open it (*The workbook view and sheet tabs*); click
+the ▸ to show its pages one by one. Picked, the entry is the whole workbook —
+Delete, Cut, Copy, Move, Extract, Print and dragging act on all its pages, and
+**Duplicate Page** copies the whole workbook as **Loads (2)**, a workbook of its
+own. Nothing goes between an Excel workbook's sheets.
 
-**A page's right-click menu** (also **Document ▸ Current Page**): Page Setup…,
-Set Scale…, Cut, Copy and Paste Pages (Before or After), Move Up, Move Down,
-**Add Page**, Insert Blank Page, Insert Spreadsheet Page, Insert Pages, Insert Image Page and
-Insert Excel Workbook (each Before or After), Duplicate Page, Extract Pages…,
-Split Document…, Delete Pages…, Crop Pages…, Rotate Pages (Clockwise or
-Anticlockwise), Rename Page Label, Reset Page Label, Reset All Page Labels, Print
-Pages…, **Include in Print & Export**, Flatten…, Unflatten, Colour Processing…,
-Go to Page, Add Bookmark, **Calc Section Break Above This Page** (Part 2), Page
-Grid, Header/Footer (Show Header, Show Footer, Headers & Footers…), Paper Size and
-**Make This Page's Markups Editable** (for a page whose own annotations were not
-read out as markups).
+**A page's right-click menu** (also **Document ▸ Current Page**): Page Setup…, Set
+Scale…, Cut, Copy and Paste Pages, Move Up / Down, **Add Page**, Insert Blank Page,
+Insert Spreadsheet Page, Insert Pages, Insert Image Page, Insert Excel Workbook
+(each Before or After), Duplicate Page, Extract Pages…, Split Document…, Delete
+Pages…, Crop Pages…, Rotate Pages, the page label, Print Pages…, **Include in Print
+& Export**, Flatten…, Unflatten, Colour Processing…, Go to Page, Add Bookmark,
+**Calc Section Break Above This Page** (Part 2), Page Grid, Header/Footer, Paper
+Size and **Make This Page's Markups Editable**.
 
-**The Document menu** has the same page commands for the whole document:
-Document Properties… (`Ctrl+D`), Page Setup…, Rotate Pages, **Insert** (**Add
-Page** first, then Blank Page `Ctrl+Shift+N`, Spreadsheet Page, Pages
-`Ctrl+Shift+I`, Image Page and Excel Workbook — each of those Before or After),
-Extract Pages… (`Ctrl+Shift+X`), Split
-Document…, Delete Pages… (`Ctrl+Shift+D`), Crop Pages… (`Alt+Shift+O`),
-Headers & Footers…, Colour Processing…, Flatten… (`Ctrl+Shift+M`), Unflatten,
-Duplicate Page, Add Bookmark (`Ctrl+B`) and Table of Contents.
+**The Document menu** has the same for the whole document, with Document
+Properties… (`Ctrl+D`), Insert ▸ Blank Page (`Ctrl+Shift+N`) and Pages
+(`Ctrl+Shift+I`), Extract Pages… (`Ctrl+Shift+X`), Delete Pages… (`Ctrl+Shift+D`),
+Crop Pages… (`Alt+Shift+O`), Headers & Footers…, Flatten… (`Ctrl+Shift+M`), Add
+Bookmark (`Ctrl+B`) and Table of Contents.
 
-- **Add Page** is one click: a blank page right after this one (after the whole
-  workbook when this page is one of a workbook's), on the same paper and the same
-  way round, no questions, one undo step — and it goes there. It has no key of its
-  own (`Ctrl+Shift+N` is Insert Blank Page…); give it one in **CalcForge ▸ Keyboard
-  Shortcuts…**.
-- **Insert Blank Page** asks the size, how many and where. New pages are A4
-  portrait unless you choose otherwise (A0–A5, Letter, Legal, Tabloid, ANSI and
-  ARCH sizes, portrait or landscape).
-- **Insert Pages** brings in pages from a PDF: all, or a range such as `1-3,7`.
-- **Extract Pages** saves chosen pages, with their markups, as a new PDF;
-  **Split Document** saves the document as several PDFs of so many pages each.
-- **Crop Pages** cuts margins off chosen pages, or drag the part to keep (**Get
-  Window**); Undo restores it.
-- **Rotate Pages** turns pages and everything on them a quarter turn; equations
-  turn with the page but never change their results. To turn only the view, use
-  **View ▸ Rotate View**.
-- **Page Setup** (Revu's): new paper (Media Size, Portrait or Landscape, Width and
-  Height), the content placed on it (Offset X and Y, Scale with Auto Scale,
-  Rotation, Clear, Centre, Fit to Media) with a preview and a Pages range, and
-  CalcForge's own calculation margins.
-- **Page labels**: rename a page's label (the name shown under its thumbnail and
-  in the page box).
-- **Include in Print & Export** off greys a page out, with a crossed-out printer
-  in its corner: it is left out of printing and export. A workbook's entry has
-  the printer when some of its pages don't print, and is greyed when none do.
+- **Add Page**: a blank page after this one (after the whole workbook on one),
+  same paper, no questions.
+- **Insert Blank Page** asks the size (A0–A5, Letter, Legal, Tabloid, ANSI, ARCH),
+  how many and where.
+- **Insert Pages** brings in pages from a PDF (all, or `1-3,7`).
+- **Extract Pages** saves pages as a new PDF; **Split Document** saves several PDFs.
+- **Crop Pages** cuts margins off, or drag the part to keep (**Get Window**).
+- **Rotate Pages** turns pages a quarter turn (equations turn with them);
+  **View ▸ Rotate View** turns only the view.
+- **Page Setup**: new paper, the content's offset, scale and rotation on it, and
+  CalcForge's calculation margins.
+- **Include in Print & Export** off leaves a page out of printing and export.
 
-**Bookmarks panel** (`Alt+B`) — Add, Rename and Delete bookmarks, and
-**Contents** for a table of contents. An opened PDF's own outline arrives as
-bookmarks; saved, the bookmarks become the PDF's outline.
+**Bookmarks panel** (`Alt+B`): Add, Rename and Delete bookmarks, and **Contents**
+for a table of contents. A PDF's outline comes in as bookmarks and goes out as one.
 
 ### Headers, footers and document properties
 
@@ -893,118 +735,53 @@ cells' own Find and Replace — see Part 3.)
 ### Viewing the drawing
 
 - **Zoom**: the plain **wheel zooms** at the pointer, as in Revu; `Ctrl`+wheel
-  scrolls; `Shift`+wheel scrolls sideways; a trackpad's two-finger scroll scrolls
-  (and zooms with `Ctrl`). Preferences ▸ Mouse wheel swaps zoom and scroll: with
-  the wheel scrolling, `Ctrl`+wheel zooms. As in Revu, each notch lands at once —
-  no animation — and the point under the pointer stays under it; the drawing
-  already made stands in (sharp where it was drawn finer) for the moment the new
-  zoom's drawing takes, which starts as soon as the notches stop. Preferences ▸
-  **Smooth zoom and scroll** makes each notch glide there instead. **View ▸ Fit Page**
+  scrolls, `Shift`+wheel scrolls sideways (Preferences ▸ Mouse wheel swaps zoom and
+  scroll; **Smooth zoom and scroll** makes a notch glide). **View ▸ Fit Page**
   (`Ctrl+9`), **Fit Width** (`Ctrl+0`), **Actual Size** (`Ctrl+8`), **Zoom to
-  Selection** (`Ctrl+2`), **Zoom In** and **Zoom Out** (no key by default), and the
-  zoom box in the status bar.
-- **Big drawing sets.** As in Revu, a page you have not looked at yet appears at
-  once at low resolution and sharpens a moment later: when a document opens, a
-  small picture of every page is drawn in the background, so however fast you
-  scroll, flick, drag the scroll bar or zoom out, each page shows itself (soft)
-  rather than a blank sheet until its sharp drawing arrives. While a zoom is
-  moving, the drawing already made stands in, scaled; once you stop, the page
-  is drawn sharp at exactly the zoom on screen, the same as before. Scrolling
-  draws ahead in the direction you are going. Nothing needs setting.
-- **Clear when zoomed out.** Below 100 % the drawing's lines keep smooth edges
-  but are drawn a little wider than a pixel, so a hairline comes out dark
-  wherever it falls and lines of one weight look the same weight: just below
-  100 % no thinner than 1.4 pixels, easing down to one pixel by 25 % and below,
-  so a dense sheet seen whole does not fill in. Markups are drawn sharp, as in
-  Revu: every markup line — straight, slanting or curved, clouds, arrows and
-  freehand included — is solid ink on whole pixels, a whole number of pixels
-  wide and one at least, with no soft edge. Words, fills and hatches stay as
-  they are, and from 100 % up lines are drawn at their own width as before.
-  Only the screen changes; prints, exports and the PDF are not affected.
-- **Moving about**: `Page Up` / `Page Down` move a screenful; `Home` and `End` go
-  to the first and last page; `Ctrl+Left` / `Ctrl+Right` (and `Ctrl+Page Up` /
-  `Ctrl+Page Down`) turn pages; `Ctrl+Home` / `Ctrl+End` reach the very ends. The
-  space bar or the middle button pans.
-- **Page layouts** (View, or the status bar): **Single Page Mode** (one page,
-  fitted), **Continuous Mode**, **Side-by-Side Mode**, **Continuous Side-by-Side
-  Mode** and **Show Cover Page in Side-by-Side**. The wheel works as in Revu:
-  - **Continuous** (and Continuous Side-by-Side) scroll through all the pages, at
-    Fit Page too.
-  - **Single Page** (and Side-by-Side, a spread at a time) shows one page only,
-    however far you zoom out. The wheel zooms or scrolls as it does in Continuous;
-    scrolling moves within the page and, at its end, turns to the next (or
-    previous) page.
-  - Preferences ▸ **Wheel in Single Page** can have the plain wheel always scroll
-    there (`Ctrl`+wheel zooming), and Preferences ▸ **Scrolling past a page's
-    end** can have it stay on the page (`Ctrl+Left` / `Ctrl+Right` still turn
-    it).
-- **Rotate View** — turn the screen view clockwise (`Ctrl+Shift+.`) or
-  anticlockwise (`Ctrl+Shift+,`) to read a sideways drawing; **Reset Rotation**.
-  The page itself is not changed.
-- **Split View** — this document beside another pane (drag a document tab onto the
-  other pane); **Separate Views** turns the panes back into windows. The status
-  bar's **Sync** links the two views (or two windows):
-  - **Off** — each view moves on its own; zooming, scrolling or turning pages in
-    one never moves the other.
-  - **Page sync** — the same zoom and the same spot, each on its own page: zoom
-    or scroll in one view and the other shows the same place (in points from
-    the page's top-left corner) on whichever page it is on; going to a page in
-    one view leaves the other on its page. Scrolling past a page's end carries
-    the other view onto its next page too.
-  - **Document sync** — scrolling, zooming and page changes in one view are
-    repeated in the other, keeping the difference between them that there was
-    when it was turned on.
-- **Rulers** along the top and left, from the page's corner; right-click one for
-  inches, centimetres, millimetres, points or picas. **Full-Screen Crosshair**:
-  two lines across the drawing that meet at the pointer.
+  Selection** (`Ctrl+2`), **Zoom In**, **Zoom Out** and the status bar's zoom box.
+  Big drawing sets show every page at once, soft, sharpening a moment later.
+- **Moving about**: `Page Up` / `Page Down` a screenful; `Home` / `End` the first
+  and last page; `Ctrl+Left` / `Ctrl+Right` (and `Ctrl+Page Up` / `Ctrl+Page Down`)
+  turn pages; `Ctrl+Home` / `Ctrl+End` the very ends. Space or the middle button
+  pans.
+- **Page layouts** (View, or the status bar): **Single Page Mode**, **Continuous
+  Mode**, **Side-by-Side Mode**, **Continuous Side-by-Side Mode** and **Show Cover
+  Page in Side-by-Side**. In Single Page the wheel scrolls within the page and turns
+  to the next at its end (Preferences: **Wheel in Single Page**, **Scrolling past a
+  page's end**).
+- **Rotate View**: clockwise (`Ctrl+Shift+.`) or anticlockwise (`Ctrl+Shift+,`);
+  **Reset Rotation**. The page itself is not changed.
+- **Split View**: this document beside another pane (drag a document tab onto it);
+  **Separate Views** undoes it. The status bar's **Sync**: **Off**, **Page sync**
+  (the same zoom and spot, each on its own page) or **Document sync** (scrolling,
+  zoom and page changes repeated in the other).
+- **Rulers** (right-click for the unit) and the **Full-Screen Crosshair**.
 - **Show Grid** (`Ctrl+'`), **Snap to Grid**, **Show Margins**, **Name Tags** (the
-  names of tables, sheets and cells named as CalcForge variables, on screen and in
-  print; a spreadsheet's own names carry none).
-- **Dimmer**: **View ▸ Dimmer** or **Dim Content** (`Ctrl+F5`) tones down the
-  page's own drawing (0–100 %) so the markups stand out — on screen only.
-- **Dark Mode** (`Ctrl+3`) — see *Customisation ▸ Themes*. The page stays white
-  paper in both themes.
-- **Window ▸ Full Screen** (`F11`) and **Presentation** (`Ctrl+Return`: the page
-  alone over the whole screen; arrows, Space and Page Up/Down turn pages, `Esc`
-  ends it).
+  names of tables, sheets and cells named as CalcForge variables).
+- **Dimmer**: **Dim Content** (`Ctrl+F5`) tones down the page's own drawing so the
+  markups stand out (screen only).
+- **Dark Mode** (`Ctrl+3`): see *Customisation ▸ Themes*; the page stays white.
+- **Window ▸ Full Screen** (`F11`) and **Presentation** (`Ctrl+Return`; `Esc` ends
+  it).
 
 ### Files: flattening, layers and recovery
 
-- **The saved file.** Markups are written as standard PDF annotations, each with
-  its own appearance, so Revu, Acrobat or a browser show and edit them. Equations,
-  tables, charts and spreadsheet pages are written into the page as drawing
-  (their own layer), so every reader shows them and none can change them; CalcForge
-  takes that layer off and rebuilds it from the record when it opens the file.
-- **Pages deleted in another program.** When the file is opened again, a message
-  lists each page deleted elsewhere by its number as saved here and its label, and
-  what was on it — equations (and the variables that are now undefined), tables,
-  markups, a page of a spreadsheet. A spreadsheet keeps all its cells, however many
-  of its pages went, and is laid out again over the pages left. **Restore…** in that
-  message, or **Document ▸ Restore Pages…** at any time until the document
-  is saved, lists the pages again and puts back **what CalcForge itself had on them**
-  — equations, calculation blocks and text, tables, spreadsheet cells and charts — on
-  pages where they were, as one undo step. Their **markups** come back only when you
-  tick **Also restore the markups that were on them** (a page that had only markups
-  is restored only then), and its **drawing** — a picture, or a PDF page CalcForge
-  kept as a file of its own — only when you tick **Also restore the page's
-  drawing**, which can be ticked only where CalcForge still holds it. A drawing that
-  was the file's own page went with it and can't come back: that page is restored as
-  paper.
-- **Flatten…** (`Ctrl+Shift+M`; Document and Batch menus, and a page's menu) is
-  Revu's **Flatten Markups**: tick the markup types; **All Markups**, **Exclude
-  Filtered Markups** or **Currently Selected Markups**; the **Pages**; and **Allow
-  Markup Recovery (Unflatten)** — keep it ticked to be able to bring them back with
-  **Unflatten** (`Ctrl+Shift+U`), even after saving. Right-click ▸ **Flatten**
-  flattens one markup at once.
-- **Autosave.** Every two minutes an unsaved change is written to a recovery copy:
-  beside the document as `name.pdf.autosave`, or for an untitled document in
-  CalcForge's recovery folder. If CalcForge stops before an untitled document is
-  saved, it offers the copy back the next time it starts. Opening a saved
-  document whose recovery copy is newer than it asks first: "A recovered version
-  of *name* exists from *date and time*" — **Open Recovered** (the copy opens in
-  the document's place, and Save writes it over the document), **Open Saved**
-  (the document as last saved; the copy is kept for another time) or **Discard
-  Recovered** (the copy is deleted). Saving deletes the copy.
+- **The saved file.** Markups are standard PDF annotations, so Revu, Acrobat or a
+  browser show and edit them. Equations, tables, charts and spreadsheet pages are
+  drawn into the page (a layer of their own) and rebuilt by CalcForge when it opens
+  the file.
+- **Pages deleted in another program.** On opening, a message lists them and what
+  was on them. **Restore…** there (or **Document ▸ Restore Pages…** until the next
+  save) puts back CalcForge's own content — equations, tables, cells, charts — and,
+  when ticked, the markups and the page's drawing where CalcForge still holds it.
+- **Flatten…** (`Ctrl+Shift+M`): Revu's **Flatten Markups** — the markup types,
+  **All Markups**, **Exclude Filtered Markups** or **Currently Selected Markups**,
+  the **Pages**, and **Allow Markup Recovery (Unflatten)** to bring them back with
+  **Unflatten** (`Ctrl+Shift+U`), even after saving.
+- **Autosave** every two minutes to a recovery copy (`name.pdf.autosave`, or
+  CalcForge's recovery folder for an untitled document). Opening a document whose
+  copy is newer asks: **Open Recovered**, **Open Saved** or **Discard Recovered**.
+  Saving deletes the copy.
 
 ## Part 2 — Calculation (SMath-style)
 
@@ -1025,17 +802,12 @@ Here** has Equation, Calc Text, Calculation Block and Plot.
   so `x=5` defines x.
 - **Units** follow a number with an apostrophe: `6'm`, `25'kN`, `2.5'kN/'m^2`. The
   unit is drawn in blue.
-- **The unit box.** After `=`, the result has a small black box after it. Press →
-  (or click the box) and type the unit you want the answer in — `kN·m`, `MPa`,
-  `mm`, or a custom unit (below). Leave it empty for SMath's own choice. A unit of
-  another kind is not refused: as in SMath, the units still needed are put before
-  it, so the number times them times your unit is the answer (`12.5 kN` with `N²`
-  in the box shows `12500 s²/(kg·m) N²`).
+- **The unit box.** After `=`, press → (or click the small black box) and type the
+  unit for the answer — `kN·m`, `MPa`, `mm` or a custom unit; empty is SMath's own
+  choice.
 - **Custom units.** A quantity you define, such as `kips:1000'lbf`, is a unit
-  wherever it is written with the apostrophe, as in SMath: `2'kips` in an equation
-  below the definition (drawn blue like any unit), `kips` in a unit box, and
-  `2'kips` in cells. It can still be used as a name too (`3*kips`). A built-in
-  unit of the same name (CalcForge already has `kip`) wins over the definition.
+  below it: `2'kips` in equations and cells, `kips` in a unit box. A built-in unit
+  of the same name wins.
 - `Enter` leaves the equation and puts the red cross below it; `Tab` and
   `Shift+Tab` go to the next or previous equation in reading order; the arrow keys
   move the red cross. `Esc` lets go of the equation.
@@ -1080,15 +852,10 @@ Boolean, Functions, Plot, Programming, Units and Constants, plus **All
 functions…**, **All units…** and **Table of all constants…**; each button types
 into the equation, or starts one at the red cross.
 
-**Data files.** `wfile(value, "name")` keeps a value — a number, quantity,
-matrix or text — in a file for another equation or document to read back with
-`rfile("name")`; `dfile("name")` deletes it. As in SMath, these files live in one
-folder of the application's own (`user` in CalcForge's data folder), whatever
-document calls them, and an equation can name only a file in it, never a folder or
-path, so a document from someone else cannot read, change or delete anything else
-on your computer. The file is written or deleted when you leave the equation, not
-while you type. (`importData` reads any text or CSV file, relative to the
-document.) Files SMath Studio wrote are in SMath's own format and are not read.
+**Data files.** `wfile(value, "name")` keeps a value in a file that
+`rfile("name")` reads back (in this or another document); `dfile("name")` deletes
+it. The files live in CalcForge's own `user` folder only. `importData` reads a text
+or CSV file next to the document.
 
 **Calculation ▸ Selection** works on the part of the equation selected: **Solve**
 (solve for the variable under the cursor; the roots go below), **Calculate
@@ -1215,51 +982,29 @@ then reads `name = value`.
 
 ### Tables and sheets in equations
 
-An equation reads a table's (or spreadsheet's) values four ways — only tables
-**above** it in reading order (a table's place is its top-left corner):
+An equation reads tables and sheets **above** it in reading order (a table's place
+is its top-left corner):
 
+- **a cell**: `Table1.D12`, `Seismic_Actions.H44` (spaces and other characters an
+  equation can't hold become one `_`: `Tables (2)` is `Tables_2`);
 - **a named cell**: `W_total` for a cell named as a CalcForge variable (its
-  right-click **Variable** box), `Loads.W_total` for a spreadsheet's own name
-  (Define Name, the Name Box, the Name Manager, Create from Selection) — a
-  spreadsheet's names are its sheet's, never read bare (Part 3, *Names*);
-- **a cell**: `Table1.D12`, or a spreadsheet's `Seismic_Actions.H44` — a sheet whose
-  name has spaces or other such characters is written with each run of them as one
-  `_` (`Seismic Actions` is `Seismic_Actions`, `Tables (2)` is `Tables_2`);
-- **an imported Excel workbook's name**, qualified: `Seismic_Actions_NZS1170_5.Z`
-  (the workbook's name) or `Seismic_Actions.Z` (the name as that sheet's cells read
-  it: the sheet's own name first, then its workbook's; a sheet's own name needs its
-  sheet, `Tables.ReturnPeriodFactor`). A self-contained workbook's names are never
-  read bare; see Part 3, *Excel workbooks*;
-- **a column as a vector**: `Loads.Load` is the column under the heading "Load" in
-  the table's first row (the heading's first word, so "Load (kN)" is `Load`), down
-  to its last filled cell — e.g. `sum(Loads.Load)`;
-- **the table as an interpolating lookup function**, searching its first column
-  and interpolating in a straight line between rows (never beyond the table):
-  `bolts(d)` gives the rest of that row; `bolts(d, "A")` (or `"A", "B"`) the values
-  under those headings; `bolts(d, t)` interpolates both ways when the first row
-  holds numbers; `bolts(d, 2)` the second column after the keys.
+  right-click **Variable** box); `Loads.W_total` for a spreadsheet's own name —
+  never read bare;
+- **an imported workbook's name**: `Seismic_Actions_NZS1170_5.Z` or
+  `Seismic_Actions.Z` (see Part 3, *Excel workbooks*);
+- **a column as a vector**: `Loads.Load` is the column under the heading "Load"
+  (the heading's first word) — `sum(Loads.Load)`;
+- **the table as an interpolating lookup** (in a straight line between rows, never
+  beyond the table): `bolts(d)` gives the rest of the row, `bolts(d, "A")` the value under heading A, `bolts(d, t)`
+  interpolates both ways, `bolts(d, 2)` the second column after the keys.
 
-The other way round, a cell reads an equation's variable by its name (see Part 3,
-*Equation variables in cells*). Tables and equations take up each other's changes
-until nothing changes; a true loop is reported as circular.
+A cell reads an equation's variable by its name, or with `var(name)` (Part 3,
+*Equation variables in cells*).
 
-**Equations follow the cells, as Excel's formulas do.** What you do to a table or
-sheet is made in the equations that read it, in the same undo step:
-
-- **rename a table or sheet** — renamed `Beam loads`, `Loads.D12` becomes
-  `Beam_loads.D12`; renamed `Beams`, the lookup `Loads(d)` becomes `Beams(d)` too (a
-  lookup needs a name with no spaces);
-- **insert or delete rows, columns or cells, or move cells** (drag the selection's
-  border, or cut and paste) — `T.A3` becomes `T.A4` when a row goes in above it,
-  and follows a cell moved to another sheet;
-- **delete the cell an equation reads** — the reference becomes `T.#REF` and the
-  equation shows a red error, *T.#REF: the cell it read was deleted (#REF!)*, until
-  you change it (undo puts the cell and the reference back);
-- **rename a name** in the Name Manager — `W_total` becomes `W_sum`, and
-  `Loads.W_total` becomes `Loads.W_sum` (an equation defining a variable of the
-  same spelling keeps its own);
-- **retype a column's heading** — `Loads.Load` becomes `Loads.Load_kN`. Text in
-  quotes, such as a lookup's `"Load"`, is left alone, as Excel leaves text.
+**Equations follow the cells, as Excel's formulas do**, in the same undo step: a
+table or sheet renamed, rows, columns or cells inserted, deleted or moved, a name
+renamed, a column's heading retyped. An equation reading a deleted cell shows
+`T.#REF` in red until it is changed.
 
 ### Errors
 
@@ -1469,35 +1214,26 @@ The engine has **122** built-in functions.
 
 ### Tables and spreadsheet pages
 
-- A **table** is a small spreadsheet anywhere on a page, beside drawings and
-  equations. Draw one with the **Table** tool (Tools or Calculation toolbar): drag
-  a rectangle and the rows and columns appear as it grows. It has a name
-  (Table1…) on a tab above it, always prints, and is part of the page in the saved
-  PDF. Dragging its edge or corner adds or removes rows and columns.
+- A **table** is a small spreadsheet anywhere on a page: draw one with the **Table**
+  tool (drag a rectangle). It has a name (Table1…) on a tab above it and always
+  prints. Drag its edge or corner to add or remove rows and columns.
 - A **spreadsheet page** is a whole page of cells: **Document ▸ Insert ▸
-  Spreadsheet Page ▸ Before / After**, the Thumbnails panel's Insert Spreadsheet
-  Page button, or a page's right-click menu; the new sheet opens straight away in the
-  workbook view. On a workbook's page (or in the workbook view) it inserts **another
-  workbook** — "Workbook (2)", a sheet of its own with its own names — after the
-  whole workbook, or before its first sheet; **⊕** on the sheet tabs adds a sheet to
-  the workbook in view instead, and a page of rows more comes by typing past the
-  sheet's last page. Consecutive spreadsheet pages are **one sheet** that
-  grows a page at a time; the columns that fit inside the page margins print, and
-  everything to the right of the blue line is a **scratch area** for side
-  calculations that never prints. Only markups can go on a spreadsheet page.
+  Spreadsheet Page ▸ Before / After**, the Thumbnails panel's button, or a page's
+  right-click menu. On a workbook's page it inserts **another workbook**
+  ("Workbook (2)"); **⊕** on the sheet tabs adds a sheet to the workbook in view.
+  Typing past a sheet's last page adds a page of rows. The columns inside the page
+  margins print; the grey area to the right is scratch space that never prints.
+- An equation can use a table as an interpolating lookup function (Part 2,
+  *Tables and sheets in equations*).
 
-**Opening the cells.** In Calc mode click a table to work in it; in Markup mode a
-table is a markup (click selects, drag moves) and a double-click opens its cells
-(or right-click ▸ **Edit Table**). Click outside it or press `Esc` to close it.
-On a spreadsheet page a click on a cell opens the workbook view (see *The workbook
-view and sheet tabs*). On a spreadsheet page, in Markup mode, `Ctrl`+drag
-box-selects markups over the cells and a plain drag selects cells. While a table is open it shows Excel's row
-and column headings, the selection and the fill handle; on a long sheet the column
-letters and row numbers stay in view as you scroll.
+**Opening the cells.** In Calc mode click a table; in Markup mode a table is a
+markup (click selects, drag moves) and a double-click opens its cells (or
+right-click ▸ **Edit Table**). `Esc` or a click outside closes it. On a
+spreadsheet page a click on a cell opens the workbook view; `Ctrl`+drag there
+box-selects markups.
 
-**The formula bar** (above the page while cells are open): the **Name Box** (the
-selected cell or block — type an address such as `B4` or `A1:C3` to go there; its
-▾ lists the names), the cell's formula or value, and the **unit box**.
+**The formula bar** (while cells are open): the **Name Box** (type `B4` or `A1:C3`
+to go there; ▾ lists the names), the formula or value, and the **unit box**.
 
 ### Typing and moving
 
@@ -1630,12 +1366,13 @@ Cells hold units and calculate with them, as the equations do:
 
 ### Equation variables in cells
 
-A bare name in a formula is looked up as a defined name, then as an equation
-variable defined **above** the sheet in reading order, then as a unit: `=fc*2`
-reads the equation's `fc`. A cell reference wins over a variable spelt like one:
-`var(M20)` (or `var(L.beam)`) reads the equation variable — `var(X)` with one
-bare name is the variable when there is one, otherwise Excel's VAR. A name that is
-neither is `#NAME?`.
+A bare name in a formula is the workbook's own name if it has one (as in Excel),
+otherwise an equation variable defined **before** the sheet (an earlier page, or
+higher on the same page), otherwise a unit: `=fc*2` reads the equation's `fc`.
+`var(height)` always reads the equation's variable — use it when the workbook has a
+name spelt the same (imported workbooks often have names Excel keeps as `#REF!`),
+or for a variable spelt like a cell (`var(M20)`, `var(L.beam)`). A name that is none
+of these is `#NAME?`; an error's tip in the cell says why.
 
 ### Formatting
 
@@ -1771,208 +1508,79 @@ the equation and R² on the chart). The axis titles carry the cells' units.
 
 ### The workbook view and sheet tabs
 
-**A workbook opens as Excel opens it.** Go to a workbook — click its entry in
-Thumbnails, click a cell on one of its pages, type one of its page numbers in the
-page box — and its sheet is shown alone, filling the document area: an endless
-grid from A1 with its row and column headings, which scrolls within that sheet
-only. There are no page edges and no other pages to scroll on to; scrolled or
-zoomed out, the grid goes on, and typing far down gives the rows the pages they
-need. Where the pages fall is shown as on the sheet's pages: what prints outlined
-in solid blue, the page breaks dashed blue (solid where you put them), each to be
-dragged, and each page's "Page N" faintly behind its cells. Markups on the sheet's pages show
-where they are over the cells and can be picked and changed as on the page
-(they belong to the cells under them). The page rulers are not shown over the
-cells, as Excel's Normal view has none; they come back as you leave. A markup
-over the cells — a chart, a box — is picked and dragged with a click, even with the
-cells open under it; elsewhere a click picks a cell. Each sheet keeps where you
-left it and its active cell.
+**Opening a workbook.** Click a cell on a spreadsheet page, or its entry in
+Thumbnails: the sheet fills the window as in Excel — an endless grid from A1 with
+its headings, its print area outlined in blue and its page breaks dashed blue
+(both dragged). Markups on the sheet show and are picked as on its pages. The
+cells are as big as on the pages; `Ctrl`+wheel zooms in Excel's steps (10 % to
+400 %), as does the footer's slider.
 
-**Zoom and scrolling, as Excel's.** A workbook opens at the zoom the pages are
-seen at, and the zoom box says the same percentage for both: a sheet's cells are
-as big as on its pages. (Its pages look larger only because they carry their
-margins round the cells.) `Ctrl`+wheel
-zooms in Excel's steps of 15 % (100 %, 115 %, 130 %…, 10 % to 400 %), as does the
-footer's slider; as in Excel, the zoom keeps the cell at the top left where it is
-(the sheet grows down and to the right from it), lands at once, and brings the
-active cell back into sight if it would leave the screen. A notch of the wheel scrolls three rows, `Shift`+wheel across.
-The scroll bars have their arrows at both ends; dragging a thumb says the row
-(or column) at the top. The grid is as big as the window and a little more,
-growing as you scroll on (`Page Down` a screenful at a time) and shrinking back as
-you scroll back, so the thumb is as big as the sheet in use allows.
+**The footer** is Excel's: Ready / Enter / Edit / Point, the Average, Count and Sum
+of the cells picked, the view buttons (**Normal**, **Page Layout**, **Page Break
+Preview**: see *Getting started ▸ The key things*), the zoom slider and the zoom.
+The view buttons stay on the sheet's pages too. A sheet keeps the view it was left
+in.
 
-**The footer.** In the workbook view the footer is Excel's: the cell mode on the
-left — **Ready**, **Enter** (typing into a cell), **Edit** (after `F2`) or
-**Point** (picking a reference for a formula) — and, with more than one cell
-picked, the **Average**, **Count** and **Sum** of what they hold; on the right
-the view buttons **Normal**, **Page Layout** and **Page Break Preview**, a zoom
-slider and the zoom box. The paper's controls (the pointer's position, the
-scale, snapping, the page layout, window sync and the paper size) come back with
-the pages.
+**Freeze Panes** (**View ▸ Spreadsheet**): **Freeze Panes**, **Freeze Top Row**,
+**Freeze First Column**, **Unfreeze Panes**. Saved with the sheet; an Excel file's
+come in with it.
 
-**Normal, Page Layout, Page Break Preview** (the footer's buttons, or **View ▸
-Spreadsheet**). Normal is the workbook view; Page Layout shows the sheet's pages;
-Page Break Preview is the workbook view with what prints white and the rest
-grey, the page breaks blue (dashed where they fell by themselves) and each
-page's "Page N": drag a blue line to move a break or the print area's edge. A
-sheet keeps the view it was left in.
+**Keys and the mouse, as Excel's.** `Esc` cancels typing; pressed again it lets the
+cells go, so the markup tools work over them. `Ctrl`+click adds a block to those
+picked; `Ctrl+A` picks the data round the active cell, then the whole sheet;
+`Ctrl`+arrows, `Page Up`/`Page Down` and `Ctrl+Home` move as in Excel; `Shift`+drag of
+the selection's border inserts the cells where they are let go. A markup over the
+cells (a chart, a box) is picked and dragged with a click; picked, it takes `Delete`
+and the arrow keys, and a click on a cell gives the keys back to the cells.
 
-**Freeze Panes** (**View ▸ Spreadsheet**): **Freeze Panes** keeps the rows above
-and the columns left of the active cell in sight as the sheet scrolls (on a
-frozen sheet it is **Unfreeze Panes**); **Freeze Top Row**, **Freeze First
-Column** and **Unfreeze Panes**. Each is one undo step and is saved with the
-sheet; an Excel file's frozen panes come in with it. A thin line marks where
-the frozen cells end; they are clicked, typed into and picked like any other,
-the active cell is kept in sight below and right of them, and `Ctrl+Home` goes
-to the first cell that is not frozen. As in Excel they are the workbook view's:
-the pages print and show the sheet whole.
+**Leaving it**: another page in Thumbnails, `Ctrl+Page Down` / `Ctrl+Page Up` past the
+last or first sheet, or the **×** at the top right (**Close Workbook**). The strip
+over the grid names the workbook and the sheet ("Workbook ▸ Sheet1").
 
-**Picking cells and keys, as Excel's.** `Esc` cancels what is being typed (and the
-copied cells' marching ants); pressed again it lets the cells go, the sheet staying
-in view, so the markup keys and tools work on it (a markup tool picked draws over
-the cells straight away); a click on a cell picks it again. Dragging cells (a
-selection, the fill handle, a move, a page line) past the edge of the view scrolls
-the sheet that way, the further out the faster. `Ctrl`+click or `Ctrl`+drag adds another block to those picked
-(shaded); the footer sums them all, and clearing, bold, number formats and the
-other formats act on all of them; Copy and Cut say Excel's "This command cannot
-be used on multiple selections". `Ctrl+A` picks the block of data round the
-active cell first, pressed again the whole sheet. `Ctrl`+arrow past the last
-cell of data goes to the sheet's end (row 1,048,576, column XFD). `Page Down` /
-`Page Up` go a screenful, the window with them. After `F2` (Edit) the arrows move
-the caret in the formula; typed straight in (Enter) they pick references. On a
-sheet a click on a HYPERLINK cell follows it; press and hold it to pick the cell.
-`Shift`+drag of the selection's border cuts the cells and inserts them where it
-is let go, the cells between closing up. The pointer is Excel's: the white cross
-over cells and the select-all corner, the arrow with the move sign on the
-selection's border (with the small + while `Ctrl` is held: a copy), the split
-arrows on heading edges (the headings kept in sight as the sheet scrolls too),
-and the plain double arrow on the blue page lines. A column's edge being
-dragged says its width as Excel does, in characters of the default font
-("Width: 8.43 (64 pixels)").
+**Sheet tabs** (under the grid): **◀ ▶** scroll them (right-click lists every
+sheet), **⊕** adds a sheet (`Shift+F11` before the one shown). Click a tab to go to
+it, double-click to rename it, drag it to move the sheet. Right-click a tab for
+**Insert Sheet**, **Delete**, **Rename…**, **Print**, **Go To**, **Close Workbook**
+and, on an imported workbook's sheet, **Self-contained**. Drag the splitter beside
+the scroll bar to give the tabs more room. Sheet and table names are unique in the
+document (any case, and as equations write them: `Loads (2)` and `Loads_2` clash);
+a taken name is refused with **That name is already taken**.
 
-**The formula bar.** The Name Box says the size of a block ("4R × 3C") only while
-the mouse picks it, then the active cell; drag the dots after it to widen it.
-**✗** (Cancel) and **✓** (Enter) beside **fx** while a cell is typed into; **fx**
-(Insert Function) starts a formula in the active cell with the list of functions.
-
-The pages are still there: in the page view (anywhere else in the document) a
-workbook's pages show as they print — its Page Layout view — and **File ▸
-Print…**'s preview is its print preview. Thumbnails, Print, Export and the page
-numbers go on as before.
-
-**The select-all corner.** Where the row and column headings meet is Excel's
-select-all box: the headings' grey with a small triangle in its bottom right
-corner, darker under the pointer (and green while the whole sheet is picked). A
-click picks the whole sheet. It is there on a sheet's pages, in the workbook
-view, and on the headings kept in sight as the sheet scrolls.
-
-**Leaving it:** click any other page in Thumbnails or type its number in the page
-box; `Ctrl+Page Down` / `Ctrl+Page Up` go to the next or previous sheet, and past
-the last or first sheet out to the page after or before the workbook; or the
-**×** at the top right of the sheet (**Close Workbook**, also on a tab's menu)
-goes back to the page you came from, as you left it. The strip it is on, over the
-grid, names the workbook and, in bold, the sheet ("Workbook ▸ Sheet1", "Loads ▸
-Factors"; a copy "Workbook (2) ▸ Sheet1 (2)"). The tabs take what they need to all be
-in sight while the row has room (the scroll bar keeping a good length), until the
-split between them is dragged.
-
-**Sheet tabs.** In the workbook view, under the canvas, the row Excel has: the
-tab-scroll arrows **◀ ▶** (a click scrolls the tabs a tab at a time, `Ctrl`+click
-goes to the first or last sheet, a right-click lists every sheet to go to), a tab
-for each sheet in reading order (tables have none; the sheet shown white, its
-name green), **⊕** for a new sheet, the **×**, and the splitter at the left of the
-scroll bar: the tabs take 60 % of the row to start, as Excel's do; drag the
-splitter (Excel's double-headed arrow) to give the tabs or the scroll bar more
-room, double-click it to put it back. The split is kept with the workbook and
-saved, and an Excel file's comes in with it. The tabs, like the formula bar,
-show only in the workbook view.
-Click a tab to go to it; double-click to rename it on the tab (`Enter` keeps the
-name, `Esc` leaves it); drag it to move the sheet's pages among the workbook's;
-**⊕** adds a sheet at the end of the workbook (to an Excel workbook, one of its
-sheets, sharing its names) and shows it, and `Shift+F11` puts a new sheet before
-the one shown. Right-click a
-tab — or press and hold it, on a touch screen — for **Insert Sheet**, **Delete**,
-**Rename…**, **Print**, **Go To** and **Close Workbook** — and, on a sheet of an
-imported Excel workbook, the **Self-contained** tick (see *Excel workbooks*). Rename a table from its right-click menu
-(**Rename Table…**) or the Properties panel; references follow a rename. Sheet and
-table names are unique in the whole document: a name another sheet or table
-already has (in any case) is refused with a warning, **That name is already
-taken**, and the tab goes back to editing with the name you typed chosen, ready
-to type over. So is a name equations would write the same way as another's
-(`Loads (2)` and `Loads_2` are both `Loads_2` in an equation).
-
-**Print / Don't Print.** **Print** on a tab's menu is ticked while the sheet
-prints; untick it for **Don't Print** (one undo step). A sheet that doesn't print
-has a grey tab with a crossed-out printer (its tooltip says so), and its pages
-are greyed in Thumbnails. Its pages are left out of Print, Export ▸ PDF and
-Images, and are not written as pages of the saved PDF, so Acrobat, Revu or a
-browser neither shows nor prints them; CalcForge keeps them in the file's own
-record and puts them back where they were when it opens the file. The sheet is
-still part of the document: equations and other sheets read its cells as before.
-
-**Page numbers on a sheet's pages.** Each page of a sheet shows its number as
-printed ("Page 4") faintly behind the cells, in the page view and in the workbook
-view; a page that doesn't print shows none, and the pages after it are numbered
-as if it were not there. Ticking or unticking **Print** renumbers the marks and
-Thumbnails at once.
+**Print / Don't Print** (a tab's menu): a sheet that doesn't print has a grey tab
+and greyed thumbnails, and is left out of Print, Export and the saved PDF's pages;
+equations and other sheets still read its cells. Each printed page shows its
+number ("Page 4") faintly behind the cells.
 
 ### Excel workbooks
 
-**File ▸ Open** an `.xlsx` makes a new document of it; **File ▸ Import ▸ Excel
-Workbook** (or Document ▸ Insert, or a page's menu) adds one Before or After the
-current page. A workbook with several worksheets asks which to bring in, and
-for each whether it prints: the window lists the worksheets with a tick to bring
-each in and a **Print** column, ticked (**Print**) to start; untick it for
-**Don't Print** (see *The workbook view and sheet tabs*). Each
-worksheet becomes a run of spreadsheet pages with its cells, formulas, formatting,
-sizes, merges, names, comments, validation, conditional formatting and page
-layout, its frozen panes and the view it was left in (Normal or Page Break
-Preview), and the workbook's split between its tabs and its scroll bar; hidden
-worksheets come in too. Its **charts** come in as CalcForge charts — XY scatter,
-line and column, with their series, title, axis titles, axis limits, log scales,
-gridlines and legend — where Excel anchors them and as big, moving with their
-cells; its **pictures** come in as images, placed and sized the same way. Charts
-of other kinds (pie, area, 3-D…) and a print scale other than 100 % are left out,
-and CalcForge says so, listing any cell whose formula gives another answer here
-than Excel last showed. A worksheet whose name is already used in the document is
-renamed `Name (2)` (then `(3)`…), and the formulas and charts reading it follow;
-the same workbook brought in twice is shown as `Loads` and `Loads (2)`, and its
-name for the equations is `Loads` and `Loads_2`, so the two never mix. Nothing is
-ever written back to Excel.
+**File ▸ Open** an `.xlsx` or `.xlsm` for a new document of it, or **File ▸ Import ▸
+Excel Workbook** to add one before or after the current page. A workbook with
+several worksheets asks which to bring in and whether each prints. Each worksheet
+becomes spreadsheet pages with its cells, formulas, formats, sizes, merges, names,
+comments, validation, conditional formatting, page layout, frozen panes and view.
+Its XY scatter, line and column **charts** and its **pictures** come in where Excel
+put them, moving with their cells; other chart kinds and a print scale other than
+100 % are left out, and CalcForge says so — with any cell whose answer differs from
+what Excel last showed. A worksheet name already used becomes `Name (2)`; the same
+workbook brought in twice is `Loads` and `Loads (2)`. Nothing is written back to
+Excel.
 
-Formulas come out as Excel showed them, named ranges included. Where an older
-workbook's formula uses a block of cells where one value is wanted — a name of a
-column such as `s_x = $J$17:$J$39` in `=s_x*w`, or `INDIRECT` of such a name —
-Excel takes the cell in the formula's own row (implicit intersection); CalcForge
-does the same and shows it the way Excel 365 does, with `@`: `=@s_x*@w`. A name
-whose cells were deleted in Excel stays and gives `#REF!`, as in Excel.
+An old workbook's implicit intersection (`=s_x*w` with `s_x` a column) is shown as
+Excel 365 shows it, `=@s_x*@w`. A name whose cells were deleted in Excel stays and
+gives `#REF!`, as in Excel.
 
-**A workbook is one, and self-contained by default.** Its sheets share its names.
-The import window has a **Self-contained** tick (ticked to start):
+**Self-contained** (the import window's tick, on to start; later on a sheet tab's
+right-click menu or the Properties panel's **Workbook** section):
 
-- **Self-contained**: its names are its own. Its cells read its names first (a
-  sheet's own name wins on its sheet, as in Excel), otherwise the equation variable
-  defined above the sheet; `var(X)` still reads the equation variable X. Equations
-  below read any of its cells by sheet and cell (`Seismic_Actions.H44`) and its
-  names only qualified — `Seismic_Actions_NZS1170_5.Cd_T_min_ULS` or
-  `Seismic_Actions.Cd_T_min_ULS` — never bare. The workbook's name is its file name
-  without the extension, each run of other characters one `_`
-  (`Seismic_Actions_NZS1170.5.xlsm` is `Seismic_Actions_NZS1170_5`), made unique in
-  the document with `_2`, `_3`…; the import's message and the Properties panel say
-  it. Two workbooks with the same names stay apart.
-- **Not self-contained** (untick it): its names are document variables, read bare
-  by equations and other sheets, each defined where its sheet is in reading order.
-  Names already used in the document (equation variables, other names, SMath's
-  constants) are listed, with **Keep self-contained**, **Rename them with the
-  prefix** (suggested from the workbook's name, e.g. `Seismic_`; the workbook's
-  formulas follow) or **Go ahead** (reading order then decides which is read).
-
-Change it later with the **Self-contained** tick on the sheet tab's right-click
-menu, or in the Properties panel's **Workbook** section (shown while one of its
-sheets is open); it is one undo step and is saved with the document. Unticking it
-then lists any names already used and asks before going ahead. The Variables panel
-lists a self-contained workbook's names under a heading of its own
-(**Workbook Seismic_Actions_NZS1170_5**), written as the equations read them; the
-Name Manager's Scope shows the workbook.
+- **Self-contained**: the workbook's names are its own. Its cells read its names
+  first, then equation variables (`var(X)` always reads the equation's X).
+  Equations read its cells as `Seismic_Actions.H44` and its names only qualified:
+  `Seismic_Actions_NZS1170_5.Cd` (the workbook, named after its file) or
+  `Seismic_Actions.Cd` (a sheet). The Variables panel lists them under the
+  workbook's heading.
+- **Not self-contained**: its names are document variables, read bare. Names
+  already used in the document are listed first, with **Keep self-contained**,
+  **Rename them with the prefix** or **Go ahead**.
 
 ### Spreadsheet functions
 
@@ -2583,12 +2191,12 @@ drawn on it keeps its own colours.
 - **Tools ▸ Toolbars**: show or hide Main, Calculation, Measure, Tools, Markup
   Styles, Properties and Alignment (hidden at first, as Revu's); **Lock Toolbars**; **Customise Toolbars…** picks which
   markup tools are on the toolbar (a tool taken off stays on its menu and key).
-- Drag a toolbar by its handle to any edge of the window. On the left or right
-  it stands on end in a column of its own at the window's edge, outside the
-  panel strip, so the panels still open between the strip and the page. As along
-  the top, room opens while you drag: near a side edge the panel strip, the panels
-  and the page move in, the room they leave is marked blue as a gap along the top
-  is, and the toolbar lands there when you let go. The Properties and Markup Styles toolbars go top or bottom only.
+- Drag a toolbar by its handle to any edge of the window. Along the top and
+  bottom toolbars share rows. On the left or right a toolbar stands on end outside
+  the panel strip: drop it onto a column of toolbars to join that column (a blue
+  gap shows where it goes), or at the window's very edge for a column of its own
+  (the strip and the panels move in to make room). The Properties and Markup
+  Styles toolbars go top or bottom only.
 - Panels: open and close them from the edge strips or **Window ▸ Panels**; drag an
   icon to the other side; pin, float or roll up a panel from its title bar.
   **Window ▸ Pin Panels** pins them all; **Reset Layout** puts every panel and
