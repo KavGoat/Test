@@ -6,6 +6,7 @@ the 2026-09-27 report is recorded below. Completion status stays user-owned.
 ## 2026-10-24 (late morning) — Excel names only dialled in, sheet tabs, blocks, the Variables panel's groups, a chart on a page, the Table tool (pushed at f6f3007…2348cc6)
 
 - The quick check passed on 2348cc6 before it was pushed (33.2 min, `-n 3`).
+- The full check passed on 2348cc6 (PYTEST_EXIT=0, 14/14 planted bugs caught); the quick check list was rebuilt from it.
 - A not-self-contained workbook's Excel names read from outside only dialled in (Sheet.Name, Book.Name in equations; ='Quoted sheet'!Name in cells), never bare; a self-contained one's not even dialled in to (not defined; #NAME? with the reason): tests/test_workbook_self_contained.py, tests/test_xlsx_drawings.py, tests/sheet/test_formula_and_inputs.py.
 - Sheet tabs keep their width as one is picked (bold), so none is cut off beside room to spare; Self-contained on a workbook's Thumbnails menu; a picked stack's frame inside its cell: tests/test_excel_tab_row.py, tests/test_thumbnails_workbooks.py, tests/test_workbook_self_contained.py.
 - The Calculation Block button puts down a new empty, self-contained block that leaves the equations it lies over out; pasted and My Tools blocks keep their own; Create Block on selected equations asks Self-contained or not: tests/test_calc_blocks.py, tests/test_definition_order_window.py. The Table tool lets go after one table: tests/test_tables.py.
