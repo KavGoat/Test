@@ -186,11 +186,12 @@ def test_the_variables_panel_lists_a_workbooks_names_only_when_equations_read_th
     pump()
     panel.refresh()
     assert not [n for n in names() if n in ("Height1", "Fph_1")], "never bare"
-    (head,) = [n for n in names() if "Workbook" in n]
-    assert head.startswith("▸ Workbook Parts_Coefficient (")
-    panel.go_to(next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
-                     if "Workbook" in tree.topLevelItem(i).text(0)))
-    assert "Parts_Coefficient.Height1" in names() and "Parts_Coefficient.Fph_1" in names()
+    assert "Workbooks (1)" in names()
+    book = panel.group_node("book:Parts_Coefficient")
+    assert book is not None and not book.isExpanded(), "closed until clicked"
+    inside = [book.child(i).text(0) for i in range(book.childCount())]
+    assert "Parts_Coefficient.Height1" in inside and "Parts_Coefficient.Fph_1" in inside
+    assert not [n for n in inside if n.endswith("Gone")], "a #REF! name is not listed"
     assert [r for r in panel.rows if r.name.endswith("Gone") and "#REF!" in r.error]
     assert not [n for n in names() if n.endswith("Gone")], "a #REF! name is not listed"
 

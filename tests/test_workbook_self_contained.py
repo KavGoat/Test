@@ -373,6 +373,12 @@ def test_a_cell_named_as_a_variable_is_read_bare_below_and_after_reopening(w, tm
     pump()
     type_equations(w, last, ["p:PGA", "p="])
     assert results(w)["p="] == "0.4"
+    # listed under its workbook: Workbooks ▸ Self-contained ▸ Quake_Calc ▸ PGA
+    panel = w.variables_panel
+    panel.refresh()
+    book = panel.group_node("book:Quake_Calc")
+    assert book is not None and book.parent() is panel.group_node("workbooks/self")
+    assert [book.child(i).text(0) for i in range(book.childCount())] == ["PGA"]
     # made global (for the sections after a section break): still read
     calcsections.set_cells_global(w, run, (0, 0, 0, 0), True)
     pump()
@@ -419,20 +425,26 @@ def test_variables_panel_and_name_manager_show_the_workbook(w, tmp_path):
         "never as a variable of its own"
     w.variables_panel.refresh()
 
+    panel = w.variables_panel
+
     def heads():
-        tree = w.variables_panel.tree
+        tree = panel.tree
         return [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
-    # the user's choice, 2026-10-23: under the workbook's heading, closed to start
-    assert "▸ Workbook Quake_Calc (3 names)" in heads()
-    head_text = "▸ Workbook Quake_Calc (3 names)"
-    assert "Tables.ReturnPeriodFactor" not in heads() and "Z" not in heads()
-    head = next(w.variables_panel.tree.topLevelItem(i)
-                for i in range(w.variables_panel.tree.topLevelItemCount())
-                if w.variables_panel.tree.topLevelItem(i).text(0) == head_text)
-    w.variables_panel.go_to(head)                  # a click on the heading opens it
-    assert "▾" + head_text[1:] in heads()
-    assert {"Quake_Calc.Z", "Quake_Calc.ReturnPeriodFactor", "Tables.ReturnPeriodFactor"} \
-        <= set(heads())
+    # Workbooks ▸ Not self-contained ▸ Quake_Calc ▸ its names as dialled in,
+    # each closed to start (the user, 2026-10-23 and 2026-10-24)
+    assert "Workbooks (1)" in heads() and "Z" not in heads()
+    top = panel.group_node("workbooks")
+    assert not top.isExpanded()
+    part = panel.group_node("workbooks/open")
+    assert part.text(0) == "Not self-contained (1)" and part.parent() is top
+    assert panel.group_node("workbooks/self") is None, "an empty group isn't shown"
+    book = panel.group_node("book:Quake_Calc")
+    assert book.text(0) == "Quake_Calc (3 names)" and book.parent() is part
+    assert {book.child(i).text(0) for i in range(book.childCount())} == \
+        {"Quake_Calc.Z", "Quake_Calc.ReturnPeriodFactor", "Tables.ReturnPeriodFactor"}
+    for head in (top, part, book):
+        panel.go_to(head)                          # a click on a heading opens it
+    assert panel.group_node("book:Quake_Calc").isExpanded()
     scopes = sorted(scope_text(wb, dn) for dn in wb.names.values())
     assert scopes == ["Quake_Calc", "Quake_Calc", "Tables"]
 

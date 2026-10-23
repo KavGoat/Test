@@ -28,6 +28,20 @@ def panel_rows(v):
             for i in range(tree.topLevelItemCount())]
 
 
+def tree_rows(v) -> list:
+    """Every row at every depth: (indent and name, page column)."""
+    tree = v.window.variables_panel.tree
+    out = []
+
+    def walk(node, depth):
+        out.append(("  " * depth + node.text(0), node.text(3)))
+        for i in range(node.childCount()):
+            walk(node.child(i), depth + 1)
+    for i in range(tree.topLevelItemCount()):
+        walk(tree.topLevelItem(i), 0)
+    return out
+
+
 def test_the_variables_panel_is_on_the_rail(v):
     assert "dock_variables" in v.window.right_rail.order()
     v.window.show_panel("dock_variables", True)
@@ -60,11 +74,33 @@ def test_it_follows_the_calculation(v):
 
 
 def test_pages_and_self_contained_blocks_are_shown(v):
+    """The user, 2026-10-24: "variable panel should clearly show what
+    variables in a self contained block like a workbook section ... block→
+    self contain or not contained and then i can drop down into each. hide a
+    group if there aren't any of them in that group"."""
     block, outside, inside, after = two_checks(v)
     v.window.set_block_self_contained([block], True)
     rows = panel_rows(v)
     assert ["x", "1", "", "Page 1"] == rows[0]
-    assert rows[1][0] == "y" and rows[1][3] == "Page 1 · block"
+    assert [r[0] for r in rows] == ["x", "Blocks (1)"], "the block's under its group"
+    assert tree_rows(v) == [("x", "Page 1"), ("Blocks (1)", ""),
+                            ("  Self-contained (1)", ""),
+                            ("    Block 1 · page 1 (2 names)", ""),
+                            ("      y", "Page 1 · block"), ("      x", "Page 1 · block")], \
+        "no Not self-contained group: it would be empty"
+    panel = v.window.variables_panel
+    head = panel.group_node("blocks")
+    assert not head.isExpanded(), "closed to start"
+    panel.go_to(head)                               # a click on it opens it
+    assert head.isExpanded() and "blocks" in panel.opened
+    panel.refresh()
+    assert panel.group_node("blocks").isExpanded(), "kept open"
+    v.window.set_block_self_contained([block], False)
+    panel_rows(v)
+    assert [r[0] for r in tree_rows(v)][2] == "  Not self-contained (1)"
+    panel.filter.setText("y")
+    assert panel.group_node("block:" + block.uid).isExpanded(), "finding looks inside"
+    panel.filter.setText("")
 
 
 def test_clicking_a_row_goes_to_the_equation(v):

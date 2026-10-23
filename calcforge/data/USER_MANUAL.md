@@ -62,8 +62,9 @@ adds a workbook.
   workbooks often have names Excel keeps as `#REF!` (their cells were deleted):
   the Seismic Parts workbook's **Height** is one, so `=height` there is `#REF!`
   (the error's tip says why) — `=var(height)` reads the equation's.
-- The **Variables** panel lists everything an equation can read; a
-  self-contained workbook's Excel names are not in it.
+- The **Variables** panel lists everything an equation can read; what is in
+  blocks and workbooks is under **Blocks** and **Workbooks**, each split
+  self-contained or not.
 
 **Spreadsheet views.** The buttons at the right of the status bar, whenever a
 spreadsheet page is in view (also **View ▸ Spreadsheet**):
@@ -936,11 +937,17 @@ in red. The definition in force at the selected equation is bold. Click a row to
 go to the equation; **Find a variable** narrows the list; right-click ▸ **Go to**
 or **Make Global**. Under **Tables** are what the tables give the equations: each
 defined name and each column a table's headings name (`Loads.Load`), with its
-value. A self-contained workbook's Excel names are not listed (equations can't
-read them); a workbook that isn't self-contained has its names listed as document
-variables, and its sheets' own names under its heading, **▸ Workbook
-Seismic_Actions (3 names)**, closed to start: click the heading to open or close
-it. **Find a variable** looks in closed workbooks too. A name Excel itself has as
+value. After them come two groups, each closed until you click it (empty ones
+aren't shown):
+
+- **Blocks** ▸ **Self-contained** / **Not self-contained** ▸ each block
+  (*Block 2 · page 3*) ▸ the variables defined in it;
+- **Workbooks** ▸ **Self-contained** / **Not self-contained** ▸ each imported
+  workbook ▸ its variables (cells named in their **Variable** box) and, for one
+  that isn't self-contained, its Excel names as you dial in to them
+  (`Seismic_Actions.Z`). A self-contained workbook's Excel names are not listed.
+
+**Find a variable** looks inside closed groups too. A name Excel itself has as
 `#REF!` (its cells deleted in Excel) is not listed. With calc section breaks the
 rows come section by section.
 

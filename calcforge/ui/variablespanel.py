@@ -8,15 +8,23 @@ it has one. Clicking a row goes to the equation that defines it.
 Below them, under Tables (the user's choice, 2026-10-10), what the tables
 give the equations: each defined name (W_total) and each column a table's
 headings name (Loads.Load), with its value; clicking one goes to its cells.
-A self-contained imported workbook's Excel names are not listed: they are
-for its own cells, and the equations read it only by its CalcForge variables
-and as Sheet.H44 (the user, 2026-10-24: "selfcontained shows nothing"). One
-that isn't self-contained has its names listed only as they are dialled in
-(Seismic_Actions_NZS1170_5.Z, a sheet's own Tables.ReturnPeriodFactor),
-never bare, under its heading, closed to start (▸, its count of names):
-click the heading to open it (the user's choice, 2026-10-23). Finding a
-variable looks in closed ones too. A name Excel itself has as #REF! (its
-cells deleted in Excel) is not listed.
+After them, two groups, each opened and closed with a click (the user,
+2026-10-24: "workbook→self contain, not contained sub category for me to
+click. then block→ self contain or not contained and then i can drop down
+into each. hide a group if there aren't any of them in that group"):
+
+* Blocks ▸ Self-contained / Not self-contained ▸ each block ("Block 2 ·
+  page 3") ▸ the variables defined in it;
+* Workbooks ▸ Self-contained / Not self-contained ▸ each imported workbook
+  ▸ its CalcForge variables (cells named in their Variable box, read bare
+  anywhere) and, one that isn't self-contained, its Excel names as they are
+  dialled in (Seismic_Actions_NZS1170_5.Z, a sheet's own
+  Tables.ReturnPeriodFactor). A self-contained one's Excel names are not
+  listed: they are for its own cells.
+
+A group with nothing in it is not shown; closed to start, every group opens
+while finding a variable. A name Excel itself has as #REF! (its cells
+deleted in Excel) is not listed.
 
 A name defined twice has two rows: SMath allows redefining, and which
 definition an equation sees depends on where it is — the latest one before
@@ -39,7 +47,7 @@ from PySide6.QtWidgets import (QHeaderView, QLabel, QLineEdit, QMenu, QTreeWidge
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 COLUMNS = ("Name", "Value", "Unit", "Page")
-GROUP_ROLE = Qt.UserRole + 1         # a workbook heading's workbook
+GROUP_ROLE = Qt.UserRole + 1         # a group heading's key ("blocks", "book:Name"…)
 ERROR_RED = "#c92a2a"
 
 
@@ -57,8 +65,12 @@ class VariableRow:
     section: int = 1            # the calc section it is in (1-based)
     is_global: bool = False     # read by later sections too
     key: Optional[tuple] = None  # where it is defined in reading order
-    group: str = ""             # the workbook a sheet's own name is under, for its heading
+    group: str = ""             # the workbook it is under (its name), for its heading
     sheet_name: bool = False    # a spreadsheet's own name (Define Name), not a Variable box's
+    group_contained: bool = False   # that workbook is self-contained
+    block: str = ""             # the calculation block it is in (its uid)
+    block_label: str = ""       # "Block 2", numbered in reading order
+    block_contained: bool = False   # that block is self-contained
 
 
 def _gone(row) -> bool:
@@ -77,6 +89,16 @@ def _split_value(shown: str) -> tuple:
     return number, plain_units(unit)
 
 
+def block_labels(sheet, pages: dict) -> dict:
+    """Each calculation block's name in the panel: block uid -> "Block 2",
+    numbered in reading order (page, then down, then across)."""
+    placed = []
+    for uid, (page_uid, (left, top, _right, _bottom), _on, _out) in sheet.blocks.items():
+        if page_uid in pages:
+            placed.append((pages[page_uid], top, left, uid))
+    return {uid: f"Block {k}" for k, (_p, _t, _l, uid) in enumerate(sorted(placed), 1)}
+
+
 def variable_rows(document) -> list:
     """Every definition in the document, in reading order."""
     from ..calc.docsheet import sheet_for
@@ -86,6 +108,7 @@ def variable_rows(document) -> list:
     pages = {page.uid: index for index, page in enumerate(document.pages)}
     rows = []
     sectioned = bool(sheet.section_starts())
+    labels = block_labels(sheet, pages)
     for region in worksheet.ordered():
         page_uid = sheet.page_uid(region)
         if page_uid not in pages or region.kind != "math":
@@ -101,20 +124,25 @@ def variable_rows(document) -> list:
         made = region.is_global
         if made:
             where += " · global"
+        block = sheet.block_of(region) or ""
+        inside = {"block": block, "block_label": labels.get(block, "Block") if block else "",
+                  "block_contained": bool(block and sheet.blocks[block][2])}
         names = list(region.defined_vars.items())
         for name, value in names:
             shown, problem = _value_text(worksheet, region, value, fmt)
             number, unit = _split_value(shown)
             rows.append(VariableRow(name, number, unit, page, where, error or problem,
-                                    region.id, source, None, section, made, region.key))
+                                    region.id, source, None, section, made, region.key,
+                                    **inside))
         for (name, arity), _body in region.defined_funcs.items():
             rows.append(VariableRow(f"{name}({', '.join(['·'] * arity)})", "function", "",
-                                    page, where, error, region.id, source, None, section, made))
+                                    page, where, error, region.id, source, None, section, made,
+                                    **inside))
         if not names and not region.defined_funcs and error:
             name = _defined_name(region)
             if name:
                 rows.append(VariableRow(name, "", "", page, where, error, region.id, source,
-                                        None, section, made))
+                                        None, section, made, **inside))
     return rows
 
 
@@ -192,8 +220,12 @@ def table_rows(document) -> list:
         text, unit, error = shown(values)
         page = homes.get(sheet.id, 0) if sheet is not None else 0
         name = dn.name + (f" ({home.name})" if home is not None else "")
-        group = ""
-        if book is not None and home is not None:
+        group, contained = "", False
+        if dn.variable and sheet is not None and sheet.book in wb.books:
+            # a CalcForge variable on a workbook's cells: under its workbook
+            # (the user, 2026-10-24), read bare all the same
+            group, contained = wb.books[sheet.book].name, wb.books[sheet.book].self_contained
+        elif book is not None and home is not None:
             name = f"{sheet_ident(home.name)}.{dn.name}"     # a sheet's own name: Sheet.Name
             group = book.name
         elif book is not None:
@@ -209,7 +241,7 @@ def table_rows(document) -> list:
                            error, -1, "Workbook" if group else "Table", cells,
                            **placed(sheet, cells),
                            key=book_key(sheet) if sheet is not None else None, group=group,
-                           sheet_name=not dn.variable)
+                           sheet_name=not dn.variable, group_contained=contained)
         (own if group else rows).append(made)
     for sheet in wb.sheets:
         if sheet.kind != "table" or not sheet.size:
@@ -226,8 +258,9 @@ def table_rows(document) -> list:
             rows.append(VariableRow(f"{sheet.name}.{_ident(cell.value)}", text, unit, page,
                                     f"Page {page}" if page else "", error, -1, "Table",
                                     cells, **placed(sheet, cells), key=book_key(sheet)))
-    # the names of a workbook that isn't self-contained, as dialled in, under the workbook
-    return rows + sorted(own, key=lambda r: (r.group.lower(), r.name.lower()))
+    # under each workbook: its CalcForge variables, and (one that isn't
+    # self-contained) its Excel names as dialled in
+    return rows + sorted(own, key=lambda r: (r.group.lower(), r.sheet_name, r.name.lower()))
 
 
 def in_force(document, rows: list, region=None) -> dict:
@@ -319,11 +352,16 @@ class VariablesPanel(QWidget):
         self.filter.setClearButtonEnabled(True)
         self.filter.textChanged.connect(lambda _t: self._fill())
         lay.addWidget(self.filter)
-        self.opened: set = set()        # the workbooks whose names are shown (▾)
+        self.opened: set = set()        # the groups shown open (their keys)
+        self._finding = False
+        self._filling = False
         self.tree = QTreeWidget()
         self.tree.setColumnCount(len(COLUMNS))
         self.tree.setHeaderLabels(list(COLUMNS))
-        self.tree.setRootIsDecorated(False)
+        self.tree.setRootIsDecorated(True)      # the groups' arrows
+        self.tree.setIndentation(14)
+        self.tree.itemExpanded.connect(lambda node: self._expanded(node, True))
+        self.tree.itemCollapsed.connect(lambda node: self._expanded(node, False))
         self.tree.setUniformRowHeights(True)
         self.tree.setAlternatingRowColors(True)
         header = self.tree.header()
@@ -412,10 +450,11 @@ class VariablesPanel(QWidget):
             pass
         self._fill()
 
-    def _heading(self, text: str, tip: str, colour: Optional[str] = None, group: str = "") -> None:
-        head = QTreeWidgetItem([text, "", "", ""])
-        if group:
-            head.setData(0, GROUP_ROLE, group)       # a workbook's: a click opens or closes it
+    def _heading(self, text: str, tip: str, colour: Optional[str] = None, parent=None):
+        """A heading row: bold, across the whole row. Made with its parent
+        (the tree or a group), which owns it: one made alone and added was
+        freed twice when the tree was cleared, a crash."""
+        head = QTreeWidgetItem(self.tree if parent is None else parent, [text, "", "", ""])
         font = head.font(0)
         font.setBold(True)
         head.setFont(0, font)
@@ -423,8 +462,17 @@ class VariablesPanel(QWidget):
         head.setToolTip(0, tip)
         if colour:
             head.setForeground(0, QBrush(QColor(colour)))
-        self.tree.addTopLevelItem(head)
         head.setFirstColumnSpanned(True)          # the heading across the whole row
+        return head
+
+    def _group(self, parent, key: str, text: str, tip: str):
+        """A group to open (▸) and close: Blocks or Workbooks, their
+        Self-contained and Not self-contained, and each block or workbook
+        (the user, 2026-10-24). Closed to start; open while finding."""
+        head = self._heading(text, tip + " · click to show or hide", parent=parent)
+        head.setData(0, GROUP_ROLE, key)
+        head.setExpanded(key in self.opened or self._finding)
+        return head
 
     # -- which definition is in force -----------------------------------------------------
     def reading_point(self):
@@ -455,8 +503,11 @@ class VariablesPanel(QWidget):
         chosen = set(force.values())
         from PySide6.QtGui import QPalette
         accent = self.palette().color(QPalette.Link)       # the theme's accent, both themes
-        for index in range(self.tree.topLevelItemCount()):
-            node = self.tree.topLevelItem(index)
+        from PySide6.QtWidgets import QTreeWidgetItemIterator
+        found = QTreeWidgetItemIterator(self.tree)
+        while found.value() is not None:
+            node = found.value()
+            found += 1
             i = node.data(0, Qt.UserRole)
             if i is None:
                 continue
@@ -485,37 +536,63 @@ class VariablesPanel(QWidget):
                                    f"latest {upto}, page by page, top to bottom).")
         self.in_force_note.setVisible(bool(force))
 
+    def _clear(self) -> None:
+        """Every row away. The groups are shut first and the rows taken out
+        and dropped from the top: clear() with open groups crashed now and
+        then (Qt kept the open rows' places while they went)."""
+        tree = self.tree
+        tree.setCurrentItem(None)
+        tree.collapseAll()
+        root = tree.invisibleRootItem()
+        for gone in root.takeChildren():
+            del gone
+
+    def _row_node(self, parent, index: int, row: VariableRow):
+        node = QTreeWidgetItem(self.tree if parent is None else parent,
+                               [("🌐 " if row.is_global else "") + row.name,
+                                row.error or row.value, row.unit, row.where])
+        node.setData(0, Qt.UserRole, index)
+        tip = f"{row.name} — {row.source.lower()} on page {row.page}" if row.page else row.name
+        if row.error:
+            for column in range(len(COLUMNS)):
+                node.setForeground(column, QBrush(QColor(ERROR_RED)))
+            tip += f"\n{row.error}"
+        for column in range(len(COLUMNS)):
+            node.setToolTip(column, tip)
+        node.setData(1, Qt.UserRole, tip)
+        return node
+
     def _fill(self) -> None:
+        """The rows: the document's own in reading order (by calc section,
+        then the tables'); then the Blocks and the Workbooks, each split
+        Self-contained / Not self-contained, then block by block and workbook
+        by workbook (the user, 2026-10-24: "workbook→self contain, not
+        contained sub category for me to click. then block→ self contain or
+        not contained and then i can drop down into each. hide a group if
+        there aren't any of them in that group")."""
         from .calcsections import BAND, has_sections, sections
         wanted = self.filter.text().strip().lower()
+        self._finding = bool(wanted)
         current = self.tree.currentItem()
         current = current.data(0, Qt.UserRole) if current is not None else None
-        self.tree.clear()
+        self._filling = True
+        self._clear()
         document = self.window.document
         listed = sections(document) if has_sections(document) else []
-        headed = False
-        section_shown = None
-        group_shown = None
         listed_rows = [(index, row) for index, row in enumerate(self.rows)
                        if not (wanted and wanted not in row.name.lower()) and not _gone(row)]
-        counts: dict = {}
-        for _index, row in listed_rows:
-            if row.group:
-                counts[row.group] = counts.get(row.group, 0) + 1
+        main, in_blocks, in_books = [], {}, {}
         for index, row in listed_rows:
-            if row.group and row.group != group_shown:
-                group_shown = row.group
-                section_shown = None
-                shut = row.group not in self.opened and not wanted
-                count = counts[row.group]
-                self._heading(f"{'▸' if shut else '▾'} Workbook {row.group} "
-                              f"({count} name{'s' * (count != 1)})",
-                              "An imported Excel workbook's own names: equations read them as "
-                              f"{row.group}.Name, or Sheet.Name for a sheet's own. "
-                              "Click to " + ("show" if shut else "hide") + " them",
-                              group=row.group)
-            if row.group and row.group not in self.opened and not wanted:
-                continue                    # its workbook closed (▸)
+            if row.block:
+                in_blocks.setdefault(row.block, []).append((index, row))
+            elif row.group:
+                in_books.setdefault(row.group, []).append((index, row))
+            else:
+                main.append((index, row))
+        nodes = {}
+        headed = False
+        section_shown = None
+        for index, row in main:
             if row.source == "Table" and not headed:
                 headed = True
                 section_shown = None
@@ -527,20 +604,54 @@ class VariablesPanel(QWidget):
                 self._heading(part.label if row.source != "Table" else f"  {part.label}",
                               "A calc section: what is defined in it is not seen after the next "
                               "break, unless it is global", BAND.name())
-            node = QTreeWidgetItem([("🌐 " if row.is_global else "") + row.name,
-                                    row.error or row.value, row.unit, row.where])
-            node.setData(0, Qt.UserRole, index)
-            tip = f"{row.name} — {row.source.lower()} on page {row.page}" if row.page else row.name
-            if row.error:
-                for column in range(len(COLUMNS)):
-                    node.setForeground(column, QBrush(QColor(ERROR_RED)))
-                tip += f"\n{row.error}"
-            for column in range(len(COLUMNS)):
-                node.setToolTip(column, tip)
-            node.setData(1, Qt.UserRole, tip)
-            self.tree.addTopLevelItem(node)
-            if index == current:
-                self.tree.setCurrentItem(node)
+            nodes[index] = self._row_node(None, index, row)
+
+        def names(n: int) -> str:
+            return f"{n} name{'s' * (n != 1)}"
+
+        if in_blocks:
+            top = self._group(None, "blocks", f"Blocks ({len(in_blocks)})",
+                              "The variables defined inside calculation blocks")
+            for contained, label, key in ((True, "Self-contained", "blocks/self"),
+                                          (False, "Not self-contained", "blocks/open")):
+                these = [uid for uid, entries in in_blocks.items()
+                         if entries[0][1].block_contained == contained]
+                if not these:
+                    continue                    # a group with nothing in it is not shown
+                tip = ("What they define stays inside them" if contained
+                       else "What they define is read after them too")
+                part = self._group(top, key, f"{label} ({len(these)})", tip)
+                for uid in these:
+                    entries = in_blocks[uid]
+                    first = entries[0][1]
+                    node = self._group(part, f"block:{uid}",
+                                       f"{first.block_label} · page {first.page} "
+                                       f"({names(len(entries))})", f"{first.block_label}'s variables")
+                    for index, row in entries:
+                        nodes[index] = self._row_node(node, index, row)
+        if in_books:
+            top = self._group(None, "workbooks", f"Workbooks ({len(in_books)})",
+                              "Imported Excel workbooks: their CalcForge variables, and the Excel "
+                              "names of one that isn't self-contained, as dialled in")
+            for contained, label, key in ((True, "Self-contained", "workbooks/self"),
+                                          (False, "Not self-contained", "workbooks/open")):
+                these = [name for name, entries in in_books.items()
+                         if entries[0][1].group_contained == contained]
+                if not these:
+                    continue
+                tip = ("Only its CalcForge variables and its cells (Sheet.H44) are read from "
+                       "outside" if contained else
+                       "Its Excel names are read from outside dialled in: Sheet.Name")
+                part = self._group(top, key, f"{label} ({len(these)})", tip)
+                for name in these:
+                    entries = in_books[name]
+                    node = self._group(part, f"book:{name}", f"{name} ({names(len(entries))})",
+                                       f"The workbook {name}")
+                    for index, row in entries:
+                        nodes[index] = self._row_node(node, index, row)
+        if current in nodes:
+            self.tree.setCurrentItem(nodes[current])
+        self._filling = False
         self.empty.setVisible(not self.rows)
         self._mark_in_force()
 
@@ -588,13 +699,35 @@ class VariablesPanel(QWidget):
         self.refresh()
 
     # -- going to one ---------------------------------------------------------------
-    def toggle_group(self, group: str) -> None:
-        """A workbook's heading clicked: its names shown, or put away."""
-        if group in self.opened:
-            self.opened.discard(group)
+    def toggle_group(self, key: str) -> None:
+        """A group's heading clicked: what is in it shown, or put away."""
+        node = self.group_node(key)
+        if node is not None:
+            node.setExpanded(not node.isExpanded())     # (opened follows: _expanded)
+            return
+        if key in self.opened:
+            self.opened.discard(key)
         else:
-            self.opened.add(group)
+            self.opened.add(key)
         self._fill()
+
+    def group_node(self, key: str):
+        """The heading of group *key* ("blocks", "workbooks/self", "book:Name"…)."""
+        from PySide6.QtWidgets import QTreeWidgetItemIterator
+        found = QTreeWidgetItemIterator(self.tree)
+        while found.value() is not None:
+            node = found.value()
+            if node.data(0, GROUP_ROLE) == key:
+                return node
+            found += 1
+        return None
+
+    def _expanded(self, node, on: bool) -> None:
+        if self._filling or self._finding:
+            return                              # (the item may be going)
+        key = node.data(0, GROUP_ROLE)
+        if key:
+            (self.opened.add if on else self.opened.discard)(key)
 
     def row_of(self, node) -> Optional[VariableRow]:
         index = node.data(0, Qt.UserRole) if node is not None else None
