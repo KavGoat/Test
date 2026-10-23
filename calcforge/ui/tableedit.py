@@ -1471,15 +1471,24 @@ class TableEditing:
         x, y = local.x(), local.y()
         across = xs[c0] - tol <= x <= xs[c1 + 1] + tol
         down = max(top - tol, 0.0) <= y <= bottom + tol
-        if down and abs(x - xs[c1 + 1]) <= tol:
+
+        def near(edges: list, k: int) -> float:
+            # never more than a third into the cell beside the edge: zoomed
+            # out, a click in the middle of row 1 took the print area's top
+            # edge rather than the cell
+            size = edges[k + 1] - edges[k] if 0 <= k < len(edges) - 1 else tol * 3
+            return min(tol, max(size, 0.0) / 3.0)
+        r0 = rows[0] if rows else 0
+        r1 = rows[1] if rows else len(ys) - 2
+        if down and abs(x - xs[c1 + 1]) <= near(xs, c1):
             return "right"
         if rows is None:
             return None
-        if down and abs(x - xs[c0]) <= tol and x >= 0:
+        if down and abs(x - xs[c0]) <= near(xs, c0) and x >= 0:
             return "left"
-        if across and abs(y - bottom) <= tol:
+        if across and abs(y - bottom) <= near(ys, r1):
             return "bottom"
-        if across and abs(y - top) <= tol and y >= 0:
+        if across and abs(y - top) <= near(ys, r0) and y >= 0:
             return "top"
         return None
 
