@@ -1164,11 +1164,14 @@ unit, its page (and whether it is inside a self-contained block), and its error
 in red. The definition in force at the selected equation is bold. Click a row to
 go to the equation; **Find a variable** narrows the list; right-click ▸ **Go to**
 or **Make Global**. Under **Tables** are what the tables give the equations: each
-cell named with its Variable box and each column a table's headings name
-(`Loads.Load`), with its value. A spreadsheet's own names (Define Name, the Name
-Box, and every name an imported workbook brings) are CalcForge variables only
-when you make them so: tick **Sheet Names** to list them too. With calc section
-breaks the rows come section by section.
+defined name and each column a table's headings name (`Loads.Load`), with its
+value. A self-contained workbook's names sit under its heading, **▸ Workbook
+Seismic_Actions (126 names)**, closed to start: click the heading to open or close
+it. They are written as equations read them (`Seismic_Actions.Z`, a sheet's own as
+`Tables.Z`), and equations reach them only that way, never bare. **Find a variable**
+looks in closed workbooks too. A name Excel itself has as `#REF!` (its cells
+deleted in Excel) is not listed. With calc section breaks the rows come section
+by section.
 
 ### Plots
 
@@ -1976,8 +1979,8 @@ The import window has a **Self-contained** tick (ticked to start):
 Change it later with the **Self-contained** tick on the sheet tab's right-click
 menu, or in the Properties panel's **Workbook** section (shown while one of its
 sheets is open); it is one undo step and is saved with the document. Unticking it
-then lists any names already used and asks before going ahead. With **Sheet Names**
-ticked, the Variables panel lists a self-contained workbook's names under a heading of its own
+then lists any names already used and asks before going ahead. The Variables panel
+lists a self-contained workbook's names under a heading of its own
 (**Workbook Seismic_Actions_NZS1170_5**), written as the equations read them; the
 Name Manager's Scope shows the workbook.
 

@@ -291,10 +291,17 @@ def test_excels_newer_validations_come_across_without_a_warning(tmp_path):
     assert rule["ranges"] == [[1, 1, 9, 1]] and rule["blank"] and rule["error"] == "Pick a grade"
 
 
-def test_charts_and_pictures_are_left_out_and_said(tmp_path):
+def test_a_column_chart_comes_in_reading_its_cells(tmp_path):
+    # the user, 2026-10-23: "the charts aren't pulling through" (they were
+    # left out); a chart CalcForge draws now comes in (tests/test_xlsx_drawings.py)
     path = a_workbook(str(tmp_path / "chart.xlsx"), with_chart=True)
     got = read_workbook(path)
-    assert any("chart" in what for what in got.left_out)
+    assert not any("chart" in what for what in got.left_out)
+    (chart,) = got.sheets[0].charts
+    assert chart["spec"]["kind"] == "column"
+    (series,) = chart["spec"]["series"]
+    assert series["y"].endswith("!$B$2:$B$4") and series["name"].endswith("!B1")
+    assert chart["anchor"][:2] == [1, 9]                   # J2
 
 
 @pytest.fixture

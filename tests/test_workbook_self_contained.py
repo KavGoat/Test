@@ -360,13 +360,21 @@ def test_variables_panel_and_name_manager_show_the_workbook(w, tmp_path):
     def heads():
         tree = w.variables_panel.tree
         return [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
-    # the user, 2026-10-23: only CalcForge's variables, unless Sheet Names is ticked
-    assert "Workbook Quake_Calc" not in heads()
-    assert not [h for h in heads() if "Quake_Calc." in h or "ReturnPeriodFactor" in h]
-    w.variables_panel.sheet_names.setChecked(True)
-    assert "Workbook Quake_Calc" in heads()
-    assert "Quake_Calc.Z" in heads()
-    w.variables_panel.sheet_names.setChecked(False)
+    # the user's choice, 2026-10-23: under the workbook's heading, closed to start
+    assert "▸ Workbook Quake_Calc (3 names)" in heads()
+    assert "Quake_Calc.Z" not in heads()
+    head = next(w.variables_panel.tree.topLevelItem(i)
+                for i in range(w.variables_panel.tree.topLevelItemCount())
+                if w.variables_panel.tree.topLevelItem(i).text(0).startswith("▸ Workbook"))
+    w.variables_panel.go_to(head)                  # a click on the heading opens it
+    assert "▾ Workbook Quake_Calc (3 names)" in heads()
+    assert {"Quake_Calc.Z", "Quake_Calc.ReturnPeriodFactor", "Tables.ReturnPeriodFactor"} <= set(heads())
+    w.variables_panel.filter.setText("ReturnPeriod")
+    w.variables_panel.go_to(next(w.variables_panel.tree.topLevelItem(i)
+                                 for i in range(w.variables_panel.tree.topLevelItemCount())
+                                 if "Workbook" in w.variables_panel.tree.topLevelItem(i).text(0)))
+    assert "Tables.ReturnPeriodFactor" in heads(), "Find a variable looks in a closed one too"
+    w.variables_panel.filter.setText("")
     wb = runs(w)["Tables"].sheet.workbook
     scopes = sorted(scope_text(wb, dn) for dn in wb.names.values())
     assert scopes == ["Quake_Calc (self-contained)", "Quake_Calc (self-contained)", "Tables"]

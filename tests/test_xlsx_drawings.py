@@ -45,6 +45,7 @@ def parts_book(path: str) -> str:
         ws.cell(row=40, column=9 + k, value=c)
     wb.defined_names["Height1"] = DefinedName("Height1", attr_text="Calculations!$I$37")
     wb.defined_names["Fph_1"] = DefinedName("Fph_1", attr_text="Calculations!$I$40")
+    wb.defined_names["Gone"] = DefinedName("Gone", attr_text="Calculations!#REF!")  # deleted in Excel
     chart = ScatterChart()
     chart.title = "Response Coefficients vs Height"
     chart.style = 13
@@ -165,19 +166,22 @@ def test_imported_twice_each_copy_reads_its_own_and_is_named_2(w, tmp_path):
     assert runs(w)["Calculations (2)"].sheet.cells[(9, 1)].value == 500
 
 
-def test_the_variables_panel_lists_calcforge_variables_only(w, tmp_path):
+def test_the_variables_panel_keeps_the_workbooks_names_under_its_heading(w, tmp_path):
+    """The user's choice, 2026-10-23: a self-contained workbook's names are
+    listed as equations write them, under its heading, closed until clicked;
+    a name Excel has as #REF! is not listed."""
     imported(w, tmp_path)
     panel = w.variables_panel
     panel.refresh()
+    tree = panel.tree
 
     def names():
-        return [panel.tree.topLevelItem(i).text(0) for i in range(panel.tree.topLevelItemCount())]
-    assert not [n for n in names() if "Height1" in n or "Fph_1" in n]
-    panel.sheet_names.setChecked(True)
-    assert [n for n in names() if n.endswith("Height1")] and [n for n in names() if n.endswith("Fph_1")]
-    panel.sheet_names.setChecked(False)
-    # a cell named with its Variable box is a CalcForge variable: listed
-    calc = runs(w)["Calculations"].sheet
-    calc.workbook.define_name("W_total", "Calculations!$I$40", variable=True)
-    panel.refresh()
-    assert [n for n in names() if n.endswith("W_total")], "listed with Sheet Names unticked"
+        return [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
+    (head,) = [n for n in names() if "Workbook" in n]
+    assert head.startswith("▸ Workbook Parts_Coefficient (")
+    assert not [n for n in names() if n.endswith("Height1")], "closed to start"
+    panel.go_to(next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
+                     if "Workbook" in tree.topLevelItem(i).text(0)))
+    assert [n for n in names() if n.endswith(".Height1")] and [n for n in names() if n.endswith(".Fph_1")]
+    assert [r for r in panel.rows if r.name.endswith("Gone") and "#REF!" in r.error]
+    assert not [n for n in names() if n.endswith("Gone")], "a #REF! name is not listed"

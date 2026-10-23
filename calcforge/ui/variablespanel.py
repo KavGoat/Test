@@ -11,10 +11,11 @@ headings name (Loads.Load), with its value; clicking one goes to its cells.
 A self-contained imported workbook's names come last, under the workbook,
 written as the equations read them (Seismic_Actions_NZS1170_5.Z; a sheet's
 own name as Tables.ReturnPeriodFactor) — they are not document variables.
-A spreadsheet's own names (Define Name, and every name an imported workbook
-brings) are listed only with **Sheet Names** ticked (the user, 2026-10-23:
-only CalcForge's variables, not the sheets'); a cell named with its Variable
-box is a CalcForge variable and always listed.
+Each workbook's names sit under its heading, closed to start (▸, its count
+of names): click the heading to open it (the user's choice, 2026-10-23: the
+names listed as equations write them, out of the way until wanted). Finding
+a variable looks in closed ones too. A name Excel itself has as #REF! (its
+cells deleted in Excel) is not listed.
 
 A name defined twice has two rows: SMath allows redefining, and which
 definition an equation sees depends on where it is — the latest one before
@@ -33,10 +34,11 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QCheckBox, QHeaderView, QLabel, QLineEdit, QMenu, QTreeWidget,
+from PySide6.QtWidgets import (QHeaderView, QLabel, QLineEdit, QMenu, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 COLUMNS = ("Name", "Value", "Unit", "Page")
+GROUP_ROLE = Qt.UserRole + 1         # a workbook heading's workbook
 ERROR_RED = "#c92a2a"
 
 
@@ -55,7 +57,13 @@ class VariableRow:
     is_global: bool = False     # read by later sections too
     key: Optional[tuple] = None  # where it is defined in reading order
     group: str = ""             # a self-contained workbook's name, for its own heading
-    sheet_name: bool = False    # a spreadsheet's own name (Define Name), not a CalcForge variable
+    sheet_name: bool = False    # a spreadsheet's own name (Define Name), not a Variable box's
+
+
+def _gone(row) -> bool:
+    """A spreadsheet's name whose cells were deleted in Excel (#REF! there too):
+    nothing an equation can use."""
+    return row.sheet_name and "#REF!" in (row.error or "")
 
 
 def _split_value(shown: str) -> tuple:
@@ -306,13 +314,7 @@ class VariablesPanel(QWidget):
         self.filter.setClearButtonEnabled(True)
         self.filter.textChanged.connect(lambda _t: self._fill())
         lay.addWidget(self.filter)
-        self.sheet_names = QCheckBox("Sheet Names")
-        self.sheet_names.setObjectName("variablesSheetNames")
-        self.sheet_names.setToolTip("List the spreadsheets' own names too (Define Name, and the "
-                                    "names an imported workbook brings); untick for CalcForge's "
-                                    "variables only")
-        self.sheet_names.toggled.connect(lambda _on: self._fill())
-        lay.addWidget(self.sheet_names)
+        self.opened: set = set()        # the workbooks whose names are shown (▾)
         self.tree = QTreeWidget()
         self.tree.setColumnCount(len(COLUMNS))
         self.tree.setHeaderLabels(list(COLUMNS))
@@ -405,8 +407,10 @@ class VariablesPanel(QWidget):
             pass
         self._fill()
 
-    def _heading(self, text: str, tip: str, colour: Optional[str] = None) -> None:
+    def _heading(self, text: str, tip: str, colour: Optional[str] = None, group: str = "") -> None:
         head = QTreeWidgetItem([text, "", "", ""])
+        if group:
+            head.setData(0, GROUP_ROLE, group)       # a workbook's: a click opens or closes it
         font = head.font(0)
         font.setBold(True)
         head.setFont(0, font)
@@ -487,18 +491,26 @@ class VariablesPanel(QWidget):
         headed = False
         section_shown = None
         group_shown = None
-        names_too = self.sheet_names.isChecked()
-        for index, row in enumerate(self.rows):
-            if wanted and wanted not in row.name.lower():
-                continue
-            if row.sheet_name and not names_too:
-                continue
+        listed_rows = [(index, row) for index, row in enumerate(self.rows)
+                       if not (wanted and wanted not in row.name.lower()) and not _gone(row)]
+        counts: dict = {}
+        for _index, row in listed_rows:
+            if row.group:
+                counts[row.group] = counts.get(row.group, 0) + 1
+        for index, row in listed_rows:
             if row.group and row.group != group_shown:
                 group_shown = row.group
                 section_shown = None
-                self._heading(f"Workbook {row.group}",
+                shut = row.group not in self.opened and not wanted
+                count = counts[row.group]
+                self._heading(f"{'▸' if shut else '▾'} Workbook {row.group} "
+                              f"({count} name{'s' * (count != 1)})",
                               "An imported Excel workbook's own names: equations read them as "
-                              f"{row.group}.Name, or Sheet.Name for a sheet's own")
+                              f"{row.group}.Name, or Sheet.Name for a sheet's own. "
+                              "Click to " + ("show" if shut else "hide") + " them",
+                              group=row.group)
+            if row.group and row.group not in self.opened and not wanted:
+                continue                    # its workbook closed (▸)
             if row.source == "Table" and not headed:
                 headed = True
                 section_shown = None
@@ -571,11 +583,23 @@ class VariablesPanel(QWidget):
         self.refresh()
 
     # -- going to one ---------------------------------------------------------------
+    def toggle_group(self, group: str) -> None:
+        """A workbook's heading clicked: its names shown, or put away."""
+        if group in self.opened:
+            self.opened.discard(group)
+        else:
+            self.opened.add(group)
+        self._fill()
+
     def row_of(self, node) -> Optional[VariableRow]:
         index = node.data(0, Qt.UserRole) if node is not None else None
         return self.rows[index] if index is not None and 0 <= index < len(self.rows) else None
 
     def go_to(self, node) -> None:
+        group = node.data(0, GROUP_ROLE) if node is not None else None
+        if group:
+            self.toggle_group(group)
+            return
         row = self.row_of(node)
         if row is None:
             return
