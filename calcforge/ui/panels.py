@@ -220,6 +220,8 @@ class _ThumbnailDelegate(QStyledItemDelegate):
     FRAME = 4
     GAP = 1
     OUTLINE = 2
+    #: How far up and right each sheet behind a workbook's entry sits.
+    STACK = 4
     #: From the top of the cell to the top of the picture's room.
     TOP = 8
     #: Between the picture's room and its first line of words.
@@ -248,6 +250,12 @@ class _ThumbnailDelegate(QStyledItemDelegate):
         return QRect(room.left() + (room.width() - fitted.width()) // 2,
                      room.top() + (room.height() - fitted.height()) // 2,
                      fitted.width(), fitted.height())
+
+    def stack_rect(self, page: QRect, collapsed: bool) -> QRect:
+        """What a picked frame goes round: the page, and a workbook's entry
+        with the sheets stacked behind it (framing the front page alone left
+        the frame showing only down its left and along its bottom, an L)."""
+        return page.united(page.translated(2 * self.STACK, -2 * self.STACK)) if collapsed else page
 
     def lines_rect(self, cell: QRect) -> QRect:
         """Where the words go: under the picture's room, across the cell."""
@@ -287,14 +295,16 @@ class _ThumbnailDelegate(QStyledItemDelegate):
             band = QColor(colours["accent_soft"])
             band.setAlpha(150)
             painter.fillRect(cell.adjusted(0, 2, 0, -2), band)
+        collapsed = bool(section.get("collapsed"))
         if picked or hovered:
-            frame = page.adjusted(-self.FRAME, -self.FRAME, self.FRAME, self.FRAME)
+            frame = self.stack_rect(page, collapsed).adjusted(-self.FRAME, -self.FRAME,
+                                                               self.FRAME, self.FRAME)
             painter.fillRect(frame, QColor(colours["thumb_picked" if picked
                                                   else "thumb_hover"]))
-        if section.get("collapsed"):
+        if collapsed:
             # a workbook as one entry: its first page on a stack of sheets
             painter.setPen(QPen(QColor(colours["thumb_edge"]), 1))
-            for step in (8, 4):
+            for step in (2 * self.STACK, self.STACK):
                 behind = page.translated(step, -step)
                 painter.fillRect(behind, Qt.white)
                 painter.drawRect(behind.adjusted(0, 0, -1, -1))
@@ -403,7 +413,10 @@ class PageListWidget(QListWidget):
         if self.in_view_row < 0 or self.item(self.in_view_row) is None:
             return QRect()
         out = self.delegate.FRAME + self.delegate.GAP + self.delegate.OUTLINE
-        return self.picture_rect(self.in_view_row).adjusted(-out, -out, out, out)
+        section = self.item(self.in_view_row).data(SECTION_ROLE) or {}
+        page = self.delegate.stack_rect(self.picture_rect(self.in_view_row),
+                                        bool(section.get("collapsed")))
+        return page.adjusted(-out, -out, out, out)
 
     def cell_size(self) -> QSize:
         """A page's cell: room for its picture, the words under it, and the
@@ -494,11 +507,35 @@ class PageListWidget(QListWidget):
                                                   cell.width(), shown)
             self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn if scrolls
                                             else Qt.ScrollBarAlwaysOff)
-            grid = QSize(share, cell.height())
+            self._fit_icon(share)
+            grid = QSize(share, self.cell_size().height())
             if grid != self.gridSize():
                 self.setGridSize(grid)
         finally:
             self._laying_out = False
+
+    #: The pictures' size as zoomed (Ctrl+wheel); drawn smaller only while
+    #: the strip is too narrow for them.
+    _wanted_icon = None
+
+    def setIconSize(self, size: QSize) -> None:
+        self._wanted_icon = QSize(size)
+        super().setIconSize(size)
+        self.relayout()
+
+    def _fit_icon(self, share: int) -> None:
+        """Zoomed in past the strip's width, the pages are made to fit it, as
+        Revu's are, rather than being cut off at its edge (the user,
+        2026-10-23: "zooming in and out in the page panel should resize the
+        grid"); wider again, they are as big as they were zoomed."""
+        wanted = self._wanted_icon or self.iconSize()
+        d = self.delegate
+        room = share - 2 * (d.FRAME + d.GAP + d.OUTLINE + 2 * d.STACK) - 2
+        size = QSize(wanted)
+        if 16 <= room < wanted.width():
+            size = QSize(room, max(int(wanted.height() * room / wanted.width()), 20))
+        if size != self.iconSize():
+            QListWidget.setIconSize(self, size)
 
     def wheelEvent(self, event) -> None:
         """Ctrl and the wheel makes the pages bigger and smaller.
@@ -609,19 +646,40 @@ class PageListWidget(QListWidget):
         return self.viewport().width() >= self.CELL_WIDTH * 2
 
     def drop_indicator_line(self, row: int):
-        """The visible slot for an external page drop, in viewport pixels."""
+        """Where pages dropped at *row* go, in viewport pixels: Revu's short
+        line in the gap beside the page they go in front of (after the last,
+        beside it), as long as the page and no longer — not the whole cell,
+        words and all (the user, 2026-10-23: "quite long and not like
+        Bluebeam")."""
         shown = self.shown_rows()
         if not shown:
             return QPointF(6, 6), QPointF(max(self.viewport().width() - 6, 6), 6)
         # the slot in front of *row*: the first thumbnail showing from there
         # (a workbook's hidden pages are behind its entry)
         ahead = next((r for r in shown if r >= row), None)
-        reference = self.visualItemRect(self.item(ahead if ahead is not None else shown[-1]))
+        page = self.picture_rect(ahead if ahead is not None else shown[-1])
+        before = shown[shown.index(ahead) - 1] if ahead is not None and shown.index(ahead) > 0 \
+            else (shown[-1] if ahead is None else None)
+        reach = self.delegate.FRAME + self.delegate.GAP + self.delegate.OUTLINE + 3
         if not self.uses_horizontal_slots():
-            y = reference.top() if ahead is not None else reference.bottom()
-            return QPointF(reference.left() + 3, y), QPointF(reference.right() - 3, y)
-        x = reference.left() if ahead is not None else reference.right()
-        return QPointF(x, reference.top() + 3), QPointF(x, reference.bottom() - 3)
+            # one page to a row: across, in the gap above it (below the last)
+            if ahead is None:
+                y = page.bottom() + reach + 2
+            elif before is not None:
+                above = self.visualItemRect(self.item(before)).bottom()
+                y = (above + page.top()) // 2
+            else:
+                y = page.top() - reach
+            return QPointF(page.left(), y), QPointF(page.right(), y)
+        if ahead is None:
+            x = page.right() + reach + 2
+        else:
+            x = page.left() - reach
+            if before is not None:
+                left = self.picture_rect(before)
+                if abs(left.center().y() - page.center().y()) < page.height() / 2:
+                    x = (left.right() + page.left()) // 2         # between the two
+        return QPointF(x, page.top()), QPointF(x, page.bottom())
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)

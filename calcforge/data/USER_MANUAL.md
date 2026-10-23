@@ -756,9 +756,11 @@ gap — the same number its "Page N" mark, the header and footer's `{page}` and 
 printed page carry. The page box goes on counting every page, so that each one
 can be gone to (a page's tooltip gives both).
 Click to go there; drag pages to reorder them (a run of picked pages moves
-together); drop a PDF file onto it to insert its pages there. `Ctrl`+wheel over
-the panel changes the picture size, as do **Larger Thumbnails** and **Smaller
-Thumbnails** (on the Window menu too). The panel's title, **Thumbnails ▾**, is
+together; a short blue line in the gap, as tall as a page, shows where they go);
+drop a PDF file onto it to insert its pages there. `Ctrl`+wheel over the panel
+changes the picture size, and as many pages go to a row as fit — as do **Larger
+Thumbnails** and **Smaller Thumbnails** (on the Window menu too); a page never
+grows wider than the panel. The panel's title, **Thumbnails ▾**, is
 its menu: every insert (Before or After), Duplicate Page, Extract Pages…, Split
 Document…, Delete Pages…, Crop Pages…, Rotate Pages, Page Setup…, Set Scale… and
 the two sizes. The buttons after it are **Add Page**, **Insert Pages**, **Insert
@@ -768,8 +770,11 @@ on a narrow panel they go on a line of their own under the title.
 
 **A workbook is one entry.** The pages of a workbook — an Excel workbook brought
 in, or spreadsheet pages made here side by side — show in Thumbnails as one
-entry: its first page on a stack of sheets, with **▸ Loads** over **pages 2–10**
-(numbered as they print; **doesn't print** when none of its sheets does).
+entry: its first page on a stack of sheets, framed all round when picked, with
+**▸ Loads** over **pages 2–10** (numbered as they print; **doesn't print** when
+none of its sheets does). An Excel workbook is named after its file; one made
+here is **Workbook**, the next **Workbook (2)** and so on, whether it has one
+sheet or many.
 Click the picture to open the workbook (its first sheet, alone: see *The workbook
 view and sheet tabs*); click its name (the ▸) to show its
 pages one by one (**▾ Loads**, on a tinted band) and again to fold them back;

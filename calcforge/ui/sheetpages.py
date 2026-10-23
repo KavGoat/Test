@@ -151,9 +151,17 @@ def sections(document, fresh: bool = False) -> list:
             out.append(last)
         last._names.append(sheet_name)
     numbers = document.printed_numbers()
+    # sheets made here, side by side, are a workbook: "Workbook", and another
+    # such run "Workbook (2)"… — never the name of its one sheet (the user,
+    # 2026-10-23: the first showed "Sheet1", the next one "Workbook (2)")
+    taken = {s.name.lower() for s in out if s.book is not None}
     for section in out:
-        if section.book is None and len(section.runs) > 1:
-            section.name = "Workbook"      # sheets made here, side by side
+        if section.book is None:
+            name = "Workbook"
+            if name.lower() in taken:
+                name = copy_name("Workbook", taken)
+            taken.add(name.lower())
+            section.name = name
         section.printed = [numbers[i] for i in section.pages if numbers[i]]
     document._sections_cache = (key, len(pages), out)
     return out
@@ -462,6 +470,13 @@ def safe_target(document, target: int) -> int:
     return target
 
 
+def _unnumbered(name: str) -> str:
+    """A name without the copy's number Excel puts after it: "Loads (2)" is
+    "Loads"."""
+    import re
+    return re.sub(r" \(\d+\)$", "", name) or name
+
+
 def copy_name(name: str, taken: set) -> str:
     """Excel's name for a copied sheet: "Loads (2)", then (3)…, not one of
     *taken* (lower case)."""
@@ -509,15 +524,14 @@ def workbook_copy(document, section: Section) -> list:
     found = wb.books.get(section.book) if section.book is not None else None
     if found is not None:
         stem, ext = os.path.splitext(os.path.basename(found.file or ""))
-        title = copy_name(stem or found.name, shown)
+        # a copy's copy is the next free number: "Loads (3)", not "Loads (2) (2)"
+        title = copy_name(_unnumbered(stem or found.name), shown)
         file, own = title + (ext or ".xlsx"), found.self_contained
     else:
         # sheets made here: the copy a workbook of its own, so that its names
         # are its own and not the original's again
-        # (a lone sheet's section is named after the sheet: its copy is a
-        # workbook, "Workbook (2)", as the strip over the grid names it)
-        base = "Workbook" if len(section.runs) == 1 else section.name
-        title = copy_name(base, shown | {"workbook"})
+        # ("Workbook" or "Workbook (2)": its copy the next free number)
+        title = copy_name(_unnumbered(section.name), shown | {"workbook"})
         file, own = title, True
     # the copy's file name says it is the copy (Loads (2).xlsx): it is how
     # the workbook is shown; its name for the equations is unique (Loads_2)

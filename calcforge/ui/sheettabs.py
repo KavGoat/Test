@@ -443,8 +443,6 @@ class SheetTabs(QWidget):
         document = getattr(self, "_document", None) or self.window.document
         section = next((x for x in sections(document) if x.key == self.section_key), None)
         book = section.name if section is not None else ""
-        if section is not None and section.book is None and len(section.runs) == 1:
-            book = "Workbook"     # (a lone sheet's entry in Thumbnails is its own name)
         self.title.show_names(book, self.entries[index][1])
 
     def _sheet_list(self, at: QPoint) -> Optional[QMenu]:
