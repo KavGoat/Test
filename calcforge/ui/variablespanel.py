@@ -1,26 +1,22 @@
 """The Variables panel on the side rail (decision 21).
 
 Every name the document's equations define, in the order SMath reads them:
-its value and unit as the defining equation shows them, the page it is on
-(and whether it is inside a self-contained block), and its error in red when
-it has one. Clicking a row goes to the equation that defines it.
+its value and unit as the defining equation shows them, the page it is on,
+and its error in red when it has one. Clicking a row goes to the equation
+that defines it. Each calculation block and each imported workbook is a
+section of its own where it comes in that order (the user, 2026-10-24:
+"each block should show as its own section", and a block after a workbook
+was listed before it), its heading saying whether it is self-contained. A
+workbook's section holds what the equations read of it — its CalcForge
+variables (cells named in their Variable box, read bare anywhere) and, one
+that isn't self-contained, its Excel names as they are dialled in
+(Seismic_Actions_NZS1170_5.Z, a sheet's own Tables.ReturnPeriodFactor) —
+and, one that is self-contained, its Excel names greyed under "Its own
+cells only", for reference (their pick, 2026-10-24).
 
-Below them, under Tables (the user's choice, 2026-10-10), what the tables
+After them, under Tables (the user's choice, 2026-10-10), what the tables
 give the equations: each defined name (W_total) and each column a table's
 headings name (Loads.Load), with its value; clicking one goes to its cells.
-After them, two groups, each opened and closed with a click (the user,
-2026-10-24: "workbook→self contain, not contained sub category for me to
-click. then block→ self contain or not contained and then i can drop down
-into each. hide a group if there aren't any of them in that group"):
-
-* Blocks ▸ Self-contained / Not self-contained ▸ each block ("Block 2 ·
-  page 3") ▸ the variables defined in it;
-* Workbooks ▸ Self-contained / Not self-contained ▸ each imported workbook
-  ▸ its CalcForge variables (cells named in their Variable box, read bare
-  anywhere) and, one that isn't self-contained, its Excel names as they are
-  dialled in (Seismic_Actions_NZS1170_5.Z, a sheet's own
-  Tables.ReturnPeriodFactor). A self-contained one's Excel names are not
-  listed: they are for its own cells.
 
 A group with nothing in it is not shown; closed to start, every group opens
 while finding a variable. A name Excel itself has as #REF! (its cells
@@ -41,7 +37,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (QHeaderView, QLabel, QLineEdit, QMenu, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -49,6 +45,7 @@ from PySide6.QtWidgets import (QHeaderView, QLabel, QLineEdit, QMenu, QTreeWidge
 COLUMNS = ("Name", "Value", "Unit", "Page")
 GROUP_ROLE = Qt.UserRole + 1         # a group heading's key ("blocks", "book:Name"…)
 ERROR_RED = "#c92a2a"
+CLOSED_GREY = "#8c8c8c"            # a self-contained workbook's own name, for reference
 
 
 @dataclass
@@ -71,6 +68,13 @@ class VariableRow:
     block: str = ""             # the calculation block it is in (its uid)
     block_label: str = ""       # "Block 2", numbered in reading order
     block_contained: bool = False   # that block is self-contained
+    # a self-contained workbook's own Excel name: listed (greyed) for
+    # reference, read only by its own cells (the user, 2026-10-24)
+    closed: bool = False
+    # its workbook's place in reading order (its first page), and that page:
+    # the workbook is a section where it comes (the user, 2026-10-24)
+    order: Optional[tuple] = None
+    group_page: int = 0
 
 
 def _gone(row) -> bool:
@@ -114,9 +118,7 @@ def variable_rows(document) -> list:
         if page_uid not in pages or region.kind != "math":
             continue
         page = pages[page_uid] + 1
-        where = f"Page {page}"
-        if worksheet.scope_of.get(region.id) is not None:
-            where += " · block"
+        where = f"Page {page}"           # a block's heading says it is in one
         error = region.error.message if region.error is not None else ""
         fmt = region.fmt or worksheet.format
         source = getattr(region, "calcforge_source", "Equation")
@@ -197,13 +199,18 @@ def table_rows(document) -> list:
 
     from ..sheet.docbook import sheet_ident
 
+    firsts = {}                       # workbook id -> (reading key, page) of its first page
+    for sheet in wb.sheets:
+        if sheet.book and sheet.id in homes:
+            at = book_key(sheet)
+            if sheet.book not in firsts or at < firsts[sheet.book][0]:
+                firsts[sheet.book] = (at, homes[sheet.id])
     rows, own = [], []
     for (lower, scope), dn in sorted(wb.names.items(), key=lambda kv: kv[1].name.lower()):
         home = wb.sheet_by_id(scope) if isinstance(scope, int) else None
         book = wb.books.get(scope) if isinstance(scope, str) else \
             (wb.books.get(home.book) if home is not None and home.book else None)
-        if book is not None and book.self_contained:
-            continue                   # its Excel names are its cells' own, not the equations'
+        closed = book is not None and book.self_contained and not dn.variable
         try:
             got = ev(F.parse(dn.refers_to).tree, Ctx(wb, home or (wb.sheets[0] if wb.sheets else None), 0, 0))
         except (F.FormulaError, SheetError, AttributeError) as e:
@@ -220,11 +227,16 @@ def table_rows(document) -> list:
         text, unit, error = shown(values)
         page = homes.get(sheet.id, 0) if sheet is not None else 0
         name = dn.name + (f" ({home.name})" if home is not None else "")
-        group, contained = "", False
+        group, contained, book_id = "", False, book.id if book is not None else None
         if dn.variable and sheet is not None and sheet.book in wb.books:
             # a CalcForge variable on a workbook's cells: under its workbook
             # (the user, 2026-10-24), read bare all the same
             group, contained = wb.books[sheet.book].name, wb.books[sheet.book].self_contained
+            book_id = sheet.book
+        elif closed:
+            # its Excel names are its own cells', not the equations': shown
+            # as Excel shows them, the sheet's own with the sheet
+            group, contained = book.name, True
         elif book is not None and home is not None:
             name = f"{sheet_ident(home.name)}.{dn.name}"     # a sheet's own name: Sheet.Name
             group = book.name
@@ -240,8 +252,11 @@ def table_rows(document) -> list:
         made = VariableRow(name, text, unit, page, f"Page {page}" if page else "",
                            error, -1, "Workbook" if group else "Table", cells,
                            **placed(sheet, cells),
-                           key=book_key(sheet) if sheet is not None else None, group=group,
-                           sheet_name=not dn.variable, group_contained=contained)
+                           key=book_key(sheet) if sheet is not None and not closed else None,
+                           group=group, sheet_name=not dn.variable, group_contained=contained,
+                           closed=closed)
+        if group:
+            made.order, made.group_page = firsts.get(book_id, (None, 0))
         (own if group else rows).append(made)
     for sheet in wb.sheets:
         if sheet.kind != "table" or not sheet.size:
@@ -370,9 +385,13 @@ class VariablesPanel(QWidget):
         header.setMinimumSectionSize(30)
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        # Value takes what it needs up to a third: Name has the rest, so a
+        # name three groups deep still shows (an even share left "sha…" and,
+        # in a narrow panel, nothing at all of a workbook's names)
+        header.setSectionResizeMode(1, QHeaderView.Interactive)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.tree.installEventFilter(self)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._menu)
         self.tree.itemClicked.connect(lambda node, _col: self.go_to(node))
@@ -515,7 +534,7 @@ class VariablesPanel(QWidget):
             font = node.font(0)
             font.setBold(i in chosen)
             node.setFont(0, font)
-            if not row.error:
+            if not row.error and not row.closed:
                 # in force: bold in the accent colour (a heading is bold in the ink)
                 node.setData(0, Qt.ForegroundRole, QBrush(accent) if i in chosen else None)
             tip = node.data(1, Qt.UserRole) or ""
@@ -553,6 +572,12 @@ class VariablesPanel(QWidget):
                                 row.error or row.value, row.unit, row.where])
         node.setData(0, Qt.UserRole, index)
         tip = f"{row.name} — {row.source.lower()} on page {row.page}" if row.page else row.name
+        if row.closed:
+            # for reference: no equation reads it (the user, 2026-10-24: greyed)
+            for column in range(len(COLUMNS)):
+                node.setForeground(column, QBrush(QColor(CLOSED_GREY)))
+            tip += (f"\nOnly {row.group}'s own cells read it: the workbook is self-contained "
+                    f"(untick Self-contained on its sheet tab to dial in to it)")
         if row.error:
             for column in range(len(COLUMNS)):
                 node.setForeground(column, QBrush(QColor(ERROR_RED)))
@@ -563,13 +588,17 @@ class VariablesPanel(QWidget):
         return node
 
     def _fill(self) -> None:
-        """The rows: the document's own in reading order (by calc section,
-        then the tables'); then the Blocks and the Workbooks, each split
-        Self-contained / Not self-contained, then block by block and workbook
-        by workbook (the user, 2026-10-24: "workbook→self contain, not
-        contained sub category for me to click. then block→ self contain or
-        not contained and then i can drop down into each. hide a group if
-        there aren't any of them in that group")."""
+        """The rows in the document's reading order (by calc section), the
+        tables' after them. Each calculation block and each imported
+        workbook is a section of its own where it comes (the user,
+        2026-10-24: "each block should show as its own section", and a
+        block after a workbook was listed before it), its heading saying
+        whether it is self-contained. A workbook's section holds what the
+        equations read of it — its CalcForge variables and, one that isn't
+        self-contained, its Excel names as dialled in — and, one that is
+        self-contained, its Excel names greyed under "Its own cells only",
+        for reference. Every section is closed until clicked, and one with
+        nothing in it is not shown."""
         from .calcsections import BAND, has_sections, sections
         wanted = self.filter.text().strip().lower()
         self._finding = bool(wanted)
@@ -581,79 +610,102 @@ class VariablesPanel(QWidget):
         listed = sections(document) if has_sections(document) else []
         listed_rows = [(index, row) for index, row in enumerate(self.rows)
                        if not (wanted and wanted not in row.name.lower()) and not _gone(row)]
-        main, in_blocks, in_books = [], {}, {}
+        main, in_books = [], {}
+        counts: dict = {}
         for index, row in listed_rows:
-            if row.block:
-                in_blocks.setdefault(row.block, []).append((index, row))
-            elif row.group:
+            if row.group:
                 in_books.setdefault(row.group, []).append((index, row))
             else:
                 main.append((index, row))
-        nodes = {}
-        headed = False
-        section_shown = None
-        for index, row in main:
-            if row.source == "Table" and not headed:
-                headed = True
-                section_shown = None
-                self._heading("Tables", "What the tables give the equations: named cells, and "
-                                        "Table.Column for each heading")
-            if listed and row.section != section_shown and row.section <= len(listed):
-                section_shown = row.section
-                part = listed[row.section - 1]
-                self._heading(part.label if row.source != "Table" else f"  {part.label}",
-                              "A calc section: what is defined in it is not seen after the next "
-                              "break, unless it is global", BAND.name())
-            nodes[index] = self._row_node(None, index, row)
+                if row.block:
+                    counts[row.block] = counts.get(row.block, 0) + 1
+        last = (float("inf"),)
+        books = sorted(in_books.items(),
+                       key=lambda kv: (tuple(kv[1][0][1].order or last), kv[0].lower()))
 
         def names(n: int) -> str:
             return f"{n} name{'s' * (n != 1)}"
 
-        if in_blocks:
-            top = self._group(None, "blocks", f"Blocks ({len(in_blocks)})",
-                              "The variables defined inside calculation blocks")
-            for contained, label, key in ((True, "Self-contained", "blocks/self"),
-                                          (False, "Not self-contained", "blocks/open")):
-                these = [uid for uid, entries in in_blocks.items()
-                         if entries[0][1].block_contained == contained]
-                if not these:
-                    continue                    # a group with nothing in it is not shown
-                tip = ("What they define stays inside them" if contained
-                       else "What they define is read after them too")
-                part = self._group(top, key, f"{label} ({len(these)})", tip)
-                for uid in these:
-                    entries = in_blocks[uid]
-                    first = entries[0][1]
-                    node = self._group(part, f"block:{uid}",
-                                       f"{first.block_label} · page {first.page} "
-                                       f"({names(len(entries))})", f"{first.block_label}'s variables")
-                    for index, row in entries:
-                        nodes[index] = self._row_node(node, index, row)
-        if in_books:
-            top = self._group(None, "workbooks", f"Workbooks ({len(in_books)})",
-                              "Imported Excel workbooks: their CalcForge variables, and the Excel "
-                              "names of one that isn't self-contained, as dialled in")
-            for contained, label, key in ((True, "Self-contained", "workbooks/self"),
-                                          (False, "Not self-contained", "workbooks/open")):
-                these = [name for name, entries in in_books.items()
-                         if entries[0][1].group_contained == contained]
-                if not these:
-                    continue
-                tip = ("Only its CalcForge variables and its cells (Sheet.H44) are read from "
-                       "outside" if contained else
-                       "Its Excel names are read from outside dialled in: Sheet.Name")
-                part = self._group(top, key, f"{label} ({len(these)})", tip)
-                for name in these:
-                    entries = in_books[name]
-                    node = self._group(part, f"book:{name}", f"{name} ({names(len(entries))})",
-                                       f"The workbook {name}")
-                    for index, row in entries:
-                        nodes[index] = self._row_node(node, index, row)
+        nodes = {}
+        state = {"tables": False, "section": None}
+
+        def section_of(row) -> None:
+            """The calc section's heading, when *row* starts one."""
+            if listed and row.section != state["section"] and row.section <= len(listed):
+                state["section"] = row.section
+                part = listed[row.section - 1]
+                self._heading(part.label if row.source != "Table" else f"  {part.label}",
+                              "A calc section: what is defined in it is not seen after the next "
+                              "break, unless it is global", BAND.name())
+
+        def put_book(name: str, entries: list) -> None:
+            first = entries[0][1]
+            section_of(first)
+            reads = [e for e in entries if not e[1].closed]
+            own = [e for e in entries if e[1].closed]
+            kind = " · self-contained" if first.group_contained else ""
+            page = f" · page {first.group_page}" if first.group_page else ""
+            count = f" ({names(len(reads))})" if reads else ""
+            tip = (f"The workbook {name}: what the equations read of it — its CalcForge variables"
+                   + ("; its Excel names are for its own cells only" if first.group_contained
+                      else ", and its Excel names dialled in (Sheet.Name)"))
+            head = self._group(None, f"book:{name}", f"{name}{page}{kind}{count}", tip)
+            for index, row in reads:
+                nodes[index] = self._row_node(head, index, row)
+            if own:
+                inner = self._group(head, f"own:{name}", f"Its own cells only ({len(own)})",
+                                    f"{name} is self-contained: its Excel names, read by its "
+                                    f"own cells only, shown for reference")
+                inner.setForeground(0, QBrush(QColor(CLOSED_GREY)))
+                for index, row in own:
+                    nodes[index] = self._row_node(inner, index, row)
+
+        blocks = {}
+        for index, row in main:
+            if row.source == "Table":
+                while books:
+                    put_book(*books.pop(0))           # every workbook before the tables
+            elif row.key is not None:
+                while books and tuple(books[0][1][0][1].order or last) < tuple(row.key):
+                    put_book(*books.pop(0))           # a workbook before this equation
+            if row.source == "Table" and not state["tables"]:
+                state["tables"] = True
+                state["section"] = None
+                self._heading("Tables", "What the tables give the equations: named cells, and "
+                                        "Table.Column for each heading")
+            section_of(row)
+            parent = None
+            if row.block:
+                parent = blocks.get(row.block)
+                if parent is None:
+                    kind = " · self-contained" if row.block_contained else ""
+                    tip = ("What it defines stays inside it: nothing after the block reads it"
+                           if row.block_contained else "What it defines is read after it too")
+                    parent = blocks[row.block] = self._group(
+                        None, f"block:{row.block}",
+                        f"{row.block_label} · page {row.page}{kind} "
+                        f"({names(counts[row.block])})", tip)
+            nodes[index] = self._row_node(parent, index, row)
+        while books:
+            put_book(*books.pop(0))
         if current in nodes:
             self.tree.setCurrentItem(nodes[current])
         self._filling = False
         self.empty.setVisible(not self.rows)
         self._mark_in_force()
+        self._fit_columns()
+
+    def _fit_columns(self) -> None:
+        """Value as wide as its widest shown value, up to a third of the
+        panel (at least 48 px); Name has the rest."""
+        width = self.tree.viewport().width()
+        wanted = max([self.tree.sizeHintForColumn(1), 48])
+        self.tree.header().resizeSection(1, max(48, min(wanted + 8, width // 3)))
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.tree and event.type() == QEvent.Resize:
+            self._fit_columns()
+        return super().eventFilter(watched, event)
 
     # -- global or not (calc sections) ------------------------------------------------------
     def _menu(self, pos) -> None:
@@ -673,7 +725,7 @@ class VariablesPanel(QWidget):
         menu = QMenu(self)
         menu.setProperty("cf_context", "variables")
         menu.addAction("Go to", lambda: self.go_to(node))
-        if row.source != "Measurement":
+        if row.source != "Measurement" and not row.closed:
             act = menu.addAction("Make Local" if row.is_global else "Make Global",
                                  lambda: self.set_global(row, not row.is_global))
             act.setToolTip("A global variable or cell is read by every later calc section")
@@ -728,7 +780,7 @@ class VariablesPanel(QWidget):
         return None
 
     def group_node(self, key: str):
-        """The heading of group *key* ("blocks", "workbooks/self", "book:Name"…)."""
+        """The heading of group *key* ("block:uid", "book:Name", "own:Name")."""
         from PySide6.QtWidgets import QTreeWidgetItemIterator
         found = QTreeWidgetItemIterator(self.tree)
         while found.value() is not None:

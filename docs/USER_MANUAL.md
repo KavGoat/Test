@@ -62,9 +62,9 @@ adds a workbook.
   workbooks often have names Excel keeps as `#REF!` (their cells were deleted):
   the Seismic Parts workbook's **Height** is one, so `=height` there is `#REF!`
   (the error's tip says why) — `=var(height)` reads the equation's.
-- The **Variables** panel lists everything an equation can read; what is in
-  blocks and workbooks is under **Blocks** and **Workbooks**, each split
-  self-contained or not.
+- The **Variables** panel lists everything an equation can read, in the
+  document's order; each block and each workbook is a section of its own where it
+  comes.
 
 **Spreadsheet views.** The buttons at the right of the status bar, whenever a
 spreadsheet page is in view (also **View ▸ Spreadsheet**):
@@ -934,22 +934,24 @@ can then use it; the same commands make it local again.
 ### The Variables panel
 
 Every name the equations define, in the order SMath reads them: its value and
-unit, its page (and whether it is inside a self-contained block), and its error
-in red. The definition in force at the selected equation is bold. Click a row to
-go to the equation; **Find a variable** narrows the list; right-click ▸ **Go to**
-or **Make Global**. Under **Tables** are what the tables give the equations: each
+unit, its page, and its error in red. The definition in force at the selected
+equation is bold. Click a row to go to the equation; **Find a variable** narrows
+the list; right-click ▸ **Go to** or **Make Global**. Each calculation block and
+each imported workbook is a section of its own where it comes, its heading saying
+whether it is self-contained (*Block 2 · page 3 · self-contained*,
+*Seismic_Actions · page 4*):
+
+- a block's section: the variables defined in it;
+- a workbook's section: what the equations read of it — its variables (cells
+  named in their **Variable** box) and, for one that isn't self-contained, its
+  Excel names as you dial in to them (`Seismic_Actions.Z`); for one that is
+  self-contained, its Excel names greyed under **Its own cells only**, for
+  reference (only its own cells read them).
+
+Under **Tables**, after the equations, are what the tables give them: each
 defined name and each column a table's headings name (`Loads.Load`), with its
-value. After them come two groups, each closed until you click it (empty ones
-aren't shown):
-
-- **Blocks** ▸ **Self-contained** / **Not self-contained** ▸ each block
-  (*Block 2 · page 3*) ▸ the variables defined in it;
-- **Workbooks** ▸ **Self-contained** / **Not self-contained** ▸ each imported
-  workbook ▸ its variables (cells named in their **Variable** box) and, for one
-  that isn't self-contained, its Excel names as you dial in to them
-  (`Seismic_Actions.Z`). A self-contained workbook's Excel names are not listed.
-
-**Find a variable** looks inside closed groups too. A name Excel itself has as
+value. Every section is closed until you click it, and an empty one isn't shown.
+**Find a variable** looks inside closed ones too. A name Excel itself has as
 `#REF!` (its cells deleted in Excel) is not listed. With calc section breaks the
 rows come section by section.
 
@@ -1611,7 +1613,8 @@ right-click menu or the Properties panel's **Workbook** section):
   only two ways: a cell you name as a **variable** (right-click ▸ **Variable**,
   read bare: `PGA`), or any cell by sheet and cell, `Seismic_Actions.H44`. Its
   Excel names can't be dialled in to (`Seismic_Actions.Cd` is not defined, and a
-  cell elsewhere gets `#NAME?`), and the Variables panel leaves them out.
+  cell elsewhere gets `#NAME?`); the Variables panel shows them greyed, for
+  reference.
 - **Not self-contained**: its Excel names can be dialled in to as well, never read
   bare, as a spreadsheet's own names: `Seismic_Actions.Cd` or
   `Seismic_Actions_NZS1170_5.Cd` in an equation, `='Seismic Actions'!Cd` in

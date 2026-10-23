@@ -398,12 +398,26 @@ def test_a_cell_named_as_a_variable_is_read_bare_below_and_after_reopening(w, tm
     pump()
     type_equations(w, last, ["p:PGA", "p="])
     assert results(w)["p="] == "0.4"
-    # listed under its workbook: Workbooks ▸ Self-contained ▸ Quake_Calc ▸ PGA
+    # its section, where it comes: what the equations read of it, PGA, and
+    # its Excel names greyed under Its own cells only (the user, 2026-10-24:
+    # "a non contained one for any defined variable, currently that shows in
+    # self contained"; each workbook a section where it comes, their pick)
+    from calcforge.ui.variablespanel import CLOSED_GREY
     panel = w.variables_panel
     panel.refresh()
     book = panel.group_node("book:Quake_Calc")
-    assert book is not None and book.parent() is panel.group_node("workbooks/self")
-    assert [book.child(i).text(0) for i in range(book.childCount())] == ["PGA"]
+    assert book is not None and book.parent() is None
+    assert book.text(0) == "Quake_Calc · page 2 · self-contained (1 name)"
+    assert [book.child(i).text(0) for i in range(book.childCount())] == \
+        ["PGA", "Its own cells only (3)"]
+    own = panel.group_node("own:Quake_Calc")
+    assert own.parent() is book
+    names = {own.child(i).text(0): own.child(i) for i in range(own.childCount())}
+    assert set(names) == {"Z", "ReturnPeriodFactor", "ReturnPeriodFactor (Tables)"}
+    assert names["Z"].foreground(0).color().name() == CLOSED_GREY
+    assert "own cells read it" in names["Z"].toolTip(0)
+    menu = panel.build_menu(names["Z"])
+    assert [a.text() for a in menu.actions()] == ["Go to"], "nothing to make global"
     # made global (for the sections after a section break): still read
     calcsections.set_cells_global(w, run, (0, 0, 0, 0), True)
     pump()
@@ -433,10 +447,10 @@ def test_variables_panel_and_name_manager_show_the_workbook(w, tmp_path):
     from calcforge.ui.names import scope_text
     from calcforge.ui.variablespanel import table_rows
     with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")), k_first=False)
-    # self-contained: its Excel names are none of the equations', so not
-    # listed ("selfcontained shows nothing", the user, 2026-10-24)
-    assert not [r for r in table_rows(w.document)
-                if "Z" in r.name or "ReturnPeriodFactor" in r.name]
+    # self-contained: its Excel names are none of the equations' — listed
+    # for reference only, greyed, read by nothing (the user's pick, 2026-10-24)
+    closed = [r for r in table_rows(w.document) if "Z" in r.name or "ReturnPeriodFactor" in r.name]
+    assert closed and all(r.closed and r.key is None for r in closed)
     wb = runs(w)["Tables"].sheet.workbook
     scopes = sorted(scope_text(wb, dn) for dn in wb.names.values())
     assert scopes == ["Quake_Calc (self-contained)", "Quake_Calc (self-contained)", "Tables"]
@@ -455,23 +469,45 @@ def test_variables_panel_and_name_manager_show_the_workbook(w, tmp_path):
     def heads():
         tree = panel.tree
         return [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
-    # Workbooks ▸ Not self-contained ▸ Quake_Calc ▸ its names as dialled in,
-    # each closed to start (the user, 2026-10-23 and 2026-10-24)
-    assert "Workbooks (1)" in heads() and "Z" not in heads()
-    top = panel.group_node("workbooks")
-    assert not top.isExpanded()
-    part = panel.group_node("workbooks/open")
-    assert part.text(0) == "Not self-contained (1)" and part.parent() is top
-    assert panel.group_node("workbooks/self") is None, "an empty group isn't shown"
+    # its section ▸ its names as dialled in, closed to start (the user,
+    # 2026-10-23 and 2026-10-24)
+    assert "Quake_Calc · page 2 (3 names)" in heads() and "Z" not in heads()
+    assert panel.group_node("own:Quake_Calc") is None, "an empty group isn't shown"
     book = panel.group_node("book:Quake_Calc")
-    assert book.text(0) == "Quake_Calc (3 names)" and book.parent() is part
+    assert not book.isExpanded()
     assert {book.child(i).text(0) for i in range(book.childCount())} == \
         {"Quake_Calc.Z", "Quake_Calc.ReturnPeriodFactor", "Tables.ReturnPeriodFactor"}
-    for head in (top, part, book):
-        panel.go_to(head)                          # a click on a heading opens it
+    panel.go_to(book)                              # a click on its heading opens it
     assert panel.group_node("book:Quake_Calc").isExpanded()
     scopes = sorted(scope_text(wb, dn) for dn in wb.names.values())
     assert scopes == ["Quake_Calc", "Quake_Calc", "Tables"]
+
+
+def test_the_panel_lists_a_block_after_a_workbook_after_it(w, tmp_path):
+    """The user, 2026-10-24: "block after a workbook were found before the
+    workbook in the panel". Each block and each workbook is a section
+    where it comes in the document."""
+    from PySide6.QtCore import QPointF
+    from calcforge.items.calc import CalcBlockItem
+    last = with_workbook(w, quake(str(tmp_path / "Quake Calc.xlsx")))
+    frame = w.document.pages[last].frame
+    w.view.calc.place_cross(frame, QPointF(300, 200))
+    w.insert_block()
+    pump()
+    (block,) = [i for i in frame.markups() if isinstance(i, CalcBlockItem)]
+    v = cw.Sheet(w)
+    v.frame = frame
+    w.view.calc.place_cross(frame, block.mapToParent(QPointF(12, 14)))
+    v.keys("late:9")
+    v.press(Qt.Key_Return)
+    w.view.calc.leave()
+    pump()
+    panel = w.variables_panel
+    panel.refresh()
+    tree = panel.tree
+    heads = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
+    assert heads == ["k", "Quake_Calc · page 2 · self-contained",
+                     f"Block 1 · page {last + 1} · self-contained (1 name)"]
 
 
 def test_a_second_import_of_the_same_workbook_is_another_workbook(w, tmp_path):

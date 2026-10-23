@@ -169,7 +169,8 @@ def test_imported_twice_each_copy_reads_its_own_and_is_named_2(w, tmp_path):
 def test_the_variables_panel_lists_a_workbooks_names_only_when_equations_read_them(w, tmp_path):
     """The user, 2026-10-24: a self-contained workbook is closed as a
     self-contained calculation block is, so its Excel names are none of the
-    equations' and the Variables panel leaves them out. Not self-contained,
+    equations': the Variables panel shows them only greyed, for reference,
+    under Self-contained (their pick, 2026-10-24). Not self-contained,
     they are listed only as dialled in, under its heading, closed until
     clicked (the choice of 2026-10-23); a name Excel has as #REF! is not
     listed."""
@@ -180,14 +181,18 @@ def test_the_variables_panel_lists_a_workbooks_names_only_when_equations_read_th
 
     def names():
         return [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
-    assert not [n for n in names() if "Workbook" in n or "Height1" in n or "Fph_1" in n]
+    assert not [n for n in names() if "Height1" in n or "Fph_1" in n]
+    own = panel.group_node("own:Parts_Coefficient")
+    greyed = [own.child(i).text(0) for i in range(own.childCount())]
+    assert "Height1" in greyed and "Fph_1" in greyed, "for reference, its own cells'"
+    assert not [n for n in greyed if n.endswith("Gone")], "a #REF! name is not listed"
     sheet = runs(w)["Calculations"].sheet
     sheet.workbook.set_self_contained(sheet.book, False)
     pump()
     panel.refresh()
     assert not [n for n in names() if n in ("Height1", "Fph_1")], "never bare"
-    assert "Workbooks (1)" in names()
     book = panel.group_node("book:Parts_Coefficient")
+    assert book.parent() is None and book.text(0).startswith("Parts_Coefficient · page ")
     assert book is not None and not book.isExpanded(), "closed until clicked"
     inside = [book.child(i).text(0) for i in range(book.childCount())]
     assert "Parts_Coefficient.Height1" in inside and "Parts_Coefficient.Fph_1" in inside

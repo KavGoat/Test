@@ -73,31 +73,31 @@ def test_it_follows_the_calculation(v):
     assert panel_rows(v)[0][1] == "25"
 
 
-def test_pages_and_self_contained_blocks_are_shown(v):
+def test_each_block_is_a_section_of_its_own_saying_whether_it_is_self_contained(v):
     """The user, 2026-10-24: "variable panel should clearly show what
-    variables in a self contained block like a workbook section ... block→
-    self contain or not contained and then i can drop down into each. hide a
-    group if there aren't any of them in that group"."""
+    variables in a self contained block like a workbook section", then
+    "each block should show as its own section" — where it comes in
+    reading order (their pick), its heading saying whether it is
+    self-contained."""
     block, outside, inside, after = two_checks(v)
     v.window.set_block_self_contained([block], True)
     rows = panel_rows(v)
     assert ["x", "1", "", "Page 1"] == rows[0]
-    assert [r[0] for r in rows] == ["x", "Blocks (1)"], "the block's under its group"
-    assert tree_rows(v) == [("x", "Page 1"), ("Blocks (1)", ""),
-                            ("  Self-contained (1)", ""),
-                            ("    Block 1 · page 1 (2 names)", ""),
-                            ("      y", "Page 1 · block"), ("      x", "Page 1 · block")], \
-        "no Not self-contained group: it would be empty"
+    heading = "Block 1 · page 1 · self-contained (2 names)"
+    assert [r[0] for r in rows] == ["x", heading], "the block's under its own heading"
+    assert tree_rows(v) == [("x", "Page 1"), (heading, ""),
+                            ("  y", "Page 1"), ("  x", "Page 1")]
     panel = v.window.variables_panel
-    head = panel.group_node("blocks")
+    head = panel.group_node("block:" + block.uid)
     assert not head.isExpanded(), "closed to start"
     panel.go_to(head)                               # a click on it opens it
-    assert head.isExpanded() and "blocks" in panel.opened
+    assert head.isExpanded() and "block:" + block.uid in panel.opened
     panel.refresh()
-    assert panel.group_node("blocks").isExpanded(), "kept open"
+    assert panel.group_node("block:" + block.uid).isExpanded(), "kept open"
     v.window.set_block_self_contained([block], False)
     panel_rows(v)
-    assert [r[0] for r in tree_rows(v)][2] == "  Not self-contained (1)"
+    assert [r[0] for r in tree_rows(v)][1] == "Block 1 · page 1 (2 names)"
+    panel.toggle_group("block:" + block.uid)       # closed again
     panel.filter.setText("y")
     assert panel.group_node("block:" + block.uid).isExpanded(), "finding looks inside"
     panel.filter.setText("")
