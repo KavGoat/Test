@@ -495,6 +495,7 @@ def _read_workbook(path: str, taken: Optional[set] = None) -> Imported:
         page = _page_options(ws, renamed)
         data = {
             "name": name, "kind": "sheet", "size": None, "cells": cells, "styles": styles,
+            "calc_names": 2,                 # Excel's own names, as Excel reads them
             "widths": widths, "heights": heights, "hidden_rows": sorted(set(hidden_rows)),
             "hidden_cols": sorted(set(hidden_cols)), "merges": merges,
             "default_width": round(default_width, 2), "default_height": default_height,

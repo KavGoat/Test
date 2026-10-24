@@ -7,9 +7,12 @@ depend on each other, as Excel does; a loop is a circular reference: its
 cells show 0 and :attr:`Workbook.circular` lists them, as Excel's status bar
 does.
 
-Names that are neither cells nor defined names are variables from the
-document's equations; :attr:`Workbook.outside` is asked for them (the
-document answers with the value defined before the sheet in reading order).
+A bare name in a formula is only ever an Excel name (find_excel_name): the
+sheet's own, its workbook's, a spreadsheet's own. A CalcForge variable — an
+equation's, or a cell named in its Variable box — is read as CALC(name)
+(the user, 2026-10-24: "there should now never be a clash"):
+:attr:`Workbook.calc_variable` is asked for it (the document answers with
+the one in force where the sheet is, in reading order).
 
 Every change goes through a transaction, so it can be undone as one step.
 """
@@ -366,6 +369,9 @@ class Workbook:
         self.day_first = True
         # asked for a document variable: outside(sheet, name) -> value; raises KeyError
         self.outside: Optional[Callable] = None
+        # CALC(name) in a cell: (sheet, name) -> a DefinedName (a cell named
+        # in its Variable box) or a value (an equation's); KeyError(why)
+        self.calc_variable: Optional[Callable] = None
         # whether one sheet may read cells of another (from, to, (t, l, b, r)):
         # the document's calculation sections (sheet/docbook.py); None: always
         self.reach: Optional[Callable] = None
@@ -420,6 +426,8 @@ class Workbook:
         # document names loaded from a record made before names had two
         # kinds (store.load_sheet): keys, until DocumentBook settles them
         self.unsettled_names: set = set()
+        # sheets loaded from a record of before CALC(name) (store.CALC_NAMES)
+        self.unmigrated_formulas: set = set()
         # formulas naming a sheet or table that isn't there (yet): learnt again
         # when one comes, so they follow it from then on
         self._unresolved: set = set()
@@ -706,6 +714,22 @@ class Workbook:
                 if mine is not None:
                     return mine
         return names.get((lower, None))
+
+    def find_excel_name(self, name: str, sheet: Optional[Sheet]) -> Optional[DefinedName]:
+        """The Excel name a formula on *sheet* means by *name*: the sheet's
+        own, then its workbook's, then (on a sheet of no imported workbook)
+        a spreadsheet's own name kept with the document. Never a CalcForge
+        variable: a cell reads one as CALC(name), so the two can't clash."""
+        lower = name.lower()
+        names = self.names
+        if sheet is not None:
+            local = names.get((lower, sheet.id))
+            if local is not None:
+                return local
+            if sheet.book is not None:
+                return names.get((lower, sheet.book))
+        dn = names.get((lower, None))
+        return dn if dn is not None and not dn.variable else None
 
     def closed_to(self, dn: DefinedName, reader: Optional[Sheet]) -> Optional[Book]:
         """The self-contained workbook *dn* is the own name of, when *reader*

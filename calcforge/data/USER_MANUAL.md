@@ -39,8 +39,8 @@ adds a workbook.
 | an equation | a cell | `Sheet1.A1` |
 | an equation | a cell named as a **variable** (right-click ▸ **Variable**) | `Load` |
 | an equation | an **Excel name**, dialled in (not in a self-contained workbook) | `Sheet1.Load` |
-| a cell | an equation's variable | `=height` |
-| a cell whose workbook has a name of the same | the equation's variable | `=var(height)` |
+| a cell | a **CalcForge variable** (an equation's, or a cell's **Variable**) | `=CALC(height)` |
+| a cell | an **Excel name** of its own workbook or sheet | `=Load` |
 
 - **Two kinds of named cell.** A **variable** is CalcForge's: name a cell in its
   right-click **Variable** box and every equation after it reads it bare (`PGA`),
@@ -48,6 +48,11 @@ adds a workbook.
   the Name Manager, or one the file came with): its own cells read it bare;
   anything else only by dialling in, `Sheet1.Load` from an equation or
   `=Sheet1!Load` from another sheet's cell — never bare.
+- **In a cell a bare name is only ever an Excel name**; a CalcForge variable is
+  read as `CALC(name)` — even a cell's own **Variable**, even in its own workbook.
+  Excel has no `CALC`, so the two never clash, and `VAR(…)` is always Excel's
+  variance. A document saved before this opens with its cells rewritten so they
+  read what they read: `=w*2` that read the equation's `w` becomes `=CALC(w)*2`.
 - An imported workbook is **self-contained** to start: closed, as a self-contained
   calculation block is. Equations reach it only through its variables and its
   cells (`Seismic_Actions.H44`); its Excel names can't be dialled in to and aren't
@@ -58,10 +63,9 @@ adds a workbook.
   `Sheet1_2`, `Seismic Actions` is `Seismic_Actions`.
 - A cell reads a variable defined **before** its sheet: on an earlier page, or
   higher on the same page.
-- In a workbook's cells its **own names come first**, as in Excel. Imported
-  workbooks often have names Excel keeps as `#REF!` (their cells were deleted):
-  the Seismic Parts workbook's **Height** is one, so `=height` there is `#REF!`
-  (the error's tip says why) — `=var(height)` reads the equation's.
+- Imported workbooks often have names Excel keeps as `#REF!` (their cells were
+  deleted): the Seismic Parts workbook's **Height** is one, so `=height` there is
+  `#REF!` (the error's tip says why) — `=CALC(height)` reads the equation's.
 - The **Variables** panel lists everything an equation can read, in the
   document's order; each block and each workbook is a section of its own where it
   comes.
@@ -1034,8 +1038,8 @@ is its top-left corner):
   beyond the table): `bolts(d)` gives the rest of the row, `bolts(d, "A")` the value under heading A, `bolts(d, t)`
   interpolates both ways, `bolts(d, 2)` the second column after the keys.
 
-A cell reads an equation's variable by its name, or with `var(name)` (Part 3,
-*Equation variables in cells*).
+A cell reads an equation's variable as `CALC(name)` (Part 3, *Equation variables in
+cells*).
 
 **Equations follow the cells, as Excel's formulas do**, in the same undo step: a
 table or sheet renamed, rows, columns or cells inserted, deleted or moved, a name
@@ -1359,8 +1363,8 @@ spreadsheet's own. It is saved that way from then on.
   delete) and **Create from Selection…** (`Ctrl+Shift+F3`: names from the labels in
   the top row or left column).
 - Excel's rules: a name starts with a letter; names that look like a cell (`A1`,
-  `R1C1`) are refused; `NAME(` is a function and a bare `NAME` is a name or
-  variable.
+  `R1C1`) are refused; `NAME(` is a function and a bare `NAME` is an Excel name
+  (a CalcForge variable is `CALC(NAME)`).
 - A name is kept with the sheet whose cells it names, so it is saved, undone and
   copied with it.
 - **Renaming a name** in the Name Manager renames it in every formula, name and
@@ -1404,13 +1408,15 @@ Cells hold units and calculate with them, as the equations do:
 
 ### Equation variables in cells
 
-A bare name in a formula is the workbook's own name if it has one (as in Excel),
-otherwise an equation variable defined **before** the sheet (an earlier page, or
-higher on the same page), otherwise a unit: `=fc*2` reads the equation's `fc`.
-`var(height)` always reads the equation's variable — use it when the workbook has a
-name spelt the same (imported workbooks often have names Excel keeps as `#REF!`),
-or for a variable spelt like a cell (`var(M20)`, `var(L.beam)`). A name that is none
-of these is `#NAME?`; an error's tip in the cell says why.
+`CALC(name)` reads a CalcForge variable: an equation's, or a cell named in its
+**Variable** box — the one in force where the sheet is, the latest defined
+**before** it (an earlier page, or higher on the same page), as an equation would
+read it; a **Variable** in the cell's own workbook wherever it is. `=CALC(fc)*2`,
+`=CALC(M20)` (a variable spelt like a cell), `=CALC(L.beam)`. A bare name is only
+ever an Excel name of the workbook or sheet (or a unit, `=10*kN`), so the two never
+clash; `VAR(…)` is always Excel's variance. A name that is neither is `#NAME?`, and
+its tip says when `CALC(name)` would read it. Typing a formula, the list offers a
+**Variable** as `CALC(name)`.
 
 ### Formatting
 
@@ -1614,8 +1620,8 @@ gives `#REF!`, as in Excel.
 right-click menu or the Properties panel's **Workbook** section):
 
 - **Self-contained**: the workbook is closed, as a self-contained calculation
-  block is. Its Excel names are for its own cells: they read them first, then
-  equation variables (`var(X)` always reads the equation's X). Equations reach it
+  block is. Its Excel names are for its own cells (and `CALC(X)` reads the
+  CalcForge variable X there, as in any cell). Equations reach it
   only two ways: a cell you name as a **variable** (right-click ▸ **Variable**,
   read bare: `PGA`), or any cell by sheet and cell, `Seismic_Actions.H44`. Its
   Excel names can't be dialled in to (`Seismic_Actions.Cd` is not defined, and a
@@ -1644,12 +1650,11 @@ self-contained, so its Excel names are for its own cells".
 
 - An equation's bare `Z` is always CalcForge's variable (an equation's, or a cell
   named in its **Variable** box), never a workbook's Excel name.
-- A workbook's own cell reads its Excel names first, as in Excel: the sheet's own,
-  then the workbook's, then CalcForge's variable; `=var(Z)` always reads
-  CalcForge's.
-- `NAME(…)` in a cell is always the Excel function (`=MAX(1,5)`); a bare `NAME` is
-  a name or variable, so a CalcForge variable `max` is read by `=max`. In an
-  equation, `max(…)` is SMath's function and `max` alone the variable.
+- In a cell a bare `Z` is only ever an Excel name — the sheet's own, then the
+  workbook's — and `=CALC(Z)` the CalcForge variable: they never clash.
+- `NAME(…)` in a cell is always the Excel function (`=MAX(1,5)`), so a CalcForge
+  variable `max` is `=CALC(max)`. In an equation, `max(…)` is SMath's function and
+  `max` alone the variable.
 - Two CalcForge variables of the same name: the latest defined before the
   equation wins, whichever kind it is (an equation, or a cell's **Variable**).
 
@@ -1659,7 +1664,7 @@ Type `=` and the function's name; the tip shows its arguments (optional ones in
 [brackets]). Every function the engine supports:
 
 <!-- generated:sheet-functions -->
-The engine has **471** spreadsheet functions.
+The engine has **472** spreadsheet functions.
 
 #### Maths and trigonometry
 
@@ -1886,7 +1891,7 @@ The engine has **471** spreadsheet functions.
 | `TREND(known_y's, [known_x's], [new_x's], [const])` | Values along a straight-line fit. |
 | `TRIMMEAN(array, percent)` | The mean with a fraction of the extremes left out. |
 | `TTEST(a1, a2, tails, type)` | Student's t-test (older name). |
-| `VAR(number1, [number2], …)` | Sample variance — but var(X) with one bare name reads the equation variable X (see Part 3). |
+| `VAR(number1, [number2], …)` | Sample variance. |
 | `VAR.P(number1, [number2], …)` | Population variance. |
 | `VAR.S(number1, [number2], …)` | Sample variance. |
 | `VARA(value1, [value2], …)` | Sample variance, counting text and logicals. |
@@ -2131,6 +2136,7 @@ The engine has **471** spreadsheet functions.
 
 | Function | What it does |
 |---|---|
+| `CALC(name)` | The CalcForge variable name — an equation's, or a cell named in its Variable box — in force where the sheet is. A bare name in a cell is only ever an Excel name, so the two never clash. |
 | `CELL(info_type, [reference])` | Information about a cell: its address, row, column, contents, type… |
 | `ENCODEURL(value)` | Text encoded for use in a web address. |
 | `ERROR.TYPE(value)` | The number of an error value (1 for #NULL! … 7 for #N/A). |

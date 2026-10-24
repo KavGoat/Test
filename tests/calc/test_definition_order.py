@@ -270,7 +270,7 @@ def test_a_cell_reads_the_latest_equation_definition_above_it():
     _doc, calc, book = a_document()
     on_page(calc, 0, 20, "w:5'kN")
     on_page(calc, 1, 20, "w:3'kN")
-    sheet = a_sheet(book, 2, cells={(0, 0): "=w*2"})
+    sheet = a_sheet(book, 2, cells={(0, 0): "=CALC(w)*2"})
     on_page(calc, 3, 20, "w:100'kN")
     calc.recalculate()
     book.workbook.outside_changed(None)

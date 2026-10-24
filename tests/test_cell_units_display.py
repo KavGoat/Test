@@ -84,14 +84,14 @@ def test_an_equation_variable_shows_in_the_unit_its_equation_shows(window):
     w.toggle_calc_mode(False)
     run = sheet_page(w, 0)
     open_at(w, run, "A1")
-    for i, formula in enumerate(["=M", "=F", "=s", "=A", "=F*2", "=10 kN*3.5 m"]):
+    for i, formula in enumerate(["=CALC(M)", "=CALC(F)", "=CALC(s)", "=CALC(A)", "=CALC(F)*2", "=10 kN*3.5 m"]):
         put(w, run, i, 0, formula)
     pump()
     assert [shown(run, f"A{i}") for i in range(1, 7)] == [
         "35 kN·m", "10 kN", "5 kPa", "17.5 kN", "20 kN", "35 kN·m"]
     m = run.sheet.cells[(0, 0)].value
     assert isinstance(m, Qty) and m.si == 35000.0 and m.unit == "kN·m"
-    # =F*2 follows the rule a typed 10 kN*2 does: the operand's unit
+    # =CALC(F)*2 follows the rule a typed 10 kN*2 does: the operand's unit
     assert run.sheet.cells[(4, 0)].value.unit == "kN"
 
 

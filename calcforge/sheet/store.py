@@ -59,7 +59,7 @@ def sheet_to_dict(sheet) -> dict:
     return {
         "name": sheet.name, "kind": sheet.kind,
         "size": list(sheet.size) if sheet.size else None,
-        "cells": cells, "styles": styles,
+        "cells": cells, "styles": styles, "calc_names": CALC_NAMES,
         "widths": {str(k): v for k, v in sorted(sheet.widths.items())},
         "heights": {str(k): v for k, v in sorted(sheet.heights.items())},
         "hidden_rows": sorted(sheet.hidden_rows), "hidden_cols": sorted(sheet.hidden_cols),
@@ -137,10 +137,21 @@ def put_book(sheet, data: dict) -> None:
         wb.book_state(known.id, bool(book.get("self_contained", True)))
 
 
+#: A record's "calc_names": its bare names are Excel names only, and a
+#: CalcForge variable is read as CALC(name) (the user, 2026-10-24). A record
+#: of cells without it is rewritten so once loaded
+#: (DocumentBook.settle_old_formulas).
+CALC_NAMES = 2
+
+
 def load_sheet(sheet, data: dict) -> None:
     """Put a recorded sheet's contents into ``sheet`` (replacing what it
     held), calculated once at the end, with no undo step of its own."""
     wb = sheet.workbook
+    if data.get("cells") and data.get("calc_names") != CALC_NAMES:
+        wb.unmigrated_formulas.add(sheet.id)
+    else:
+        wb.unmigrated_formulas.discard(sheet.id)
     journal, wb.journal = wb.journal, False
     try:
         with wb.transaction("Load"):

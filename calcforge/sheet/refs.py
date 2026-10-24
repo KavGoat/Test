@@ -152,7 +152,7 @@ def parse_cell(text: str) -> Optional[CellRef]:
 
 def is_cell_name(text: str) -> bool:
     """Would Excel read this as a cell address? (Such a name can't be a
-    defined name; a document variable spelled like one is written var(M20).)"""
+    defined name; a CalcForge variable spelled like one is read as CALC(M20).)"""
     return parse_cell(text) is not None
 
 

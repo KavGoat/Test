@@ -1,6 +1,6 @@
 """Why a cell shows an error, in one line (Excel's error indicator and tip).
 
-QA (2026-10-15): #UNITS!, #DIV/0!, #NAME?, #VALUE! and var() failures came
+QA (2026-10-15): #UNITS!, #DIV/0!, #NAME?, #VALUE! and CALC() failures came
 with no explanation. Errors now carry a reason from where they are made
 (values.ErrorValue.reason), and :func:`why` says it for a cell, following
 the error back to the cell it started in:

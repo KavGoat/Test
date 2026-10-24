@@ -68,12 +68,29 @@ def test_units_after_numbers():
         F.parse("A1/'1x")
 
 
-def test_var_of_one_name_is_a_document_variable_and_otherwise_excels_variance():
-    assert F.parse("var(M20)").tree == F.DocVar("M20")
-    assert F.parse("VAR(L.beam)").tree == F.DocVar("L.beam")
-    assert isinstance(F.parse("VAR(A1:A9)").tree, F.Call)
-    assert isinstance(F.parse("VAR(1,2,3)").tree, F.Call)
-    assert isinstance(F.parse("VAR($M$20)").tree, F.Call)
+def test_calc_reads_a_calcforge_variable_and_var_is_always_excels_variance():
+    """The user, 2026-10-24: "maybe change from var to something excel does
+    not have as a function, so there can never be a clash"."""
+    assert F.parse("CALC(M20)").tree == F.DocVar("M20")
+    assert F.parse("calc(L.beam)").tree == F.DocVar("L.beam")
+    assert F.parse("CALC(PGA)").tree == F.DocVar("PGA")
+    for excels in ("var(M20)", "VAR(L.beam)", "VAR(A1:A9)", "VAR(1,2,3)", "VAR($M$20)"):
+        assert isinstance(F.parse(excels).tree, F.Call), excels
+    for bad in ("CALC(A1:A2)", "CALC(1)", "CALC(x, y)", "CALC()", "CALC(Sheet1!x)"):
+        with pytest.raises(F.FormulaError, match="CALC takes the name"):
+            F.parse(bad)
+
+
+def test_an_old_formula_is_written_with_calc_where_it_read_a_calcforge_variable():
+    calc = {"x", "height", "M20", "L.beam", "pga"}.__contains__
+    excel = {"height", "z"}.__contains__
+    assert F.to_calc_names("x*2", excel, calc) == "CALC(x)*2"
+    assert F.to_calc_names("var(height)+height", excel, calc) == "CALC(height)+height"
+    assert F.to_calc_names("var(M20)+VAR(A1:A3)+var(nope)", excel, calc) == \
+        "CALC(M20)+VAR(A1:A3)+var(nope)"
+    assert F.to_calc_names("L.beam/2+z", excel, calc) == "CALC(L.beam)/2+z"
+    assert F.to_calc_names("LET(x, 2, x*3)", excel, calc) == "LET(x, 2, x*3)", "LET's own x"
+    assert F.to_calc_names("SUM(pga, Sheet1!pga)", excel, calc) == "SUM(CALC(pga), Sheet1!pga)"
 
 
 def test_xlsx_function_prefixes_are_dropped():

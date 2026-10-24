@@ -64,7 +64,7 @@ ARGS = {
     "TEXTSPLIT": "text, col_delimiter, [row_delimiter], [ignore_empty], …", "TIME": "hour, minute, second",
     "TODAY": "", "TOCOL": "array, [ignore], [scan_by_column]", "TOROW": "array, [ignore], [scan_by_column]",
     "TRANSPOSE": "array", "TREND": "known_y's, [known_x's], [new_x's], [const]", "TRIM": "text", "TRUNC": "number, [num_digits]",
-    "UNIQUE": "array, [by_col], [exactly_once]", "UPPER": "text", "VALUE": "text", "VAR": "number1, [number2], …",
+    "UNIQUE": "array, [by_col], [exactly_once]", "UPPER": "text", "VALUE": "text", "VAR": "number1, [number2], …", "CALC": "name",
     "VAR.P": "number1, [number2], …", "VAR.S": "number1, [number2], …",
     "VLOOKUP": "lookup_value, table_array, col_index_num, [range_lookup]", "VSTACK": "array1, [array2], …",
     "WEEKDAY": "serial_number, [return_type]", "WEEKNUM": "serial_number, [return_type]",

@@ -47,6 +47,7 @@ class DocumentBook:
         self.workbook = Workbook()
         self.workbook.journal = False           # the window's undo stack records pages
         self.workbook.outside = self._outside
+        self.workbook.calc_variable = self.calc_variable
         self.workbook.reach = self._reach
         # SMath's custom units: a quantity the equations define is a unit in the cells
         import weakref
@@ -266,6 +267,46 @@ class DocumentBook:
         fmt = getattr(ws, "format", None)
         return from_engine(value, bool(getattr(fmt, "engineering", True)))
 
+    def calc_variable(self, sheet: Sheet, name: str):
+        """What CALC(name) in a cell of *sheet* reads (the user, 2026-10-24):
+        a cell named *name* in its Variable box (its DefinedName) or an
+        equation's value — the one in force where the sheet is, the latest
+        defined before it, as an equation would read it. One in the sheet's
+        own workbook (or on the sheet itself) is read wherever it is, as
+        Excel reads a workbook's names. KeyError(why) when there is none."""
+        from calcforge.calc.engine import evaluator
+        from calcforge.calc.engine.evaluator import TABLES, IndexedContext
+
+        wb = self.workbook
+        dn = wb.names.get((name.lower(), None))
+        if dn is not None and not dn.variable:
+            dn = None
+        if dn is not None:
+            home = self._kept_on(dn)
+            if home is sheet or (home is not None and home.book and home.book == sheet.book):
+                return dn
+        ws = self._calc().worksheet
+        held, evaluator.EXTERNAL = evaluator.EXTERNAL, self
+        try:
+            found = IndexedContext(ws.index, self._key(sheet)).entry(name)
+        finally:
+            evaluator.EXTERNAL = held
+        if found is None:
+            if name in evaluator.BUILTIN_CONSTANTS:
+                return self._outside(sheet, name)          # CALC(pi), CALC(e)
+            raise KeyError(f"CALC({name}): there's no CalcForge variable {name} before this "
+                           f"sheet")
+        if found[1] is TABLES:
+            if dn is not None:
+                return dn
+            raise KeyError(f"CALC({name}): {name} isn't a CalcForge variable (a sheet's own "
+                           f"name is read as Sheet!{name.rpartition('.')[2]})")
+        try:
+            return self._outside(sheet, name)
+        except KeyError:
+            raise KeyError(f"CALC({name}): the equations' {name} isn't a value a cell can hold "
+                           f"(a function, or not worked out yet)") from None
+
     # -- the equations reading tables --------------------------------------------------------------
     def _hook_equations(self) -> None:
         ws = self._calc().worksheet
@@ -379,6 +420,12 @@ class DocumentBook:
         """Every name the document's equations read on its own (lower
         case): the equations calculated so far, those on pages built but not
         yet calculated, and those on pages still to be built."""
+        return self._equation_words()[0]
+
+    def _equation_words(self) -> tuple:
+        """(names the document's equations read on their own, lower case;
+        names they define, as written): the equations calculated so far,
+        those on pages built but not yet calculated, those still to be built."""
         from calcforge.calc.engine.model import walk_rows
         from calcforge.calc.engine.parser import lex
         from calcforge.calc.record import row_from_data
@@ -402,16 +449,81 @@ class DocumentBook:
             for payload in getattr(page, "_pending_items", ()) or ():
                 if isinstance(payload, dict):
                     saved(payload.get("calc"))
-        out = set()
+        read, defined = set(), set()
         for root in roots:
             for row in walk_rows(root):
                 toks = lex(row) or []
                 for k, tok in enumerate(toks):
                     after = toks[k + 1] if k + 1 < len(toks) else None
                     defines = after is not None and after.kind == "op" and after.value == "≔"
-                    if tok.kind == "ident" and not defines:
-                        out.add(str(tok.value).lower())
+                    if tok.kind == "ident":
+                        (defined.add(str(tok.value)) if defines
+                         else read.add(str(tok.value).lower()))
+        return read, defined
+
+    def _measured_names(self) -> set:
+        """The variables the document's measurements are named as."""
+        out = set()
+        for page in getattr(self.document, "pages", ()) or ():
+            frame = getattr(page, "frame", None)
+            for item in (frame.markups() if frame is not None else ()):
+                if getattr(item, "variable", ""):
+                    out.add(str(item.variable))
+            for payload in getattr(page, "_pending_items", ()) or ():
+                if isinstance(payload, dict) and payload.get("variable"):
+                    out.add(str(payload["variable"]))
         return out
+
+    def _pending_excel_names(self) -> set:
+        """Excel names (lower case) in sheet records of pages not built yet."""
+        out = set()
+        for page in getattr(self.document, "pages", ()) or ():
+            for payload in getattr(page, "_pending_items", ()) or ():
+                table = payload.get("table") if isinstance(payload, dict) else None
+                for entry in (table or {}).get("names", []) or []:
+                    if isinstance(entry, (list, tuple)) and entry and \
+                            not (len(entry) > 4 and entry[4]):
+                        out.add(str(entry[0]).lower())
+        return out
+
+    def settle_old_formulas(self) -> None:
+        """The formulas of sheets recorded before a bare name in a cell was
+        only ever an Excel name (store.CALC_NAMES; the user, 2026-10-24): a
+        bare name that read a CalcForge variable, and var(x) of one, are
+        written CALC(x), so they go on reading what they read. Once, and
+        kept: the next save records the sheet as it is now."""
+        from . import formula as F
+
+        wb = self.workbook
+        ids, wb.unmigrated_formulas = wb.unmigrated_formulas, set()
+        if not ids:
+            return
+        _read, defined = self._equation_words()
+        from calcforge.calc.engine.evaluator import BUILTIN_CONSTANTS
+        calc = defined | self._measured_names() | set(BUILTIN_CONSTANTS)
+        variables = {dn.name.lower() for dn in wb.names.values() if dn.variable}
+        excel = {dn.name.lower() for dn in wb.names.values() if not dn.variable}
+        excel |= self._pending_excel_names()
+
+        def is_excel(name: str) -> bool:
+            return name.lower() in excel or wb.sheet(name) is not None
+
+        def is_calc(name: str) -> bool:
+            return name in calc or name.lower() in variables
+
+        journal, wb.journal = wb.journal, False
+        try:
+            with wb.transaction("Load"):
+                for sheet in [s for s in wb.sheets if s.id in ids]:
+                    for (row, col), cell in list(sheet.cells.items()):
+                        text = cell.input
+                        if not isinstance(text, str) or not text.startswith("="):
+                            continue
+                        body = F.to_calc_names(text[1:], is_excel, is_calc)
+                        if body != text[1:]:
+                            wb._set_state(sheet, row, col, ("=" + body, cell.style, cell.comment))
+        finally:
+            wb.journal = journal
 
     def _name_value(self, dn):
         """(sheet, RefValue or value) of a defined name, as the equations read it."""

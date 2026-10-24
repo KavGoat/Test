@@ -173,3 +173,42 @@ def test_names_saved_before_they_had_two_kinds(w, tmp_path, monkeypatch):
     # saved again, the kind is written down
     assert [e[4] for e in sorted(store.names_homed_on(again.sheet))] == [True, False]
     assert sum(isinstance(i, CalcItem) for i in w.view.scene().items()) == 3
+
+
+def test_an_old_documents_cells_are_written_with_calc_and_read_what_they_read(w, tmp_path,
+                                                                            monkeypatch):
+    """The user, 2026-10-24: a bare name in a cell is only ever an Excel
+    name, CALC(x) reads a CalcForge variable, VAR is Excel's. A document saved
+    before that: =w*2 and =var(w), reading the equation's w, are written
+    =CALC(w)*2 and =CALC(w) when opened, and read the same; Excel's own
+    names and VAR(1,2,3) are left as they were."""
+    from calcforge.items.table import TableItem
+    from calcforge.sheet import store
+    from tests.test_calc_saving import reopen, write_lines
+
+    write_lines(w, ["w:5"], y=40)
+    table = make_table(w, y=200)
+    wb = table.sheet.workbook
+    wb.set_input(table.sheet, 0, 1, "4")
+    wb.define_name("own", f"{table.name}!$B$1")
+    for row, text in enumerate(["=w*2", "=var(w)", "=VAR(1,2,3)", "=own+1"]):
+        wb.set_input(table.sheet, row, 0, text)
+    real = store.sheet_to_dict
+
+    def as_before(sheet):
+        data = real(sheet)
+        data.pop("calc_names", None)
+        return data
+    monkeypatch.setattr(store, "sheet_to_dict", as_before)
+    path = str(tmp_path / "old.pdf")
+    w.document.path = path
+    assert w.save_document()
+    monkeypatch.setattr(store, "sheet_to_dict", real)
+    reopen(w, path)
+    QApplication.instance().processEvents()
+    (again,) = [t for t in w.view.scene().items() if isinstance(t, TableItem)]
+    cells = again.sheet.cells
+    assert [cells[(r, 0)].input for r in range(4)] == \
+        ["=CALC(w)*2", "=CALC(w)", "=VAR(1,2,3)", "=own+1"]
+    assert [cells[(r, 0)].value for r in range(4)] == [10, 5, 1, 5]
+    assert store.sheet_to_dict(again.sheet)["calc_names"] == store.CALC_NAMES

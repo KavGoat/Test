@@ -44,14 +44,14 @@ from calcforge.sheet.xlsx import make_book, read_workbook, workbook_ident  # noq
 
 def quake(path: str, z: float = 0.4) -> str:
     """Two worksheets sharing the workbook name Z; Tables has its own
-    ReturnPeriodFactor; B2 reads k, which the workbook doesn't name."""
+    ReturnPeriodFactor; B2 reads the CalcForge variable k as CALC(k)."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Seismic Actions"
     ws["A1"], ws["A2"] = z, 1.0
-    ws["B2"] = "=Z*k"
+    ws["B2"] = "=Z*CALC(k)"
     ws["B3"] = "=ReturnPeriodFactor"
-    ws["B4"] = "=var(Z)"
+    ws["B4"] = "=CALC(Z)"
     tables = wb.create_sheet("Tables")
     tables["A1"], tables["A2"] = 3, 1.3
     tables["B1"] = "=Z*2"
@@ -109,7 +109,7 @@ def test_two_self_contained_workbooks_with_the_same_names_stay_apart(tmp_path):
     assert two["Tables (2)"].cells[(0, 1)].value == pytest.approx(0.26), "its own names first"
 
 
-def test_a_cell_reads_its_workbooks_name_first_then_the_equation_variable(tmp_path):
+def test_a_cell_reads_its_workbooks_names_bare_and_the_equations_with_calc(tmp_path):
     asked = []
     wb, (sheets,) = engine_with((quake(str(tmp_path / "q.xlsx")), True))
 
@@ -121,8 +121,8 @@ def test_a_cell_reads_its_workbooks_name_first_then_the_equation_variable(tmp_pa
     wb.outside = outside
     wb.recalculate(everything=True)
     sa = sheets["Seismic Actions"]
-    assert sa.cells[(1, 1)].value == pytest.approx(4.0), "Z the workbook's, k the equations'"
-    assert sa.cells[(3, 1)].value == pytest.approx(99.0), "var(Z) is the equation variable"
+    assert sa.cells[(1, 1)].value == pytest.approx(4.0), "Z the workbook's, CALC(k) the equations'"
+    assert sa.cells[(3, 1)].value == pytest.approx(99.0), "CALC(Z) is the equation variable"
     assert "k" in asked
 
 

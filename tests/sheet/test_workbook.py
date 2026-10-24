@@ -216,9 +216,10 @@ def test_defined_names(wb):
     assert wb.find_name("W_total", None).refers_to == "Loads!$D$13"
 
 
-def test_document_variables_are_read_by_name(wb):
-    """A name that is no cell and no defined name is a variable from the
-    document's equations, asked for where the sheet sits."""
+def test_document_variables_are_read_with_calc(wb):
+    """CALC(x) is a variable from the document's equations, asked for where
+    the sheet sits; a bare name is only ever an Excel name (the user,
+    2026-10-24)."""
     from calcforge.calc.engine.units import Quantity
 
     s = wb.add_sheet()
@@ -230,9 +231,11 @@ def test_document_variables_are_read_by_name(wb):
         return variables[name]
 
     wb.outside = outside
-    put(wb, s, A1="=L.beam*2", A2="=var(M20)+1", A3="=M20", A4="=nothing")
+    put(wb, s, A1="=CALC(L.beam)*2", A2="=CALC(M20)+1", A3="=M20", A4="=CALC(nothing)",
+        A5="=L.beam")
     assert text(s, "A1") == "12 m" and get(s, "A2") == 4 and get(s, "A4") == NAME
-    assert get(s, "A3") == 0, "M20 is the cell; var(M20) is the variable"
+    assert get(s, "A3") == 0, "M20 is the cell; CALC(M20) is the variable"
+    assert get(s, "A5") == NAME, "bare, never the variable"
     variables["L.beam"] = Quantity(10.0, (1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     wb.outside_changed({"L.beam"})
     assert text(s, "A1") == "20 m"
@@ -335,5 +338,5 @@ def test_a_name_beside_a_function_of_the_same_name(wb):
     other = Workbook()
     t = other.add_sheet()
     other.outside = lambda _sheet, name: {"sin": Quantity(9.0, (0,) * 11)}[name]
-    put(other, t, A1="=sin", A2="=SIN(0)")
-    assert get(t, "A1") == 9 and get(t, "A2") == 0
+    put(other, t, A1="=CALC(sin)", A2="=SIN(0)", A3="=sin")
+    assert get(t, "A1") == 9 and get(t, "A2") == 0 and get(t, "A3") == NAME

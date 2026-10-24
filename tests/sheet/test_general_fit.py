@@ -92,8 +92,8 @@ def test_why_a_cell_shows_its_error(book):
     assert said(s, "A4") == "#UNITS! — from A3: kN and m can't be added (A1 + A2)"
     assert said(s, "B5") == "#DIV/0! — dividing by zero (B4 is 0)"
     assert said(s, "B6") == "#DIV/0! — dividing by zero (B9 is empty)"
-    assert said(s, "C1") == ("#NAME? — 'Spna' isn't a function, a defined name or a "
-                             "variable from the equations")
+    assert said(s, "C1") == ("#NAME? — 'Spna' isn't a function or an Excel name of this "
+                             "workbook or sheet")
     assert said(s, "C2") == "#NAME? — There's a problem with this formula."
     assert said(s, "C3").startswith("#VALUE! — “abc” is text, not a number")
     assert said(s, "C4") == "#UNITS! — kN and m can't be compared (A1 > A2)"
@@ -107,8 +107,10 @@ def test_why_a_cell_shows_its_error(book):
     assert said(s, "B5") == "#DIV/0! — dividing by zero (B4 is empty)"
 
 
-# -- var() ---------------------------------------------------------------------------------------
-def test_var_reads_the_variable_first_then_is_excels_var(book):
+# -- CALC() ---------------------------------------------------------------------------------------
+def test_calc_reads_the_variable_and_var_is_always_excels(book):
+    """The user, 2026-10-24: a bare name in a cell is only ever an Excel
+    name; CALC(x) reads the CalcForge variable x; VAR is Excel's variance."""
     wb, s = book
     variables = {"F": 10.0}
 
@@ -122,14 +124,19 @@ def test_var_reads_the_variable_first_then_is_excels_var(book):
     put(wb, s, A1="4", B1="1", B2="2", B3="3")
     wb.define_name("F", "Sheet1!$A$1")
     assert wb.find_name("F", s) is not None
-    put(wb, s, C1="=var(F)", C2="=var(Span)", C3="=VAR(B1:B3)", C4="=var(M20)")
+    put(wb, s, C1="=CALC(F)", C2="=CALC(Span)", C3="=VAR(B1:B3)", C4="=CALC(M20)", C5="=F",
+        C6="=Span", C7="=var(B1:B3)")
     assert get(s, "C1") == 10.0, "the equations' F, though a cell is named F"
-    assert get(s, "C2") == NAME and "var(Span)" in said(s, "C2")
-    assert get(s, "C3") == 1.0
-    assert get(s, "C4") == DIV0 and "Excel's VAR" in said(s, "C4")
+    assert get(s, "C5") == 4.0, "bare: the Excel name F"
+    assert get(s, "C2") == NAME and "CALC(Span)" in said(s, "C2")
+    assert get(s, "C3") == 1.0 and get(s, "C7") == 1.0
+    assert get(s, "C4") == NAME
+    assert said(s, "C6") == "#NAME? — 'Span' isn't a function or an Excel name of this workbook or sheet"
     variables["M20"] = 3.0
-    wb.outside_changed({"m20"})
-    assert get(s, "C4") == 3.0
+    variables["Span"] = 2.0
+    wb.outside_changed({"m20", "span"})
+    assert get(s, "C4") == 3.0 and get(s, "C2") == 2.0
+    assert "read as CALC(Span)" in said(s, "C6"), "bare, it says how a cell reads the variable"
 
 
 # -- hiding by dragging ----------------------------------------------------------------------

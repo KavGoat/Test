@@ -149,7 +149,7 @@ def test_a_quantity_keeps_its_unit_and_loses_decimals(w):
 
 
 # -- 2. var(F) and a cell named F ----------------------------------------------------------
-def test_var_reads_the_equation_variable_though_a_cell_has_its_name(w):
+def test_calc_reads_the_equation_variable_though_a_cell_has_its_name(w):
     v = cw.Sheet(w)
     equation(v, 18, "F:10'kN")
     w.insert_sheet_page(0)
@@ -164,11 +164,14 @@ def test_var_reads_the_equation_variable_though_a_cell_has_its_name(w):
     tabs.bar._go()
     pump()
     assert run.sheet.workbook.find_name("F", run.sheet) is not None
-    put(w, run, 1, 0, "=var(F)")
+    put(w, run, 1, 0, "=CALC(F)")
     got = run.sheet.value(1, 0)
     assert isinstance(got, Qty) and abs(got.si - 10000) < 1e-6, got
+    put(w, run, 6, 0, "=F")
+    got = run.sheet.value(6, 0)
+    assert isinstance(got, Qty) and abs(got.si - 4) < 1e-9, "bare: the cell's Excel name"
     # no such variable or name: #NAME?, said
-    put(w, run, 2, 0, "=var(Span)")
+    put(w, run, 2, 0, "=CALC(Span)")
     assert run.sheet.value(2, 0) == NAME
     tabs.select((2, 0))
     assert "Span" in status(w) and "#NAME?" in status(w)
@@ -190,7 +193,7 @@ def test_an_error_says_what_went_wrong_in_the_status_bar_and_tooltip(w):
     expect = {
         2: "A3: #UNITS! — kN and m can't be added (A1 + A2)",
         4: "A5: #DIV/0! — dividing by zero (A4 is 0)",
-        5: "A6: #NAME? — 'Spna' isn't a function, a defined name or a variable from the equations",
+        5: "A6: #NAME? — 'Spna' isn't a function or an Excel name of this workbook or sheet",
         6: "A7: #NAME? — There's a problem with this formula.",
         8: "A9: #UNITS! — from A3: kN and m can't be added (A1 + A2)",
     }

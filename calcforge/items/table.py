@@ -308,6 +308,7 @@ class TableItem(MarkupItem):
         if data is not None:
             load_sheet(sheet, data)
             book.settle_old_names()
+            book.settle_old_formulas()      # var(x), bare equation names: CALC(x)
             wanted = data.get("name")
             # (the sheet found by that name may be this one: names are told
             # apart regardless of case, and an undo of Sheet1 renamed SHEET1

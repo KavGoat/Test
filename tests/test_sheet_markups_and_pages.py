@@ -452,10 +452,11 @@ def test_a_cell_reads_a_page_variable_and_says_why_a_lost_name_is_ref(w, sheet):
     """The user, 2026-10-24: "I had a variable height in a page then tried
     =height in a cell in a sheet but threw ref error (what's the proper way
     to refer to this)". =height reads an equation's height defined before the
-    sheet. The Seismic Parts workbook has a name of its own, Height, which
-    Excel keeps as Calculations!#REF! (its cells were deleted), and in its
-    cells a workbook's own name comes first, as in Excel: the #REF! now says
-    so, and that var(height) reads the equation's."""
+    sheet — now written =CALC(height): a bare name in a cell is only ever an
+    Excel name (the user, 2026-10-24). The Seismic Parts workbook has a name
+    of its own, Height, which Excel keeps as Calculations!#REF! (its cells
+    were deleted): the #REF! says so, and that CALC(height) reads the
+    equation's."""
     from tests.test_calc_editing import type_line
     from tests.test_excel_footer_keys import key, typed
     from calcforge.ui import sheetview
@@ -479,14 +480,16 @@ def test_a_cell_reads_a_page_variable_and_says_why_a_lost_name_is_ref(w, sheet):
         key(w, Qt.Key_Return)
         pump()
         return run.sheet.cells[(r, 0)].value
-    got = put(0, "=height")
+    got = put(0, "=CALC(height)")
     assert "3.5" in str(got) and "m" in str(got), got
-    # a broken name of the workbook's own comes first, and says what to do
+    got = put(3, "=height")
+    assert str(got) == "#NAME?" and "CALC(height)" in got.reason, "bare: says how"
+    # a broken name of the workbook's own, read bare, says what to do
     run.sheet.workbook.define_name("Height", "Gone!#REF!")
     got = put(1, "=height")
     assert str(got) == "#REF!"
-    assert "var(height)" in got.reason and "deleted" in got.reason
-    got = put(2, "=var(height)")
+    assert "CALC(height)" in got.reason and "deleted" in got.reason
+    got = put(2, "=CALC(height)")
     assert "3.5" in str(got), got
 
 

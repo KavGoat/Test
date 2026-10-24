@@ -135,8 +135,15 @@ class FormulaHelp:
         item = self.tables.item
         if item is not None and item.sheet is not None:
             wb = item.sheet.workbook
-            names = sorted({dn.name for dn in wb.names.values()}, key=str.lower)
+            sheet = item.sheet
+            # the Excel names this sheet reads bare; a CalcForge variable
+            # (a Variable box's) as it is read, CALC(name) (the user, 2026-10-24)
+            names = sorted({dn.name for dn in wb.names.values() if not dn.variable
+                            and wb.find_excel_name(dn.name, sheet) is dn}, key=str.lower)
             out += [(n, NAME) for n in names if n.upper().startswith(up)]
+            variables = sorted({dn.name for dn in wb.names.values() if dn.variable},
+                               key=str.lower)
+            out += [(f"CALC({n})", NAME) for n in variables if n.upper().startswith(up)]
             out += [(s.name, TABLE) for s in wb.sheets
                     if getattr(s, "kind", "") == "table" and s.name.upper().startswith(up)]
         return out

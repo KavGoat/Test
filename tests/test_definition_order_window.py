@@ -307,7 +307,7 @@ def test_a_cell_reads_the_latest_equation_above_it(w):
     equation(w, 0, 120, "w:3'kN")
     run = insert_sheet_page_after(w, 0)
     equation(w, 2, 60, "w:100'kN")
-    type_into_cell(w, run, "A1", "=w*2")
+    type_into_cell(w, run, "A1", "=CALC(w)*2")
     pump(6)
     from calcforge.sheet.numfmt import format_value
     assert format_value(run.sheet.value(0, 0)).text == "6 kN"

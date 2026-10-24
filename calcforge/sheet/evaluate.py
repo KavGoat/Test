@@ -320,7 +320,7 @@ def ev(n, ctx: Ctx):
     if t is F.Name:
         return _name(n, ctx)
     if t is F.DocVar:
-        return _doc_var(n, ctx)
+        return _calc_var(n, ctx)
     if t is F.Apply:
         from .functions import apply
         return apply(n, ctx)
@@ -507,7 +507,8 @@ def _name(n: F.Name, ctx: Ctx):
         sheet = ctx.wb.sheet(unquote_sheet(n.sheet))
         if sheet is None:
             raise failed(REF, f"there's no sheet or table called '{unquote_sheet(n.sheet)}'")
-    dn = ctx.wb.find_name(n.name, sheet)
+    # an Excel name only: a CalcForge variable is read as CALC(name)
+    dn = ctx.wb.find_excel_name(n.name, sheet)
     if dn is not None and n.sheet is not None:
         closed = ctx.wb.closed_to(dn, ctx.sheet)
         if closed is not None:
@@ -516,42 +517,43 @@ def _name(n: F.Name, ctx: Ctx):
             return NAME.because(f"{n.name} is a name of {closed.name}, which is self-contained: "
                                 f"only its own cells read its names")
     if dn is not None:
-        if ctx.depth > 40:
-            raise failed(NUM, f"the name '{n.name}' refers to itself, round and round")
-        # what it refers to, read once while it stays the same (parsing it
-        # again for every formula that uses it was most of a name's cost)
-        held = dn.__dict__.get("_parsed")
-        if held is not None and held[0] == dn.refers_to:
-            parsed = held[1]
-        else:
-            try:
-                parsed = F.parse(dn.refers_to, 0, 0)
-            except F.FormulaError:
-                return NAME.because(f"the defined name '{n.name}' is a formula that can't be read")
-            dn.__dict__["_parsed"] = (dn.refers_to, parsed)
-        home = ctx.wb.sheet_by_id(dn.sheet) if dn.sheet else ctx.sheet
-        inner = Ctx(ctx.wb, home, 0, 0)
-        inner.reads = ctx.reads
-        inner.depth = ctx.depth + 1
-        global _compiled
-        if _compiled is None:
-            from .compiled import compiled as _compiled
-        got = _compiled(parsed)(inner)
-        if isinstance(got, ErrorValue) and got.code == REF.code:
-            got = ErrorValue(got.code, _lost_name(n.name, dn, ctx))
-        return got
+        return _defined(n.name, dn, ctx)
     if n.sheet is None:
-        try:
-            return _outside(n.name, ctx)
-        except SheetError as e:
-            if e.error != NAME:
-                raise
         try:
             return _unit(n.name, custom=False)
         except SheetError:
             pass
-        return NAME.because(not_known(n.name))
+        ctx.reads.add(n.name.lower())   # its reason says CALC(x) once x is there
+        return NAME.because(not_known(n.name, ctx))
     return NAME.because(f"'{n.name}' isn't a defined name on {n.sheet}")
+
+
+def _defined(name: str, dn, ctx: Ctx):
+    """What the defined name *dn* (read as *name*) refers to."""
+    if ctx.depth > 40:
+        raise failed(NUM, f"the name '{name}' refers to itself, round and round")
+    # what it refers to, read once while it stays the same (parsing it
+    # again for every formula that uses it was most of a name's cost)
+    held = dn.__dict__.get("_parsed")
+    if held is not None and held[0] == dn.refers_to:
+        parsed = held[1]
+    else:
+        try:
+            parsed = F.parse(dn.refers_to, 0, 0)
+        except F.FormulaError:
+            return NAME.because(f"the defined name '{name}' is a formula that can't be read")
+        dn.__dict__["_parsed"] = (dn.refers_to, parsed)
+    home = ctx.wb.sheet_by_id(dn.sheet) if dn.sheet else ctx.sheet
+    inner = Ctx(ctx.wb, home, 0, 0)
+    inner.reads = ctx.reads
+    inner.depth = ctx.depth + 1
+    global _compiled
+    if _compiled is None:
+        from .compiled import compiled as _compiled
+    got = _compiled(parsed)(inner)
+    if isinstance(got, ErrorValue) and got.code == REF.code:
+        got = ErrorValue(got.code, _lost_name(name, dn, ctx))
+    return got
 
 
 def _lost_name(name: str, dn, ctx: Ctx) -> str:
@@ -562,61 +564,58 @@ def _lost_name(name: str, dn, ctx: Ctx) -> str:
     variable height on a page, =height in a cell of the Seismic Parts
     workbook gave #REF!)."""
     why = f"the defined name '{dn.name}' refers to cells that were deleted ({dn.refers_to})"
-    ask = ctx.wb.outside
-    if ask is not None:
-        try:
-            ask(ctx.sheet, name)
-        except (KeyError, SheetError):
-            return why
-        return why + f"; var({name}) reads the equations' {name}"
+    if _is_calc_variable(name, ctx):
+        return why + f"; CALC({name}) reads the CalcForge variable {name}"
     return why
 
 
-def not_known(name: str) -> str:
-    """Why a name gives #NAME? (QA, 2026-10-15: errors say what went wrong)."""
-    return f"'{name}' isn't a function, a defined name or a variable from the equations"
-
-
-def _outside(name: str, ctx: Ctx):
-    """A variable from the document's equations."""
-    ctx.reads.add(name.lower())
-    ask = ctx.wb.outside
+def _is_calc_variable(name: str, ctx: Optional["Ctx"]) -> bool:
+    """Whether CALC(name) would read something where *ctx* is."""
+    ask = (ctx.wb.calc_variable or ctx.wb.outside) if ctx is not None else None
     if ask is None:
-        raise failed(NAME, f"'{name}' isn't a variable from the equations")
+        return False
     try:
-        value = ask(ctx.sheet, name)
-    except KeyError:
-        raise failed(NAME, f"'{name}' isn't a variable from the equations before this sheet")
-    return from_engine(value)
+        ask(ctx.sheet, name)
+    except (KeyError, SheetError):
+        return False
+    return True
 
 
-def _doc_var(n: F.DocVar, ctx: Ctx):
-    """var(X): the equations' variable X when there is one; otherwise it is
-    Excel's VAR (variance) of the cell or defined name X, so =VAR(A1:A5)
-    and =VAR(Loads) still work as in Excel; a name that is neither is
-    #NAME? (the user, 2026-10-15). Before, a cell named F made var(F) the
-    variance of one cell, #DIV/0!, though the equations define F."""
+def not_known(name: str, ctx: Optional["Ctx"] = None) -> str:
+    """Why a name gives #NAME? (QA, 2026-10-15: errors say what went wrong):
+    and when it is a CalcForge variable, how a cell reads one."""
+    if _is_calc_variable(name, ctx):
+        return (f"'{name}' isn't an Excel name of this workbook or sheet; the CalcForge "
+                f"variable {name} is read as CALC({name})")
+    return f"'{name}' isn't a function or an Excel name of this workbook or sheet"
+
+
+def _calc_var(n: F.DocVar, ctx: Ctx):
+    """CALC(x): the CalcForge variable x — an equation's, or a cell named in
+    its Variable box — in force where the sheet is (the user, 2026-10-24:
+    "to use a calc forge variable, you always have to do var(variable),
+    maybe change from var to something excel does not have as a function,
+    so there can never be a clash"). Never an Excel name."""
+    ctx.reads.add(n.name.lower())
+    ask = ctx.wb.calc_variable
+    if ask is None and ctx.wb.outside is not None:
+        # a workbook of its own (no document): the equations' variables only
+        def ask(sheet, name, outside=ctx.wb.outside):
+            return from_engine(outside(sheet, name))
+    if ask is None:
+        return NAME.because(f"CALC({n.name}): there are no CalcForge variables here")
     try:
-        return _outside(n.name, ctx)
+        got = ask(ctx.sheet, n.name)
+    except KeyError as e:
+        why = e.args[0] if e.args and isinstance(e.args[0], str) and " " in e.args[0] else \
+            f"CALC({n.name}): there's no CalcForge variable {n.name} before this sheet"
+        return NAME.because(why)
     except SheetError as e:
-        if e.error != NAME:
-            raise
-    from .functions import call
-
-    cell = parse_cell(n.name) if is_cell_name(n.name) else None
-    if cell is not None:
-        arg = F.Ref(cell.row, cell.col, True, True, None)
-    elif ctx.wb.find_name(n.name, ctx.sheet) is not None:
-        arg = F.Name(n.name)
-    else:
-        return NAME.because(f"var({n.name}): '{n.name}' isn't a variable from the equations "
-                            "before this sheet, nor a cell or a defined name")
-    got = call(F.Call("VAR", (arg,)), ctx)
-    if isinstance(got, ErrorValue) and got.code == DIV0.code:
-        return ErrorValue(got.code, f"var({n.name}): there's no variable '{n.name}' in the "
-                                    f"equations before this sheet, so this is Excel's VAR "
-                                    f"(variance) of {n.name}, which needs two numbers or more")
-    return got
+        return e.error
+    from .workbook import DefinedName
+    if isinstance(got, DefinedName):
+        return _defined(n.name, got, ctx)
+    return got                          # an equation's, as a cell's value
 
 
 def from_engine(value, engineering: bool = True):
@@ -740,7 +739,7 @@ def operand_text(node, ctx: Ctx) -> Optional[str]:
     if t is F.Name:
         return node.name if node.sheet is None else f"{node.sheet}!{node.name}"
     if t is F.DocVar:
-        return f"var({node.name})"
+        return f"{F.CALC}({node.name})"
     if t is F.Num:
         return general_number(node.value)
     if t is F.Unit:

@@ -12,10 +12,11 @@ down a column, =A1*2, =A2*2, =A3*2... are one and the same tree, parsed once.
 Beyond Excel:
   * a number may carry a unit: =5 kN, =A1 + 250 mm, =10 kN/m*B2
   * 'kN on its own is that unit (SMath's way of writing one): =A1/'kN
-  * a bare name that is no cell and no defined name is a variable from the
-    document's equations, read where the sheet sits in reading order;
-    var(M20) reads a document variable whose name looks like a cell (or
-    one a cell's name hides); with no such variable it is Excel's VAR.
+  * a bare name is only ever an Excel name (or a unit); CALC(x) reads the
+    CalcForge variable x — an equation's, or a cell named in its Variable
+    box — in force where the sheet sits in reading order, CALC(M20) and
+    CALC(L.beam) too. Excel has no CALC, so the two never clash (the user,
+    2026-10-24); VAR is always Excel's variance.
 """
 from __future__ import annotations
 
@@ -25,6 +26,10 @@ from typing import Callable, Optional
 
 from .refs import CellRef, parse_range, quote_sheet
 from .values import is_unit_text
+
+
+#: The function a cell reads a CalcForge variable with (evaluate._calc_var).
+CALC = "CALC"
 
 
 class FormulaError(ValueError):
@@ -411,7 +416,8 @@ class Name:
 
 @dataclass(frozen=True)
 class DocVar:
-    """var(M20): a document variable whose name looks like a cell."""
+    """CALC(x): the CalcForge variable x (an equation's, or a cell named in
+    its Variable box), never an Excel name."""
 
     name: str
 
@@ -653,17 +659,18 @@ class _Parser:
         if name.startswith("_XLWS."):
             name = name[6:]
         self.expect("(")
-        if name == "VAR" and self.peek(1).kind == ")" and (
-                (self.peek().kind == "ref" and isinstance(self.peek().ref, CellRef)
-                 and self.peek().ref.sheet is None and "$" not in self.peek().text)
-                or (self.peek().kind == "name" and "!" not in self.peek().text)):
-            # var(M20): the document variable M20 when the equations have
-            # one, else Excel's VAR of M20 (evaluate._doc_var; the user,
-            # 2026-10-15); VAR(A1:A9) and VAR(1,2,3) are Excel's variance
-            inner = self.take()
-            self.expect(")")
-            self.names.add(inner.text)
-            return DocVar(inner.text)
+        if name == CALC:
+            # CALC(x): a CalcForge variable, by its name alone — one spelt
+            # like a cell (CALC(M20)) or with a subscript (CALC(L.beam)) too
+            if self.peek(1).kind == ")" and (
+                    (self.peek().kind == "ref" and isinstance(self.peek().ref, CellRef)
+                     and self.peek().ref.sheet is None and "$" not in self.peek().text)
+                    or (self.peek().kind == "name" and "!" not in self.peek().text)):
+                inner = self.take()
+                self.expect(")")
+                self.names.add(inner.text)
+                return DocVar(inner.text)
+            raise FormulaError("CALC takes the name of a CalcForge variable, as CALC(PGA)")
         self.functions.add(name)
         args = []
         if self.peek().kind == ")":
@@ -869,6 +876,53 @@ def rename_name_in(text: str, old: str, new: str, uses: Callable[[Optional[str]]
                 t.text = sheet + "!" + new
                 changed = True
     return join(tokens) if changed else text
+
+
+def to_calc_names(body: str, excel: Callable[[str], bool], calc: Callable[[str], bool]) -> str:
+    """A formula (without its "=") from before a bare name in a cell was
+    only ever an Excel name (the user, 2026-10-24), written for the rule
+    now: a bare name that read a CalcForge variable — *calc(name)*, and no
+    Excel name of that spelling, *excel(name)* — becomes CALC(name), and
+    var(x) of one CALC(x) (any other var(...) was, and stays, Excel's VAR).
+    Names a LET or LAMBDA in the formula binds are its own, left as they are."""
+    tokens = tokenize(body)
+    bound = _bound_names(tokens)
+    changed = False
+    for k, t in enumerate(tokens):
+        if t.kind == "func" and t.text.upper() == "VAR" and k + 3 < len(tokens) \
+                and tokens[k + 1].kind == "(" and tokens[k + 3].kind == ")" \
+                and tokens[k + 2].kind in ("name", "ref") \
+                and not set("!$") & set(tokens[k + 2].text):
+            if calc(tokens[k + 2].text):
+                t.text = CALC                  # var(x) read the equations' x first
+                changed = True
+        elif t.kind == "name" and "!" not in t.text and t.text.lower() not in bound \
+                and not excel(t.text) and calc(t.text):
+            inside = k >= 2 and tokens[k - 1].kind == "(" and \
+                tokens[k - 2].text.upper() in ("VAR", CALC) and tokens[k - 2].kind == "func"
+            if not inside:
+                t.text = f"{CALC}({t.text})"
+                changed = True
+    return join(tokens) if changed else body
+
+
+def _bound_names(tokens: list) -> set:
+    """The names (lower case) a LET or LAMBDA among *tokens* binds."""
+    bound, stack = set(), []
+    for k, t in enumerate(tokens):
+        if t.kind == "func":
+            stack.append([t.text.upper(), 0, k])
+        elif t.kind == "(" and not (k and tokens[k - 1].kind == "func"):
+            stack.append(["", 0, k])
+        elif t.kind == ")" and stack:
+            stack.pop()
+        elif t.kind == "," and stack:
+            stack[-1][1] += 1
+        elif t.kind == "name" and stack and k and tokens[k - 1].kind in ("(", ","):
+            func, arg, _at = stack[-1]
+            if (func == "LET" and arg % 2 == 0) or func == "LAMBDA":
+                bound.add(t.text.lower())
+    return bound
 
 
 def _escape_heading(heading: str) -> str:

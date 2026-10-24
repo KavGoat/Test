@@ -483,8 +483,7 @@ SHEET = {
     "TREND": (_S, "Values along a straight-line fit."),
     "TRIMMEAN": (_S, "The mean with a fraction of the extremes left out."),
     "TTEST": (_S, "Student's t-test (older name)."),
-    "VAR": (_S, "Sample variance — but var(X) with one bare name reads the equation "
-                "variable X (see Part 3)."),
+    "VAR": (_S, "Sample variance."),
     "VAR.P": (_S, "Population variance."),
     "VAR.S": (_S, "Sample variance."),
     "VARA": (_S, "Sample variance, counting text and logicals."),
@@ -717,6 +716,9 @@ SHEET = {
     "ISERROR": (_I, "TRUE for any error."),
     "ISEVEN": (_I, "TRUE if the number is even."),
     "ISFORMULA": (_I, "TRUE if the cell holds a formula."),
+    "CALC": (_I, "The CalcForge variable name — an equation's, or a cell named in its "
+                 "Variable box — in force where the sheet is. A bare name in a cell is only "
+                 "ever an Excel name, so the two never clash.", "CALC(name)"),
     "ISLOGICAL": (_I, "TRUE if the value is TRUE or FALSE."),
     "ISNA": (_I, "TRUE if the value is #N/A."),
     "ISNONTEXT": (_I, "TRUE if the value is not text."),

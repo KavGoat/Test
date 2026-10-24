@@ -70,7 +70,7 @@ def shown(table, row, col):
 
 def test_a_table_reads_variables_defined_before_it(v):
     equation(v, 18, "L:6'm")
-    table = table_at(v, 100, [["=L*2", "=w"]])
+    table = table_at(v, 100, [["=CALC(L)*2", "=CALC(w)"]])
     equation(v, 300, "w:3'kN")
     assert shown(table, 0, 0) == "12 m"
     assert shown(table, 0, 1) == "#NAME?", "w is defined after the table"
@@ -123,7 +123,7 @@ def test_a_table_below_is_not_defined_above_it(v):
     equation(v, 18, "z:T1.A1+1")
     equation(v, 54, "z=")
     equation(v, 120, "a:10")
-    table = table_at(v, 200, [["=a*3"]], name="T1")
+    table = table_at(v, 200, [["=CALC(a)*3"]], name="T1")
     equation(v, 400, "y:T1.A1+1")
     equation(v, 440, "y=")
     found = {item.region.editor.root.text(): item.region

@@ -1335,6 +1335,14 @@ def ISNA(x):
     return scalar(x) == NA
 
 
+@fn("CALC", least=1, most=1, lazy=True)
+def _calc_variable(ctx, args):
+    """CALC(x) is read by the parser as the CalcForge variable x
+    (formula.DocVar, evaluate._calc_var); here only for its place in the
+    function list, its tip and the manual."""
+    return NAME.because("CALC takes the name of a CalcForge variable, as CALC(PGA)")
+
+
 @fn("ISREF", least=1, most=1)
 def ISREF(x):
     return isinstance(x, RefValue)
