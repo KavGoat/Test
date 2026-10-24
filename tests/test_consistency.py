@@ -186,7 +186,9 @@ def test_a_spreadsheet_page_shows_its_sheet_and_cells_but_no_layout(win):
     open_at(win, run, "B2")
     heading, sections = panel(win)
     assert heading == "Sheet1 Properties"
-    assert sections == ["General", "Sheet", "Cells"]
+    # its workbook first, then the worksheet (the user, 2026-10-24: "a better
+    # property panel for workbook and work sheets")
+    assert sections == ["General", "Workbook", "Worksheet", "Cells"]
     assert child(win, QLabel, "cellsSelection").text() == "B2"
 
 
