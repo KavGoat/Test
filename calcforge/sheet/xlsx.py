@@ -362,6 +362,8 @@ def _read_workbook(path: str, taken: Optional[set] = None) -> Imported:
     except Exception:  # noqa: BLE001
         cached = None
     newer = _x14_validations(path)
+    from .xlsxpictures import drawing_pictures
+    drawn = drawing_pictures(path)          # every picture, metafiles too (openpyxl drops them)
     theme = _theme_colours(wb)
     try:
         base = wb._fonts[0]
@@ -515,7 +517,7 @@ def _read_workbook(path: str, taken: Optional[set] = None) -> Imported:
         margins = (m.left * 25.4, m.top * 25.4, m.right * 25.4, m.bottom * 25.4) if m is not None else None
         from .xlsxcharts import charts_of, pictures_of
         charts = charts_of(ws, data, renamed, left_out)
-        pictures = pictures_of(ws, data, left_out)
+        pictures = pictures_of(ws, data, left_out, drawn.get(ws.title))
         if setup is not None and setup.fitToWidth not in (None, 0, 1) and _fits_to_page(ws):
             left_out.append(f"fitting “{ws.title}” to {int(setup.fitToWidth)} pages wide "
                             f"(its columns that fit print, the rest is scratch)")

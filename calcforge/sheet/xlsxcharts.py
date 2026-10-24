@@ -222,9 +222,14 @@ def charts_of(ws, data: dict, renamed: Callable[[str], str], left_out: list) -> 
     return out
 
 
-def pictures_of(ws, data: dict, left_out: list) -> list:
+def pictures_of(ws, data: dict, left_out: list, drawn: Optional[list] = None) -> list:
     """[{"data": bytes, "suffix", "anchor", "w", "h"}] for the worksheet's
-    pictures, as Excel places and sizes them."""
+    pictures, as Excel places and sizes them: every picture of its drawing
+    (*drawn*, sheet/xlsxpictures.py: metafiles, groups, cropped ones), else
+    those openpyxl kept."""
+    if drawn:
+        from .xlsxpictures import placed_pictures
+        return placed_pictures(ws.title, drawn, data, left_out)
     found = getattr(ws, "_images", None) or []
     if not found:
         return []

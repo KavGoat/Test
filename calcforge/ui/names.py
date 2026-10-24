@@ -191,24 +191,104 @@ class _Nothing:
     value = None
 
 
+# -- whose names: a workbook's, the tables', the CalcForge variables -------------------------------
+#: The Name Manager's list beside the workbooks: names of the tables on
+#: ordinary pages, and the document's CalcForge variables (cells named in
+#: their Variable box), which a cell reads as CALC(name).
+TABLES, VARIABLES = "tables", "variables"
+TABLES_SHOWN, VARIABLES_SHOWN = "Tables on Pages", "CalcForge Variables"
+
+
+def _home(wb, dn):
+    """The sheet a name is kept with: the one it is local to, the one whose
+    cells it names, else the one it was made on."""
+    if dn.sheet is not None:
+        return wb.sheet_by_id(dn.sheet)
+    return wb._first_sheet_read(dn.refers_to) or \
+        (wb.sheet_by_id(dn.home) if dn.home is not None else None)
+
+
+def whose(wb, dn):
+    """Whose list a name is on in the Name Manager: its workbook's Book.id,
+    TABLES, or VARIABLES."""
+    if dn.variable:
+        return VARIABLES
+    if dn.book is not None:
+        return dn.book
+    home = _home(wb, dn)
+    if home is not None and home.book is not None:
+        return home.book
+    return TABLES
+
+
+def scope_in_list(wb, dn) -> str:
+    """The Name Manager's Scope, as Excel's: Workbook for a workbook's own
+    name, the sheet's name for one local to a sheet; the tables' shared
+    names are the Document's, and a CalcForge variable says where its cells
+    are."""
+    if dn.sheet is not None and wb.sheet_by_id(dn.sheet) is not None:
+        return wb.sheet_by_id(dn.sheet).name
+    if dn.variable:
+        home = _home(wb, dn)
+        return f"Document ({home.name})" if home is not None else "Document"
+    return "Document" if whose(wb, dn) == TABLES else "Workbook"
+
+
+def lists_of(window, wb) -> list:
+    """The Name Manager's drop-down: (shown, key) for each workbook of the
+    document in page order, then the tables on pages (when there are any),
+    then the CalcForge variables."""
+    from .sheetpages import sections
+    out, seen = [], set()
+    document = getattr(window, "document", None)
+    for section in (sections(document) if document is not None else []):
+        if section.book is not None and section.book not in seen:
+            seen.add(section.book)
+            out.append((section.name, section.book))
+    for book in wb.books.values():
+        if book.id not in seen and any(s.book == book.id for s in wb.sheets):
+            seen.add(book.id)
+            from .sheetpages import _book_shown
+            out.append((_book_shown(book.file, book.name), book.id))
+    if any(s.book is None for s in wb.sheets) or \
+            any(whose(wb, dn) == TABLES for dn in wb.names.values()):
+        out.append((TABLES_SHOWN, TABLES))
+    out.append((VARIABLES_SHOWN, VARIABLES))
+    return out
+
+
+def sheets_of(wb, key) -> list:
+    """The sheets a list's names may be local to."""
+    if key == VARIABLES:
+        return []
+    if key == TABLES:
+        return [s for s in wb.sheets if s.book is None]
+    return [s for s in wb.sheets if s.book == key]
+
+
 # -- New / Edit Name ------------------------------------------------------------------------------
 class NameDialog(QDialog):
-    """New Name / Edit Name: the name, its scope, a comment, what it refers to."""
+    """New Name / Edit Name: the name, its scope, a comment, what it refers
+    to. Its Scope offers the workbook the Name Manager shows and that
+    workbook's sheets only (*key*: Book.id, TABLES or VARIABLES; None: any
+    sheet), as Excel's offers the workbook's own."""
 
-    def __init__(self, wb, parent=None, dn=None, refers_to: str = ""):
+    def __init__(self, wb, parent=None, dn=None, refers_to: str = "", key=None):
         super().__init__(parent)
         self.wb = wb
+        self.key = key
         self.setWindowTitle("Edit Name" if dn is not None else "New Name")
         layout = QVBoxLayout(self)
         form = QFormLayout()
         self.name = QLineEdit(dn.name if dn is not None else "")
         form.addRow("Name:", self.name)
         self.scope = QComboBox()
-        self.scope.addItem("Workbook", None)
-        for sheet in wb.sheets:
+        self.scope.addItem("Document" if key in (TABLES, VARIABLES) else "Workbook", None)
+        for sheet in (wb.sheets if key is None else sheets_of(wb, key)):
             self.scope.addItem(sheet.name, sheet.id)
         if dn is not None and dn.sheet is not None:
             self.scope.setCurrentIndex(max(0, self.scope.findData(dn.sheet)))
+        self.scope.setEnabled(self.scope.count() > 1)
         form.addRow("Scope:", self.scope)
         self.comment = QLineEdit(dn.comment if dn is not None else "")
         form.addRow("Comment:", self.comment)
@@ -249,14 +329,16 @@ class NameDialog(QDialog):
 
 
 def define(tables, name: str, refers_to: str, scope=None, comment: str = "",
-           replacing=None, variable: Optional[bool] = None) -> Optional[str]:
+           replacing=None, variable: Optional[bool] = None, home=None) -> Optional[str]:
     """Define (or redefine) a name as one undo step; the problem, if any.
     *variable*: a CalcForge variable (the cell's Variable box) or a
     spreadsheet's own name; None keeps what *replacing* was (a new name is
-    the spreadsheet's)."""
+    the spreadsheet's). *home*: the sheet it is kept with, whose workbook it
+    is a name of (the open sheet when not given)."""
     item = tables.item
     if variable is None:
         variable = bool(replacing is not None and replacing.variable)
+    home = scope or home or item.sheet
 
     def change(wb):
         old = replacing
@@ -268,8 +350,7 @@ def define(tables, name: str, refers_to: str, scope=None, comment: str = "",
                 old = wb.names.get((name.lower(), old.key[1]), old)
             old_scope = wb.sheet_by_id(old.sheet) if old.sheet else None
             wb.remove_name(old.name, old_scope, old.book)
-        wb.define_name(name, refers_to, scope, comment, home=scope or item.sheet,
-                       variable=variable)
+        wb.define_name(name, refers_to, scope, comment, home=home, variable=variable)
     return change_names(tables, "Define name", change)
 
 
@@ -293,14 +374,39 @@ def scope_text(wb, dn) -> str:
 
 # -- the Name Manager -----------------------------------------------------------------------------
 class NameManagerDialog(QDialog):
+    """Excel's Name Manager, one workbook at a time (the user, 2026-10-24:
+    "name manager can you make it for each workbook and then inside shows
+    each worksheet etc like excel. currently all in one"): the drop-down at
+    the top picks the workbook — the open sheet's to start — or the tables
+    on pages, or the document's CalcForge variables; the list is that
+    workbook's names, its own (Scope: Workbook) and its sheets' (Scope: the
+    sheet), with the CalcForge variables named on its cells. Two workbooks
+    may each have a name Load: each list shows its own."""
     COLUMNS = ("Name", "Value", "Refers To", "Scope", "Comment")
 
-    def __init__(self, tables, parent=None):
+    def __init__(self, tables, parent=None, key=None):
         super().__init__(parent)
         self.tables = tables
         self.setWindowTitle("Name Manager")
-        self.resize(720, 360)
+        self.resize(760, 380)
         layout = QVBoxLayout(self)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Workbook:"))
+        self.whose = QComboBox()
+        self.whose.setObjectName("nameManagerWorkbook")
+        self.whose.setToolTip("Whose names to list: a workbook's (its own and its sheets'), "
+                              "the tables on pages', or the CalcForge variables a cell reads "
+                              "as CALC(name)")
+        window = getattr(tables.view, "window", None)
+        for shown, which in lists_of(window, self.wb):
+            self.whose.addItem(shown, which)
+        sheet = tables.item.sheet if tables.item is not None else None
+        start = key if key is not None else (
+            sheet.book if sheet is not None and sheet.book is not None else TABLES)
+        self.whose.setCurrentIndex(max(0, self.whose.findData(start)))
+        self.whose.currentIndexChanged.connect(lambda _i: self.refresh())
+        top.addWidget(self.whose, 1)
+        layout.addLayout(top)
         row = QHBoxLayout()
         self.new = QPushButton("New…")
         self.edit = QPushButton("Edit…")
@@ -334,14 +440,34 @@ class NameManagerDialog(QDialog):
     def wb(self):
         return self.tables.item.sheet.workbook
 
+    def key(self):
+        """Whose names are listed: a Book.id, TABLES or VARIABLES."""
+        which = self.whose.currentData() if hasattr(self, "whose") else None
+        return which if which is not None else TABLES
+
     def names(self) -> list:
-        return sorted(self.wb.names.values(), key=lambda dn: (dn.name.lower(), dn.sheet or 0))
+        key, wb = self.key(), self.wb
+        if key == VARIABLES:
+            chosen = [dn for dn in wb.names.values() if dn.variable]
+        else:
+            chosen = []
+            for dn in wb.names.values():
+                if dn.variable:
+                    # a CalcForge variable named on this workbook's cells
+                    home = _home(wb, dn)
+                    mine = (home.book if home is not None else None) or TABLES
+                    if home is not None and mine == key:
+                        chosen.append(dn)
+                elif whose(wb, dn) == key:
+                    chosen.append(dn)
+        return sorted(chosen, key=lambda dn: (dn.name.lower(), dn.sheet or 0))
 
     def refresh(self) -> None:
         names = self.names()
         self.table.setRowCount(len(names))
         for i, dn in enumerate(names):
-            scope = scope_text(self.wb, dn)
+            scope = "CalcForge variable" if dn.variable and self.key() != VARIABLES \
+                else scope_in_list(self.wb, dn)
             for j, text in enumerate((dn.name, name_value(self.wb, dn), "=" + dn.refers_to,
                                       scope, dn.comment)):
                 self.table.setItem(i, j, QTableWidgetItem(text))
@@ -359,7 +485,10 @@ class NameManagerDialog(QDialog):
             return
         t, l, b, r = self.tables.selection()
         here = _absolute(self.tables.item.name, t, l, b, r)
-        dialog = NameDialog(self.wb, self, dn, here)
+        key = self.key()
+        if dn is not None and dn.variable:
+            key = VARIABLES                         # its scope is the document's
+        dialog = NameDialog(self.wb, self, dn, here, key)
         window = self.tables.view.window
         if not getattr(window, "interactive_prompts", True):
             window._last_name_dialog = dialog
@@ -371,7 +500,15 @@ class NameManagerDialog(QDialog):
 
     def apply_editor(self, dialog: NameDialog, dn=None) -> Optional[str]:
         name, refers, scope, comment = dialog.values()
-        problem = define(self.tables, name, refers, scope, comment, replacing=dn)
+        key = self.key()
+        # a new name is the listed workbook's: kept with the open sheet when
+        # it is one of that workbook's, else with the workbook's first sheet
+        sheets = sheets_of(self.wb, key)
+        open_sheet = self.tables.item.sheet
+        home = open_sheet if open_sheet in sheets or not sheets else sheets[0]
+        variable = None if dn is not None else key == VARIABLES
+        problem = define(self.tables, name, refers, scope, comment, replacing=dn,
+                         variable=variable, home=home)
         self.problem.setText(problem or "")
         self.refresh()
         return problem
@@ -385,10 +522,11 @@ class NameManagerDialog(QDialog):
         self.refresh()
 
 
-def name_manager(tables) -> None:
+def name_manager(tables, key=None) -> None:
+    """The Name Manager (Ctrl+F3), on the open sheet's workbook (or *key*'s)."""
     if tables.item is None:
         return
-    dialog = NameManagerDialog(tables, tables.view)
+    dialog = NameManagerDialog(tables, tables.view, key)
     window = tables.view.window
     if not getattr(window, "interactive_prompts", True):
         window._last_data_dialog = dialog
@@ -434,12 +572,28 @@ def go_to_name(tables, text: str) -> bool:
     return False
 
 
+def in_reach(sheet, dn) -> bool:
+    """Whether a formula on *sheet* reads *dn* by its name alone, or the
+    Name Box there goes to it: the sheet's own names, its workbook's, the
+    CalcForge variables — not another workbook's (its own) nor another
+    sheet's."""
+    if dn.sheet is not None:
+        return dn.sheet == sheet.id
+    if dn.variable:
+        return True
+    if dn.book is not None:
+        return dn.book == sheet.book
+    return sheet.book is None
+
+
 def names_menu(tables, menu) -> None:
-    """The Name Box's drop-down: every name, to go to."""
+    """The Name Box's drop-down: the names of the open sheet's workbook (and
+    its own), to go to — as Excel's lists the workbook's."""
     item = tables.item
     if item is None:
         return
-    names = sorted(item.sheet.workbook.names.values(), key=lambda dn: dn.name.lower())
+    names = sorted((dn for dn in item.sheet.workbook.names.values() if in_reach(item.sheet, dn)),
+                   key=lambda dn: dn.name.lower())
     if not names:
         action = menu.addAction("(no names yet)")
         action.setEnabled(False)

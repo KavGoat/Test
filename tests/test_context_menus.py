@@ -275,8 +275,11 @@ def test_the_page_tab_and_sheet_tab_menus(w):
     sheet_page(w)
     w.go_to_page(1)                       # the workbook view: its tabs
     pump()
-    assert top_level(w.sheet_tabs.build_menu(0)) == ["Insert Sheet", "Delete", "Rename…", "Print",
-                                                     "Go To", "Close Workbook"]
+    # a spreadsheet made here is a workbook, Self-contained among its tab's
+    # entries as an imported one's (the user, 2026-10-24)
+    assert top_level(w.sheet_tabs.build_menu(0)) == ["Insert Sheet", "Delete", "Rename…",
+                                                     "Self-contained", "Print", "Go To",
+                                                     "Close Workbook"]
 
 
 def test_calc_modes_page_menu_has_smaths_inserts(w):

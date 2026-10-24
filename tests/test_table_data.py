@@ -102,9 +102,9 @@ def test_validation_list_and_stop(w):
     dialog.accept()
     tabs.select((1, 2))
     assert table.list_button() is not None
-    menu = tabs.list_menu()
-    assert [a.text() for a in menu.actions()] == ["OK", "NG"]
-    menu.actions()[1].trigger()
+    menu = tabs.list_menu()                  # Excel's list box (ui/listpopup.py)
+    assert menu.choices() == ["OK", "NG"]
+    menu.pick("NG")
     assert typed(table, "C2") == "NG"
     tabs.select((2, 2))
     type_text(w, "maybe")

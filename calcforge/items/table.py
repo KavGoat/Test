@@ -1067,16 +1067,17 @@ class TableItem(MarkupItem):
                     painter.drawPath(tri)
         if self.opened and self.active is not None and self.list_button() is not None:
             box = self.list_button()
-            painter.setPen(QPen(QColor("#8c8c8c"), 0))
-            painter.setBrush(QColor("#f3f3f3"))
+            painter.setPen(QPen(QColor("#ababab"), 0))
+            painter.setBrush(QColor("#f0f0f0"))
             painter.drawRect(box)
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor("#444444"))
+            painter.setBrush(QColor("#404040"))
             mid = box.center()
+            half = box.width() * 0.24
             tri = QPainterPath()
-            tri.moveTo(mid + QPointF(-2.5, -1))
-            tri.lineTo(mid + QPointF(2.5, -1))
-            tri.lineTo(mid + QPointF(0, 1.8))
+            tri.moveTo(mid + QPointF(-half, -half * 0.45))
+            tri.lineTo(mid + QPointF(half, -half * 0.45))
+            tri.lineTo(mid + QPointF(0, half * 0.6))
             tri.closeSubpath()
             painter.drawPath(tri)
         if self.opened and self.active is not None:
@@ -1110,9 +1111,12 @@ class TableItem(MarkupItem):
         rule = at(self.sheet, *self.active)
         if rule is None or rule.get("type") != "list" or not rule.get("dropdown", True):
             return None
+        # Excel's: beside the cell, as tall as its row (a default row's
+        # height at most), a little narrower than tall
         rect = self.cell_rect(*self.active)
-        s = min(12.0, rect.height())
-        return QRectF(rect.right() + 1, rect.bottom() - s, s, s)
+        h = min(15.0, rect.height())
+        w = min(12.5, h * 0.85)
+        return QRectF(rect.right() + 1, rect.bottom() - h, w, h)
 
     def paint_handles(self, painter: QPainter) -> None:
         if not self.opened:

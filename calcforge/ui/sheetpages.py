@@ -348,7 +348,8 @@ def insert_sheet_page(window, index: Optional[int] = None, before: bool = False,
             page.sheet = run
             page.printable = printable
         else:
-            page.sheet, record = new_sheet_record(setup)
+            # a workbook of its own, as Excel's new workbook (sheetpages.give_books)
+            page.sheet, record = new_sheet_record(setup, new_book(document))
             page._pending_items = [record]
         window.current_index = target
     window._structural_change("Insert spreadsheet page", mutate)
@@ -416,10 +417,7 @@ def new_workbook_beside(window, section: Section, before: bool = False) -> None:
     another workbook, currently does nothing"). It is a workbook of its own,
     so it is not taken for one more sheet of its neighbour: "Workbook (2)",
     its names its own."""
-    import uuid
-
-    from ..sheet.docbook import book_for, sheet_ident
-    from ..sheet.xlsx import workbook_ident
+    from ..sheet.docbook import book_for
     document = window.document
     wb = book_for(document).workbook
     target = section.first if before else section.last + 1
@@ -428,10 +426,7 @@ def new_workbook_beside(window, section: Section, before: bool = False) -> None:
      setup.margin_bottom) = EXCEL_MARGINS_MM
     shown = {_book_shown(b.file, b.name).lower() for b in wb.books.values()}
     shown |= {s.name.lower() for s in sections(document)} | {"workbook"}
-    title = copy_name("Workbook", shown)
-    idents = {b.name for b in wb.books.values()} | {sheet_ident(s.name) for s in wb.sheets}
-    book = {"id": "book-" + uuid.uuid4().hex[:12], "name": workbook_ident(title, idents),
-            "file": title, "self_contained": True}
+    book = new_book(document, "Workbook", True, shown)
 
     def mutate():
         page = document.add_page(target)
@@ -440,6 +435,155 @@ def new_workbook_beside(window, section: Section, before: bool = False) -> None:
         page._pending_items = [record]
         window.current_index = target
     window._structural_change("Insert spreadsheet page", mutate)
+
+
+# -- every workbook has its record ----------------------------------------------------------------
+def _book_idents(document) -> set:
+    """The names for the equations the document's workbooks are known by:
+    those of sheets on the canvas, and those of sheets still waiting to be."""
+    from ..sheet.docbook import book_for, sheet_ident
+    wb = book_for(document).workbook
+    out = {b.name for b in wb.books.values()} | {sheet_ident(s.name) for s in wb.sheets}
+    for page in document.pages:
+        for record in getattr(page, "_pending_items", None) or ():
+            table = record.get("table") if isinstance(record, dict) else None
+            if isinstance(table, dict):
+                if isinstance(table.get("book"), dict) and table["book"].get("name"):
+                    out.add(table["book"]["name"])
+                if table.get("name"):
+                    out.add(sheet_ident(table["name"]))
+    return out
+
+
+def new_book(document, title: str = "Workbook", self_contained: bool = True,
+             shown: Optional[set] = None) -> dict:
+    """The record of a new workbook of sheets made here (Book.to_dict()):
+    shown as *title*, or "Workbook (2)"… when a workbook is already shown so
+    (*shown*, lower case, when known), its name for the equations unique."""
+    import uuid
+
+    from ..sheet.xlsx import workbook_ident
+    if shown is None:
+        shown = {s.name.lower() for s in sections(document)}
+    if title.lower() in shown:
+        title = copy_name(_unnumbered(title), shown)
+    return {"id": "book-" + uuid.uuid4().hex[:12],
+            "name": workbook_ident(title, _book_idents(document)),
+            "file": title, "self_contained": bool(self_contained)}
+
+
+def give_books(document) -> None:
+    """Sheets made here side by side are a workbook just as one brought in
+    from Excel is (the user, 2026-10-24: "inserting a spreadsheet, i cant
+    right click and self contain it ... like importing an excel works"):
+    each has its record (Book), and with it Self-contained, names of its
+    own, and the Properties panel's Workbook section. A new one is made with
+    it (new_book); a workbook recorded before is given one as it comes in,
+    Not self-contained — as it was — its names now its own. A name of its
+    own read bare on a sheet outside it (a table on a page, another
+    workbook) is written Home!Name there, so that sheet goes on reading the
+    same cells."""
+    loose = [s for s in sections(document) if s.book is None]
+    if not loose:
+        return
+    from ..sheet.docbook import book_for
+    keeper = book_for(document)
+    wb = keeper.workbook
+    shown = {s.name.lower() for s in sections(document) if s.book is not None}
+    bare = None
+    moved = {}              # name (lower) -> (name, a sheet of its workbook, its Book.id)
+    journal, wb.journal = wb.journal, False
+    try:
+        with wb.transaction("Load"):
+            for section in loose:
+                book = new_book(document, section.name, False, shown)
+                shown.add(book["file"].lower())
+                for uid in section.runs:
+                    sheet, record = _run_record(document, uid)
+                    if sheet is not None:
+                        _book_given(keeper, sheet, book, moved)
+                        continue
+                    if record is None:
+                        continue
+                    record["book"] = dict(book)
+                    for entry in record.get("names") or []:
+                        if not isinstance(entry, list) or len(entry) < 2:
+                            continue
+                        local = len(entry) > 2 and bool(entry[2])
+                        if len(entry) <= 4:
+                            # recorded before names had two kinds: settled now
+                            # as DocumentBook.settle_old_names would have
+                            if bare is None:
+                                bare = keeper._bare_in_equations()
+                            entry.extend([False, ""][len(entry) - 2:])
+                            entry.append(not local and str(entry[0]).lower() in bare)
+                        if not local and not entry[4] and record.get("name"):
+                            moved[str(entry[0]).lower()] = (str(entry[0]), record["name"],
+                                                            book["id"])
+            if moved:
+                _names_read_elsewhere(document, wb, moved)
+    finally:
+        wb.journal = journal
+    document._sections_cache = None
+
+
+def _book_given(keeper, sheet, book: dict, moved: dict) -> None:
+    """A sheet on the canvas made part of workbook *book*, its names the
+    workbook's own."""
+    from dataclasses import replace
+
+    from ..sheet.workbook import Book
+    wb = sheet.workbook
+    if book["id"] not in wb.books:
+        wb.books[book["id"]] = Book(book["id"], book["name"], book["file"],
+                                    book["self_contained"])
+    sheet.book = book["id"]
+    for key, dn in list(wb.names.items()):
+        if key[1] is None and dn.sheet is None and not dn.variable \
+                and keeper._kept_on(dn) is sheet:
+            wb._put_name(key, None)
+            wb._put_name((key[0], book["id"]), replace(dn, book=book["id"]))
+            moved[key[0]] = (dn.name, sheet.name, book["id"])
+
+
+def _names_read_elsewhere(document, wb, moved: dict) -> None:
+    """Each of *moved*'s names read bare by a formula on a sheet outside its
+    workbook written Home!Name there (give_books)."""
+    from ..sheet import formula as F
+    from ..sheet.refs import quote_sheet
+
+    def rewritten(text, book_id, own):
+        if not isinstance(text, str) or not text.startswith("="):
+            return text
+        low = text.lower()
+        for lower, (name, home, owner) in moved.items():
+            if owner == book_id or lower in own or lower not in low:
+                continue
+            try:
+                text = "=" + F.rename_name_in(text[1:], name, f"{quote_sheet(home)}!{name}",
+                                              lambda sheet: sheet is None)
+            except F.FormulaError:
+                pass
+            low = text.lower()
+        return text
+
+    for page in document.pages:
+        for record in getattr(page, "_pending_items", None) or ():
+            table = record.get("table") if isinstance(record, dict) else None
+            if not isinstance(table, dict) or not table.get("cells"):
+                continue
+            book_id = (table.get("book") or {}).get("id")
+            own = {str(e[0]).lower() for e in table.get("names") or []
+                   if isinstance(e, list) and len(e) > 2 and e[2]}
+            for entry in table["cells"]:
+                if len(entry) > 2:
+                    entry[2] = rewritten(entry[2], book_id, own)
+    for sheet in wb.sheets:
+        own = {lower for (lower, scope) in wb.names if scope == sheet.id}
+        for (row, col), cell in list(sheet.cells.items()):
+            text = rewritten(cell.input, sheet.book, own)
+            if text != cell.input:
+                wb._set_state(sheet, row, col, (text, cell.style, cell.comment))
 
 
 def why_not_moved(document, source: int, count: int, target: int) -> str:

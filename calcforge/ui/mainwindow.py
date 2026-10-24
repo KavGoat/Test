@@ -4518,6 +4518,10 @@ class MainWindow(QMainWindow):
         page would have quietly emptied every page in the document.
         """
         self._adopt_calc_defaults(self.document)
+        # every workbook has its record, one recorded before too (Self-
+        # contained, its own names: sheetpages.give_books)
+        from .sheetpages import give_books
+        give_books(self.document)
         from . import release
         release.DOCUMENTS.add(self.document)
         if self.scene is None or self.scene.document is not self.document:

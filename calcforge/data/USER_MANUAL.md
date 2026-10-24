@@ -53,11 +53,13 @@ adds a workbook.
   Excel has no `CALC`, so the two never clash, and `VAR(…)` is always Excel's
   variance. A document saved before this opens with its cells rewritten so they
   read what they read: `=w*2` that read the equation's `w` becomes `=CALC(w)*2`.
-- An imported workbook is **self-contained** to start: closed, as a self-contained
-  calculation block is. Equations reach it only through its variables and its
-  cells (`Seismic_Actions.H44`); its Excel names can't be dialled in to and aren't
-  listed. Untick **Self-contained** (its sheet tab's right-click menu) to let
-  them be dialled in to.
+- A workbook — one brought in from Excel, or one made with **Insert ▸ Spreadsheet
+  Page** — is **self-contained** to start: closed, as a self-contained calculation
+  block is. Equations reach it only through its variables and its cells
+  (`Seismic_Actions.H44`); its Excel names can't be dialled in to and aren't
+  listed. Untick **Self-contained** (its sheet tab's or Thumbnails entry's
+  right-click menu, or the Properties panel's **Workbook** section) to let them be
+  dialled in to. It is the whole workbook's setting, not a sheet's.
 
 - A sheet name an equation can't hold is written with `_`: `Sheet1 (2)` is
   `Sheet1_2`, `Seismic Actions` is `Seismic_Actions`.
@@ -1352,8 +1354,14 @@ A **name** stands for a cell, a block or a constant (`W_total`,
   whatever workbook its cells are part of, and its name is tagged on the cells
   (View ▸ Name Tags).
 
-The Name Manager lists both; its Scope says *Workbook (CalcForge variable)* for a
-variable. Editing a name there keeps its kind. In a document saved before names had
+The **Name Manager** shows one workbook at a time, as Excel's: the **Workbook**
+drop-down at its top picks the workbook (the open sheet's to start), **Tables on
+Pages**, or **CalcForge Variables**. Its list is that workbook's names — Scope
+*Workbook* for the workbook's own, the sheet's name for a sheet's own — with the
+CalcForge variables named on its cells (Scope *CalcForge variable*). A new name is
+the listed workbook's, and its Scope offers only that workbook and its sheets. Two
+workbooks can each have a name `Load`; each reads its own. The **Name Box**'s
+drop-down lists the open sheet's workbook's names. Editing a name there keeps its kind. In a document saved before names had
 two kinds, a name an equation reads bare (`W_total` on its own) opens as a CalcForge
 variable, so those equations go on calculating; any other opens as the
 spreadsheet's own. It is saved that way from then on.
@@ -1503,7 +1511,9 @@ filter numbers or text, or Top 10), **Clear Filter**, **Remove Duplicates…**,
 **Text to Columns…**, **Goal Seek…**, **Data Validation…** (any value, whole
 number, decimal, list, date, time, text length or a custom formula, with an input
 message, an error style and message, and an in-cell drop-down — `Alt+Down` opens
-it), **Circle Invalid Data** and
+it: a list box as Excel's, the cell's value picked out; a letter jumps to the next
+choice starting with it, `Enter` or a click puts it in, `Esc` closes it), **Circle
+Invalid Data** and
 **Clear Validation Circles**. **Comment** adds a note to a cell (`Shift+F2`);
 **Find & Replace…** (`Ctrl+F`, `Ctrl+H`) searches the open table.
 
@@ -1587,8 +1597,8 @@ over the grid names the workbook and the sheet ("Workbook ▸ Sheet1").
 **Sheet tabs** (under the grid): **◀ ▶** scroll them (right-click lists every
 sheet), **⊕** adds a sheet (`Shift+F11` before the one shown). Click a tab to go to
 it, double-click to rename it, drag it to move the sheet. Right-click a tab for
-**Insert Sheet**, **Delete**, **Rename…**, **Print**, **Go To**, **Close Workbook**
-and, on an imported workbook's sheet, **Self-contained**. Drag the splitter beside
+**Insert Sheet**, **Delete**, **Rename…**, **Self-contained** (the workbook's),
+**Print**, **Go To** and **Close Workbook**. Drag the splitter beside
 the scroll bar to give the tabs more room. Sheet and table names are unique in the
 document (any case, and as equations write them: `Loads (2)` and `Loads_2` clash);
 a taken name is refused with **That name is already taken**.
@@ -1606,7 +1616,8 @@ several worksheets asks which to bring in and whether each prints. Each workshee
 becomes spreadsheet pages with its cells, formulas, formats, sizes, merges, names,
 comments, validation, conditional formatting, page layout, frozen panes and view.
 Its XY scatter, line and column **charts** and its **pictures** come in where Excel
-put them, moving with their cells; other chart kinds and a print scale other than
+put them, moving with their cells — every picture, a logo kept as a Windows
+metafile (WMF or EMF) too, cropped as Excel crops it, and pictures grouped together; other chart kinds and a print scale other than
 100 % are left out, and CalcForge says so — with any cell whose answer differs from
 what Excel last showed. A worksheet name already used becomes `Name (2)`; the same
 workbook brought in twice is `Loads` and `Loads (2)`. Nothing is written back to

@@ -26,7 +26,7 @@ import datetime
 import re
 from typing import Callable, Optional
 
-from PySide6.QtCore import QEvent, QMimeData, QPointF, QRect, QRectF, Qt, QTimer
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QFont, QKeySequence, QPainter, QPen
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QLineEdit, QMenu,
                                QWidget)
@@ -2374,23 +2374,35 @@ class TableEditing:
         return True
 
     def list_menu(self):
-        """A list validation's choices, to pick one for the active cell."""
+        """A list validation's choices under the active cell, to pick one: a
+        list box as Excel's (ui/listpopup.py), as wide as the cell or its
+        widest choice, the cell's own value picked out."""
         from ..sheet import validation
+        from .listpopup import ListPopup
         item = self.item
         if item is None:
             return None
         rule = validation.at(item.sheet, *self.active)
         if rule is None or rule.get("type") != "list":
             return None
-        menu = QMenu(self.view)
         row, col = self.active
-        for text in validation.list_items(item.sheet, rule, row, col):
-            menu.addAction(text, lambda t=text: self._change(
-                "Pick", lambda wb, s: wb.set_input(s, row, col, t)))
+        choices = validation.list_items(item.sheet, rule, row, col)
+        cell = item.sheet.cells.get((row, col))
+        current = cell.input if cell is not None else ""
+        # the sheet's font at the zoom it is shown at, as Excel's list
+        font = QFont(self.view.font())
+        zoom = self.view.transform().m11() if self.view.transform().m11() > 0 else 1.0
+        font.setPointSizeF(max(8.0, min(20.0, 9.0 * zoom)))
+        popup = ListPopup(self.view, choices, current, font, lambda t: self._change(
+            "Pick", lambda wb, s: wb.set_input(s, row, col, t)))
+        rect = item.mapRectToScene(item.cell_rect(row, col))
+        top_left = self.view.mapFromScene(rect.topLeft())
+        bottom_right = self.view.mapFromScene(rect.bottomRight())
+        popup.fit(max(40, bottom_right.x() - top_left.x()))
         if getattr(self.view.window, "interactive_prompts", True):
-            rect = item.mapRectToScene(item.cell_rect(row, col))
-            menu.exec(self.view.viewport().mapToGlobal(self.view.mapFromScene(rect.bottomLeft())))
-        return menu
+            popup.show_at(self.view.viewport().mapToGlobal(
+                QPoint(top_left.x(), bottom_right.y() + 1)), bottom_right.x() - top_left.x())
+        return popup
 
     @staticmethod
     def _widen_for_number(sheet, row: int, col: int) -> None:

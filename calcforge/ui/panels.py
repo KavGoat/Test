@@ -4378,7 +4378,7 @@ class PropertiesPanel(QScrollArea):
             hint.setWordWrap(True)
             hint.setStyleSheet("color:#6b7280;")
             self.layout.addWidget(hint)
-            self._add_workbook()
+            self._add_workbook(with_sheet=True)
             self.layout.addStretch(1)
             self._settle()
             self._building = False
@@ -4407,15 +4407,16 @@ class PropertiesPanel(QScrollArea):
         if all(getattr(i, "TYPE", "") == "calc_block" for i in self._items):
             self._add_block(first)
         if len(self._items) == 1 and getattr(first, "TYPE", "") in ("table", "sheet_run"):
+            if getattr(first, "TYPE", "") == "sheet_run":
+                # a worksheet: its workbook first, then itself (the user,
+                # 2026-10-24: "a better property panel for workbook and
+                # work sheets")
+                self._add_workbook()
             self._add_table(first)
             if self.window.view.tables.item is first:
                 # open for its cells: the selected cells' look, as the
                 # Properties toolbar's table controls give it
                 self._add_cells(first)
-            if getattr(first, "TYPE", "") == "sheet_run":
-                # an imported workbook's sheet: its Workbook section too
-                # (Self-contained), now the open sheet is the panel's subject
-                self._add_workbook()
         if len(self._items) == 1 and getattr(first, "TYPE", "") == "chart":
             self._add_chart(first)
         appearance = common_capabilities(self._items)
@@ -5907,7 +5908,7 @@ class PropertiesPanel(QScrollArea):
         """A table or a spreadsheet: its name (formulas and equations use
         it), its size."""
         sheet = getattr(first, "SHEET_RUN", False)
-        form = self._group("Sheet" if sheet else "Table")
+        form = self._group("Worksheet" if sheet else "Table")
         name = QLineEdit(first.name)
         name.setObjectName("tableName")
         name.setToolTip(("The sheet's" if sheet else "The table's") +
@@ -5929,6 +5930,9 @@ class PropertiesPanel(QScrollArea):
         size = QLabel(f"{rows} rows × {cols} columns")
         size.setObjectName("tableSize")
         form.addRow("Size:", size)
+        if sheet:
+            from .workbookscope import add_sheet_rows
+            add_sheet_rows(self, form, first)
         if self.window.view.tables.item is not first:
             open_button = QPushButton("Edit Table")
             open_button.setToolTip("Open the table for its cells (or double-click it)")
@@ -6106,16 +6110,20 @@ class PropertiesPanel(QScrollArea):
         finally:
             self._building = building
 
-    def _add_workbook(self) -> None:
-        """An imported Excel workbook's sheet open or in view: its Workbook
-        section (workbookscope.py), Self-contained among it."""
-        from .workbookscope import add_panel_section, open_sheet
+    def _add_workbook(self, with_sheet: bool = False) -> None:
+        """A workbook's sheet open or in view (one brought in from Excel or
+        made here): its Workbook section (workbookscope.py) — and, nothing
+        being selected (*with_sheet*), the Worksheet's after it."""
+        from .workbookscope import add_panel_section, open_sheet, run_of_sheet
         try:
             sheet = open_sheet(self.window)
         except AttributeError:
             sheet = None                     # the window still being built
         if sheet is not None:
             add_panel_section(self, sheet)
+            run = run_of_sheet(self.window, sheet) if with_sheet else None
+            if run is not None:
+                self._add_table(run)
 
     def _add_chart(self, first) -> None:
         """A chart: what it is, and its dialog (or double-click it)."""

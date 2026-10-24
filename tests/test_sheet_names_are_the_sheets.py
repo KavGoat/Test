@@ -95,10 +95,11 @@ def test_only_a_calcforge_variable_carries_a_name_tag(w):
     tables.select((1, 0))
     assert tables.selection_name().name == "x_calc"
     # the Name Manager lists both, and says which is the CalcForge variable
+    # (the tables on pages share the document's names)
     manager = names.NameManagerDialog(tables)
     listed = {manager.table.item(i, 0).text(): manager.table.item(i, 3).text()
               for i in range(manager.table.rowCount())}
-    assert listed == {"x_calc": "Workbook (CalcForge variable)", "x_sheet": "Workbook"}
+    assert listed == {"x_calc": "CalcForge variable", "x_sheet": "Document"}
     manager.reject()
     # edited in the Name Manager, a variable stays one
     assert names.define(tables, "x_calc2", f"{table.name}!$A$2",

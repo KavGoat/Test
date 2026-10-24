@@ -485,7 +485,7 @@ def test_a_cell_reads_a_page_variable_and_says_why_a_lost_name_is_ref(w, sheet):
     got = put(3, "=height")
     assert str(got) == "#NAME?" and "CALC(height)" in got.reason, "bare: says how"
     # a broken name of the workbook's own, read bare, says what to do
-    run.sheet.workbook.define_name("Height", "Gone!#REF!")
+    run.sheet.workbook.define_name("Height", "Gone!#REF!", home=run.sheet)
     got = put(1, "=height")
     assert str(got) == "#REF!"
     assert "CALC(height)" in got.reason and "deleted" in got.reason
