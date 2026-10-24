@@ -166,9 +166,14 @@ def the_report(w):
 # -- the report, and its relatives -----------------------------------------------------------
 
 def bold_rows(panel):
-    """(name, source, page) of the rows drawn bold: the definitions in force."""
+    """(name, source, page) of the rows drawn bold: the definitions in force
+    (a workbook's under its section)."""
+    from PySide6.QtWidgets import QTreeWidgetItemIterator
     tree = panel.tree
-    nodes = (tree.topLevelItem(i) for i in range(tree.topLevelItemCount()))
+    nodes, walk = [], QTreeWidgetItemIterator(tree)
+    while walk.value() is not None:
+        nodes.append(walk.value())
+        walk += 1
     return [(r.name, r.source, r.page) for r in
             (panel.rows[n.data(0, Qt.UserRole)] for n in nodes
              if n.data(0, Qt.UserRole) is not None and n.font(0).bold())]
@@ -185,7 +190,8 @@ def test_the_named_cell_after_the_equation_wins(w):
     pump()
     assert [r.name for r in panel.rows].count("test") == 2
     # nothing picked: in force at the end of the document, the sheet's
-    assert bold_rows(panel) == [("test", "Table", 2)]
+    # (the sheet is a workbook's: its variable is listed under the workbook)
+    assert bold_rows(panel) == [("test", "Workbook", 2)]
     assert "end of the document" in panel.in_force_note.text()
     # click the test:=5 kN equation on page 1: in force there, its own
     w.go_to_page(0)
@@ -207,7 +213,7 @@ def test_the_named_cell_after_the_equation_wins(w):
     centre = asked.sceneBoundingRect().center()
     click_at(w.view, centre.x(), centre.y())
     pump(6)
-    assert bold_rows(panel) == [("test", "Table", 2)], "test= reads the sheet's"
+    assert bold_rows(panel) == [("test", "Workbook", 2)], "test= reads the sheet's"
     w.view.calc.leave()
     # a row clicked in the panel picks its equation, and the bold follows it
     tree = panel.tree
@@ -236,14 +242,21 @@ def test_the_name_box_names_the_cell_too(w):
     QTest.keyClicks(box, "test")
     QTest.keyClick(box, Qt.Key_Return)
     pump()
-    dn = run.sheet.workbook.find_name("test", None)
+    dn = run.sheet.workbook.find_name("test", run.sheet)      # its workbook's
     assert dn is not None and not dn.variable
     # the Name Box's name is the spreadsheet's own: read as Sheet.test, not
     # bare (the user, 2026-10-21) — test= reads the equation's
     asked = equation(w, 2, 60, "test=")
     assert shown(asked) == "5 kN"
     from calcforge.sheet.docbook import sheet_ident
+    # a new workbook is self-contained: not even dialled in to; unticked, it is
     qualified = equation(w, 2, 120, f"{sheet_ident(run.sheet.name)}.test=")
+    assert "self-contained" in (qualified.region.error.message if qualified.region.error
+                                else shown(qualified))
+    run.sheet.workbook.set_self_contained(run.sheet.book, False)
+    w.view.calc.leave()
+    pump()
+    qualified = equation(w, 2, 160, f"{sheet_ident(run.sheet.name)}.test=")
     assert shown(qualified) == "2"
 
 

@@ -84,6 +84,7 @@ ALIASES: dict[str, str] = {
     "properties.underline": "command.underline",
     "properties.change_colours": "canvas.change_colours",
     "properties.self_contained": "sheettab.self_contained",
+    "properties.name_manager": "sheet.name_manager",
     "propbar.bold": "command.bold",
     "propbar.italic": "command.italic",
     "propbar.underline": "command.underline",

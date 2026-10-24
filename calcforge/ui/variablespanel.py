@@ -314,7 +314,10 @@ def in_force(document, rows: list, region=None) -> dict:
         table = entry[1] is TABLES
         for index in found:
             row = rows[index]
-            if (row.source == "Table") == table and tuple(row.key) == tuple(entry[0]):
+            # a cell's name, a table's or a workbook's (listed under its
+            # workbook), against an equation's or a measurement's
+            cells = row.source in ("Table", "Workbook")
+            if cells == table and tuple(row.key) == tuple(entry[0]):
                 out[name] = index
                 break
     return out
