@@ -2246,7 +2246,9 @@ def INDIRECT(ctx, args):
         if dn is not None:
             return ev(F.Name(t), ctx)
         return REF
-    sheet = ctx.sheet if got.sheet is None else ctx.wb.sheet(got.sheet)
+    # a sheet its workbook renamed coming in is still its own by the name
+    # Excel knew it by ("Loads" is "Loads (2)" here)
+    sheet = ctx.sheet if got.sheet is None else ctx.wb.sheet_as_written(got.sheet, ctx.sheet)
     if sheet is None:
         return REF
     if isinstance(got, CellRef):

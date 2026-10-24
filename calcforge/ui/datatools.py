@@ -1088,7 +1088,9 @@ def comment_dialog(tables):
 
 # -- find and replace -------------------------------------------------------------------------------
 class FindDialog(QDialog):
-    """Excel's Find and Replace, on the open table or on every table."""
+    """Excel's Find and Replace: Within the open sheet (or table), its
+    workbook, or the whole document — so Replace All on one workbook leaves
+    the others as they are."""
 
     def __init__(self, tables, replace: bool = False):
         super().__init__(tables.view)
@@ -1101,7 +1103,10 @@ class FindDialog(QDialog):
         layout.addRow("Find what:", self.what)
         layout.addRow("Replace with:", self.with_)
         self.within = QComboBox()
-        self.within.addItems(["Table", "All tables"])
+        sheet = tables.item.sheet if tables.item is not None else None
+        made_here = sheet is None or sheet.book is None
+        self.within.addItems(["Table" if made_here else "Sheet",
+                              "All tables" if made_here else "Workbook", "Document"])
         self.look_in = QComboBox()
         self.look_in.addItem("Formulas", "formulas")
         self.look_in.addItem("Values", "values")
@@ -1129,8 +1134,13 @@ class FindDialog(QDialog):
         self._at = -1
 
     def _tables(self):
-        if self.within.currentIndex() == 0 and self.tables.item is not None:
-            return [self.tables.item]
+        item = self.tables.item
+        if self.within.currentIndex() == 0 and item is not None:
+            return [item]
+        if self.within.currentIndex() == 1 and item is not None:
+            # its workbook (the tables on pages, for a table)
+            return [t for t in self.tables._all_tables()
+                    if t.sheet is not None and t.sheet.book == item.sheet.book]
         return self.tables._all_tables()
 
     def _search(self):

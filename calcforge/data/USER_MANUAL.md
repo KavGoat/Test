@@ -1515,7 +1515,8 @@ it: a list box as Excel's, the cell's value picked out; a letter jumps to the ne
 choice starting with it, `Enter` or a click puts it in, `Esc` closes it), **Circle
 Invalid Data** and
 **Clear Validation Circles**. **Comment** adds a note to a cell (`Shift+F2`);
-**Find & Replace…** (`Ctrl+F`, `Ctrl+H`) searches the open table.
+**Find & Replace…** (`Ctrl+F`, `Ctrl+H`) searches the open sheet, its workbook or
+the whole document (**Within**).
 
 ### Charts
 
@@ -1622,6 +1623,21 @@ metafile (WMF or EMF) too, cropped as Excel crops it, and pictures grouped toget
 what Excel last showed. A worksheet name already used becomes `Name (2)`; the same
 workbook brought in twice is `Loads` and `Loads (2)`. Nothing is written back to
 Excel.
+
+**Several workbooks in one document** stay apart:
+
+- A formula reading **another workbook** (`[Snow.xlsx]Sheet1!B2` in Excel) reads it
+  live when that workbook is already in the document — bring it in first — by its
+  sheets as they are named here. When it isn't, the cell keeps the value Excel last
+  showed, and CalcForge says how many cells did.
+- A workbook whose sheet was renamed coming in (`Loads (2)`) still finds its own
+  sheet by its old name in text a formula builds: `INDIRECT("Loads!A1")`.
+- **Copying cells to another workbook** brings the names their formulas use, as
+  Excel does; where the destination has its own name of that spelling, its own is
+  used. The status bar says which.
+- A workbook kept in Excel's **1904 date system** (Excel for Mac) comes in with
+  the same dates. One relying on Excel's iterative calculation shows its circular
+  references as errors; CalcForge says so.
 
 An old workbook's implicit intersection (`=s_x*w` with `s_x` a column) is shown as
 Excel 365 shows it, `=@s_x*@w`. A name whose cells were deleted in Excel stays and

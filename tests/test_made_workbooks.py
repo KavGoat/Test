@@ -247,3 +247,51 @@ def test_the_cells_drop_down_list_is_excels_list_box(w):
     assert popup.currentItem().text() == "Stone", "the cell's own value picked out"
     popup.pick("Timber")
     assert table.sheet.cells[(1, 1)].input == "Timber"
+
+
+def test_find_looks_in_the_sheet_its_workbook_or_the_document(w):
+    """Find's Within: Sheet, Workbook or Document — so Replace All on one
+    workbook leaves another as it is."""
+    from calcforge.ui.datatools import FindDialog
+    w.insert_spreadsheet(0)
+    pump()
+    w.sheet_tabs.new_sheet()
+    pump()
+    w.insert_spreadsheet(len(w.document.pages) - 1)
+    pump()
+    one, also, other = runs(w)
+    for run in (one, also, other):
+        put(w, run, 0, 0, "Steel")
+    w.view.tables.open(one, (0, 0))
+    found = FindDialog(w.view.tables)
+    assert [found.within.itemText(i) for i in range(3)] == ["Sheet", "Workbook", "Document"]
+    found.what.setText("Steel")
+    counts = []
+    for k in range(3):
+        found.within.setCurrentIndex(k)
+        counts.append(len(found.find_all()))
+    assert counts == [1, 2, 3]
+    found.within.setCurrentIndex(1)
+    found.with_.setText("Timber")
+    found.replace_all()
+    pump()
+    assert [r.sheet.cells[(0, 0)].input for r in (one, also, other)] == \
+        ["Timber", "Timber", "Steel"]
+    found.reject()
+
+
+def test_a_workbook_brought_in_after_the_one_it_reads_reads_it_live(w, tmp_path):
+    """Snow.xlsx, then Roof.xlsx whose cells read [Snow.xlsx]Sheet1!B2: they
+    read the Snow workbook's cells in the document."""
+    from tests.sheet.test_workbooks_together import linking, snow
+    assert w.insert_workbook(snow(str(tmp_path / "Snow.xlsx")), 0)
+    pump()
+    assert w.insert_workbook(linking(str(tmp_path / "Roof.xlsx")), len(w.document.pages) - 1)
+    pump()
+    sheets = {r.sheet.name: r.sheet for r in runs(w)}
+    roof = sheets["Sheet1 (2)"]
+    assert roof.cells[(0, 0)].input == "=Sheet1!B2*10"
+    assert roof.cells[(0, 0)].value == pytest.approx(8.5)
+    snowy = sheets["Sheet1"]
+    snowy.workbook.set_input(snowy, 1, 1, "1.2")
+    assert roof.cells[(0, 0)].value == pytest.approx(12.0)

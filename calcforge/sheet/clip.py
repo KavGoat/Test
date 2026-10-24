@@ -762,6 +762,45 @@ def paste(wb, sheet, row: int, col: int, data: dict, what: str = "all") -> tuple
     return row, col, row + h - 1, col + w - 1
 
 
+def bring_names(wb, source, target, data: dict) -> tuple:
+    """The names the copied formulas use, brought to *target*'s workbook
+    when the cells came from another (as Excel's copy brings them), kept
+    with *target*: (the names brought, the names the destination has its
+    own of — which it then reads, as Excel's "use this version")."""
+    if source is None or target is None or source.book == target.book:
+        return [], []
+    used = {}
+    for line in data.get("rows") or []:
+        for got in line:
+            text = got[0] if got else None
+            if not isinstance(text, str) or not text.startswith("=") or len(text) < 2:
+                continue
+            try:
+                tokens = F.tokenize(text[1:])
+            except F.FormulaError:
+                continue
+            for t in tokens:
+                if t.kind == "name" and "!" not in t.text:
+                    used.setdefault(t.text.lower(), t.text)
+    from .workbook import DefinedName
+    brought, kept = [], []
+    for written in sorted(used.values(), key=str.lower):
+        mine = wb.find_excel_name(written, source)
+        if mine is None:
+            continue
+        theirs = wb.find_excel_name(written, target)
+        if theirs is not None:
+            if theirs is not mine:
+                kept.append(theirs.name)
+            continue
+        local = mine.sheet is not None
+        dn = DefinedName(mine.name, mine.refers_to, target.id if local else None, mine.comment,
+                         target.id, None if local else target.book, False)
+        wb._set_name(dn.key, dn)
+        brought.append(mine.name)
+    return brought, kept
+
+
 def _value_text(wb, text, sheet, r, c) -> str:
     """Paste Values: a formula's value as typed text."""
     if not (text.startswith("=") and len(text) > 1):

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import bisect
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable, Optional
 
 from . import formula as F
@@ -100,10 +100,16 @@ class Book:
     name: str                            # how equations qualify its names (an identifier)
     file: str = ""                       # the file it came from, as a reminder
     self_contained: bool = True
+    #: its sheets renamed coming in, as Excel named them -> as named here
+    #: ("Loads" -> "Loads (2)"): text its formulas build still means them
+    renamed: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "name": self.name, "file": self.file,
-                "self_contained": self.self_contained}
+        out = {"id": self.id, "name": self.name, "file": self.file,
+               "self_contained": self.self_contained}
+        if self.renamed:
+            out["renamed"] = dict(self.renamed)
+        return out
 
 
 class Sheet:
@@ -543,6 +549,12 @@ class Workbook:
 
             def apply(name, s=sheet):
                 s.name = name
+                # a sheet renamed coming in, renamed again: still the one
+                # its workbook's text means by the name Excel knew it by
+                book = self.books.get(s.book) if s.book else None
+                for excel, now in list((book.renamed if book is not None else {}).items()):
+                    if now.lower() in (old.lower(), new.lower()):
+                        book.renamed[excel] = name
                 self._names_changed()
 
             apply(new)
@@ -714,6 +726,19 @@ class Workbook:
                 if mine is not None:
                     return mine
         return names.get((lower, None))
+
+    def sheet_as_written(self, name: str, reader: Optional[Sheet]) -> Optional[Sheet]:
+        """The sheet *name* means in text a formula on *reader* builds
+        (INDIRECT("Loads!A1")): its own workbook's sheet by the name Excel
+        knew it by, when bringing it in renamed it ("Loads" is "Loads (2)"
+        here, another workbook having a Loads), else the sheet so named."""
+        book = self.books.get(reader.book) if reader is not None and reader.book else None
+        if book is not None and book.renamed:
+            now = next((v for k, v in book.renamed.items() if k.lower() == name.lower()), None)
+            found = self.sheet(now) if now else None
+            if found is not None:
+                return found
+        return self.sheet(name)
 
     def find_excel_name(self, name: str, sheet: Optional[Sheet]) -> Optional[DefinedName]:
         """The Excel name a formula on *sheet* means by *name*: the sheet's

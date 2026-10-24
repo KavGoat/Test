@@ -3500,9 +3500,15 @@ class TableEditing:
         widths = data.get("widths") or []
         grow = need_r > rows_n or need_c > cols_n
 
+        names = ([], [])
+
         def change(wb, sheet):
             if grow:
                 item.resize_table(max(rows_n, need_r), max(cols_n, need_c))
+            if what in ("all", "formulas") and data.get("sheet"):
+                # from another workbook: the names its formulas use come too
+                names[0][:], names[1][:] = clip.bring_names(
+                    wb, wb.sheet(data["sheet"]), sheet, data)
             for i in range(reps_r):
                 for j in range(reps_c):
                     clip.paste(wb, sheet, t + i * h, l + j * w, data, what)
@@ -3512,6 +3518,13 @@ class TableEditing:
                         wb.set_widths(sheet, [l + k], width)
         self._change("Paste", change)
         self.select((t, l), (t + h * reps_r - 1, l + w * reps_c - 1), (t, l))
+        said = []
+        if names[0]:
+            said.append("brought the name" + "s" * (len(names[0]) > 1) + " " + ", ".join(names[0]))
+        if names[1]:
+            said.append("used this workbook's own " + ", ".join(names[1]))
+        if said:
+            self.view.statusMessage.emit("Pasted from another workbook: " + "; ".join(said))
         return True
 
     # -- the right-click menu ----------------------------------------------------------------------

@@ -16,7 +16,7 @@ import colorsys
 import datetime as _dt
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 
 from . import formula as F
 from .refs import col_letters, quote_sheet
@@ -61,6 +61,7 @@ class ImportedSheet:
 class Imported:
     sheets: list
     left_out: list = field(default_factory=list)       # what could not come across, in words
+    renames: dict = field(default_factory=dict)        # its sheets renamed: Excel's name -> here
 
 
 # -- colours --------------------------------------------------------------------------------------
@@ -228,6 +229,100 @@ def _value_input(v, data_type: str) -> Optional[str]:
     return text
 
 
+# -- links to other workbooks ---------------------------------------------------------------------
+#: [1]Sheet1!A1, '[1]My Sheet'!A1, [1]!Rate: a formula reading another
+#: workbook, as Excel stores it (the number is the workbook's place in the
+#: file's list of external links)
+_EXTERNAL = re.compile(r"'\[(\d+)\]((?:[^']|'')*)'!"
+                       r"|\[(\d+)\]([A-Za-z_À-￿][\w.À-￿]*)!"
+                       r"|\[(\d+)\]!([A-Za-z_\\À-￿][\w.À-￿]*)")
+_PLAIN_REF = re.compile(r"(?:'(?:[^']|'')+'|[A-Za-z_][\w.]*)!\$?[A-Za-z]{1,3}\$?\d+"
+                        r"(?::\$?[A-Za-z]{1,3}\$?\d+)?")
+
+
+def external_links(wb) -> dict:
+    """{number: the linked workbook's file name} of an openpyxl workbook."""
+    import ntpath
+    import posixpath
+    from urllib.parse import unquote
+    out = {}
+    for k, link in enumerate(getattr(wb, "_external_links", None) or [], 1):
+        target = getattr(getattr(link, "file_link", None), "Target", "") or ""
+        target = unquote(target.replace("file:///", ""))
+        out[k] = posixpath.basename(ntpath.basename(target))
+    return out
+
+
+def linked_formula(text: str, links: dict, linked: Optional[Callable]) -> Optional[str]:
+    """*text* (a formula without its "=") with what it reads of other
+    workbooks read here instead: a workbook that is in the document already
+    (*linked(file name)* gives its sheets and names) by its sheets as they
+    are named here — the same cells, calculated live. None when it reads a
+    workbook that isn't in the document (or a sheet or name it hasn't)."""
+    if "[" not in text:
+        return text
+    found = {"ok": True}
+
+    def target_of(number: str):
+        file = links.get(int(number), "")
+        return linked(file) if linked is not None and file else None
+
+    def swap(m):
+        number = m.group(1) or m.group(3) or m.group(5)
+        target = target_of(number)
+        if target is None:
+            found["ok"] = False
+            return m.group(0)
+        if m.group(5):                         # [1]!Rate: one of that workbook's names
+            refers = target["names"].get(m.group(6).lower())
+            if refers is not None and _PLAIN_REF.fullmatch(refers):
+                return refers                  # the cells it names, read as they are
+            if refers is None or not target["sheets"]:
+                found["ok"] = False
+                return m.group(0)
+            first = next(iter(target["sheets"].values()))
+            return f"{quote_sheet(first)}!{m.group(6)}"
+        sheet = m.group(2).replace("''", "'") if m.group(1) is not None else m.group(4)
+        now = target["sheets"].get(sheet.lower())
+        if now is None:
+            found["ok"] = False
+            return m.group(0)
+        return quote_sheet(now) + "!"
+
+    parts = re.split(r'("(?:[^"]|"")*")', text)
+    for i in range(0, len(parts), 2):          # not inside "text"
+        parts[i] = _EXTERNAL.sub(swap, parts[i])
+    return "".join(parts) if found["ok"] else None
+
+
+def hide_links(text: str) -> tuple:
+    """(*text* with each reference to another workbook stood in for by a
+    name of its own, the references): so the sheets this workbook renames
+    coming in ("Loads" is "Loads (2)") aren't taken for the linked
+    workbook's, nor [1] for a table's column."""
+    held: list = []
+    if "[" not in text:
+        return text, held
+
+    def stand_in(m):
+        held.append(m.group(0))
+        tail = "!" if not m.group(5) else ""
+        return f"ZZXLINK{len(held) - 1}ZZ{tail}"
+
+    parts = re.split(r'("(?:[^"]|"")*")', text)
+    for i in range(0, len(parts), 2):
+        parts[i] = _EXTERNAL.sub(stand_in, parts[i])
+    return "".join(parts), held
+
+
+def show_links(text: str, held: list) -> str:
+    """hide_links undone."""
+    for k, original in enumerate(held):
+        tail = "!" if original.endswith("!") else ""
+        text = text.replace(f"ZZXLINK{k}ZZ{tail}", original)
+    return text
+
+
 # -- formulas --------------------------------------------------------------------------------------
 _ANCHOR = re.compile(r"_xlfn\.ANCHORARRAY\(\s*((?:'[^']+'|[A-Za-z0-9_.]+)?!?\$?[A-Za-z]{1,3}\$?\d+)\s*\)",
                      re.I)
@@ -339,20 +434,23 @@ def _width_pt(chars: float) -> float:
     return px * 0.75
 
 
-def read_workbook(path: str, taken: Optional[set] = None) -> Imported:
+def read_workbook(path: str, taken: Optional[set] = None,
+                  linked: Optional[Callable] = None) -> Imported:
     """Every worksheet of an .xlsx as a sheet's record; *taken*: the names
     already used in the document (a worksheet so named is renamed, and the
-    formulas reading it follow)."""
+    formulas reading it follow); *linked(file name)*: a workbook of the
+    document a formula of this one reads (linked_formula), or None."""
     import warnings
     with warnings.catch_warnings():
         # openpyxl says on the console what it drops; the newer validations
         # it can't read are read here instead (_x14_validations), and what
         # can't come across at all is said in the window
         warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
-        return _read_workbook(path, taken)
+        return _read_workbook(path, taken, linked)
 
 
-def _read_workbook(path: str, taken: Optional[set] = None) -> Imported:
+def _read_workbook(path: str, taken: Optional[set] = None,
+                   linked: Optional[Callable] = None) -> Imported:
     import openpyxl
     from openpyxl.utils import range_boundaries
 
@@ -385,6 +483,11 @@ def _read_workbook(path: str, taken: Optional[set] = None) -> Imported:
             taken.add(name.lower())
     for cs in getattr(wb, "chartsheets", []):
         left_out.append(f"chart sheet “{cs.title}”")
+    if getattr(getattr(wb, "calculation", None), "iterate", False):
+        left_out.append("iterative calculation (Excel's Enable iterative calculation): "
+                        "a circular reference shows as an error here")
+    links = external_links(wb)
+    unlinked: dict = {}               # a workbook not in the document -> cells that read it
     tables = _tables_of(wb)
     # formulas stored plainly are Excel's before dynamic arrays: a block where
     # one value is wanted is the cell of it in the formula's row or column
@@ -434,19 +537,33 @@ def _read_workbook(path: str, taken: Optional[set] = None) -> Imported:
                     text = _value_input(cached_cells.get((r, k)), "n")
                 elif c.data_type == "f" or (isinstance(value, str) and value.startswith("=")
                                             and c.data_type != "s"):
-                    text = "=" + _plain_formula(str(value)[1:])
-                    text = "=" + with_intersections(
-                        _structured_to_a1(text[1:], ws.title, r, k, tables),
+                    body, held = hide_links(_plain_formula(str(value)[1:]))
+                    body = with_intersections(
+                        _structured_to_a1(body, ws.title, r, k, tables),
                         lambda written, title=ws.title: block_name(written, title))
+                    text = "=" + show_links(body, held)
                 else:
                     text = _value_input(value, c.data_type)
                 if (r, k) in spilled:
                     text = None
                 if text is not None and text.startswith("="):
-                    text = "=" + _structured_to_a1(text[1:], ws.title, r, k, tables)
-                    text = "=" + renamed(text[1:])
-                    if (r, k) in cached_cells:
-                        excel_values[(r, k)] = cached_cells[(r, k)]
+                    body, held = hide_links(text[1:])
+                    body = renamed(_structured_to_a1(body, ws.title, r, k, tables))
+                    body = show_links(body, held)
+                    got = linked_formula(body, links, linked) if held else body
+                    if got is None:
+                        # it reads a workbook that isn't in the document: the
+                        # value Excel last showed, as Excel's Break Links
+                        for number in set(re.findall(r"\[(\d+)\]", body)):
+                            file = links.get(int(number)) or f"[{number}]"
+                            unlinked[file] = unlinked.get(file, 0) + 1
+                        last = cached_cells.get((r, k))
+                        kind = "e" if isinstance(last, str) and last.upper() in _ERRORS else "n"
+                        text = _value_input(last, kind) or ""
+                    else:
+                        text = "=" + got
+                        if (r, k) in cached_cells:
+                            excel_values[(r, k)] = cached_cells[(r, k)]
                 if c.has_style:
                     # a workbook has a few dozen looks over its thousands of cells
                     st = converted.get(c.style_id)
@@ -524,8 +641,12 @@ def _read_workbook(path: str, taken: Optional[set] = None) -> Imported:
         sheets.append(ImportedSheet(name, data, paper, orientation, margins,
                                     ws.sheet_state != "visible", excel_values, charts,
                                     pictures))
-    _names(wb, sheets, renames, renamed, left_out)
-    return Imported(sheets, left_out)
+    _names(wb, sheets, renames, renamed, left_out, links, linked)
+    for file, count in unlinked.items():
+        left_out.append(f"{count} cell{'s' * (count != 1)} reading {file}, which isn't in this "
+                        f"document: the values Excel last showed (bring {file} in first, and "
+                        f"they read it live)")
+    return Imported(sheets, left_out, {old: new for old, new in renames.items()})
 
 
 def _fits_to_page(ws) -> bool:
@@ -853,7 +974,8 @@ def _defined_names(wb) -> list:
     return out
 
 
-def _names(wb, sheets: list, renames: dict, renamed, left_out: list) -> None:
+def _names(wb, sheets: list, renames: dict, renamed, left_out: list,
+           links: Optional[dict] = None, linked: Optional[Callable] = None) -> None:
     """The workbook's defined names, each kept with the sheet whose cells it
     names (or the first sheet, for a constant)."""
     by_name = {s.name.lower(): s for s in sheets}
@@ -873,7 +995,14 @@ def _names(wb, sheets: list, renames: dict, renamed, left_out: list) -> None:
         if re.fullmatch(r"(?:'(?:[^']|'')+'|[^'!]+)!#REF!|#REF!", text.strip()):
             # cells deleted in Excel: the name stays, giving #REF! as in Excel
             text = "#REF!"
-        text = renamed(_plain_formula(text))
+        text, held = hide_links(_plain_formula(text))
+        text = show_links(renamed(text), held)
+        if held:
+            text = linked_formula(text, links or {}, linked)
+            if text is None:
+                left_out.append(f"the name “{name}” (it reads a workbook that isn't in this "
+                                f"document)")
+                continue
         try:
             tokens = F.tokenize(text)
         except F.FormulaError:
@@ -1014,6 +1143,10 @@ def make_book(imported: Imported, name: str, file: str = "", self_contained: boo
     import uuid
     book = {"id": "book-" + uuid.uuid4().hex[:12], "name": name, "file": file,
             "self_contained": bool(self_contained)}
+    kept = {s.name.lower() for s in imported.sheets}
+    renamed = {old: new for old, new in imported.renames.items() if new.lower() in kept}
+    if renamed:
+        book["renamed"] = renamed            # (Workbook.sheet_as_written)
     for sheet in imported.sheets:
         sheet.data["book"] = dict(book)
     return book

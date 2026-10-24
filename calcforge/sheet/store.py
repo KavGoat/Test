@@ -6,7 +6,7 @@
      "widths": {col: pt}, "heights": {row: pt},
      "hidden_rows": [...], "hidden_cols": [...], "merges": [[t, l, b, r], ...],
      "default_width": pt, "default_height": pt, "gridlines": bool, "headings": bool,
-     "book": {"id", "name", "file", "self_contained"}}   # an imported Excel workbook's sheet
+     "book": {"id", "name", "file", "self_contained", "renamed"}}   # its workbook
 """
 from __future__ import annotations
 
@@ -130,10 +130,13 @@ def put_book(sheet, data: dict) -> None:
     known = wb.books.get(book["id"])
     if known is None:
         wb.books[book["id"]] = Book(book["id"], book.get("name") or "Workbook",
-                                    book.get("file") or "", bool(book.get("self_contained", True)))
+                                    book.get("file") or "", bool(book.get("self_contained", True)),
+                                    dict(book.get("renamed") or {}))
     else:
         known.name = book.get("name") or known.name
         known.file = book.get("file") or known.file
+        if book.get("renamed"):
+            known.renamed = dict(book["renamed"])
         wb.book_state(known.id, bool(book.get("self_contained", True)))
 
 

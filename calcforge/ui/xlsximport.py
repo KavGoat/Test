@@ -139,6 +139,54 @@ def pages_for(imported, base: PageSetup, document=None) -> list:
     return pages
 
 
+def linked_books(wb, document=None):
+    """read_workbook's *linked*: for a file name, the workbook of the
+    document brought in from that file — its sheets by the names Excel knew
+    them by (as named here) and its names — or None (sheet/xlsx.py
+    linked_formula)."""
+    import os
+    books: dict = {}                  # Book.id -> {"file", "renamed", "sheets", "names"}
+
+    def book(found: dict) -> dict:
+        return books.setdefault(found["id"], {"file": found.get("file") or "",
+                                              "renamed": dict(found.get("renamed") or {}),
+                                              "sheets": [], "names": {}})
+    for found in wb.books.values():
+        book(found.to_dict())
+    for sheet in wb.sheets:
+        if sheet.book in books:
+            books[sheet.book]["sheets"].append(sheet.name)
+    for (lower, scope), dn in wb.names.items():
+        if scope in books and not dn.variable:
+            books[scope]["names"][lower] = dn.refers_to
+    for page in getattr(document, "pages", None) or ():
+        for record in getattr(page, "_pending_items", None) or ():
+            table = record.get("table") if isinstance(record, dict) else None
+            found = (table or {}).get("book") if isinstance(table, dict) else None
+            if not isinstance(found, dict) or not found.get("id"):
+                continue
+            entry = book(found)
+            if table.get("name"):
+                entry["sheets"].append(table["name"])
+            for name in table.get("names") or []:
+                if isinstance(name, list) and len(name) > 1 and not (len(name) > 2 and name[2]) \
+                        and not (len(name) > 4 and name[4]):
+                    entry["names"][str(name[0]).lower()] = name[1]
+
+    def linked(file: str):
+        wanted = os.path.basename(file or "").lower()
+        for entry in books.values():
+            if os.path.basename(entry["file"]).lower() != wanted or not entry["sheets"]:
+                continue
+            sheets = {name.lower(): name for name in entry["sheets"]}
+            for excel, now in entry["renamed"].items():
+                if now.lower() in sheets:
+                    sheets[excel.lower()] = sheets[now.lower()]
+            return {"sheets": sheets, "names": entry["names"]}
+        return None
+    return linked
+
+
 def _taken(document) -> set:
     from ..sheet.docbook import book_for
     return {s.name for s in book_for(document).workbook.sheets}
@@ -530,7 +578,10 @@ def insert_workbook(window, path: Optional[str] = None, index: Optional[int] = N
         if not path:
             return False
     try:
-        imported = read_workbook(path, taken=_taken(window.document))
+        from ..sheet.docbook import book_for
+        imported = read_workbook(path, taken=_taken(window.document),
+                                 linked=linked_books(book_for(window.document).workbook,
+                                                     window.document))
     except Exception as exc:  # noqa: BLE001
         from PySide6.QtWidgets import QMessageBox
         if getattr(window, "interactive_prompts", True):

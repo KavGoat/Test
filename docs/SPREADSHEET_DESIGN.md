@@ -22,7 +22,7 @@ here is new.
 
 | Topic | Decision |
 | --- | --- |
-| Formulas | Excel's syntax in cells. A cell reference wins over a document variable of the same spelling; such a variable is written `var(M20)`. |
+| Formulas | Excel's syntax in cells. ~~A cell reference wins over a document variable of the same spelling; such a variable is written `var(M20)`.~~ Replaced 2026-10-24 (the user: "to use a calc forge variable, you always have to do var(variable), maybe change from var to something excel does not have as a function, so there can never be a clash"; by pop-up: a function, everywhere): a bare name in a cell is only ever an Excel name (the sheet's, then its workbook's); a CalcForge variable — an equation's, a measurement's, a cell named in its Variable box — is `CALC(x)`. `VAR(...)` is always Excel's variance. |
 | Units | Cells hold units (`5 kN`) and calculate with CalcForge's unit system. Units that don't match are an error (`#UNITS!`). |
 | Calculation order | Reading order between normal pages and sheets/tables: a table or sheet section uses variables defined before it; its values are usable after it. Inside a sheet section (one page, or consecutive sheet pages shown as one block) and inside a table, references are Excel's: A5 can be read above it. |
 | Order clashes | ~~Follow dependencies: evaluate in the order things depend on each other, reading order otherwise.~~ Replaced 2026-10-17 (the user's answer by pop-up): **reading order, as in SMath.** An equation reads the latest definition before it, an equation's, a measurement's or a table's alike (a table's names are defined at its top-left corner); a name defined only below an equation is "not defined" there (SMath's red "test - not defined."), even when a table further down has it. A cell reads only the equation variables defined above its sheet. Tables and equations still take up each other's changed values until nothing changes; a true loop is a circular reference, as in Excel. |
@@ -37,7 +37,7 @@ here is new.
 | Tables in the PDF | Like equations: page drawing on the calc layer, editable only in CalcForge. |
 | Clicks on sheet pages | Mode-aware. Markup mode: markup tools draw over the grid; Select picks a markup if one is hit, else a cell. Calc mode: clicks and typing go to cells. |
 | xlsx (confirmed 2026-10-10) | Open `.xlsx` as sheet pages (adds openpyxl): cells only — values, formulas, formatting, sizes, merges, names, comments, validation, conditional formatting and the page layout; charts and pictures are left out (said so on opening). No export to `.xlsx`. Copy/paste with Excel keeps formulas and formatting. |
-| An imported workbook's names (2026-10-19, by pop-up) | A workbook comes in as one: its sheets share its names. **Self-contained** (the default, a tick in the import chooser) its names are its own: equations below read any of its cells by sheet and cell (`Seismic_Actions.H44`) and its names only qualified (`Seismic_Actions_NZS1170_5.Cd_T_min_ULS` or `Seismic_Actions.Cd_T_min_ULS`), never bare. Inside its cells a bare name is the workbook's own name first (a sheet-local name wins on its sheet, Excel's rule), otherwise the equation variable defined above the sheet; `var(X)` still reads the equation variable. **Unticked** (replaced 2026-10-24: "un self contained workbook variable names (like spreadsheet names) should not be accessible from outside unless I dial in like sheet1.variable ... selfcontained shows nothing and cant dial in"), its names are read from outside only dialled in, as a spreadsheet's own names are (`Seismic_Actions.Cd`, `Seismic_Actions_NZS1170_5.Cd`, a cell's `='Seismic Actions'!Cd`), never bare; so they never clash and the import asks nothing about clashes (the prefix renaming and "go ahead" are gone). Self-contained, not even dialled in. Changeable later from the sheet tab's right-click menu (Self-contained) and the Properties panel's Workbook section; one undo step; saved with the document. Two self-contained workbooks with the same names stay apart. |
+| An imported workbook's names (2026-10-19, by pop-up) | A workbook comes in as one: its sheets share its names. **Self-contained** (the default, a tick in the import chooser) its names are its own: equations below read any of its cells by sheet and cell (`Seismic_Actions.H44`) and its names only qualified (`Seismic_Actions_NZS1170_5.Cd_T_min_ULS` or `Seismic_Actions.Cd_T_min_ULS`), never bare. Inside its cells a bare name is the workbook's own name first (a sheet-local name wins on its sheet, Excel's rule), and never an equation's variable, which is read as `CALC(X)` (2026-10-24). **Unticked** (replaced 2026-10-24: "un self contained workbook variable names (like spreadsheet names) should not be accessible from outside unless I dial in like sheet1.variable ... selfcontained shows nothing and cant dial in"), its names are read from outside only dialled in, as a spreadsheet's own names are (`Seismic_Actions.Cd`, `Seismic_Actions_NZS1170_5.Cd`, a cell's `='Seismic Actions'!Cd`), never bare; so they never clash and the import asks nothing about clashes (the prefix renaming and "go ahead" are gone). Self-contained, not even dialled in. Changeable later from the sheet tab's right-click menu (Self-contained) and the Properties panel's Workbook section; one undo step; saved with the document. Two self-contained workbooks with the same names stay apart. |
 | In scope | Charts, dynamic arrays (spill, FILTER/SORT/UNIQUE/SEQUENCE), named ranges and structured references, and everything else Excel does: fill handle, copy/cut/paste, Paste Special, formatting, borders, merge, number formats, Format Painter, conditional formatting (highlight rules, top/bottom, data bars, colour scales, icon sets, formula rules, rules manager), sort/filter, data validation, comments, find/replace, insert/delete/hide/resize/autofit, point mode, F4, Ctrl+arrows, drag-moving cells. **Out:** pivot tables. |
 | Printing | Excel's defaults: gridlines on screen only, row/column headings never printed (both switchable per sheet); cell borders always print. |
 | Page layout | Fit to N pages wide, repeat header rows (Print Titles), print area, margins and centring. |
@@ -72,13 +72,15 @@ here is new.
 
 ## Settled while building (small; recorded so they can be changed)
 
-* **`var` and Excel's `VAR`.** Excel has a `VAR` function (variance). `var(M20)`
-  or `var(L.beam)` — one bare cell-like name or one bare name — is the
-  document variable; `VAR(A1:A9)`, `VAR(1,2,3)` and `VAR($M$20)` are Excel's
-  variance. Excel's VAR of a single value is always `#DIV/0!`, so nothing
-  Excel can do is lost. The user (2026-10-15): `var(X)` reads the equation
-  variable X when there is one — even when a cell is also named X —
-  otherwise it is Excel's VAR of X; a name that is neither is `#NAME?`.
+* **`CALC(x)` and Excel's `VAR`** (2026-10-24, replacing `var(x)`). `CALC(x)`
+  reads the CalcForge variable x where the sheet is: the latest defined
+  before it, as an equation would read it; a cell named x in its Variable box
+  of the same workbook wherever it is (`DocumentBook.calc_variable`).
+  `VAR(...)` is always Excel's variance. A document recorded before
+  (`store.CALC_NAMES` missing from a sheet's record) is rewritten once as it
+  opens (`DocumentBook.settle_old_formulas`): a bare name that read an
+  equation's variable, and `var(x)` of one, become `CALC(x)`; an Excel name
+  of the same spelling, a LET or LAMBDA name, a sheet's name are left alone.
 * **Errors explained** (QA, 2026-10-15). An error carries a reason
   (`ErrorValue.reason`, not part of comparing it); selecting or hovering a
   cell with an error says it in one line, following it back to the cell it
@@ -219,10 +221,9 @@ here is new.
   Qualified names follow reading order like any other: the sheet must be
   above the equation.
 * **Which name a cell reads** (Excel's order, then the document's): the
-  cell's sheet's own name; its workbook's name; a document name (defined on
-  a table or sheet made here — read by every cell, as before); the equation
-  variable defined before the sheet; a unit. `var(X)` goes straight to the
-  equation variable. `Sheet!Name` reads the name as that sheet's cells do
+  cell's sheet's own name; its workbook's name; on a table on a page, a
+  name the tables share; a unit. Never an equation's variable: that is
+  `CALC(X)`. `Sheet!Name` reads the name as that sheet's cells do
   (`'Seismic Actions'!Cd` too), refused (`#NAME?`) from outside a
   self-contained workbook (`Workbook.closed_to`).
 * **Where the setting lives.** Each sheet of an imported workbook carries
@@ -233,6 +234,29 @@ here is new.
   workbook's Excel names out, and lists those of one that isn't as dialled
   in, under "Workbook <name>"; the Name Manager's Scope says "<name>
   (self-contained)" or "<name>".
+
+## Workbooks side by side (2026-10-24)
+
+A document can hold several workbooks: Excel workbooks brought in and
+workbooks made here, each a run of spreadsheet pages (a Section). The user,
+2026-10-24: "think of some other issue along these lines for merging
+multiple workbooks in one file like this app allows ... think through all
+possibilities and how they might clash". What could clash, and what
+happens:
+
+| Clash | What happens |
+| --- | --- |
+| A bare name in a cell vs a CalcForge variable | Never: a bare name in a cell is only ever an Excel name (the sheet's, then its workbook's); a CalcForge variable is read as `CALC(x)`, a function Excel doesn't have. `VAR(...)` is always Excel's variance. Old documents are rewritten once when opened (`store.CALC_NAMES`, `DocumentBook.settle_old_formulas`). |
+| Two workbooks with a name of the same spelling | Each its own: a workbook's names are keyed by its Book (`(name, book id)`), a sheet's own by the sheet. A formula reads its own workbook's; another workbook's only as `Sheet!Name`, refused from outside a self-contained one. |
+| Workbooks made here | Each is a workbook as an imported one is (a Book: Self-contained, its own names, the Properties panel's Workbook section, the Name Manager's list). A new one is self-contained; one recorded before every workbook had a Book is given one as it comes in, not self-contained, its names its own, and a table that read one of them bare reads it as `Sheet!Name` (`sheetpages.give_books`). |
+| Two workbooks with a sheet of the same name | Sheet names stay unique in the document (the user's choice, 2026-10-24): the later one is renamed as Excel names a copy, "Loads (2)", and its formulas, names, rules and validations follow. The workbook remembers the name it had (`Book.renamed`), so text its formulas build — `INDIRECT("Loads!A1")` — still reads its own sheet (`Workbook.sheet_as_written`). |
+| A formula reading another workbook (`[1]Snow.xlsx` … `Sheet1!B2`) | When that workbook is in the document already, it reads it live, by its sheets as named here (`xlsx.linked_formula`; a name of it as the cells the name gives). When it isn't, the cell keeps the value Excel last showed, and the import says how many (bring the other workbook in first). |
+| Copying cells from one workbook to another | The names their formulas use come with them, as Excel's copy brings them; when the destination has its own name of that spelling, the destination's is used, as Excel's "use this version" (`clip.bring_names`). |
+| The 1904 date system | A workbook kept in it (Excel for Mac) comes in with the same dates: its dates are read as dates and kept in the document's one system (1900). |
+| Excel tables (ListObjects) | Their structured references are written as the cells they name on the way in, so two workbooks' `Table1` can't clash. |
+| Conditional formatting, data validation | Per sheet; their formulas read names as the sheet's cells do, so per workbook. The Rules Manager shows the sheet's or the selection's rules. |
+| The Name Manager, the Name Box, Find | One workbook at a time: the Name Manager's drop-down picks the workbook (the open sheet's to start), the tables on pages, or the CalcForge variables, and its Scope is Workbook or the sheet; the Name Box lists the open sheet's workbook's names; Find's Within is Sheet, Workbook or Document. |
+| Iterative calculation | Not carried: a workbook that relies on Excel's iterative calculation shows its circular references as errors, and the import says so. |
 
 ## Tables on pages (phase 2)
 
