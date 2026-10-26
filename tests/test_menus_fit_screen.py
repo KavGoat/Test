@@ -96,9 +96,9 @@ def test_a_tall_menu_stays_on_the_screen_while_open_and_every_entry_can_be_reach
         pump(0.1)
         assert menu.geometry().bottom() <= available.bottom(), "and held to it still"
         entries = [a for a in menu.actions() if a.isVisible() and not a.isSeparator()]
-        last = entries[-1]
-        assert scrolled_to(menu, last), "the last entry can be scrolled to"
-        assert hovered(menu, last), "and rested on"
+        assert scrolled_to(menu, entries[-1]), "the last entry can be scrolled to"
+        last = [a for a in entries if a.isEnabled()][-1]     # (a greyed one never lights up)
+        assert scrolled_to(menu, last) and hovered(menu, last), "and rested on"
         # a submenu low down opens beside its entry, whole, on the screen
         parents = [a for a in entries if a.menu() is not None]
         if parents:
