@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from . import formula as F
-from .refs import MAX_COLS, MAX_ROWS, col_letters, is_cell_name, parse_cell, quote_sheet
+from .refs import MAX_COLS, MAX_ROWS, col_letters, quote_sheet
 from .values import (BLANK, CALC, DIV0, ERRORS, NA, NAME, NUM, REF, UNITS_ERR, VALUE, Array,
                      ErrorValue, Qty, SheetError, add, div, equation_unit, failed,
                      general_number, mul, neg, power, sub, units_clash, is_unit_text,
@@ -208,6 +208,7 @@ MISSING = F.Missing()
 
 
 _compiled = None
+_referred = None
 
 
 def evaluate_cell(wb, sheet, row: int, col: int, tree, parsed=None):
@@ -547,10 +548,10 @@ def _defined(name: str, dn, ctx: Ctx):
     inner = Ctx(ctx.wb, home, 0, 0)
     inner.reads = ctx.reads
     inner.depth = ctx.depth + 1
-    global _compiled
-    if _compiled is None:
-        from .compiled import compiled as _compiled
-    got = _compiled(parsed)(inner)
+    global _referred
+    if _referred is None:
+        from .compiled import referred as _referred
+    got = _referred(parsed)(inner)           # a name of one cell stays its reference
     if isinstance(got, ErrorValue) and got.code == REF.code:
         got = ErrorValue(got.code, _lost_name(name, dn, ctx))
     return got

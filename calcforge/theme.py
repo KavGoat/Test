@@ -162,7 +162,8 @@ QToolBar::separator {{ background: {chrome_edge}; width: 1px; margin: 5px 2px; }
 QMenuBar {{ background: {menubar}; border-bottom: 1px solid {chrome_edge}; }}
 QMenuBar::item {{ padding: 5px 11px; background: transparent; }}
 QMenuBar::item:selected {{ background: {accent_soft}; }}
-QMenu {{ background: {menu}; border: 1px solid {field_edge}; padding: 5px; }}
+QMenu {{ background: {menu}; border: 1px solid {field_edge}; padding: 5px;
+         menu-scrollable: 1; }}
 QListWidget#completionList {{
     background: {menu}; border: 1px solid {accent}; border-radius: 3px;
     padding: 2px; outline: none;

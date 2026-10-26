@@ -434,7 +434,8 @@ def test_insert_spreadsheet_on_a_workbook_inserts_another_workbook(w):
     # Before, from the page menu of the first workbook's first page
     index = books[0].first
     menu = w.page_menu(index)
-    sub = next(a.menu() for a in menu.actions() if a.text() == "Insert Spreadsheet Page")
+    inserts = next(a.menu() for a in menu.actions() if a.text() == "Insert")
+    sub = next(a.menu() for a in inserts.actions() if a.text() == "Insert Spreadsheet Page")
     next(a for a in sub.actions() if a.text() == "Before").trigger()
     pump()
     books = sections(w.document)

@@ -39,6 +39,18 @@ def compiled(parsed):
     return got
 
 
+def referred(parsed):
+    """The closure working out what a defined name refers to: as compiled()
+    does, but a name of one cell stays a reference (a RefValue) — MIN(ae_3,
+    ae_4) passes over the text in the cell ae_4 names, as Excel does, and
+    ROW(name) or OFFSET(name, 1, 0) have the cell to work from
+    (200PFC_WP30NC.xlsx's G115 gave #VALUE! where Excel shows 49)."""
+    got = getattr(parsed, "fast_ref", None)
+    if got is None:
+        got = parsed.fast_ref = _c(parsed.tree)
+    return got
+
+
 # -- a node as what ev gives (a reference stays a RefValue) ---------------------------------
 def _c(n):
     t = type(n)

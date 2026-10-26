@@ -7288,6 +7288,11 @@ class MainWindow(QMainWindow):
         these = f"these {len(acting)} pages" if several else "page"
         page = self.document.pages[index]
         menu = bindable.set_context(menu or QMenu(self), "page")
+        # a workbook's page: only what a sheet's pages take (the user,
+        # 2026-10-26: its menu ran into two columns, an entry for a PDF's
+        # markups among them). Its paper, scale, crop, grid, header and
+        # footer are its Sheet Layout's; it has no PDF to read or recolour
+        sheet = page.sheet is not None
 
         def here(run):
             """*run* on this page: the page goes in view first, as the
@@ -7295,9 +7300,15 @@ class MainWindow(QMainWindow):
             return lambda _checked=False: (self.go_to_page(index), run())
 
         # -- page setup and scale ----------------------------------------------------
-        menu.addAction("Page Setup…", here(self.page_setup))
-        menu.addAction(self.act_scale.text(), here(self.calibrate_dialog)).setToolTip(
-            self.act_scale.toolTip())
+        if sheet:
+            layout = menu.addAction(self.act_sheet_page_setup.text(),
+                                    lambda: self.sheet_page_setup(index))
+            layout.setToolTip("Paper, print area, titles, fit to page width, centring, "
+                              "gridlines, header and footer")
+        else:
+            menu.addAction("Page Setup…", here(self.page_setup))
+            menu.addAction(self.act_scale.text(), here(self.calibrate_dialog)).setToolTip(
+                self.act_scale.toolTip())
         menu.addSeparator()
         # -- the clipboard, and moving the pages along (E9) ----------------------------
         many = len(self.document.pages) > 1
@@ -7332,8 +7343,11 @@ class MainWindow(QMainWindow):
         quick = menu.addAction("Add Page", lambda: self.quick_add_page(index))
         quick.setToolTip("A blank page after this one (after the whole workbook on a "
                          "workbook), the same paper, no questions")
+        # (on a workbook's page, the kinds under one Insert, to keep its menu
+        # short: a workbook takes them before or after the whole of it)
+        inserts = menu.addMenu("Insert") if sheet else menu
         for entry in self.insert_family():
-            self.fill_insert_choice(menu.addMenu(entry[1]), entry, index)
+            self.fill_insert_choice(inserts.addMenu(entry[1]), entry, index)
         duplicate = menu.addAction("Duplicate Pages" if several else "Duplicate Page",
                                    lambda: self.duplicate_page(index))
         duplicate.setToolTip(f"Duplicate {these}")
@@ -7345,8 +7359,9 @@ class MainWindow(QMainWindow):
         delete = menu.addAction(self.act_delete_page.text(), lambda: self.delete_page(index))
         delete.setToolTip(f"Delete {these}")
         delete.setEnabled(many)
-        crop = menu.addAction(self.act_crop_page.text(), here(self.crop_pages))
-        crop.setToolTip(self.act_crop_page.toolTip())
+        if not sheet:
+            crop = menu.addAction(self.act_crop_page.text(), here(self.crop_pages))
+            crop.setToolTip(self.act_crop_page.toolTip())
         turn = menu.addMenu("Rotate Pages")
         turn_cw = turn.addAction(self.act_rotate_pages_cw.text(),
                                  lambda: self.rotate_page(index, True))
@@ -7355,13 +7370,14 @@ class MainWindow(QMainWindow):
         turn_acw = turn.addAction(self.act_rotate_pages_acw.text(),
                                   lambda: self.rotate_page(index, False))
         turn_acw.setToolTip("Turn the paper and everything drawn on it anticlockwise")
+        labels = menu.addMenu("Page Labels") if sheet else menu
         if not several:
-            rename = menu.addAction("Rename Page Label", lambda: self.rename_page(index))
+            rename = labels.addAction("Rename Page Label", lambda: self.rename_page(index))
             rename.setToolTip("Edit this page's label on its thumbnail (F2)")
-            reset = menu.addAction("Reset Page Label", lambda: self.reset_page_label(index))
+            reset = labels.addAction("Reset Page Label", lambda: self.reset_page_label(index))
             reset.setToolTip("Restore the imported label, or the normal page number")
             reset.setEnabled(page.label != page.source_note.strip())
-        every = menu.addAction("Reset All Page Labels", self.reset_all_page_labels)
+        every = labels.addAction("Reset All Page Labels", self.reset_all_page_labels)
         every.setToolTip("Every page back to its imported label, or the normal page number")
         every.setEnabled(any(p.label != p.source_note.strip() for p in self.document.pages))
         menu.addSeparator()
@@ -7379,9 +7395,10 @@ class MainWindow(QMainWindow):
         # -- flatten and colour: the Document menu's group (E14, E15) ---------------
         menu.addAction(self.act_flatten_document)
         menu.addAction(self.act_recover_flattened)
-        processing = menu.addAction(self.act_color_processing.text(),
-                                    lambda: self.color_processing(index))
-        processing.setEnabled(bool(page.background_key or page.pdf_key))
+        if not sheet:
+            processing = menu.addAction(self.act_color_processing.text(),
+                                        lambda: self.color_processing(index))
+            processing.setEnabled(bool(page.background_key or page.pdf_key))
         menu.addSeparator()
         # -- CalcForge's own ------------------------------------------------------------
         go = menu.addAction("Go to Page", lambda: self._go_to_page_asked(index))
@@ -7389,12 +7406,10 @@ class MainWindow(QMainWindow):
         self.pages_panel.add_section_entries(menu, index)   # a workbook's pages in Thumbnails
         bookmark = menu.addAction(self.act_bookmark.text(), lambda: self.bookmark_page(index))
         bookmark.setToolTip("Add this page to the document bookmarks")
-        if page.sheet is not None:
-            layout = menu.addAction(self.act_sheet_page_setup.text(),
-                                    lambda: self.sheet_page_setup(index))
-            layout.setToolTip("Print area, titles, fit to page width, centring, gridlines")
         from . import calcsections
         calcsections.add_menu(self, menu, index)
+        if sheet:
+            return menutidy.tidy(menu)
         grid = menu.addAction("Page Grid")
         grid.setCheckable(True)
         grid.setChecked(page.shows_a_grid(self.document.settings))
@@ -7416,14 +7431,15 @@ class MainWindow(QMainWindow):
             entry = paper.addAction(name, lambda n=name: self.set_page_size(index, n))
             entry.setCheckable(True)
             entry.setChecked(page.setup.size_name == name)
-        editable = menu.addAction("Make This Page's Markups Editable",
-                                  lambda: self.make_markups_editable(index))
-        editable.setToolTip(
-            "Read the clouds, call-outs and dimensions already on this page "
-            "out of the PDF\nand turn them into markups you can move and "
-            "change. What is read out is\nCalcForge's drawing of them, so it "
-            "will not match the file exactly.")
-        editable.setEnabled(bool(page.pdf_key) and page.pdf_annotations)
+        if page.pdf_key and page.pdf_annotations:
+            # only on a page whose PDF came with markups to read
+            editable = menu.addAction("Make This Page's Markups Editable",
+                                      lambda: self.make_markups_editable(index))
+            editable.setToolTip(
+                "Read the clouds, call-outs and dimensions already on this page "
+                "out of the PDF\nand turn them into markups you can move and "
+                "change. What is read out is\nCalcForge's drawing of them, so it "
+                "will not match the file exactly.")
         return menutidy.tidy(menu)
 
     def cut_pages(self, index: Optional[int] = None) -> None:

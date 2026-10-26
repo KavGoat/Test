@@ -659,7 +659,10 @@ has no number.
 the ▸ to show its pages one by one. Picked, the entry is the whole workbook —
 Delete, Cut, Copy, Move, Extract, Print and dragging act on all its pages, and
 **Duplicate Page** copies the whole workbook as **Loads (2)**, a workbook of its
-own. Nothing goes between an Excel workbook's sheets.
+own. Nothing goes between an Excel workbook's sheets. Its right-click menu is a
+workbook's: **Sheet Layout…** in place of Page Setup, **Self-contained**, the
+inserts under **Insert** and the page labels under **Page Labels**; a sheet's
+paper, scale, header and footer are its Sheet Layout's.
 
 **A page's right-click menu** (also **Document ▸ Current Page**): Page Setup…, Set
 Scale…, Cut, Copy and Paste Pages, Move Up / Down, **Add Page**, Insert Blank Page,

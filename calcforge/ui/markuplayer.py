@@ -482,6 +482,13 @@ class MarkupLayer:
         """Whether *item* can be drawn from the squares just now."""
         if not self.enabled or not _valid(item) or item.parentItem() is not self.frame:
             return False
+        if getattr(self.frame, "is_sheet", False):
+            # a spreadsheet page: its grid is drawn over the page, so markups
+            # in the page's squares were under its cells — a workbook's
+            # pictures on white cells were not seen at all (the user,
+            # 2026-10-26: "the pfc excel photos shown in the thumbnail but
+            # not in the actual sheet"). Each is drawn as itself, over them.
+            return False
         if not item.isVisible() or item.hasFocus():
             return False
         if getattr(item, "IS_CALC", False) or getattr(item, "live", False):

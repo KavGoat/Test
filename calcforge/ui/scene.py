@@ -2290,6 +2290,23 @@ class DocumentScene(QGraphicsScene):
         count = len(self.frames)
         for index, frame in enumerate(self.frames):
             frame.setZValue(-1000.0 + (count - index) * 1e-4)
+        # but a sheet's later pages over its first: its grid is drawn by its
+        # first page's item over every page of it, and a picture on a later
+        # page (the logo at the top of each printed page of
+        # 200PFC_WP30NC.xlsx) was under the cells (the user, 2026-10-26).
+        # A spreadsheet page draws no paper, so nothing of the page before
+        # is covered; all of them stay under the page before the sheet
+        run: list = []
+        for frame in self.frames + [None]:
+            if frame is not None and sheet(frame) and run \
+                    and frame.page.sheet == run[0].page.sheet:
+                run.append(frame)
+                continue
+            if len(run) > 1:
+                step = 1e-4 / (len(run) + 1)
+                for k, later in enumerate(run[1:], 1):
+                    later.setZValue(run[0].zValue() + k * step)
+            run = [frame] if frame is not None and sheet(frame) else []
 
         paired = self.page_mode in ("side", "continuous_side")
         # the rows of pages: one page a row, or two side by side — odd pages

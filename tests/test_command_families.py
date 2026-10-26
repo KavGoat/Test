@@ -220,7 +220,8 @@ def test_add_sheet_page_is_insert_spreadsheet_page_on_a_sheet(w):
     index = next(i for i, p in enumerate(w.document.pages) if p.sheet is not None)
     menu = w.page_menu(index)
     assert "Add Sheet Page" not in labels(menu)
-    after = entry(entry(menu, "Insert Spreadsheet Page").menu(), "After")
+    # (a workbook's page has its inserts under one Insert, keeping its menu short)
+    after = entry(entry(entry(menu, "Insert").menu(), "Insert Spreadsheet Page").menu(), "After")
     # the user, 2026-10-23: on a workbook it inserts another workbook
     assert after.toolTip() == "A new workbook of its own, placed after this workbook"
     pages = len(w.document.pages)
