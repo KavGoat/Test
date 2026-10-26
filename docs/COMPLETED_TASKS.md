@@ -3,6 +3,13 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-26 — G115, a workbook's pictures on its sheet, the workbook's Thumbnails menu (pushed at 0446325)
+
+- The quick check passed on 0446325 before it was pushed (17.6 min, `-n 3`).
+- 200PFC_WP30NC.xlsx: every formula cell against the value Excel saved with it — 133 of 133 the same (G115 =MIN(ae_3,ae_4,ae_5) is 49); the other eight workbooks the same apart from TODAY(): tests/sheet/test_names_are_references.py.
+- The workbook in the window: the logo on each printed page and the three diagrams drawn over its white cells, on the pages and in the workbook view (screen grabs, checked by eye); a sheet of white cells with a picture on its first and a later page, each seen by its colour on screen (fails on the code before): tests/test_sheet_pictures_shown.py.
+- A workbook's Thumbnails menu, 28 entries in one column (was 42 in two), no entry for a PDF's markups, menus scrolling when taller than the screen: tests/test_sheet_pictures_shown.py, tests/test_command_families.py, tests/test_workbook_view.py.
+
 ## 2026-10-24 (afternoon) — CALC(x), workbooks made here, every picture, the Name Manager per workbook, workbooks side by side (pushed at 2fc4ca7…fd71a4d)
 
 - The quick check passed on 2fc4ca7 before it was pushed (7.3 min, `-n 3`). The full check passed on fd71a4d (PYTEST_EXIT=0, 14/14 planted bugs caught), which was pushed on it; the quick check list was rebuilt from it. A quick check on 582fc88 failed three tests: two timing tests run while another test run shared the machine (both pass alone) and the consistency test still expecting a worksheet's sections without its workbook's (updated at 27bc8f9). One on 468eae7 found the Properties panel's Name Manager button without a key alias, two tests assuming a spreadsheet made here had no workbook, and the in-force bold never matching a workbook's variable (fixed at fd71a4d).
