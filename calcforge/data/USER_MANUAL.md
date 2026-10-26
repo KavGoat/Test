@@ -2057,7 +2057,7 @@ The engine has **472** spreadsheet functions.
 | `MINUTE(serial_number)` | The minute of a time. |
 | `MONTH(serial_number)` | The month of a date. |
 | `NETWORKDAYS(start_date, end_date, [holidays])` | Working days between two dates. |
-| `NETWORKDAYS.INTL(start, end, [rest1], [rest2], …)` | Working days between two dates, with chosen weekend days. |
+| `NETWORKDAYS.INTL(start, end, [weekend], [holidays])` | Working days between two dates, with chosen weekend days. |
 | `NOW()` | The date and time now; new at every change. |
 | `SECOND(serial_number)` | The second of a time. |
 | `TIME(hour, minute, second)` | The time of an hour, minute and second. |
@@ -2066,7 +2066,7 @@ The engine has **472** spreadsheet functions.
 | `WEEKDAY(serial_number, [return_type])` | The day of the week as a number. |
 | `WEEKNUM(serial_number, [return_type])` | The week number in the year. |
 | `WORKDAY(start_date, days, [holidays])` | The date a number of working days away. |
-| `WORKDAY.INTL(start, days, [rest1], [rest2], …)` | The date a number of working days away, with chosen weekend days. |
+| `WORKDAY.INTL(start, days, [weekend], [holidays])` | The date a number of working days away, with chosen weekend days. |
 | `YEAR(serial_number)` | The year of a date. |
 | `YEARFRAC(start_date, end_date, [basis])` | The fraction of a year between two dates. |
 

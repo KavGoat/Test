@@ -75,9 +75,11 @@ _BITS = {2: 10, 8: 30, 16: 40}
 
 def _from_base(value, base: int) -> int:
     v = one(value)
+    if v is BLANK or v == "":
+        v = 0.0                               # an empty cell, or "": 0 (Excel)
     t = (general_number(v) if is_number(v) and not isinstance(v, bool) else to_text(v)).strip().upper()
-    if len(t) > 10 or not t:
-        raise SheetError(NUM)
+    if len(t) > 10 or not t or t.startswith("-"):
+        raise SheetError(NUM)                 # (a negative number isn't a binary numeral)
     try:
         n = int(t, base)
     except ValueError:
@@ -97,8 +99,8 @@ def _to_base(n: int, base: int, places) -> str:
     out = BASE(float(n), float(base))
     if places is not MISSING:
         p = integer(places)
-        if p <= 0 or p < len(out):
-            raise SheetError(NUM)
+        if p <= 0 or p > 10 or p < len(out):
+            raise SheetError(NUM)             # Excel: 1 to 10 places
         out = out.rjust(p, "0")
     return out
 
@@ -501,8 +503,10 @@ def BETADIST(x, alpha, beta, a=MISSING, b=MISSING):
 def BETA_INV(p, alpha, beta, a=MISSING, b=MISSING):
     q, al, be = real(p), real(alpha), real(beta)
     lo, hi = _opt_real(a, 0.0), _opt_real(b, 1.0)
-    if al <= 0 or be <= 0 or lo >= hi or not 0 < q < 1:
+    if al <= 0 or be <= 0 or lo >= hi or not 0 < q <= 1:
         return NUM
+    if q == 1:
+        return hi                             # Excel allows probability 1: the upper bound
     u = _inverse(lambda t: _beta_cdf(t, al, be), q, 0.0, 1.0)
     return lo + u * (hi - lo)
 
@@ -1112,8 +1116,16 @@ def _two_series(a, b):
     ga, gb = grid(a), grid(b)
     if (ga.height, ga.width) != (gb.height, gb.width):
         raise SheetError(NA)
-    return [(to_float(x), to_float(y)) for x, y in zip(ga.values(), gb.values())
-            if is_number(x) and is_number(y)]
+    pairs = []
+    for x, y in zip(ga.values(), gb.values()):
+        for v in (x, y):
+            if isinstance(v, ErrorValue):
+                raise SheetError(v)           # an error in either series is the answer (Excel)
+        if is_number(x) and is_number(y):
+            pairs.append((to_float(x), to_float(y)))
+    if not pairs:
+        raise SheetError(NA)
+    return pairs
 
 
 @fn("SUMX2MY2", least=2, most=2)
@@ -1683,6 +1695,8 @@ def EXPAND(array, rows, cols=MISSING, pad_with=MISSING):
     c = g.width if cols is MISSING or one(cols) is BLANK else integer(cols)
     if r < g.height or c < g.width:
         return VALUE
+    from .functions import sized
+    sized(r, c)
     pad = _pad(pad_with)
     return Array(tuple(tuple(g.get(i, j) if i < g.height and j < g.width else pad for j in range(c))
                        for i in range(r)))

@@ -90,8 +90,23 @@ def _call(n: F.Call, ctx: Ctx):
             return spec.fn(ctx, n.args)
         except SheetError as e:
             return e.error
+        except (OverflowError, ValueError, ZeroDivisionError):
+            return NUM
+        except RecursionError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            return _fault(n.name, e)
     args = [MISSING if type(a) is F.Missing else ev(a, ctx) for a in n.args]
     return run(spec, args, ctx)
+
+
+def _fault(name: str, e: Exception) -> ErrorValue:
+    """A function that failed in a way it shouldn't have: the cell gets
+    #VALUE! and says so, rather than the whole calculation stopping (a
+    MINIFS short of its criterion took every sheet down, 2026-10-26)."""
+    if isinstance(e, MemoryError):
+        return NUM.because(f"{name}: the answer is too big to hold")
+    return VALUE.because(f"{name} couldn't work this out ({type(e).__name__}: {e})")
 
 
 def run(spec: Spec, args: list, ctx: Ctx):
@@ -106,6 +121,10 @@ def run(spec: Spec, args: list, ctx: Ctx):
         return e.error
     except (OverflowError, ValueError, ZeroDivisionError):
         return NUM
+    except RecursionError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        return _fault(spec.fn.__name__, e)
 
 
 def _is_block(v) -> bool:
@@ -132,6 +151,10 @@ def _lifted(spec: Spec, args, lifted, ctx):
                 row.append(e.error)
             except (OverflowError, ValueError, ZeroDivisionError):
                 row.append(NUM)
+            except RecursionError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                row.append(_fault(spec.fn.__name__, e))
         rows.append(tuple(row))
     return Array(tuple(rows))
 
@@ -283,8 +306,11 @@ def SUM(*args):
 
 @fn("PRODUCT", least=1)
 def PRODUCT(*args):
+    nums = numbers(args)
+    if not nums:
+        return 0.0                            # nothing to multiply: 0, as Excel's
     total = 1.0
-    for n in numbers(args):
+    for n in nums:
         total = mul(total, n)
     return total
 
@@ -576,7 +602,8 @@ fn("DEGREES", least=1, most=1, lift=(0,))(_angle(math.degrees))
 fn("RADIANS", least=1, most=1, lift=(0,))(_plain(math.radians))
 fn("SQRTPI", least=1, most=1, lift=(0,))(_domain(lambda x: math.sqrt(x * math.pi), lambda x: x >= 0))
 fn("FACTDOUBLE", least=1, most=1, lift=(0,))(_domain(
-    lambda x: math.prod(range(int(x), 0, -2)) if int(x) > 0 else 1, lambda x: x >= -1))
+    lambda x: math.prod(range(int(x), 0, -2)) if int(x) > 0 else 1,
+    lambda x: -1 <= x <= 300))            # 301!! is past the biggest number (Excel: #NUM!)
 
 
 @fn("ATAN2", least=2, most=2, lift=(0, 1))
@@ -638,12 +665,20 @@ def _dec(x: float) -> Decimal:
 def _round_to(x: float, digits: int, mode) -> float:
     if not math.isfinite(x):
         raise SheetError(NUM)
-    q = Decimal(1).scaleb(-digits)
-    d = _dec(x)
-    # Excel rounds the 15-significant-digit value, so 2.675 rounds to 2.68
-    d = Decimal(f"{float(d):.15g}")
-    return float(d.quantize(q, rounding=mode)) if digits >= 0 else \
-        float((d / Decimal(10) ** (-digits)).quantize(Decimal(1), rounding=mode) * Decimal(10) ** (-digits))
+    if digits > 330:
+        return x                              # finer than any number is: as it is (ROUND(49, 50) is 49)
+    if digits < -330:
+        return 0.0
+    from decimal import localcontext
+    with localcontext() as context:
+        context.prec = 700                    # room for 10^330 either way
+        q = Decimal(1).scaleb(-digits)
+        d = _dec(x)
+        # Excel rounds the 15-significant-digit value, so 2.675 rounds to 2.68
+        d = Decimal(f"{float(d):.15g}")
+        return float(d.quantize(q, rounding=mode)) if digits >= 0 else \
+            float((d / Decimal(10) ** (-digits)).quantize(Decimal(1), rounding=mode)
+                  * Decimal(10) ** (-digits))
 
 
 @fn("ROUND", least=2, most=2, lift=(0, 1))
@@ -785,11 +820,26 @@ def ODD(x):
     return float(n if v >= 0 else -n)
 
 
+#: The most cells an array a function builds may have: Excel's sheet has
+#: 17 billion, but a 45366 × 45366 MUNIT (a date given as the size) takes
+#: all the memory there is before anything can say #NUM! (2026-10-26).
+ARRAY_CELLS_MOST = 4_000_000
+
+#: Excel's longest text in a cell
+TEXT_LONGEST = 32767
+
+
+def sized(rows: int, cols: int) -> None:
+    """Refuse an array bigger than any sheet could show, as Excel's #NUM!."""
+    if rows * cols > ARRAY_CELLS_MOST:
+        raise failed(NUM, f"an array of {rows} × {cols} is too big to work with")
+
+
 @fn("FACT", least=1, most=1, lift=(0,))
 def FACT(x):
     v = real(x)
-    if v < 0:
-        return NUM
+    if v < 0 or v > 170:
+        return NUM                            # 171! is past the biggest number (Excel: #NUM!)
     return float(math.factorial(int(v)))
 
 
@@ -822,6 +872,9 @@ def GCD(*args):
 
 @fn("LCM", least=1)
 def LCM(*args):
+    for a in args:
+        if a is BLANK or (isinstance(a, RefValue) and a.single and a.value_at(0, 0) is BLANK):
+            return 0.0                        # an empty cell is 0, and LCM(…, 0) is 0 (Excel)
     out = 1
     for n in numbers(args):
         v = to_float(n)
@@ -856,6 +909,7 @@ def RANDARRAY(rows=MISSING, cols=MISSING, lo=MISSING, hi=MISSING, whole=MISSING)
     w = flag(whole)
     if r < 1 or c < 1 or a > b:
         return VALUE
+    sized(r, c)
     make = (lambda: float(random.randint(math.ceil(a), math.floor(b)))) if w else \
         (lambda: a + (b - a) * random.random())
     return Array(tuple(tuple(make() for _ in range(c)) for _ in range(r)))
@@ -984,6 +1038,7 @@ def MUNIT(n):
     k = integer(n)
     if k < 1:
         return VALUE
+    sized(k, k)
     return Array(tuple(tuple(1.0 if i == j else 0.0 for j in range(k)) for i in range(k)))
 
 
@@ -1278,6 +1333,7 @@ def MAKEARRAY(ctx, args):
     cols = int(to_number(scalar(ev(args[1], ctx))))
     if rows < 1 or cols < 1:
         return VALUE
+    sized(rows, cols)
     fun = _lambda_arg(args[2], ctx)
     return Array(tuple(tuple(_scalar_result(fun.call([float(r + 1), float(c + 1)], ctx))
                              for c in range(cols)) for r in range(rows)))
@@ -1431,7 +1487,7 @@ def SHEET(x=MISSING):
 
 
 # -- text ----------------------------------------------------------------------------------
-@fn("CONCAT", "CONCATENATE", least=1)
+@fn("CONCAT", least=1)
 def CONCAT(*args):
     out = []
     for v in every_value(args):
@@ -1439,6 +1495,14 @@ def CONCAT(*args):
             return v
         out.append(to_text(v))
     return "".join(out)
+
+
+@fn("CONCATENATE", least=1, lift=tuple(range(255)))
+def CONCATENATE(*args):
+    """Excel's CONCATENATE joins its arguments one value each: given a range
+    it works cell by cell (spilling, in Excel 365), where CONCAT joins the
+    whole range (2026-10-26)."""
+    return CONCAT(*args)
 
 
 @fn("TEXTJOIN", least=3)
@@ -1577,7 +1641,10 @@ def REPT(x, n):
     k = integer(n)
     if k < 0:
         return VALUE
-    return text(x) * k
+    s = text(x)
+    if len(s) * k > TEXT_LONGEST:
+        return VALUE                          # longer than a cell holds (Excel: #VALUE!)
+    return s * k
 
 
 @fn("EXACT", least=2, most=2, lift=(0, 1))
@@ -1655,7 +1722,10 @@ def NUMBERVALUE(x, decimal=MISSING, group=MISSING):
 def TEXT(x, fmt):
     from .numfmt import format_value
 
-    return format_value(one(x), text(fmt)).text
+    code = text(fmt)
+    if code == "":
+        return ""                             # Excel's TEXT(x, "") is ""
+    return format_value(one(x), code).text
 
 
 @fn("FIXED", least=1, most=3)
@@ -1858,7 +1928,11 @@ def WEEKNUM(x, kind=MISSING):
     d = _date(x)
     if k == 21:
         return float(d.isocalendar()[1])
-    start = 6 if k in (1, 17) else 0     # Sunday or Monday
+    # the weekday a week starts on (Python's Monday 0 … Sunday 6)
+    starts = {1: 6, 2: 0, 11: 0, 12: 1, 13: 2, 14: 3, 15: 4, 16: 5, 17: 6}
+    if k not in starts:
+        return NUM
+    start = starts[k]
     jan1 = _dt.date(d.year, 1, 1)
     offset = (jan1.weekday() - start) % 7
     return float((d - jan1).days + offset) // 7 + 1
@@ -1953,28 +2027,76 @@ def _holidays(h):
     return out
 
 
-@fn("NETWORKDAYS", "NETWORKDAYS.INTL", least=2, most=4)
-def NETWORKDAYS(start, end, *rest):
-    a, b = int(real(start)), int(real(end))
-    holidays = _holidays(rest[-1]) if rest else set()
+def _weekend(code) -> set:
+    """The days off of WORKDAY.INTL's weekend argument, as weekday numbers
+    (Sunday 0 … Saturday 6, Excel's serial 1 being a Sunday): 1 or omitted
+    Saturday and Sunday, 2 Sunday and Monday … 7 Friday and Saturday, 11
+    Sunday only … 17 Saturday only, or seven 1s and 0s from Monday
+    ("0000011"). The .INTL functions took it for a list of holidays and kept
+    Saturday and Sunday whatever it said (2026-10-26)."""
+    if code is MISSING:
+        return {0, 6}
+    c = one(code)
+    if c is BLANK:
+        return {0, 6}
+    if isinstance(c, str):
+        if len(c) != 7 or set(c) - {"0", "1"} or c == "1111111":
+            raise SheetError(VALUE)
+        return {(i + 1) % 7 for i, ch in enumerate(c) if ch == "1"}
+    n = to_int(c)
+    if 1 <= n <= 7:
+        return {(n + 5) % 7, (n + 6) % 7}
+    if 11 <= n <= 17:
+        return {n - 11}
+    raise SheetError(NUM)
+
+
+def _working_days(start, end, weekend, holidays) -> float:
+    a, b = int(real(start)), int(real(end))      # (the dates first: a text date is #VALUE!)
+    weekend, holidays = _weekend(weekend), _holidays(holidays)
+    if a < 0 or b < 0:
+        raise SheetError(NUM)
     step = 1 if b >= a else -1
     n = 0
     for s in range(a, b + step, step):
-        if (s - 1) % 7 not in (0, 6) and s not in holidays:   # not Sunday, not Saturday
+        if (s - 1) % 7 not in weekend and s not in holidays:
             n += 1
     return float(n * step)
 
 
-@fn("WORKDAY", "WORKDAY.INTL", least=2, most=4)
-def WORKDAY(start, days, *rest):
+def _workday(start, days, weekend, holidays) -> float:
     s, k = int(real(start)), integer(days)
-    holidays = _holidays(rest[-1]) if rest else set()
+    weekend, holidays = _weekend(weekend), _holidays(holidays)
+    if s < 0:
+        raise SheetError(NUM)
+    if len(weekend) >= 7:
+        raise SheetError(VALUE)
     step = 1 if k >= 0 else -1
     while k:
         s += step
-        if (s - 1) % 7 not in (0, 6) and s not in holidays:
+        if (s - 1) % 7 not in weekend and s not in holidays:
             k -= step
     return float(s)
+
+
+@fn("NETWORKDAYS", least=2, most=3)
+def NETWORKDAYS(start, end, holidays=MISSING):
+    return _working_days(start, end, MISSING, holidays)
+
+
+@fn("NETWORKDAYS.INTL", least=2, most=4)
+def NETWORKDAYS_INTL(start, end, weekend=MISSING, holidays=MISSING):
+    return _working_days(start, end, weekend, holidays)
+
+
+@fn("WORKDAY", least=2, most=3)
+def WORKDAY(start, days, holidays=MISSING):
+    return _workday(start, days, MISSING, holidays)
+
+
+@fn("WORKDAY.INTL", least=2, most=4)
+def WORKDAY_INTL(start, days, weekend=MISSING, holidays=MISSING):
+    return _workday(start, days, weekend, holidays)
 
 
 @fn("YEARFRAC", least=2, most=3)
@@ -2347,6 +2469,7 @@ def SEQUENCE(rows, cols=MISSING, start=MISSING, step=MISSING):
     d = 1.0 if step is MISSING else num(step)
     if r < 1 or c < 1:
         return CALC
+    sized(r, c)
     out = []
     for i in range(r):
         out.append(tuple(add(s, mul(d, float(i * c + j))) for j in range(c)))
@@ -2510,7 +2633,9 @@ def criterion(c) -> Callable:
     if not isinstance(c, str):
         if c is BLANK:
             c = 0.0
-        return lambda v, c=c: v is not BLANK and _rank_same(c, v) and compare_values(v, c) == 0
+        # (an error in the range is no match — it crashed the count, 2026-10-26)
+        return lambda v, c=c: v is not BLANK and not isinstance(v, ErrorValue) \
+            and _rank_same(c, v) and compare_values(v, c) == 0
     m = re.match(r"^(<=|>=|<>|=|<|>)?(.*)$", c, re.S)
     op, rest = m.group(1) or "", m.group(2)
     from .inputs import number_from_text
@@ -2520,6 +2645,8 @@ def criterion(c) -> Callable:
         target = rest.upper() == "TRUE"
     if target is not None:
         def test(v, op=op or "=", target=target):
+            if isinstance(v, ErrorValue):
+                return False
             if v is BLANK or not _rank_same(target, v):
                 if isinstance(v, str) and op in ("=", "<>") and not isinstance(target, bool):
                     got = number_from_text(v)
@@ -2642,11 +2769,19 @@ def SUMIF(ref, crit, sum_range=MISSING):
     return _summed(target, _positions(ref, criterion(crit), criterion(crit)(BLANK)))
 
 
+def _same_shape(a, b) -> bool:
+    def shape(r):
+        return (r.height, r.width) if isinstance(r, RefValue) else (grid(r).height, grid(r).width)
+    return shape(a) == shape(b)
+
+
 @fn("SUMIFS", least=3)
 def SUMIFS(sum_range, *args):
     if len(args) % 2:
         return VALUE
     pairs = [(args[i], args[i + 1]) for i in range(0, len(args), 2)]
+    if not _same_shape(sum_range, pairs[0][0]):
+        return VALUE
     return _summed(sum_range, _ifs(pairs))
 
 
@@ -2672,7 +2807,11 @@ def AVERAGEIF(ref, crit, avg_range=MISSING):
 
 @fn("AVERAGEIFS", least=3)
 def AVERAGEIFS(avg_range, *args):
+    if len(args) % 2:
+        return VALUE
     pairs = [(args[i], args[i + 1]) for i in range(0, len(args), 2)]
+    if not _same_shape(avg_range, pairs[0][0]):
+        return VALUE
     return _averaged(avg_range, _ifs(pairs))
 
 
@@ -2692,13 +2831,21 @@ def _extreme(target, offsets, pick):
 
 @fn("MAXIFS", least=3)
 def MAXIFS(target, *args):
+    if len(args) % 2:
+        return VALUE
     pairs = [(args[i], args[i + 1]) for i in range(0, len(args), 2)]
+    if not _same_shape(target, pairs[0][0]):
+        return VALUE
     return _extreme(target, _ifs(pairs), max)
 
 
 @fn("MINIFS", least=3)
 def MINIFS(target, *args):
+    if len(args) % 2:
+        return VALUE
     pairs = [(args[i], args[i + 1]) for i in range(0, len(args), 2)]
+    if not _same_shape(target, pairs[0][0]):
+        return VALUE
     return _extreme(target, _ifs(pairs), min)
 
 
@@ -3020,7 +3167,10 @@ def CONVERT(x, a, b=MISSING):
     got = excel_convert(v, text(a).strip(), text(b).strip())    # Excel's own codes: "F", "C", "ft2"…
     if got is not None:
         return got
-    ua, ub = _unit_text(a), _unit_text(b)
+    try:
+        ua, ub = _unit_text(a), _unit_text(b)
+    except SheetError:
+        return NA                             # a unit Excel's CONVERT hasn't: #N/A, as Excel
     fa, da, oa = unit_parts(ua)
     fb, db, ob = unit_parts(ub)
     if tuple(da) != tuple(db):
