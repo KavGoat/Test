@@ -3,6 +3,13 @@
 Previous entries were deleted at the user's request on 2026-09-27. Evidence for
 the 2026-09-27 report is recorded below. Completion status stays user-owned.
 
+## 2026-10-26 (later) — every function the same for a name as for its cells; every function against LibreOffice (pushed at 941eba4)
+
+- The full check passed on 941eba4 (PYTEST_EXIT=0, 14/14 planted bugs caught), which was pushed on it; the quick check list was rebuilt from it.
+- Every function given its arguments as cells and as names of those cells, 4,235 calls over all 472 functions: the same answer both ways, and the same through the compiled formulas as through the plain tree walk (CALC, LET and LAMBDA apart, which take a name as a word, as Excel does); scratchpad probe, kept in tests/sheet/test_excel_parity.py (`test_every_function_reads_a_name_as_the_cells_it_names`).
+- 8,352 formulas — every function with numbers, text, blanks, TRUE, numeric text, #N/A, single cells, ranges and the operators — worked out by LibreOffice 24.2 and by CalcForge: 4,927 LibreOffice knows; 1,661 differences before, 1,542 after, each remaining kind judged against Excel's documented behaviour and found to be LibreOffice's (it counts a TRUE cell as 1, reads "5" as text in arithmetic, counts dates from 1899-12-30, has no dynamic arrays). The fixes (the dispatcher's #VALUE! for a function that fails, array and text sizes, COUNTIF over errors, WORKDAY.INTL's weekend, ROUND's digits, CONCATENATE, PRODUCT, LCM, TEXT, WEEKNUM, the IFS family's shapes, CONVERT, BETA.INV, base conversions, SUMX2MY2 and kin, FACT): tests/sheet/test_excel_parity.py.
+- The nine workbooks: every formula cell against the value Excel saved with it, all the same apart from TODAY() (scratchpad probe over the user's files, not committed).
+
 ## 2026-10-26 — G115, a workbook's pictures on its sheet, the workbook's Thumbnails menu (pushed at 0446325)
 
 - The quick check passed on 0446325 before it was pushed (17.6 min, `-n 3`).
