@@ -8,14 +8,18 @@ menus had two separators in a row).
 ``proxy`` puts a window command on a menu under the name that menu uses
 (Revu's "Set Scale…" for the window's "Page Scale…") with the key it really
 answers to shown beside it, without a second binding of that key.
+
+``keep_menus_on_screen`` holds a menu taller than the screen to the screen
+while it is open, so that it scrolls (as Windows' menus do) rather than
+running off the bottom.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QMenu, QWidgetAction
+from PySide6.QtWidgets import QMenu, QStyle, QWidgetAction
 
 # Small words Title Case leaves in lower case (unless first).
 _SMALL = {"a", "an", "and", "as", "at", "by", "for", "from", "in", "of", "on", "or",
@@ -61,6 +65,35 @@ def tidy(menu: QMenu) -> QMenu:
     while visible and visible[-1].isSeparator():
         menu.removeAction(visible.pop())
     return menu
+
+
+class _MenusOnScreen(QObject):
+    """A menu taller than the screen opens held to the screen and scrolls
+    (the style's menu-scrollable, theme.py, rather than Qt's second column)
+    — and stays so. Qt resizes an open menu to its full height whenever one
+    of its entries changes (QMenu::actionEvent; Edit's Undo takes the name of
+    the last change as the menu shows, a command is greyed), which put the
+    lower entries, and the submenus beside them, off the bottom of the
+    screen (2026-10-26). A menu that opened short enough and grew past the
+    screen is held too, though Qt gives it no scroll arrows then: nothing
+    is lost that could have been reached."""
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() not in (QEvent.Resize, QEvent.Move) or not isinstance(watched, QMenu) \
+                or watched.windowType() != Qt.Popup or not watched.isVisible():
+            return False                     # (moved: a menu bar's is put 2 px down once shown)
+        frame = watched.style().pixelMetric(QStyle.PM_MenuDesktopFrameWidth, None, watched)
+        room = watched.screen().availableGeometry().bottom() - 2 * frame - watched.y()
+        if watched.height() > room > 0:
+            watched.resize(watched.width(), room)      # (as QMenu sized it when it opened)
+        return False
+
+
+def keep_menus_on_screen(application) -> None:
+    """Once per application: every menu of it held to the screen."""
+    if getattr(application, "_menus_on_screen", None) is None:
+        application._menus_on_screen = _MenusOnScreen(application)
+        application.installEventFilter(application._menus_on_screen)
 
 
 def proxy(menu: QMenu, action: QAction, text: Optional[str] = None,

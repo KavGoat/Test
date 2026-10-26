@@ -77,6 +77,8 @@ def apply_theme(application: QApplication, theme: str) -> None:
     # where it was nine tenths of the time New Window took).
     if application.styleSheet() != sheet:
         application.setStyleSheet(sheet)
+    from .ui.menutidy import keep_menus_on_screen
+    keep_menus_on_screen(application)          # (the style makes tall menus scroll)
     app_settings().setValue("theme", theme)
 
 

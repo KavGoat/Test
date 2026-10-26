@@ -2598,11 +2598,11 @@ def walk_popup(path, outcome, each_index=None):
                 outcome["disabled"] = label
                 close_popups()
                 return False
-            rect = menu.actionGeometry(action)
             if not point_at(menu, action):
                 outcome["error"] = f"the pointer never rested on '{label}'"
                 close_popups()
                 return False
+            rect = menu.actionGeometry(action)          # (where it is once scrolled into view)
             if last and outcome.get("open_only"):
                 sub = action.menu()
                 if sub is not None:
@@ -2642,6 +2642,32 @@ def wait_for(condition, limit=2.0) -> bool:
     return True
 
 
+def scroll_into_view(menu, action) -> None:
+    """A menu taller than the screen scrolls, as Windows' menus do, rather
+    than spreading into a second column (0446325; the screen here is 800 px
+    high): roll the wheel over it, as a hand would, until *action* is in
+    sight — clear of the scroll arrows at its ends."""
+    QtCore, QtGui, QtWidgets, _ = qt()
+    if not menu.style().styleHint(QtWidgets.QStyle.SH_Menu_Scrollable, None, menu):
+        return
+    arrow = menu.style().pixelMetric(QtWidgets.QStyle.PM_MenuScrollerHeight, None, menu) + 2
+    for _ in range(400):
+        rect = menu.actionGeometry(action)
+        if rect.top() >= arrow and rect.bottom() <= menu.height() - arrow:
+            return
+        centre = menu.rect().center()
+        down = rect.top() > centre.y()
+        before = (menu.geometry(), rect)   # (a roll can move the menu without scrolling it)
+        event = QtGui.QWheelEvent(QtCore.QPointF(centre), QtCore.QPointF(menu.mapToGlobal(centre)),
+                                  QtCore.QPoint(0, 0), QtCore.QPoint(0, -120 if down else 120),
+                                  QtCore.Qt.NoButton, QtCore.Qt.NoModifier,
+                                  QtCore.Qt.NoScrollPhase, False)
+        QtWidgets.QApplication.sendEvent(menu, event)
+        APP.processEvents()
+        if (menu.geometry(), menu.actionGeometry(action)) == before:
+            return                        # it scrolls no further: at an end, with no arrow over it
+
+
 def point_at(menu, action) -> bool:
     """Glide the pointer onto *action* in small steps, as a hand does, and wait
     until the menu has it under the pointer. QMenu takes a click only once the
@@ -2650,6 +2676,7 @@ def point_at(menu, action) -> bool:
     the pointer, and the click was ignored (tests/test_sheet_qa_round1.py has
     the same finding, a7656be)."""
     QtCore, QTest = qt()[0], qt()[3]
+    scroll_into_view(menu, action)
     rect = menu.actionGeometry(action)
     centre = rect.center()
     for k in range(8, -1, -1):

@@ -707,7 +707,13 @@ class _SideRoom(QObject):
     Qt lays nothing out while a toolbar is held (and nothing in the toolbar
     layout may be changed then: _ToolbarDrags), so the widgets are moved
     themselves, from where the layout had put them, and put back when the
-    room closes; once the toolbar lands the layout places everything anew."""
+    room closes; once the toolbar lands the layout places everything anew.
+    One thing Qt does lay out meanwhile: the rows along the top rewrap once
+    the toolbar has left them (a row of its own goes, and everything below
+    moves up), which puts the rail and the panels back where the layout
+    now wants them — so when the layout moves the rail, where everything is
+    is noted afresh and the room opened again from there (the room was left
+    where the rail had been, a row too low, 2026-10-26)."""
 
     GLIDE_MS = 110
 
@@ -720,6 +726,19 @@ class _SideRoom(QObject):
         self.placed = {}                # widget -> where the layout had it
         self.tint = None
         self.easing = None
+        self.moving = False             # while the room itself moves the widgets
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() in (QEvent.Move, QEvent.Resize) and not self.moving \
+                and self.side is not None and watched is self.rail(self.side):
+            QTimer.singleShot(0, self, self._note_again)   # (once the layout has finished)
+        return False
+
+    def _note_again(self) -> None:
+        if self.side is None:
+            return
+        self._take_note()
+        self._move(self.shown)
 
     def rail(self, side):
         return self.window.right_rail_bar if side == Qt.RightToolBarArea \
@@ -769,6 +788,7 @@ class _SideRoom(QObject):
                 self.placed[child] = QRect(box)
         if central is not None:
             self.placed[central] = QRect(middle)
+        self.rail(self.side).installEventFilter(self)
 
     def _glide_to(self, width) -> None:
         if self.easing is not None:
@@ -787,16 +807,20 @@ class _SideRoom(QObject):
         central = self.window.centralWidget()
         sign = -1 if self.side == Qt.RightToolBarArea else 1
         from shiboken6 import isValid
-        for widget, box in self.placed.items():
-            if not isValid(widget):
-                continue
-            if widget is central:
-                if self.side == Qt.RightToolBarArea:
-                    widget.setGeometry(box.adjusted(0, 0, -by, 0))
+        self.moving = True
+        try:
+            for widget, box in self.placed.items():
+                if not isValid(widget):
+                    continue
+                if widget is central:
+                    if self.side == Qt.RightToolBarArea:
+                        widget.setGeometry(box.adjusted(0, 0, -by, 0))
+                    else:
+                        widget.setGeometry(box.adjusted(by, 0, 0, 0))
                 else:
-                    widget.setGeometry(box.adjusted(by, 0, 0, 0))
-            else:
-                widget.setGeometry(box.translated(sign * by, 0))
+                    widget.setGeometry(box.translated(sign * by, 0))
+        finally:
+            self.moving = False
         rail = self.placed.get(self.rail(self.side))
         if rail is None:
             return
@@ -816,6 +840,7 @@ class _SideRoom(QObject):
             self.easing = None
         if self.side is not None:
             self._move(0)
+            self.rail(self.side).removeEventFilter(self)
         if self.tint is not None:
             self.tint.hide()
         self.side = None
