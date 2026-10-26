@@ -7456,15 +7456,16 @@ class MainWindow(QMainWindow):
             entry = paper.addAction(name, lambda n=name: self.set_page_size(index, n))
             entry.setCheckable(True)
             entry.setChecked(page.setup.size_name == name)
-        if page.pdf_key and page.pdf_annotations:
-            # only on a page whose PDF came with markups to read
-            editable = menu.addAction("Make This Page's Markups Editable",
-                                      lambda: self.make_markups_editable(index))
-            editable.setToolTip(
-                "Read the clouds, call-outs and dimensions already on this page "
-                "out of the PDF\nand turn them into markups you can move and "
-                "change. What is read out is\nCalcForge's drawing of them, so it "
-                "will not match the file exactly.")
+        # greyed on a page whose PDF came with no markups to read (a
+        # workbook's menu, which has nothing of a PDF, left it out above)
+        editable = menu.addAction("Make This Page's Markups Editable",
+                                  lambda: self.make_markups_editable(index))
+        editable.setToolTip(
+            "Read the clouds, call-outs and dimensions already on this page "
+            "out of the PDF\nand turn them into markups you can move and "
+            "change. What is read out is\nCalcForge's drawing of them, so it "
+            "will not match the file exactly.")
+        editable.setEnabled(bool(page.pdf_key and page.pdf_annotations))
         return menutidy.tidy(menu)
 
     def cut_pages(self, index: Optional[int] = None) -> None:

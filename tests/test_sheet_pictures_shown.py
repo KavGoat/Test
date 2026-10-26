@@ -10,10 +10,10 @@ went to a right column? why?").
   stacked under its first, whose item draws the whole grid.
 * A workbook page's Thumbnails menu leaves out what a sheet doesn't take
   (Page Setup, Set Scale, Crop, Page Grid, Header/Footer, Paper Size,
-  Colour Processing), its inserts and page labels in submenus: one column.
-  "Make This Page's Markups Editable" is only on a page whose PDF has
-  markups to read. A menu taller than the screen scrolls; it is never laid
-  out in columns.
+  Colour Processing, a PDF's markups), its inserts and page labels in
+  submenus: one column. An ordinary page keeps "Make This Page's Markups
+  Editable", greyed until its PDF has markups to read. A menu taller than
+  the screen scrolls; it is never laid out in columns.
 """
 from __future__ import annotations
 
@@ -115,9 +115,10 @@ def test_a_workbooks_thumbnails_menu_is_a_workbooks(w):
     assert {"Insert", "Page Labels", "Self-contained", "Print Pages…"} <= set(labels)
     inserts = next(a.menu() for a in menu.actions() if a.text() == "Insert")
     assert "Insert Excel Workbook" in [a.text() for a in inserts.actions()]
-    # an ordinary page of no PDF: no greyed entry for a PDF's markups
+    # an ordinary page of no PDF: the entry for a PDF's markups, greyed
     ordinary = next(i for i, p in enumerate(w.document.pages) if p.sheet is None)
-    assert "Make This Page's Markups Editable" not in \
-        [a.text() for a in w.page_menu(ordinary).actions()]
+    entry = next(a for a in w.page_menu(ordinary).actions()
+                 if a.text() == "Make This Page's Markups Editable")
+    assert not entry.isEnabled()
     # a menu taller than the screen scrolls, never two columns
     assert menu.style().styleHint(QStyle.SH_Menu_Scrollable, None, menu)
