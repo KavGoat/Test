@@ -252,19 +252,23 @@ def test_the_shortcuts_shown_are_the_real_ones(w):
 def test_the_page_tab_and_sheet_tab_menus(w):
     labels = top_level(w.page_menu(0))
     assert labels[:5] == ["Page Setup…", "Set Scale…", "Cut Pages", "Copy Pages", "Paste Pages"]
-    for wanted in ("Insert Blank Page", "Insert Pages", "Extract Pages…", "Delete Pages…",
-                   "Rotate Pages", "Rename Page Label", "Reset All Page Labels",
+    for wanted in ("Insert", "Extract Pages…", "Delete Pages…", "Rotate Pages", "Page Labels",
                    "Print Pages…", "Flatten…"):
         assert wanted in labels
-    # every way of putting pages in sits together, each Before or After
+    # every way of putting pages in sits together under one Insert, each
+    # Before or After, on every page's menu alike (the user, 2026-10-29)
     inserts = ["Insert Blank Page", "Insert Spreadsheet Page", "Insert Pages",
                "Insert Image Page", "Insert Excel Workbook"]
-    at = labels.index(inserts[0])
-    assert labels[at:at + len(inserts)] == inserts, labels
     menu = w.page_menu(0)
+    inserting = next(a.menu() for a in menu.actions() if a.text() == "Insert")
+    assert top_level(inserting) == inserts, top_level(inserting)
     for title in inserts:
-        sub = next(a.menu() for a in menu.actions() if a.text() == title)
+        sub = next(a.menu() for a in inserting.actions() if a.text() == title)
         assert [a.text().rstrip("…") for a in sub.actions()] == ["Before", "After"], title
+    assert not any(t.startswith("Insert ") for t in labels), "none loose at the top"
+    labelling = next(a.menu() for a in menu.actions() if a.text() == "Page Labels")
+    assert top_level(labelling) == ["Rename Page Label", "Reset Page Label",
+                                    "Reset All Page Labels"]
     assert "Spreadsheet After" not in labels
     assert labels.index("Flatten…") < labels.index("Go to Page"), \
         "CalcForge's own come after Revu's"
