@@ -144,8 +144,8 @@ def test_every_page_dialog_opens_from_its_menus(window, monkeypatch, tmp_path):
     _pages(window, 3)
     blank = _opened(monkeypatch, dialogs.InsertBlankPageDialog)
     window.act_add_page.trigger()                          # Document ▸ Insert ▸ Blank Page…
-    _entry(window.page_menu(1), "Insert Blank Page", "Before…").trigger()
-    _entry(window.page_menu(1), "Insert Blank Page", "After…").trigger()
+    _entry(window.page_menu(1), "Insert", "Insert Blank Page", "Before…").trigger()
+    _entry(window.page_menu(1), "Insert", "Insert Blank Page", "After…").trigger()
     assert [d.windowTitle() for d in blank] == ["Insert Blank Page"] * 3
     # pre-set: after the page in view; before / after the page right-clicked
     assert [(d.placement.side.currentData(), d.placement.where(),
@@ -157,8 +157,8 @@ def test_every_page_dialog_opens_from_its_menus(window, monkeypatch, tmp_path):
 
     inserting = _opened(monkeypatch, dialogs.InsertPagesDialog)
     window.act_insert_pdf.trigger()
-    _entry(window.page_menu(2), "Insert Pages", "Before…").trigger()
-    _entry(window.page_menu(2), "Insert Pages", "After…").trigger()
+    _entry(window.page_menu(2), "Insert", "Insert Pages", "Before…").trigger()
+    _entry(window.page_menu(2), "Insert", "Insert Pages", "After…").trigger()
     assert [d.windowTitle() for d in inserting] == ["Insert Pages"] * 3
     assert [(d.placement.side.currentData(), d.placement.number.value())
             for d in inserting] == [("after", 1), ("before", 3), ("after", 3)]
@@ -610,7 +610,7 @@ def test_rename_page_label_edits_in_place(window):
     window.show()
     _pages(window, 2)
     QApplication.processEvents()
-    _entry(window.page_menu(1), "Rename Page Label").trigger()
+    _entry(window.page_menu(1), "Page Labels", "Rename Page Label").trigger()
     editor = window.pages_panel.label_editor
     assert editor is not None and editor.parent() is window.pages_panel.list.viewport()
     assert editor.text() == "2"

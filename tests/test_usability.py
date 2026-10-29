@@ -1846,7 +1846,8 @@ def test_current_page_commands_are_reachable_from_the_menu_bar(window, qapp):
     assert {"Rename Page Label", "Insert Blank Page", "After…", "Move Down",
             "Rotate Pages", "Clockwise", "Colour Processing…"} <= set(labels)
 
-    blank = _menu_entry(menu, "Insert Blank Page").menu()
+    inserts = _menu_entry(menu, "Insert").menu()          # the kinds of page under one Insert
+    blank = _menu_entry(inserts, "Insert Blank Page").menu()
     blank.popup(window.mapToGlobal(window.rect().center()))
     qapp.processEvents()
     add = _menu_entry(blank, "After…")
@@ -2252,14 +2253,16 @@ def test_a_page_label_can_be_renamed_and_reset_from_its_menu(window, monkeypatch
     monkeypatch.setattr(QInputDialog, "getText",
                         lambda *args, **kwargs: ("Foundation", True))
 
+    def labels_menu(menu):
+        return next(action for action in menu.actions() if action.text() == "Page Labels").menu()
     menu = window.page_menu(0)
-    next(action for action in menu.actions()
+    next(action for action in labels_menu(menu).actions()
          if action.text() == "Rename Page Label").trigger()
     assert page.label == "Foundation"
     assert "Foundation" in window.pages_panel.list.item(0).text()
 
     menu = window.page_menu(0)
-    next(action for action in menu.actions()
+    next(action for action in labels_menu(menu).actions()
          if action.text() == "Reset Page Label").trigger()
     assert page.label == "drawing.pdf page A1"
     assert "drawing.pdf page A1" in window.pages_panel.list.item(0).text()

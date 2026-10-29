@@ -130,5 +130,6 @@ def test_a_table_below_is_not_defined_above_it(v):
              for item in v.window.view.scene().items()
              if isinstance(item, CalcItem) and item.region}
     assert table.sheet.value(0, 0) == 30
-    assert found["z="].error is not None and found["z="].error.message == "T1.A1 - not defined."
+    assert found["z="].error is not None and found["z="].error.message == \
+        "T1.A1: T1 comes after this equation (page 1); an equation reads a sheet before it."
     assert display_text(found["y="].display) == "31"

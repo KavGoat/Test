@@ -229,8 +229,8 @@ def test_a_name_defined_only_below_is_not_defined():
             cells={(0, 0): "d", (0, 1): "A", (1, 0): "1", (1, 1): "10", (2, 0): "3", (2, 1): "30"})
     calc.recalculate()
     assert answer(asked) == "test - not defined."
-    assert answer(cell) == "T1.A2 - not defined."
-    assert answer(column) == "T1.Load - not defined."
+    assert answer(cell).startswith("T1.A2: T1 comes after this equation"), answer(cell)
+    assert answer(column).startswith("T1.Load: T1 comes after this equation"), answer(column)
     assert answer(looked) == "bolts(#) - function is not defined."
     below = on_page(calc, 2, 20, "test=")
     calc.recalculate()

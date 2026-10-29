@@ -648,7 +648,7 @@ def _bezier(a, b, c, d, t: float) -> list:
 def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINAL,
                  dpi: float = 150.0, at: Optional[int] = None,
                  vectors: bool = False, annotations: bool = False,
-                 bookmarks: bool = True) -> list[Page]:
+                 bookmarks: bool = True, lazy: bool = False) -> list[Page]:
     """Load the chosen PDF pages into *document* as new pages.
 
     **What arrives is the PDF.** Every page is drawn from the file itself, by
@@ -662,7 +662,10 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
 
     *vectors* brings the page's own line work in as real geometry, so a
     measurement can snap to the end of a beam rather than to a guess.
-    *annotations* turns markups already on the page into editable ones.
+    *annotations* turns markups already on the page into editable ones —
+    read now, or with *lazy* left for when the page is looked at or asked
+    for (read_pending_annotations; the window opens a set of hundreds of
+    marked-up sheets this way, in the time it took to read them all).
     """
     source = PdfSource(path)
     with open(path, "rb") as handle:
@@ -672,6 +675,10 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
     drawn = line_work(path, indices) if vectors else {}
     created: list[Page] = []
     source_heights: dict[int, float] = {}
+    reader = None
+    if annotations and not lazy:
+        from . import pdfvector
+        reader = pdfvector.PdfFile.from_bytes(document.asset(pdf_key) or b"")
     try:
         for offset, index in enumerate(indices):
             info = source.page_info(index)
@@ -685,11 +692,11 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
                 page._pending_items = _items_from(
                     drawn[index], page.setup.width_pt / across)
             if annotations:
-                # read when the page is looked at, or asked for
-                # (read_pending_annotations): a set of hundreds of marked-up
-                # sheets opened in the time it took to read them all
                 across = info.width_pt or 1.0
                 page._pending_annotations = (pdf_key, index, page.setup.width_pt / across)
+                if reader is not None:
+                    page._pending_items.extend(read_pending_annotations(
+                        page, page._pending_annotations, document, reader))
             page.pdf_key = pdf_key
             page.pdf_page_index = index
             page.source_note = f"{os.path.basename(path)} page {index + 1}"
@@ -706,6 +713,8 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
             created.append(page)
     finally:
         source.close()
+        if reader is not None:
+            reader.close()
     if bookmarks:
         _bring_the_outline(document, path, indices, created, source_heights)
     document.modified = True

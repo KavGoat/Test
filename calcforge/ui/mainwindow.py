@@ -4645,8 +4645,12 @@ class MainWindow(QMainWindow):
 
     def _load_behind_start(self) -> None:
         scene = self.scene
-        waiting = [frame for frame in (scene.frames if scene is not None else ())
-                   if frame.holds()]
+        frames = scene.frames if scene is not None else ()
+        # the page in view is built before it is first drawn: what is on
+        # screen is complete at once, and never changes hands under the eye
+        if 0 <= self.current_index < len(frames) and frames[self.current_index].holds():
+            frames[self.current_index].load_held()
+        waiting = [frame for frame in frames if frame.holds()]
         self._behind = None
         if not waiting:
             if self._loading_behind:
@@ -4925,7 +4929,7 @@ class MainWindow(QMainWindow):
         # The page's own line work is a different matter and stays off: that is
         # the drawing, not a markup, and there can be tens of thousands of it.
         pdfio.import_pages(document, path, list(range(count)), pdfio.FIT_ORIGINAL,
-                           pdfio.BEST_DPI, at=0, annotations=True)
+                           pdfio.BEST_DPI, at=0, annotations=True, lazy=True)
         # Opening a PDF is opening a document, not converting one. The page is
         # the PDF's own page, drawn by the PDF renderer; nothing on it is
         # turned into a markup of ours, so what is on screen is what any
@@ -7080,7 +7084,7 @@ class MainWindow(QMainWindow):
         def mutate():
             brought.extend(pdfio.import_pages(self.document, path, indices, fit,
                                               dpi, at=target, vectors=vectors,
-                                              annotations=True))
+                                              annotations=True, lazy=True))
             self.current_index = target
         try:
             self._structural_change(f"Insert {len(indices)} PDF page(s)", mutate)
@@ -7162,7 +7166,7 @@ class MainWindow(QMainWindow):
                         pages = pdfio.import_pages(
                             self.document, path,
                             list(range(pdfio.page_count(path))),
-                            pdfio.FIT_ORIGINAL, at=at, annotations=True)
+                            pdfio.FIT_ORIGINAL, at=at, annotations=True, lazy=True)
                         added += len(pages)
                         at += len(pages)
                     else:

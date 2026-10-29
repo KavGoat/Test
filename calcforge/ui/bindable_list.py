@@ -43,6 +43,21 @@ ALIASES: dict[str, str] = {
     "page.insert_image_page.after": "command.insert_image_page",
     "page.insert_excel_workbook.before": "insert.insert_workbook.before",
     "page.insert_excel_workbook.after": "command.insert_workbook",
+    # the same five under one Insert, on every page's menu (the user, 2026-10-29)
+    "page.insert.insert_blank_page.before": "insert.add_page.before",
+    "page.insert.insert_blank_page.after": "command.add_page",
+    "page.insert.insert_spreadsheet_page.before": "insert.add_sheet_page.before",
+    "page.insert.insert_spreadsheet_page.after": "command.add_sheet_page",
+    "page.insert.insert_pages.before": "insert.insert_pdf.before",
+    "page.insert.insert_pages.after": "command.insert_pdf",
+    "page.insert.insert_image_page.before": "insert.insert_image_page.before",
+    "page.insert.insert_image_page.after": "command.insert_image_page",
+    "page.insert.insert_excel_workbook.before": "insert.insert_workbook.before",
+    "page.insert.insert_excel_workbook.after": "command.insert_workbook",
+    # and the labels under Page Labels
+    "page.page_labels.rename_page_label": "page.rename_page_label",
+    "page.page_labels.reset_page_label": "page.reset_page_label",
+    "page.page_labels.reset_all_page_labels": "page.reset_all_page_labels",
     # the workbook view's footer: Excel's view buttons (sheetstatus.py)
     "status.normal": "command.sheet_normal_view",
     "status.page_layout": "command.sheet_page_layout_view",

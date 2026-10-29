@@ -189,13 +189,16 @@ def test_every_insert_is_offered_before_or_after_everywhere(window):
     assert shapes == {"Blank Page": ["Before…", "After…"], "Spreadsheet Page": ["Before", "After"],
                       "Pages": ["Before…", "After…"], "Image Page": ["Before…", "After…"],
                       "Excel Workbook": ["Before…", "After…"]}
-    # the page menu: the same five, with Insert in front, the same shapes
+    # the page menu: the same five under one Insert (as a workbook's page
+    # has them; the user, 2026-10-29), with Insert in front, the same shapes
     page = window.page_menu(1)
-    on_page = [t for t in labels(page) if t.startswith("Insert ")]
+    assert not any(t.startswith("Insert ") for t in labels(page)), "none loose at the top"
+    inserts = entry(page, "Insert").menu()
+    on_page = [t for t in labels(inserts) if t.startswith("Insert ")]
     assert on_page == [f"Insert {name}" for name in INSERTS]
-    assert {name: labels(entry(page, f"Insert {name}").menu()) for name in INSERTS} == shapes
+    assert {name: labels(entry(inserts, f"Insert {name}").menu()) for name in INSERTS} == shapes
     # all five together, in one group
-    assert set(on_page) <= set(group_of(page, "Insert Blank Page"))
+    assert set(on_page) <= set(group_of(inserts, "Insert Blank Page"))
     # File ▸ Import: the three that come from a file, the same commands
     imports = sub(top(window, "File"), "Import")
     assert labels(imports) == ["Pages", "Image Page", "Excel Workbook", "Tool Set…"]

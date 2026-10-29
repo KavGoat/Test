@@ -102,7 +102,7 @@ def test_the_variables_panel_shows_sections_and_makes_variables_global(v):
     panel = VariablesPanel(v.window)
     panel.refresh()
     tree = panel.tree
-    tops = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
+    tops = [tree.topLevelItem(i).text(0).lstrip("§ ") for i in range(tree.topLevelItemCount())]
     assert tops[0].startswith("Section 1") and any(t.startswith("Section 2") for t in tops)
     row = next(r for r in panel.rows if r.name == "a")
     assert row.section == 1 and not row.is_global

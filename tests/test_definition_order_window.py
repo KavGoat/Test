@@ -108,18 +108,18 @@ def click_through(path, seen):
 
 
 def insert_sheet_page_after(w, page):
-    """Thumbnails ▸ right-click the page ▸ Insert Spreadsheet Page ▸ After."""
+    """Thumbnails ▸ right-click the page ▸ Insert ▸ Insert Spreadsheet Page ▸ After."""
     w.show_panel("dock_pages", True)
     pump()
     strip = w.pages_panel.list
     rect = strip.visualItemRect(strip.item(page))
     seen = {}
-    click_through(["Insert Spreadsheet Page", "After"], seen)
+    click_through(["Insert", "Insert Spreadsheet Page", "After"], seen)
     local = rect.center()
     QApplication.sendEvent(strip.viewport(), QContextMenuEvent(
         QContextMenuEvent.Mouse, local, strip.viewport().mapToGlobal(local)))
     pump(6)
-    assert seen.get("clicked") == ["Insert Spreadsheet Page", "After"], seen
+    assert seen.get("clicked") == ["Insert", "Insert Spreadsheet Page", "After"], seen
     run = next(i for i in w.view.scene().items() if isinstance(i, SheetRunItem))
     return run
 

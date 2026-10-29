@@ -317,7 +317,7 @@ DIALOG_OPENERS = {
     "printdialog.open_advanced()": ("fresh", ["menu", ["File", "Print…"],
                                               {"inside": {"title": "Print",
                                                           "click": "Advanced"}}]),
-    "(no opener found)": ("two_pages", ["context", "thumbnail", ["Insert Pages", "After…"]]),
+    "(no opener found)": ("two_pages", ["context", "thumbnail", ["Insert", "Insert Pages", "After…"]]),
 }
 
 # dialogs that are also run once with OK (their defaults), to see them work
