@@ -48,6 +48,7 @@ class DocumentBook:
         self.workbook.journal = False           # the window's undo stack records pages
         self.workbook.outside = self._outside
         self.workbook.calc_variable = self.calc_variable
+        self.workbook.calc_expression = self.calc_expression
         self.workbook.reach = self._reach
         # SMath's custom units: a quantity the equations define is a unit in the cells
         import weakref
@@ -281,10 +282,11 @@ class DocumentBook:
         dn = wb.names.get((name.lower(), None))
         if dn is not None and not dn.variable:
             dn = None
-        if dn is not None:
-            home = self._kept_on(dn)
-            if home is sheet or (home is not None and home.book and home.book == sheet.book):
-                return dn
+        # never the sheet's own workbook's cell, Variable box or no: that is
+        # read as =name or by its address (the user, 2026-10-29: "calc(ting)
+        # will use ting inside the workbook if there is a ting … calc() should
+        # only use calcforge")
+        own = dn is not None and self._in_book_of(dn, sheet)
         ws = self._calc().worksheet
         held, evaluator.EXTERNAL = evaluator.EXTERNAL, self
         try:
@@ -294,11 +296,15 @@ class DocumentBook:
         if found is None:
             if name in evaluator.BUILTIN_CONSTANTS:
                 return self._outside(sheet, name)          # CALC(pi), CALC(e)
+            if own:
+                raise KeyError(self._own_cell(name, dn))
             raise KeyError(f"CALC({name}): there's no CalcForge variable {name} before this "
                            f"sheet")
         if found[1] is TABLES:
-            if dn is not None:
+            if dn is not None and not own:
                 return dn
+            if own:
+                raise KeyError(self._own_cell(name, dn))
             raise KeyError(f"CALC({name}): {name} isn't a CalcForge variable (a sheet's own "
                            f"name is read as Sheet!{name.rpartition('.')[2]})")
         try:
@@ -306,6 +312,54 @@ class DocumentBook:
         except KeyError:
             raise KeyError(f"CALC({name}): the equations' {name} isn't a value a cell can hold "
                            f"(a function, or not worked out yet)") from None
+
+    @staticmethod
+    def _own_cell(name: str, dn) -> str:
+        where = str(dn.refers_to or "").replace("$", "")
+        return (f"CALC({name}): {name} is this workbook's own cell — read it by its address"
+                + (f", ={where}" if where else ""))
+
+    def _in_book_of(self, dn, sheet: Sheet) -> bool:
+        """Whether the document name *dn* is a cell of *sheet*'s own workbook
+        (or of the sheet itself)."""
+        home = self._kept_on(dn)
+        return home is sheet or (home is not None and bool(home.book) and home.book == sheet.book)
+
+    def calc_expression(self, sheet: Sheet, text: str):
+        """What CALC(v1+v2) in a cell of *sheet* reads: the expression worked
+        out as an equation standing where the sheet is would work it out,
+        its names the CalcForge variables in force there (the user,
+        2026-10-29). KeyError(why) when it can't be."""
+        from calcforge.calc.engine import ast as A
+        from calcforge.calc.engine import evaluator
+        from calcforge.calc.engine.errors import SMathError
+        from calcforge.calc.engine.evaluator import Evaluator, IndexedContext
+        from calcforge.calc.engine.linear import parse_text
+        from calcforge.calc.engine.parser import parse_row
+        from calcforge.calc.engine.units import Quantity
+        from calcforge.calc.engine.values import Matrix, String
+
+        try:
+            node = parse_row(parse_text(text))
+        except Exception as e:                                     # noqa: BLE001
+            raise KeyError(f"CALC({text}): can't be read as an expression ({e})") from None
+        if isinstance(node, A.Define):
+            raise KeyError(f"CALC({text}): a cell can't define a CalcForge variable; "
+                           f"write it in an equation")
+        if isinstance(node, A.Evaluate):
+            node = node.expr                                       # a trailing = is allowed
+        ws = self._calc().worksheet
+        held, evaluator.EXTERNAL = evaluator.EXTERNAL, self
+        try:
+            value = Evaluator().eval(node, IndexedContext(ws.index, self._key(sheet)))
+        except SMathError as e:
+            raise KeyError(f"CALC({text}): {e}") from None
+        finally:
+            evaluator.EXTERNAL = held
+        if not isinstance(value, (Quantity, Matrix, String)):
+            raise KeyError(f"CALC({text}): isn't a value a cell can hold")
+        fmt = getattr(ws, "format", None)
+        return from_engine(value, bool(getattr(fmt, "engineering", True)))
 
     # -- the equations reading tables --------------------------------------------------------------
     def _hook_equations(self) -> None:
@@ -643,7 +697,18 @@ class DocumentBook:
         got = self._named(name, at_key)
         if got is None:
             return self.refused(name, at_key) is not None
-        return self._before(got[0], at_key) is not None
+        # a sheet's cell or name anywhere in the document, before or after:
+        # ``Sheet1.A1=`` stays a question (value() says when the sheet comes
+        # after), where SMath's rule made it a definition waiting for a
+        # value — "Fill in all empty elements" (the user, 2026-10-29)
+        return True
+
+    def _page_of(self, sheet: Sheet) -> Optional[int]:
+        """The 1-based page the sheet starts on, if it is on one."""
+        key = self._key(sheet)
+        if key[0] == float("inf"):
+            return None
+        return int(key[0] // STRIDE) + 1
 
     def refused(self, name: str, at_key=None) -> Optional[str]:
         """Why *name*, dialled in as Sheet.Name or Book.Name to a sheet or
@@ -694,7 +759,16 @@ class DocumentBook:
                 raise NotDefined(why)
             return None
         if self._before(got[0], at_key) is None:
-            return None
+            if "." not in name:
+                return None               # a bare name: "not defined", as any
+            # Sheet.A1 (Table.Name) dialled in to a sheet further on: why, so
+            # that "Sheet1.A1=" explains itself (the user, 2026-10-29)
+            from calcforge.calc.engine.errors import NotDefined
+
+            where = self._page_of(got[0])
+            raise NotDefined(f"{name}: {got[0].name} comes after this equation"
+                             + (f" (page {where})" if where else "")
+                             + "; an equation reads a sheet before it.")
         if self._seen(got, at_key) is None:
             from calcforge.calc.engine.errors import SMathError
 

@@ -490,6 +490,41 @@ def markups(path: str, indices: list[int], keep_the_look: bool = True,
     return found
 
 
+def read_pending_annotations(page, pending: tuple, document, source=None) -> list[dict]:
+    """The markups a page's own annotations are, read now (import_pages
+    left them unread: *pending* is (the file's asset key, the page's index
+    in it, the scale onto the page's paper)). Which annotations became
+    markups goes on the page — it goes on drawing them, which is what makes
+    somebody else's drawing look like theirs, and leaves out the ones taken
+    over since. *source*: the file already open (pdfvector.PdfFile), else
+    it is opened here."""
+    from . import pdfmarkups, pdfvector
+
+    key, index, onto = pending
+    page._pending_annotations = None
+    opened = None
+    was = document.modified             # the pictures read are assets: not an edit
+    try:
+        if source is None:
+            opened = source = pdfvector.PdfFile.from_bytes(document.asset(key) or b"")
+        made = pdfmarkups.markups_of_page(
+            source, index, keep_the_look=True,
+            picture_of=lambda png: document.add_asset(png, "png") if png else "")
+    except Exception:                                  # noqa: BLE001
+        made = []
+    finally:
+        if opened is not None:
+            opened.close()
+        document.modified = was
+    if not made:
+        return []
+    page.markup_annotations = list(dict.fromkeys(
+        int(payload.get("from_annotation") or payload.get("split_from_annotation"))
+        for payload in made
+        if payload.get("from_annotation") or payload.get("split_from_annotation")))
+    return _scaled_markups(made, onto)
+
+
 def _scaled_markups(payloads: list[dict], scale: float) -> list[dict]:
     """The same markups on differently sized paper.
 
@@ -635,7 +670,6 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
     template = document.pages[at - 1].setup if at else (
         document.pages[-1].setup if document.pages else None)
     drawn = line_work(path, indices) if vectors else {}
-    marked = markups(path, indices, document=document) if annotations else {}
     created: list[Page] = []
     source_heights: dict[int, float] = {}
     try:
@@ -650,19 +684,12 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
                 across = info.width_pt or 1.0
                 page._pending_items = _items_from(
                     drawn[index], page.setup.width_pt / across)
-            if index in marked:
+            if annotations:
+                # read when the page is looked at, or asked for
+                # (read_pending_annotations): a set of hundreds of marked-up
+                # sheets opened in the time it took to read them all
                 across = info.width_pt or 1.0
-                onto = page.setup.width_pt / across
-                page._pending_items = list(page._pending_items) + _scaled_markups(
-                    marked[index], onto)
-                # Which of the page's annotations became markups. The page
-                # goes on drawing them — that is what makes somebody else's
-                # drawing look like theirs — and leaves out the ones that have
-                # since been taken over or deleted.
-                page.markup_annotations = list(dict.fromkeys(
-                    int(payload.get("from_annotation") or payload.get("split_from_annotation"))
-                    for payload in marked[index]
-                    if payload.get("from_annotation") or payload.get("split_from_annotation")))
+                page._pending_annotations = (pdf_key, index, page.setup.width_pt / across)
             page.pdf_key = pdf_key
             page.pdf_page_index = index
             page.source_note = f"{os.path.basename(path)} page {index + 1}"

@@ -458,8 +458,8 @@ def markups_to_place(document, printed: list, carried=None) -> Appearances:
     kept = set() if carried is None else set(carried)
     for index, page in enumerate(printed):
         frame = page.frame
-        if frame is None:
-            continue
+        if frame is None or frame.file_only():
+            continue                      # (nothing of ours yet: the page is as its file has it)
         preserved = bool(page.pdf_key and page.pdf_page_index is not None
                          and page.background_opacity == 1.0
                          and document.asset(page.pdf_key))

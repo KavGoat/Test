@@ -319,8 +319,7 @@ def _file_facts(document, sources: dict, carried: set, layers: dict,
         wanted = set(page.markup_annotations)
         frame = page.frame
         if frame is not None:
-            wanted |= {int(item.from_annotation) for item in frame.markups()
-                       if getattr(item, "from_annotation", 0)}
+            wanted |= frame.annotation_links()        # (nothing built for the asking)
         else:
             wanted |= {int(payload.get("from_annotation") or 0)
                        for payload in page._pending_items if isinstance(payload, dict)}
@@ -477,7 +476,9 @@ def _draw_a_layer(output, document, leftovers: list, opened: list,
     from . import calclayer
 
     written = document.pages if pages is None else pages
-    drawn = [page for page in written if page.frame is not None]
+    # (a page whose markups are all still its file's, not even read yet, has
+    # nothing of ours to draw, and is not built for a save)
+    drawn = [page for page in written if page.frame is not None and not page.frame.file_only()]
     if kind == calclayer.CALC:
         drawn = [page for page in drawn
                  if getattr(page, "sheet", None) is not None
@@ -684,6 +685,11 @@ def _take_the_file_back(document, data: bytes, record: dict, assets: dict) -> No
                 page["pdf_page_index"] = index
                 if page.get("written_here") is None:
                     page["written_here"] = True
+            if page.get("annotations_unread") is not None:
+                # never read as markups: nothing of ours is on the page, and
+                # they are read when it is looked at (Page.from_dict)
+                pages.append(page)
+                continue
             new, replaced = _sort_the_annotations(source, index, page)
             if new:
                 foreign[index] = (new, replaced)

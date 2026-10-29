@@ -1393,10 +1393,18 @@ def ISNA(x):
 
 @fn("CALC", least=1, most=1, lazy=True)
 def _calc_variable(ctx, args):
-    """CALC(x) is read by the parser as the CalcForge variable x
-    (formula.DocVar, evaluate._calc_var); here only for its place in the
+    """CALC(x) is read by the parser as the CalcForge variable x, CALC(v1+v2)
+    as an expression of theirs (formula.DocVar, formula.DocExpr,
+    evaluate._calc_var, evaluate._calc_expr); here only for its place in the
     function list, its tip and the manual."""
-    return NAME.because("CALC takes the name of a CalcForge variable, as CALC(PGA)")
+    return NAME.because("CALC takes a CalcForge variable or expression, as CALC(PGA) or "
+                        "CALC(v1+v2)")
+
+
+@fn("CF", least=1, most=1, lazy=True)
+def _cf_variable(ctx, args):
+    """CF(x): CALC(x) in two letters (the user, 2026-10-29); Excel has no CF."""
+    return NAME.because("CF takes a CalcForge variable or expression, as CF(PGA) or CF(v1+v2)")
 
 
 @fn("ISREF", least=1, most=1)

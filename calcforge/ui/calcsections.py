@@ -36,6 +36,11 @@ class Section:
         name = f" · {self.title}" if self.title else ""
         return f"Section {self.number}{name} ({pages})"
 
+    @property
+    def short(self) -> str:
+        """Its title, or "Section N": what fits on a thumbnail's tag."""
+        return self.title or f"Section {self.number}"
+
 
 def sections(document) -> list:
     """The document's calculation sections, first to last."""

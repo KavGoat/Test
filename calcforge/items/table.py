@@ -99,6 +99,7 @@ def border_pen(b: Border) -> QPen:
 # fifths of the size, lifted by about half the capitals' height.
 SUP_SIZE = 0.8
 SUP_RISE = 0.55
+SUB_DROP = 0.3       # a lowered run's baseline, below the line's, in cap heights
 _SUP_FONTS: dict = {}
 _FONT_METRICS: dict = {}
 
@@ -151,7 +152,7 @@ class Drawn:
         self.width = width
 
     def _advance(self, t: str, kind: str) -> float:
-        if kind == "sup":
+        if kind in _SMALL:
             return _font_metrics(_sup_font(self.font)).horizontalAdvance(t)
         return self.metrics.horizontalAdvance(t)
 
@@ -160,15 +161,28 @@ class Drawn:
         return self.metrics.capHeight() * SUP_RISE
 
     @property
+    def drop(self) -> float:
+        return self.metrics.capHeight() * SUB_DROP
+
+    @property
     def ascent(self) -> float:
         a = self.metrics.ascent()
-        if any(kind == "sup" for _t, kind in self.runs):
+        if any(kind in ("sup", "up") for _t, kind in self.runs):
             a = max(a, self.rise + _font_metrics(_sup_font(self.font)).ascent())
         return a
 
     @property
     def descent(self) -> float:
-        return self.metrics.descent()
+        d = self.metrics.descent()
+        if any(kind == "down" for _t, kind in self.runs):
+            d = max(d, self.drop + _font_metrics(_sup_font(self.font)).descent())
+        return d
+
+    @property
+    def rich(self) -> bool:
+        """Whether the text itself has raised or lowered parts (Excel's
+        superscript and subscript runs), rather than a unit's powers."""
+        return any(kind in ("up", "down") for _t, kind in self.runs)
 
     @property
     def plain(self) -> bool:
@@ -187,10 +201,18 @@ class Drawn:
         for t, kind in self.runs:
             if not t:
                 continue
-            if kind == "sup":
+            if kind == "sup":                        # a unit's power: SMath's blue
                 painter.setFont(_sup_font(font))
                 painter.setPen(UNIT_BLUE)
                 painter.drawText(QPointF(x, y - self.rise), t)
+            elif kind == "up":                       # the text's own superscript
+                painter.setFont(_sup_font(font))
+                painter.setPen(ink)
+                painter.drawText(QPointF(x, y - self.rise), t)
+            elif kind == "down":                     # and subscript
+                painter.setFont(_sup_font(font))
+                painter.setPen(ink)
+                painter.drawText(QPointF(x, y + self.drop), t)
             else:
                 painter.setFont(font)
                 painter.setPen(UNIT_BLUE if kind else ink)
@@ -213,6 +235,16 @@ def _unit_blue() -> QColor:
 
 
 _LINES: dict = {}
+_SMALL = ("sup", "up", "down")       # the runs drawn in the smaller font
+
+
+def rich_runs(st: Style, text: str) -> Optional[list]:
+    """The style's raised and lowered runs, while *text* is still the text
+    they spell (Excel's rich text, xlsx.py); None once it is retyped."""
+    runs = st.runs
+    if not runs or "".join(t for t, _kind in runs) != text:
+        return None
+    return [(t, kind) for t, kind in runs]
 
 
 def _line(text: str, unit: Optional[str], st: Style, metrics: QFontMetricsF) -> Drawn:
@@ -221,10 +253,10 @@ def _line(text: str, unit: Optional[str], st: Style, metrics: QFontMetricsF) -> 
     for every picture of the sheet drawn. (Its own copy of the font: the
     one a cell shrinks to fit is changed where it is drawn.)"""
     key = (text, unit, st.font or DEFAULT_FONT, st.size or DEFAULT_SIZE, bool(st.bold),
-           bool(st.italic), bool(st.underline), bool(st.strike))
+           bool(st.italic), bool(st.underline), bool(st.strike), st.runs)
     got = _LINES.get(key)
     if got is None or got.metrics is not metrics:
-        got = Drawn(text, unit, cell_font(st), metrics)
+        got = Drawn(text, unit, cell_font(st), metrics, rich_runs(st, text))
         if len(_LINES) > 20000:
             _LINES.clear()
         _LINES[key] = got
@@ -820,7 +852,7 @@ class TableItem(MarkupItem):
         the number on one line and its unit under it (where Qt's word wrap
         broke "3 kN/m^2"), each line drawn as an unwrapped one is."""
         metrics = line.metrics
-        if line.width <= inner.width():
+        if line.width <= inner.width() or line.rich:
             lines = [line]
         else:
             number = line.runs[0][0].rstrip()

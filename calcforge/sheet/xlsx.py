@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import colorsys
 import datetime as _dt
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -454,12 +455,13 @@ def _read_workbook(path: str, taken: Optional[set] = None,
     import openpyxl
     from openpyxl.utils import range_boundaries
 
-    wb = openpyxl.load_workbook(path, data_only=False, rich_text=False)
+    wb = openpyxl.load_workbook(path, data_only=False, rich_text=True)
     try:
         cached = openpyxl.load_workbook(path, data_only=True, read_only=True)
     except Exception:  # noqa: BLE001
         cached = None
     newer = _x14_validations(path)
+    newer_rules = _x14_cond_formats(path)
     from .xlsxpictures import drawing_pictures
     drawn = drawing_pictures(path)          # every picture, metafiles too (openpyxl drops them)
     theme = _theme_colours(wb)
@@ -519,6 +521,12 @@ def _read_workbook(path: str, taken: Optional[set] = None,
             for c in row:
                 r, k = c.row - 1, c.column - 1
                 value = c.value
+                runs = None
+                if type(value).__name__ == "CellRichText":
+                    # Excel's rich text: kN/m with a raised 3 (the user,
+                    # 2026-10-29: "super and subscripts not showing properly")
+                    runs = _rich_runs(value)
+                    value = str(value)
                 text = None
                 if value is not None and type(value).__name__ == "ArrayFormula":
                     # a dynamic array (or an old Ctrl+Shift+Enter one): its
@@ -572,10 +580,12 @@ def _read_workbook(path: str, taken: Optional[set] = None,
                     st = dict(st)
                 else:
                     st = {}
+                if runs and text:
+                    st["runs"] = runs
                 comment = c.comment.text if c.comment is not None else None
                 if text is None and not st and not comment:
                     continue
-                key = tuple(sorted((a, tuple(b) if isinstance(b, list) else b) for a, b in st.items()))
+                key = tuple(sorted((a, _frozen(b)) for a, b in st.items()))
                 index = style_index.get(key)
                 if index is None:
                     index = len(styles) if st else 0
@@ -621,7 +631,8 @@ def _read_workbook(path: str, taken: Optional[set] = None,
             "gridlines": bool(ws.sheet_view.showGridLines if ws.sheet_view.showGridLines is not None
                               else True),
             "headings": bool(ws.print_options.headings) if ws.print_options else False,
-            "names": [], "cond_rules": _cond_rules(ws, theme, renamed),
+            "names": [], "cond_rules": _cond_rules(ws, theme, renamed,
+                                                   newer_rules.get(ws.title, ())),
             "validations": _validations(ws, renamed, newer.get(ws.title, ())),
             "filter": None, "filtered_rows": [],
             "page": page,
@@ -638,6 +649,7 @@ def _read_workbook(path: str, taken: Optional[set] = None,
         if setup is not None and setup.fitToWidth not in (None, 0, 1) and _fits_to_page(ws):
             left_out.append(f"fitting “{ws.title}” to {int(setup.fitToWidth)} pages wide "
                             f"(its columns that fit print, the rest is scratch)")
+        _scale_to_the_design(data, paper, orientation, margins)
         sheets.append(ImportedSheet(name, data, paper, orientation, margins,
                                     ws.sheet_state != "visible", excel_values, charts,
                                     pictures))
@@ -738,16 +750,36 @@ def _page_options(ws, renamed) -> dict:
     return out
 
 
-def _cond_rules(ws, theme, renamed) -> list:
+def _cond_rules(ws, theme, renamed, extra=()) -> list:
+    """The sheet's conditional formats: openpyxl's, and *extra*, the ones
+    Excel keeps in its 2010 extension list (_x14_cond_formats), which
+    openpyxl drops — any rule whose formula reads another sheet goes there,
+    so a sheet's "blue when the choice in B is a material" rule was read for
+    some columns and not others (the user, 2026-10-29: "all four input cells
+    should be blue but it is not")."""
     from openpyxl.utils import range_boundaries
     out = []
     try:
-        blocks = list(ws.conditional_formatting)
+        blocks = [(str(cf.sqref), list(cf.rules)) for cf in ws.conditional_formatting]
     except Exception:  # noqa: BLE001
-        return out
-    for cf in blocks:
+        blocks = []
+    if extra:
+        # a rule of the extension list may point at the workbook's shared
+        # differential styles instead of carrying its own
+        try:
+            shared = list(ws.parent._differential_styles.styles)
+        except AttributeError:
+            shared = []
+        for _sqref, rule in extra:
+            if rule.dxf is None and getattr(rule, "dxf_id", None) is not None:
+                try:
+                    rule.dxf = shared[int(rule.dxf_id)]
+                except (ValueError, IndexError):
+                    pass
+    blocks += [(sqref, [rule]) for sqref, rule in extra]
+    for sqref, rules in blocks:
         ranges = []
-        for part in str(cf.sqref).split():
+        for part in str(sqref).split():
             try:
                 l, t, r, b = range_boundaries(part)
                 ranges.append([t - 1, l - 1, b - 1, r - 1])
@@ -755,7 +787,7 @@ def _cond_rules(ws, theme, renamed) -> list:
                 continue
         if not ranges:
             continue
-        for rule in cf.rules:
+        for rule in rules:
             got = _rule(rule, theme, renamed)
             if got is not None:
                 got["ranges"] = [list(x) for x in ranges]
@@ -763,6 +795,153 @@ def _cond_rules(ws, theme, renamed) -> list:
                 out.append((rule.priority or 0, len(out), got))
     # Excel's priority runs across the whole sheet, not within each range
     return [got for _p, _i, got in sorted(out, key=lambda x: x[:2])]
+
+
+def _x14_cond_formats(path: str) -> dict:
+    """{worksheet name: [(sqref, rule)]} — the conditional formats Excel
+    writes in its 2010 extension list, each rule shaped as openpyxl's (type,
+    operator, formula, dxf, text, …) for _rule. Rules whose look is only in
+    the extension (data bars with their newer settings) are left to the
+    plain copy Excel writes beside them."""
+    import xml.etree.ElementTree as ET
+    import zipfile
+    from types import SimpleNamespace
+    out: dict = {}
+    try:
+        archive = zipfile.ZipFile(path)
+    except (OSError, zipfile.BadZipFile):
+        return out
+    with archive:
+        try:
+            from openpyxl.styles.differential import DifferentialStyle
+        except ImportError:                             # pragma: no cover
+            return out
+        for name, part in _sheet_parts(archive).items():
+            try:
+                data = archive.read(part)
+            except KeyError:
+                continue
+            if b"x14:conditionalFormatting" not in data:
+                continue
+            try:
+                root = ET.fromstring(data)
+            except ET.ParseError:
+                continue
+            found = []
+            for cf in root.iter(_X14 + "conditionalFormatting"):
+                sqref = cf.find(_XM + "sqref")
+                where = sqref.text.strip() if sqref is not None and sqref.text else ""
+                if not where:
+                    continue
+                for rule in cf.findall(_X14 + "cfRule"):
+                    kind = rule.get("type")
+                    if kind in (None, "dataBar", "iconSet", "colorScale"):
+                        continue
+                    dxf_node = rule.find(_X14 + "dxf")
+                    dxf = None
+                    if dxf_node is not None:
+                        try:
+                            dxf = DifferentialStyle.from_tree(dxf_node)
+                        except Exception:  # noqa: BLE001
+                            dxf = None
+                    try:
+                        priority = int(rule.get("priority") or 0)
+                    except ValueError:
+                        priority = 0
+                    yes = lambda key: rule.get(key) in ("1", "true")      # noqa: E731
+                    found.append((where, SimpleNamespace(
+                        type=kind, operator=rule.get("operator"),
+                        formula=[f.text or "" for f in rule.findall(_XM + "f")],
+                        dxf=dxf, dxf_id=rule.get("dxfId"), text=rule.get("text"),
+                        rank=rule.get("rank"), bottom=yes("bottom"), percent=yes("percent"),
+                        aboveAverage=None if rule.get("aboveAverage") is None else
+                        yes("aboveAverage"), equalAverage=yes("equalAverage"),
+                        timePeriod=rule.get("timePeriod"), priority=priority,
+                        stopIfTrue=yes("stopIfTrue"))))
+            if found:
+                out[name] = found
+    return out
+
+
+def _rich_runs(value) -> Optional[list]:
+    """Excel's rich text as [[text, ""|"up"|"down"], …] — its superscript and
+    subscript runs and the plain text between — or None when nothing in it
+    is raised or lowered (bold or coloured words alone stay plain text)."""
+    runs: list = []
+    for block in value:
+        text = str(block) if isinstance(block, str) else str(getattr(block, "text", "") or "")
+        if not text:
+            continue
+        font = getattr(block, "font", None)
+        kind = {"superscript": "up", "subscript": "down"}.get(
+            getattr(font, "vertAlign", None) or "", "")
+        if runs and runs[-1][1] == kind:
+            runs[-1][0] += text
+        else:
+            runs.append([text, kind])
+    if not any(kind for _t, kind in runs):
+        return None
+    return runs
+
+
+def _frozen(value):
+    """A style entry as a dictionary key."""
+    if isinstance(value, list):
+        return tuple(_frozen(v) for v in value)
+    return value
+
+
+NEARLY_A_PAGE = 0.06     # a print area running over a page by this much or less
+
+
+def _scale_to_the_design(data: dict, paper, orientation, margins) -> None:
+    """Excel's Adjust to N % on a sheet with a print area: when the area at
+    that scale runs over the page by a hair — the last row or two of 47 on
+    a page of their own, a last column on its own page — the scale comes
+    down the percent or two that fits it, as the designer saw it fit in
+    Excel (whose page breaks fall from pixel rounding at the printer rather
+    than from points; the user, 2026-10-29: "the page size doesn't match
+    when importing, but the spreadsheets are designed already")."""
+    page = data.get("page") or {}
+    area = page.get("print_area")
+    if not area or page.get("fit_width") or page.get("fit_tall") or not paper:
+        return
+    from ..core.document import MM_TO_PT, PAGE_SIZES
+    from .pagination import HEADING_H, HEADING_W
+    size = PAGE_SIZES.get(paper)
+    if size is None:
+        return
+    wide_mm, tall_mm = size
+    if orientation == "landscape":
+        wide_mm, tall_mm = tall_mm, wide_mm
+    left, top, right, bottom = margins or (19.05, 19.05, 19.05, 19.05)
+    room_w = (wide_mm - left - right) * MM_TO_PT
+    room_h = (tall_mm - top - bottom) * MM_TO_PT
+    if page.get("print_headings"):
+        room_w -= HEADING_W
+        room_h -= HEADING_H
+    scale = max(10, min(400, int(page.get("scale") or 100)))
+    widths = {int(k): float(v) for k, v in data.get("widths", {}).items()}
+    heights = {int(k): float(v) for k, v in data.get("heights", {}).items()}
+    hidden_cols = set(data.get("hidden_cols", []))
+    hidden_rows = set(data.get("hidden_rows", []))
+    default_w = float(data.get("default_width", 48.0))
+    default_h = float(data.get("default_height", 15.0))
+    top_row, left_col, bottom_row, right_col = (int(v) for v in area)
+    wide = sum(widths.get(c, default_w) for c in range(left_col, right_col + 1)
+               if c not in hidden_cols) * scale / 100.0
+    tall = sum(heights.get(r, default_h) for r in range(top_row, bottom_row + 1)
+               if r not in hidden_rows) * scale / 100.0
+    best = scale
+    for used, room in ((wide, room_w), (tall, room_h)):
+        if used <= 0 or room <= 0:
+            continue
+        pages = used / room
+        whole = math.floor(pages)
+        if whole >= 1 and 0 < pages - whole <= NEARLY_A_PAGE:
+            best = min(best, int(math.floor(scale * whole / pages)))
+    if 10 <= best < scale:
+        page["scale"] = best
 
 
 def _dxf_format(dxf, theme) -> dict:

@@ -140,7 +140,7 @@ def _frames(item, others: bool = False) -> list:
         for frame in getattr(scene, "frames", []) or []:
             if frame in frames:
                 continue
-            for other in frame.markups():
+            for other in frame.built_markups():
                 if getattr(other, "TYPE", "") == "chart" and sheet.name.lower() in sheets_read(other.spec):
                     frames.append(frame)
                     break
@@ -623,7 +623,7 @@ class TableEditing:
         # rebuilt by undo or redo: the same table under the same uid
         scene = self.view.scene()
         for frame in getattr(scene, "frames", []) or []:
-            for other in frame.markups():
+            for other in frame.built_markups():
                 if isinstance(other, TableItem) and other.uid == self._uid:
                     self._item = other
                     other.opened = True
@@ -1029,7 +1029,44 @@ class TableEditing:
         if scroll_to_cell(self.view, item, cell):
             return                         # panes frozen: kept below and right of them
         rect = item.mapRectToScene(item.cell_rect(*cell))
+        bars = self.view.verticalScrollBar(), self.view.horizontalScrollBar()
+        before = bars[0].value(), bars[1].value()
         self.view.ensureVisible(rect, 8, 8)
+        if (bars[0].value(), bars[1].value()) != before:
+            self._align_to_cells(item, cell)
+
+    def _align_to_cells(self, item, cell) -> None:
+        """Scrolled to bring *cell* in: the sheet shown alone starts on whole
+        cells, as Excel's window does — never half a row under the headings
+        or half a column past the row numbers (the user, 2026-10-29: "using
+        arrows to scroll should never half scroll over a cell") — the cell
+        kept in sight: the cut row goes whole when it is the cell's, else the
+        next whole row comes to the top."""
+        import bisect
+
+        from ..items.table import HEADING_H, ROWNUM_W
+        from .sheetview import _item, run_shown
+        view = self.view
+        window = getattr(view, "window", None)
+        if window is None or getattr(window, "view", None) is not view \
+                or _item(window, run_shown(view.scene())) is not item or not hasattr(item, "edges"):
+            return                      # on the pages, a sheet scrolls as the paper does
+        k = max(view.transform().m11(), 0.05)
+        xs, ys = item.edges()
+        seen = item.mapRectFromScene(view.mapToScene(view.viewport().rect()).boundingRect())
+        rect = item.cell_rect(*cell)
+        top = seen.top() + HEADING_H
+        r = max(0, bisect.bisect_right(ys, top + 1e-6) - 1)
+        if r < len(ys) - 1 and top - ys[r] > 0.5:
+            wanted = ys[r] if rect.top() < ys[r + 1] - 1e-6 else ys[r + 1]
+            bar = view.verticalScrollBar()
+            bar.setValue(bar.value() + int(round((wanted - top) * k)))
+        left = seen.left() + ROWNUM_W
+        c = max(0, bisect.bisect_right(xs, left + 1e-6) - 1)
+        if c < len(xs) - 1 and left - xs[c] > 0.5:
+            wanted = xs[c] if rect.left() < xs[c + 1] - 1e-6 else xs[c + 1]
+            bar = view.horizontalScrollBar()
+            bar.setValue(bar.value() + int(round((wanted - left) * k)))
 
     def _status_soon(self) -> None:
         """Excel's status bar in the workbook view: its mode and the sums
@@ -2082,6 +2119,7 @@ class TableEditing:
         had_copied = self.copied is not None
         self.copied = None
         cell = self.active
+        self._scroll_to(cell)              # typing into a cell out of sight brings it in (2026-10-29)
         current = item.sheet.input(*cell)
         editor = self.editor
         if editor is None:
@@ -3386,7 +3424,7 @@ class TableEditing:
     def _all_tables(self) -> list:
         out = []
         for frame in getattr(self.view.scene(), "frames", []) or []:
-            out.extend(i for i in frame.markups() if isinstance(i, TableItem))
+            out.extend(i for i in frame.built_markups() if isinstance(i, TableItem))
         return out
 
     def _selected_table(self) -> Optional[TableItem]:

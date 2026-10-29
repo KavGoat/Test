@@ -132,6 +132,28 @@ class _InlineEditor(QGraphicsTextItem):
             self.set_script("sub" if text == "_" else "super")
             event.accept()
             return
+        if text == "\\" and not (event.modifiers() & Qt.ControlModifier):
+            # an equation inside the box (items/inline_equations.py): {\ }
+            # opened, the caret inside it, to type 5+2= or t:=5 into
+            cursor = self.textCursor()
+            cursor.insertText("{\\}")
+            cursor.movePosition(QTextCursor.Left)
+            self.setTextCursor(cursor)
+            event.accept()
+            return
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not event.modifiers():
+            # Enter inside an open {\…} steps out past its }, as typing on
+            # would; a new line comes from the next Enter
+            cursor = self.textCursor()
+            raw = self.document().toPlainText()
+            at = cursor.position()
+            from .inline_equations import inline_fields
+            for match, _body in inline_fields(raw):
+                if match.start() < at < match.end():
+                    cursor.setPosition(match.end())
+                    self.setTextCursor(cursor)
+                    event.accept()
+                    return
         if text and (text in self.ENDS_A_RUN or event.key() in (Qt.Key_Return,
                                                                 Qt.Key_Enter)):
             self.set_script("")
@@ -439,7 +461,86 @@ class _TextBase(MarkupItem):
         # A bookmark titled with these words, wherever the box is moved to
         # (the user, 2026-10-15; kept in step by MainWindow.sync_text_bookmarks)
         self.auto_bookmark = False
+        # the equations typed inside the box, {\5+2=} (items/inline_equations.py)
+        self._equations_link = None
+        self._field_spans: list = []
         self.doc.contentsChanged.connect(self._on_contents_changed)
+
+    # -- equations inside the box (the user, 2026-10-29) --------------------------
+    def sync_equations(self) -> None:
+        """The regions the box's inline equations are worked out with, as
+        its words and place now say."""
+        from .inline_equations import InlineEquations, has_inline
+        link = getattr(self, "_equations_link", None)
+        if link is None:
+            doc = getattr(self, "doc", None)
+            if doc is None or not has_inline(doc.toPlainText()):
+                return
+            link = self._equations_link = InlineEquations(self)
+        link.sync()
+
+    def itemChange(self, change, value):
+        result = super().itemChange(change, value)
+        if change in (QGraphicsItem.ItemParentHasChanged, QGraphicsItem.ItemSceneHasChanged,
+                      QGraphicsItem.ItemPositionHasChanged,
+                      QGraphicsItem.ItemRotationHasChanged):
+            self.sync_equations()
+        return result
+
+    def text_origin(self) -> QPointF:
+        """Where the words start in the box (paint_text's corner)."""
+        rect = self.text_rect()
+        offset = 0.0
+        if self.style.valign in ("middle", "bottom"):
+            spare = rect.height() - self._words_height()
+            offset = max(spare, 0) * (0.5 if self.style.valign == "middle" else 1.0)
+        return QPointF(rect.left(), rect.top() + offset + self._bluebeam_nudge(rect.height(),
+                                                                               offset))
+
+    def inline_field_at(self, scene_pos: QPointF) -> Optional[tuple]:
+        """The inline equation under *scene_pos* on the box as it is shown
+        (its results in place): (k, raw from, raw to, body), or None."""
+        from .fields import shown_document
+        if self._editing:
+            return None
+        shown = shown_document(self, on_screen=True)
+        shown.size()                            # laid out, if not drawn yet
+        local = self.mapFromScene(scene_pos) - self.text_origin()
+        at = shown.documentLayout().hitTest(local, Qt.FuzzyHit)
+        if at < 0:
+            return None
+        k = 0
+        for start, end, raw_start, raw_end, body in getattr(self, "_field_spans", []):
+            if not body.startswith("\\"):
+                continue
+            if start <= at <= end:
+                return (k, raw_start, raw_end, body[1:])
+            k += 1
+        return None
+
+    def inline_field(self, k: int) -> Optional[tuple]:
+        """The k-th inline equation in the words as typed: (raw from, raw
+        to, body)."""
+        from .inline_equations import inline_fields
+        fields = inline_fields(self.doc.toPlainText())
+        if 0 <= k < len(fields):
+            match, body = fields[k]
+            return (match.start(), match.end(), body)
+        return None
+
+    def select_field(self, k: int) -> bool:
+        """While being edited: the k-th inline equation's text picked out,
+        ready to be retyped."""
+        editor = self._editor
+        field = self.inline_field(k)
+        if editor is None or field is None:
+            return False
+        start, end, body = field
+        cursor = editor.textCursor()
+        cursor.setPosition(start + 2 + (1 if body.lstrip().startswith("!") else 0))
+        cursor.setPosition(end - 1, QTextCursor.KeepAnchor)
+        editor.setTextCursor(cursor)
+        return True
 
     # -- content -----------------------------------------------------------
     def text(self) -> str:
@@ -450,6 +551,7 @@ class _TextBase(MarkupItem):
         self.doc.setPlainText(text)
         self._spacing_applied = 1.0           # plain lines, single-spaced
         self.apply_style()
+        self.sync_equations()
 
     def html(self) -> str:
         return self.doc.toHtml()
@@ -485,6 +587,7 @@ class _TextBase(MarkupItem):
             self.doc.setDefaultFont(self.style.font())
             self._apply_line_spacing()
             self._fit_height()
+        self.sync_equations()
 
     def _unpin_the_box_size(self) -> None:
         """Let the runs take the box's own size again after loading.
@@ -1341,6 +1444,7 @@ class _TextBase(MarkupItem):
 
     def end_edit(self) -> None:
         self.written = self.doc.toPlainText()
+        self._fields_shown = None
         self.check_spelling(False)
         if self._editor is not None:
             self._editor.setTextInteractionFlags(Qt.NoTextInteraction)
@@ -1358,6 +1462,7 @@ class _TextBase(MarkupItem):
         self._editing = False
         self.apply_style()
         self._restore_after_edit()
+        self.sync_equations()
         self.update()
 
     @property

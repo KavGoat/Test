@@ -26,7 +26,7 @@ def runs_of(window, book_id: str) -> list:
     from ..items.sheetpage import SheetRunItem
     out = []
     for frame in getattr(window.view.scene(), "frames", []) or []:
-        for item in frame.markups():
+        for item in frame.built_markups():
             if isinstance(item, SheetRunItem) and item.sheet is not None \
                     and item.sheet.book == book_id:
                 out.append(item)
@@ -87,7 +87,7 @@ def open_sheet(window):
         return None
     uid = pages[index].sheet
     for frame in getattr(window.view.scene(), "frames", []) or []:
-        for markup in frame.markups():
+        for markup in frame.built_markups():
             if getattr(markup, "uid", None) == uid and book_of(getattr(markup, "sheet", None)):
                 return markup.sheet
     return None

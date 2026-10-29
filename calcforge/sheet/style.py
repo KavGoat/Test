@@ -43,6 +43,10 @@ class Style:
     diagonal_down: Optional[Border] = None
     locked: bool = True
     hidden: bool = False
+    runs: Optional[tuple] = None             # ((text, ""|"up"|"down"), …): a text's
+    #                                          raised and lowered parts, as Excel's
+    #                                          rich text (kN/m³ typed as kN/m + ³);
+    #                                          drawn while the text is as they spell it
 
     def changed(self, **kw) -> "Style":
         return replace(self, **kw)

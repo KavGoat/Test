@@ -5,10 +5,16 @@ good enough ... Bluebeam looks better in zoomed out mode and more legible";
 fuzzy at all?"; 2026-10-22: "Markup still fuzzy, only PDF lines should be
 fuzzy; the min line width should reduce based on how much it's zoomed out").
 
-The drawing (pdf/engine.thinnest_line): below 100 % no line thinner than
-1.4 device pixels just below 100 %, easing by the same step for each halving
-of the zoom to one pixel at 25 % and below, still smoothed — dark and soft
-where there is room, and a dense sheet far out does not fill in.
+The drawing, crisp (pdf/engine.CRISP_ZOOMED_OUT, on to start; the user,
+2026-10-29: "fuzzy is not good … Bluebeam looks clear when zoomed out"):
+below 100 % its line work is drawn on the pixels, every line at least a
+pixel and a hair, nothing smoothed into grey, as Revu draws a sheet at
+fit-to-page; words keep their smoothing. With Preferences ▸ Crisp lines
+zoomed out off, the drawing is as it was (pdf/engine.thinnest_line): below
+100 % no line thinner than 1.4 device pixels just below 100 %, easing by the
+same step for each halving of the zoom to one pixel at 25 % and below, still
+smoothed — dark and soft where there is room, and a dense sheet far out does
+not fill in.
 
 Markups (ui/markuplayer.drawn_sharp): below 100 % every stroke — lines,
 rectangles, slants, clouds, ellipses, arrows, freehand — is drawn without
@@ -47,6 +53,15 @@ PAPER, INK = 250, 5
 def _soft(values) -> bool:
     """A grey between paper and black: smoothing."""
     return bool(((values > 40) & (values < 215)).any())
+
+
+@pytest.fixture
+def smoothed():
+    """The drawing as before: Preferences ▸ Crisp lines zoomed out off."""
+    from calcforge.io import pdftiles
+    pdftiles.TILES.configure(crisp_zoomed_out=False)
+    yield
+    pdftiles.TILES.configure(crisp_zoomed_out=True)
 
 
 def _sheet(path=None) -> pymupdf.Document:
@@ -116,7 +131,64 @@ def test_the_drawings_thinnest_line_eases_down_with_the_zoom():
 
 
 @pytest.mark.parametrize("scale", [0.75, 0.5, 0.37, 0.25, 0.12])
-def test_a_zoomed_out_hairline_is_as_wide_as_the_curve_says_with_soft_edges(scale):
+def test_crisp_a_zoomed_out_hairline_is_whole_pixels_of_black(scale):
+    from calcforge.pdf import engine
+
+    assert engine.crisp_at(scale)
+    found = list(_hairlines(_render(scale), scale))
+    for rows, ink in found:
+        assert not _soft(rows), f"a hairline smoothed at {scale}: {rows.round()}"
+        assert 1 - 1e-6 <= ink <= 2 + 1e-6, f"a hairline held {ink:.2f} rows at {scale}"
+    single = sum(1 for _rows, ink in found if ink < 1.5)
+    assert single >= len(found) * 3 // 4, f"only {single} of {len(found)} hairlines one row at {scale}"
+
+
+@pytest.mark.parametrize("scale", [0.75, 0.5, 0.25, 0.15])
+def test_crisp_a_sloping_hairline_is_unbroken_and_a_red_one_stays_red(scale):
+    rgb = _render(scale)
+    grey = rgb.mean(axis=2)
+    for x in range(int(45 * scale), int(555 * scale)):
+        y = (700 + 30 * (x / scale - 40) / 520) * scale
+        assert grey[int(y) - 2:int(y) + 3, x].min() <= 140, f"a gap in a sloping hairline at x={x}"
+    red = rgb[int(760 * scale) - 2:int(760 * scale) + 3, int(50 * scale):int(550 * scale)]
+    reddest = red[np.argmin(red[:, :, 1].mean(axis=1))]
+    assert reddest[:, 0].mean() > 200 and reddest[:, 1].mean() < 140, "the red line went pale"
+
+
+def test_crisp_is_for_below_a_hundred_per_cent():
+    from calcforge.pdf import engine
+
+    assert engine.crisp_at(0.99) and engine.crisp_at(0.25)
+    assert not engine.crisp_at(1.0) and not engine.crisp_at(2.0)
+
+
+def test_the_crisp_preference_reaches_the_renderers(window):
+    from calcforge.io import pdftiles
+    from calcforge.pdf import engine
+    from calcforge.ui import preferences
+    from calcforge.ui.dialogs import PreferencesDialog
+
+    dialog = PreferencesDialog(preferences.current(), window)
+    assert dialog.crisp_lines.isChecked(), "on to start"
+    dialog.crisp_lines.setChecked(False)
+    prefs = dialog.result_preferences()
+    assert prefs.crisp_zoomed_out is False
+    try:
+        window.apply_preferences(prefs)
+        assert engine.CRISP_ZOOMED_OUT is False
+        assert engine.settings() == {"crisp_zoomed_out": False}
+        worker = pdftiles.TILES._worker
+        if worker is not None:
+            assert worker._settings == {"crisp_zoomed_out": False}, "told to the renderers"
+        assert not engine.crisp_at(0.5)
+    finally:
+        dialog.crisp_lines.setChecked(True)
+        window.apply_preferences(dialog.result_preferences())
+    assert engine.CRISP_ZOOMED_OUT is True and engine.crisp_at(0.5)
+
+
+@pytest.mark.parametrize("scale", [0.75, 0.5, 0.37, 0.25, 0.12])
+def test_a_zoomed_out_hairline_is_as_wide_as_the_curve_says_with_soft_edges(scale, smoothed):
     from calcforge.pdf import engine
 
     wanted = engine.thinnest_line(scale)
@@ -129,7 +201,7 @@ def test_a_zoomed_out_hairline_is_as_wide_as_the_curve_says_with_soft_edges(scal
 
 
 @pytest.mark.parametrize("scale", [0.25, 0.5])
-def test_a_sloping_hairline_is_unbroken_and_smooth_and_a_red_one_stays_red(scale):
+def test_a_sloping_hairline_is_unbroken_and_smooth_and_a_red_one_stays_red(scale, smoothed):
     rgb = _render(scale)
     grey = rgb.mean(axis=2)
     along = []
@@ -305,7 +377,7 @@ def test_zoomed_out_every_markup_stroke_is_sharp(window, qapp, tmp_path, zoom):
 
 
 @pytest.mark.parametrize("zoom", [0.25, 0.37, 0.5])
-def test_zoomed_out_a_markup_line_is_one_solid_pixel(window, qapp, tmp_path, zoom):
+def test_zoomed_out_a_markup_line_is_one_solid_pixel(window, qapp, tmp_path, zoom, smoothed):
     """A markup's thin line across or down the screen is one solid dark pixel
     wide, wherever it falls; the drawing's hairline beside it stays soft."""
     grey, at, _around, _made, heights, weights = _markups_beside_the_drawing(

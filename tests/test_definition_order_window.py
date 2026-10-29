@@ -417,7 +417,8 @@ def test_a_table_dragged_above_the_equation_defines_its_names(w):
     table.sheet.workbook.rename_sheet(table.sheet, "T1")
     w.view.commit_snapshot("table")
     pump(6)
-    assert shown(asked) == "T1.A1 - not defined."
+    assert shown(asked) == ("T1.A1: T1 comes after this equation (page 1); an equation reads "
+                            "a sheet before it.")
     QTest.keyClick(w.view.viewport(), Qt.Key_F12)          # Markup mode: a drag moves it
     pump()
     assert w.view.calc.mode == "markup"

@@ -93,7 +93,7 @@ def _run_record(document, uid: str):
             continue
         frame = page.frame
         if frame is not None and isValid(frame):
-            for item in frame.markups():
+            for item in frame.built_markups():
                 if isinstance(item, SheetRunItem) and item.uid == uid:
                     return item.sheet, (item._data if item.sheet is None else None)
         for record in getattr(page, "_pending_items", None) or ():
@@ -198,7 +198,7 @@ def run_items(scene) -> list:
     from ..items.sheetpage import SheetRunItem
     out = []
     for frame in getattr(scene, "frames", []) or []:
-        for item in frame.markups():
+        for item in frame.built_markups():
             if isinstance(item, SheetRunItem):
                 out.append(item)
     return out
@@ -270,7 +270,7 @@ def short_runs(window) -> list:
             continue
         spare = 0
         for frame in reversed(frames[need:]):
-            if any(not isinstance(m, SheetRunItem) for m in frame.markups()):
+            if frame.holds() or any(not isinstance(m, SheetRunItem) for m in frame.built_markups()):
                 break                   # something drawn on it: it stays
             spare += 1
         if spare:

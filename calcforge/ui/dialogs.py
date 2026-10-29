@@ -1978,6 +1978,13 @@ class PreferencesDialog(QDialog):
         self.insertion.setChecked(prefs.insertion_point)
         self.insertion.setToolTip(
             "Click empty paper to leave a caret there; the arrow keys move it")
+        self.crisp_lines = QCheckBox("Crisp lines zoomed out")
+        self.crisp_lines.setObjectName("crispLines")
+        self.crisp_lines.setChecked(bool(getattr(prefs, "crisp_zoomed_out", True)))
+        self.crisp_lines.setToolTip(
+            "Below 100 % a page's lines are drawn on the pixels, none thinner than\n"
+            "one and none smoothed into grey, so a whole sheet reads clearly at\n"
+            "fit-to-page, as in Revu. Off: lines smoothed at every zoom.")
         self.gpu_drawing = QCheckBox("Draw with the graphics card")
         self.gpu_drawing.setChecked(getattr(prefs, "gpu_drawing", True))
         self.gpu_drawing.setToolTip(
@@ -1989,6 +1996,7 @@ class PreferencesDialog(QDialog):
         ticks.addWidget(self.snapping, 0, 1)
         ticks.addWidget(self.insertion, 1, 0)
         ticks.addWidget(self.gpu_drawing, 1, 1)
+        ticks.addWidget(self.crisp_lines, 2, 0)
         form.addRow("", ticks)
         # Recoverable flattening is Flatten Markups' Allow Markup Recovery
         # now, as in Revu, and remembered from there (the user, 2026-10-15).
@@ -2094,6 +2102,7 @@ class PreferencesDialog(QDialog):
             autosize_text=self.autosize.isChecked(),
             insertion_point=self.insertion.isChecked(),
             gpu_drawing=self.gpu_drawing.isChecked(),
+            crisp_zoomed_out=self.crisp_lines.isChecked(),
             recover_flattened=getattr(self.prefs, "recover_flattened", True),
             markup_style_keys=self.style_keys.isChecked(),
             filtered_dim_percent=self.filtered_dim.value(),

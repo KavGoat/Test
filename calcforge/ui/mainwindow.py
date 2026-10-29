@@ -6,6 +6,7 @@ import sys
 import base64
 import json
 import os
+import time
 import re
 import weakref
 from contextlib import contextmanager
@@ -1277,6 +1278,7 @@ class MainWindow(QMainWindow):
         self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowTabbedDocks)
 
         self.view = PageView(self)
+        self.setAcceptDrops(True)        # files dropped on the window (drop_files)
         self._build_central()
         self._build_actions()
         self._build_toolbars()
@@ -1291,6 +1293,8 @@ class MainWindow(QMainWindow):
         self.apply_shortcuts()
         from . import preferences as _prefs
         self.view.use_the_graphics_card(_prefs.current().gpu_drawing)
+        from ..io import pdftiles
+        pdftiles.TILES.configure(crisp_zoomed_out=_prefs.current().crisp_zoomed_out)
 
         self._autosave = QTimer(self)
         self._autosave.setInterval(120_000)
@@ -4521,6 +4525,19 @@ class MainWindow(QMainWindow):
         self._refresh_undo_actions()
 
     def new_document(self, confirm: bool = True) -> None:
+        if confirm and not self._workspace_empty and not self._untouched():
+            # Revu's File ▸ New: a new document beside the one open, in a
+            # tab of its own — never in its place (the user, 2026-10-29:
+            # "click new pdf got rid of the old one"). Asked without
+            # confirming (confirm=False), it is the program starting afresh
+            # in place: a closed last tab, a drop on an empty workspace.
+            self.open_in_new_tab()
+            self.select_tool("select")
+            self.toggle_calc_mode(False)
+            self.view.fit_page()
+            self.update_title()
+            self._let_go()
+            return
         if confirm and not self.confirm_discard():
             return
         self.document = Document()
@@ -4586,7 +4603,9 @@ class MainWindow(QMainWindow):
                 if page.frame is None or page.frame.scene() is not self.scene:
                     frame = self.scene.add_frame(page)
                     page.frame = frame
-                    frame.load_items(page._pending_items)
+                    # the calculation's items now, the markups when the page
+                    # is looked at (scene.PageFrame.hold_items, _load_behind)
+                    frame.hold_items(page._pending_items)
                 elif page._pending_items:
                     page.frame.load_items(page._pending_items)
                 page._pending_items = []
@@ -4611,6 +4630,78 @@ class MainWindow(QMainWindow):
         self.pages_panel.rebuild(self.document, self.current_index)
         self.refresh_lists()
         self.refresh_scale_label()
+        self._load_behind_start()
+
+    # -- the pages' markups built behind the first screen ------------------------
+    #
+    # A page's markups are built when it is looked at or asked for
+    # (scene.PageFrame.hold_items): a set of three hundred marked-up sheets
+    # opens in the time its first screen takes rather than the twenty
+    # seconds every markup took (the user, 2026-10-29). The rest are built
+    # here, a few pages at a time between events, nearest the page in view
+    # first; the Markups List fills in once they are all here.
+    _behind = None
+    _loading_behind = False
+
+    def _load_behind_start(self) -> None:
+        scene = self.scene
+        waiting = [frame for frame in (scene.frames if scene is not None else ())
+                   if frame.holds()]
+        self._behind = None
+        if not waiting:
+            if self._loading_behind:
+                self._loading_behind = False
+                self.refresh_lists()
+            return
+        self._behind = {"document": self.document, "scene": scene, "waiting": waiting,
+                        "total": len(waiting)}
+        self._loading_behind = True
+        QTimer.singleShot(0, self, self._load_behind_tick)
+
+    def _load_behind_tick(self) -> None:
+        state = self._behind
+        if state is None or state["document"] is not self.document \
+                or state["scene"] is not self.scene:
+            self._behind = None
+            self._loading_behind = False
+            return
+        waiting = [frame for frame in state["waiting"] if frame.holds()]
+        order = {id(frame): index for index, frame in enumerate(self.scene.frames)}
+        current = self.current_index
+        waiting.sort(key=lambda frame: abs(order.get(id(frame), 0) - current))
+        deadline = time.perf_counter() + 0.05
+        source, source_key = None, None
+        try:
+            while waiting and time.perf_counter() < deadline:
+                frame = waiting.pop(0)
+                unread = frame.unread
+                if unread is not None and unread[0] != source_key:
+                    # the file opened once for the pages read in this go
+                    if source is not None:
+                        source.close()
+                    source, source_key = None, unread[0]
+                    try:
+                        from ..io import pdfvector
+                        source = pdfvector.PdfFile.from_bytes(self.document.asset(source_key) or b"")
+                    except Exception:                        # noqa: BLE001
+                        source = None
+                frame.load_held(source)
+        except Exception:                                    # noqa: BLE001
+            waiting = []                  # (a page that won't load is left as its file draws it)
+        finally:
+            if source is not None:
+                source.close()
+        state["waiting"] = waiting
+        if waiting:
+            done = state["total"] - len(waiting)
+            self.status_hint.setText(f"Loading markups… {done} of {state['total']} pages")
+            QTimer.singleShot(10, self, self._load_behind_tick)
+            return
+        self._behind = None
+        self._loading_behind = False
+        if self.status_hint.text().startswith("Loading markups"):
+            self.status_hint.setText("")
+        self.refresh_lists()
 
     def open_document(self) -> None:
         """File ▸ Open: the file in a tab of its own, as Revu opens it."""
@@ -7089,6 +7180,9 @@ class MainWindow(QMainWindow):
                 f"Inserted {added} page(s) as page {row + 1}")
         return added
 
+    #: what a dropped or inserted picture may be
+    IMAGE_FILES = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp")
+
     def insert_image_page(self, index: Optional[int] = None,
                           before: bool = False) -> None:
         """Put a photo or a scan in as a page of its own."""
@@ -7097,6 +7191,10 @@ class MainWindow(QMainWindow):
             "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp)")
         if not path:
             return
+        self._insert_image_file(path, index, before)
+
+    def _insert_image_file(self, path: str, index: Optional[int] = None,
+                           before: bool = False) -> bool:
         target = self.page_index(index) + (0 if before else 1)
 
         def mutate():
@@ -7106,9 +7204,81 @@ class MainWindow(QMainWindow):
             self._structural_change("Insert image page", mutate)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Insert image", str(exc))
-            return
+            return False
         self.view.fit_page()
         self.status_hint.setText(f"Inserted {os.path.basename(path)} as a page")
+        return True
+
+    # -- files dropped on the window (the user, 2026-10-29: "allow drag and
+    # drop to open pdf or add excel after page etc") --------------------------------
+    @classmethod
+    def droppable(cls, path: str) -> str:
+        """What a file dropped here is: "pdf", "workbook", "image" or ""."""
+        from .xlsximport import is_workbook
+        if str(path).lower().endswith(".pdf"):
+            return "pdf"
+        if is_workbook(path):
+            return "workbook"
+        if str(path).lower().endswith(cls.IMAGE_FILES):
+            return "image"
+        return ""
+
+    def dropped_paths(self, event) -> list:
+        """The files a drag or drop carries that this window takes."""
+        data = event.mimeData()
+        if data is None or not data.hasUrls():
+            return []
+        return [url.toLocalFile() for url in data.urls()
+                if url.isLocalFile() and self.droppable(url.toLocalFile())]
+
+    def dragEnterEvent(self, event) -> None:
+        if self.dropped_paths(event):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if self.dropped_paths(event):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        paths = self.dropped_paths(event)
+        if not paths:
+            super().dropEvent(event)
+            return
+        event.acceptProposedAction()
+        self.drop_files(paths)
+
+    def drop_files(self, paths: list, index: Optional[int] = None) -> None:
+        """Files dropped on the window: a PDF opens in a tab of its own
+        (as File ▸ Open does); an Excel workbook's sheets go in after page
+        *index* — the page dropped on, else the page in view — and a picture
+        as a page there too; into a blank, untouched window a workbook opens
+        as a document of its own."""
+        opened: list = []
+        for path in paths:
+            kind = self.droppable(path)
+            if not kind:
+                continue
+            if kind == "pdf" or (kind == "workbook" and (self._workspace_empty or self._untouched())):
+                self._open_chosen(path)
+                opened.append(os.path.basename(path))
+                index = None                  # (the next goes into the document now in view)
+                continue
+            if self._workspace_empty:
+                self.new_document(confirm=False)
+            after = self.page_index(index) if self.document.pages else None
+            if kind == "workbook":
+                if self.insert_workbook(path, index=after):
+                    opened.append(os.path.basename(path))
+            elif self._insert_image_file(path, after):
+                opened.append(os.path.basename(path))
+            if self.document.pages:
+                index = self.current_index    # the next drop lands after what just came in
+        if len(opened) > 1:
+            self.status_hint.setText(f"Dropped in: {', '.join(opened)}")
 
     def rotate_page(self, index: Optional[int] = None, clockwise: bool = True) -> None:
         """Turn a page a quarter turn, and everything that is drawn on it.
@@ -7368,9 +7538,11 @@ class MainWindow(QMainWindow):
         quick = menu.addAction("Add Page", lambda: self.quick_add_page(index))
         quick.setToolTip("A blank page after this one (after the whole workbook on a "
                          "workbook), the same paper, no questions")
-        # (on a workbook's page, the kinds under one Insert, to keep its menu
-        # short: a workbook takes them before or after the whole of it)
-        inserts = menu.addMenu("Insert") if sheet else menu
+        # (the kinds under one Insert, on every page's menu alike — the user,
+        # 2026-10-29: a workbook's menu "looks good but a work page looks
+        # different like insert page not condensed")
+        inserts = menu.addMenu("Insert")
+        inserts.setToolTip("Put a page in before or after this one")
         for entry in self.insert_family():
             self.fill_insert_choice(inserts.addMenu(entry[1]), entry, index)
         duplicate = menu.addAction("Duplicate Pages" if several else "Duplicate Page",
@@ -7395,7 +7567,7 @@ class MainWindow(QMainWindow):
         turn_acw = turn.addAction(self.act_rotate_pages_acw.text(),
                                   lambda: self.rotate_page(index, False))
         turn_acw.setToolTip("Turn the paper and everything drawn on it anticlockwise")
-        labels = menu.addMenu("Page Labels") if sheet else menu
+        labels = menu.addMenu("Page Labels")
         if not several:
             rename = labels.addAction("Rename Page Label", lambda: self.rename_page(index))
             rename.setToolTip("Edit this page's label on its thumbnail (F2)")
@@ -11779,9 +11951,12 @@ class MainWindow(QMainWindow):
         if timer is not None:
             timer.stop()
         # what an edit says it changed: the Markups List puts in those rows
-        # (and builds itself again if it finds it was not in step)
-        self.markups_panel.refresh(self.document,
-                                   getattr(self.document, "markups_changed", None))
+        # (and builds itself again if it finds it was not in step); while the
+        # pages' markups are still being built behind the first screen it
+        # waits, and fills in once (_load_behind_tick)
+        if not self._loading_behind:
+            self.markups_panel.refresh(self.document,
+                                       getattr(self.document, "markups_changed", None))
         self.sync_text_bookmarks()
         self.bookmarks_panel.rebuild(self.document)
         self.variables_panel.watch(self.document)
@@ -11791,7 +11966,27 @@ class MainWindow(QMainWindow):
     # bookmarks
     # ==================================================================
     # -- text boxes as bookmarks, fields in text boxes (the user, 2026-10-15) --
-    def _text_box_menu(self, menu, item) -> None:
+    def _text_box_menu(self, menu, item, scene_pos=None) -> None:
+        # an equation inside the box, right-clicked (items/inline_equations.py):
+        # shown with its working, or edited
+        field = None
+        if scene_pos is not None and hasattr(item, "inline_field_at"):
+            try:
+                field = item.inline_field_at(scene_pos)
+            except Exception:  # noqa: BLE001
+                field = None
+        if field is not None:
+            k, _start, _end, body = field
+            show = menu.addAction("Show Expression")
+            show.setCheckable(True)
+            show.setChecked(body.lstrip().startswith("!"))
+            show.setToolTip("Show the equation with its result (test*test = 50) rather "
+                            "than the result alone")
+            show.toggled.connect(lambda on, k=k: self.set_inline_expression_shown(item, k, on))
+            edit = menu.addAction("Edit Equation", lambda k=k: self.edit_inline_equation(item, k))
+            edit.setToolTip("Open the box with the equation picked out, to retype it "
+                            "(a double-click on it does the same)")
+            menu.addSeparator()
         mark = menu.addAction("Bookmark")
         mark.setCheckable(True)
         mark.setChecked(bool(getattr(item, "auto_bookmark", False)))
@@ -11822,6 +12017,38 @@ class MainWindow(QMainWindow):
             if row.value != "function" and row.name not in seen:
                 seen.append(row.name)
         return seen
+
+    def set_inline_expression_shown(self, item, k: int, on: bool) -> None:
+        """The k-th equation inside *item* shown with its working (test*test
+        = 50) or as its result alone (50); one undo step."""
+        from PySide6.QtGui import QTextCursor
+        field = item.inline_field(k)
+        if field is None:
+            return
+        start, _end, body = field
+        flagged = body.lstrip().startswith("!")
+        if flagged == bool(on):
+            return
+        self.view.begin_snapshot(self.view.involved_frames(item))
+        cursor = QTextCursor(item.doc)
+        cursor.setPosition(start + 2)                  # just after {\
+        if on:
+            cursor.insertText("!")
+        else:
+            lead = len(body) - len(body.lstrip())
+            cursor.setPosition(start + 2 + lead + 1, QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
+        item.written = item.doc.toPlainText()
+        item._fields_shown = None
+        item.touch()
+        item.sync_equations()
+        item.update()
+        self.view.commit_snapshot("Show expression" if on else "Hide expression")
+
+    def edit_inline_equation(self, item, k: int) -> None:
+        """Open *item* for typing with its k-th equation picked out."""
+        self.view.begin_item_edit(item)
+        item.select_field(k)
 
     def insert_text_field(self, item, token: str) -> None:
         """A field at the caret of a box being typed in, or at the end of one
@@ -11867,7 +12094,7 @@ class MainWindow(QMainWindow):
             return False
         boxes = {}
         for frame in self.scene.frames:
-            for item in frame.markups():
+            for item in frame.built_markups():
                 if isinstance(item, _TextBase) and getattr(item, "auto_bookmark", False):
                     boxes[item.uid] = (item, frame)
         changed = False
@@ -12527,6 +12754,8 @@ class MainWindow(QMainWindow):
             sheet.recalculate(force=True)
             self.mark_modified()
         self.view.use_the_graphics_card(prefs.gpu_drawing)
+        from ..io import pdftiles
+        pdftiles.TILES.configure(crisp_zoomed_out=prefs.crisp_zoomed_out)
         self.view.viewport().update()
         self.status_hint.setText("Preferences saved")
 
@@ -13334,7 +13563,7 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         # -- CalcForge's extras for this kind of markup ---------------------------
         if isinstance(item, _TextBase) and not grouped:
-            self._text_box_menu(menu, item)
+            self._text_box_menu(menu, item, scene_pos)
             self._fill_leader_menu(menu, item, scene_pos)
         if isinstance(item, MeasureItem) and not grouped:
             menu.addAction("Edit Text…", lambda: self.edit_measure_text(item))

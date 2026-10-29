@@ -212,7 +212,7 @@ def report(window, imported) -> str:
 
     runs = {}
     for frame in window.scene.frames:
-        for item in frame.markups():
+        for item in frame.built_markups():
             if isinstance(item, SheetRunItem) and item.sheet is not None:
                 runs[item.sheet.name] = item
     differ = []

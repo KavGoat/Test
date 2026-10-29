@@ -235,6 +235,8 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'canvas.edit_link': ('Edit Link', 'Markup', 'always'),
     'canvas.edit_text': ('Edit Text', 'Markup', 'always'),
     'canvas.bookmark': ('Bookmark This Text', 'Markup', 'always'),
+    'canvas.show_expression': ('Show Expression', 'Markup', 'always'),
+    'canvas.edit_equation': ('Edit Equation', 'Markup', 'always'),
     'canvas.insert_field.title': ('Insert Field ▸ Title', 'Markup', 'always'),
     'canvas.insert_field.project': ('Insert Field ▸ Project', 'Markup', 'always'),
     'canvas.insert_field.author': ('Insert Field ▸ Author', 'Markup', 'always'),

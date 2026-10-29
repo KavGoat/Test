@@ -76,9 +76,20 @@ def test_calc_reads_a_calcforge_variable_and_var_is_always_excels_variance():
     assert F.parse("CALC(PGA)").tree == F.DocVar("PGA")
     for excels in ("var(M20)", "VAR(L.beam)", "VAR(A1:A9)", "VAR(1,2,3)", "VAR($M$20)"):
         assert isinstance(F.parse(excels).tree, F.Call), excels
-    for bad in ("CALC(A1:A2)", "CALC(1)", "CALC(x, y)", "CALC()", "CALC(Sheet1!x)"):
-        with pytest.raises(F.FormulaError, match="CALC takes the name"):
+    # CF is CALC in two letters, and either takes an expression of the
+    # equations' own, kept as typed (the user, 2026-10-29)
+    assert F.parse("CF(M20)").tree == F.DocVar("M20", "CF")
+    assert F.parse("cf(L.beam)").tree == F.DocVar("L.beam", "CF")
+    assert F.parse("CALC(v1+v2)").tree == F.DocExpr("v1+v2")
+    assert F.parse("CF( height * 2 )").tree == F.DocExpr("height * 2", "CF")
+    assert F.parse("CALC(sin(x)+f(a,b))").tree == F.DocExpr("sin(x)+f(a,b)")
+    assert F.parse("CF(x)+1").names >= {"x"}
+    assert F.parse("CF(v1+v2)").names >= {"v1", "v2"}, "recalculated when either changes"
+    for bad in ("CALC()", "CF()"):
+        with pytest.raises(F.FormulaError, match="takes a CalcForge variable or expression"):
             F.parse(bad)
+    with pytest.raises(F.FormulaError, match="missing its"):
+        F.parse("CF(a+b")
 
 
 def test_an_old_formula_is_written_with_calc_where_it_read_a_calcforge_variable():

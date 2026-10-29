@@ -636,6 +636,9 @@ class PageView(QGraphicsView):
     def __init__(self, window):
         super().__init__()
         self.window = window
+        # files dropped on the canvas: taken by the window (MainWindow.drop_files)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
         # Equations: the one being typed into, the red cross, SMath's keys.
         from .calcedit import CalcEditing
         self.calc = CalcEditing(self)
@@ -1771,6 +1774,38 @@ class PageView(QGraphicsView):
         viewport.setMouseTracking(True)
         viewport.setAcceptDrops(self.acceptDrops())
         return self.gpu
+
+    # -- files dropped on the canvas ------------------------------------------------------
+    def _dropped(self, event) -> list:
+        window = getattr(self, "window", None)
+        return window.dropped_paths(event) if window is not None else []
+
+    def dragEnterEvent(self, event) -> None:
+        if self._dropped(event):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if self._dropped(event):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        paths = self._dropped(event)
+        if not paths:
+            super().dropEvent(event)
+            return
+        event.acceptProposedAction()
+        frame = self.frame_at(self.mapToScene(event.position().toPoint()))
+        index = None
+        if frame is not None:
+            try:
+                index = self.window.document.index_of(frame.page)
+            except ValueError:
+                index = None
+        self.window.drop_files(paths, index)
 
     def paintEvent(self, event) -> None:
         """Paint the canvas, the pages first saying whether their markups
@@ -4421,8 +4456,13 @@ class PageView(QGraphicsView):
             event.accept()                    # a second click on a box
             return
         if isinstance(item, _TextBase) and not item.locked:
+            # on an equation inside the box, the equation is picked out to
+            # retype (items/inline_equations.py); found before the box opens,
+            # while its results are still in place
+            field = item.inline_field_at(scene_pos) if hasattr(item, "inline_field_at") else None
             self.begin_item_edit(item)
-            self.place_caret(item, scene_pos)
+            if field is None or not item.select_field(field[0]):
+                self.place_caret(item, scene_pos)
             event.accept()
             return
         if isinstance(item, NoteItem) and not item.locked:

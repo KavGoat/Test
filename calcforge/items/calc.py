@@ -1013,7 +1013,7 @@ def closed_block_of(item):
     if frame is None or not hasattr(frame, "markups"):
         return None
     found = None
-    for other in frame.markups():
+    for other in frame.built_markups():
         if isinstance(other, CalcBlockItem) and not other.opened \
                 and item in other.members():
             if found is None or (other._rect.width() * other._rect.height()
@@ -1037,7 +1037,7 @@ def blocks_put_down(placed: list) -> None:
             # and its equations are its own, not those of a block they land in
             frame = item.parentItem()
             own = item.members()
-            for other in (frame.markups() if frame is not None else ()):
+            for other in (frame.built_markups() if frame is not None else ()):
                 if isinstance(other, CalcBlockItem) and other is not item \
                         and id(other) not in came:
                     other.leave_out([m for m in own if m in other.inside()])

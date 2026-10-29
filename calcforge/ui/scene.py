@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (QGraphicsItem, QGraphicsObject, QGraphicsScene,
 
 from ..core.document import MM_TO_PT, Document, Page
 from ..theme import CANVAS, LIGHT
-from ..items.base import MarkupItem, build_item, covered_rect
+from ..items.base import ITEM_REGISTRY, MarkupItem, build_item, covered_rect
 
 ROW_TOLERANCE = 9.0        # points; items this close vertically share a row
 
@@ -51,6 +51,33 @@ def _order_key(item):
     """
     position = item.pos()
     return (position.y(), position.x(), item.zValue(), getattr(item, "uid", ""))
+
+
+def _built_at_once(entry) -> bool:
+    """Whether a markup record is the calculation's, built as the page is
+    opened rather than when it is looked at (PageFrame.hold_items)."""
+    if not isinstance(entry, dict):
+        return True
+    cls = ITEM_REGISTRY.get(entry.get("type"))
+    if cls is None:
+        return True
+    return bool(getattr(cls, "IS_CALC", False) or getattr(cls, "SHEET_RUN", False)
+                or cls.__module__.endswith(".calc") or entry.get("variable"))
+
+
+def _assets_in(value) -> set:
+    """The document assets a markup record refers to (asset_… keys, at any
+    depth: a picture's, a snapshot's sources')."""
+    if isinstance(value, str):
+        return {value} if value.startswith("asset_") else set()
+    found: set = set()
+    if isinstance(value, dict):
+        for inner in value.values():
+            found |= _assets_in(inner)
+    elif isinstance(value, (list, tuple)):
+        for inner in value:
+            found |= _assets_in(inner)
+    return found
 
 
 def reading_order(items: list) -> list:
@@ -388,6 +415,12 @@ class PageFrame(QGraphicsObject):
         # the page, in the page's own squares, on every core at once; a page
         # with a few has each drawn on its own (MarkupItem.paint_their_file).
         self.file_draws = False
+        # The page's markups not built yet: their records (held), and a page
+        # opened from a PDF's own annotations not even read (unread) — built
+        # when the page is looked at or asked for (hold_items, load_held)
+        self.held: list = []
+        self.unread = None
+        self._load_scheduled = False
         self._annotation_boxes: dict = {}
         self._last_without = None
         self._patches: list = []
@@ -430,6 +463,8 @@ class PageFrame(QGraphicsObject):
         ask with it, or it would write the strokes and the annotation both.
         """
         page = self.page
+        if self.held or self.unread:
+            return ()                     # nothing taken over yet: the file draws them all
         left_out = set(getattr(page, "markup_annotations", ()) or ())
         if not left_out:
             return ()
@@ -920,7 +955,7 @@ class PageFrame(QGraphicsObject):
         if not numbers or not shown or self.file_draws:
             return
         index = int(page.pdf_page_index)
-        for item in self.markups():
+        for item in self.built_markups():
             box = getattr(item, "their_box", ())
             if (not box or not getattr(item, "still_theirs", False)
                     or item.from_annotation not in numbers or not item.isVisible()
@@ -956,7 +991,7 @@ class PageFrame(QGraphicsObject):
         numbers = set(getattr(page, "markup_annotations", ()) or ())
         left, top, right, bottom = (region.left() - 1, region.top() - 1,
                                     region.right() + 1, region.bottom() + 1)
-        for item in self.markups():
+        for item in self.built_markups():
             box = getattr(item, "their_box", ())
             if (not box or not getattr(item, "still_theirs", False)
                     or item.from_annotation not in numbers or not item.isVisible()):
@@ -978,6 +1013,8 @@ class PageFrame(QGraphicsObject):
         graphics card, a highlighter nobody has changed: it multiplies into
         what is under it, which OpenGL cannot do (a black block, 2026-10-01),
         so there the page's own render draws it."""
+        if self.held or self.unread:
+            return ()                     # nothing taken over yet
         numbers = set(getattr(self.page, "markup_annotations", ()) or ())
         if self.file_draws:
             # the page draws every untouched one; left out are only those
@@ -1010,6 +1047,8 @@ class PageFrame(QGraphicsObject):
     def paint(self, painter: QPainter, option, widget=None) -> None:
         if self._items_only:
             return                        # the equations' own layer: nothing of the page
+        if widget is not None and not self.print_mode and (self.held or self.unread):
+            self._load_soon()             # looked at: its markups are built next
         if self._print_stream == "markups" and self.print_mode:
             # Print's Markups Only: none of the page, but the markups its own
             # file still draws
@@ -1435,7 +1474,85 @@ class PageFrame(QGraphicsObject):
         return item
 
     def markups(self) -> list[MarkupItem]:
+        """Every markup of the page — built now if any are still held."""
+        if self.held or self.unread:
+            self.load_held()
+        return self.built_markups()
+
+    # -- markups built when the page is looked at ---------------------------
+    #
+    # Opening a set of three hundred sheets with forty markups each built
+    # all twelve thousand before the window answered (the user, 2026-10-29:
+    # "opening files led to a crash" — a Ctrl+C after a long wait). As Revu,
+    # a page's markups are made when the page is looked at or asked for,
+    # the rest behind the first screen (MainWindow._load_behind). A page
+    # still holding its markups draws as its file draws it: nothing of it is
+    # taken over yet. The calculation's items — equations, blocks, tables,
+    # sheets, charts, a measurement naming a variable — are built at once
+    # whatever the page: every page's reading order and every cell's formula
+    # need them.
+
+    def holds(self) -> bool:
+        """Whether some of this page's markups are not built yet."""
+        return bool(self.held or self.unread)
+
+    def built_markups(self) -> list[MarkupItem]:
+        """The markups built so far; nothing is built for the asking."""
         return [item for item in self.childItems() if isinstance(item, MarkupItem)]
+
+    def built_in_order(self) -> list[MarkupItem]:
+        return reading_order(self.built_markups())
+
+    def hold_items(self, data: list) -> None:
+        """Take the page's markup records, building the calculation's now;
+        the rest, and the page's own annotations not read yet
+        (Page._pending_annotations), wait for load_held."""
+        now, later = [], []
+        for entry in data:
+            (now if _built_at_once(entry) else later).append(entry)
+        self.held = later
+        self.unread = getattr(self.page, "_pending_annotations", None)
+        if now:
+            self._place(now)
+        self.itemsChanged.emit()
+
+    def load_held(self, source=None) -> None:
+        """Build the markups held back, the page's annotations read first
+        when they are not yet (*source*: its file, already open)."""
+        if not (self.held or self.unread):
+            return
+        self._load_scheduled = False
+        held, self.held = self.held, []
+        if self.unread is not None:
+            unread, self.unread = self.unread, None
+            from ..io import pdfio
+            held = held + pdfio.read_pending_annotations(self.page, unread, self.document, source)
+        if held:
+            self._place(held)
+        self.update()                 # the page stops drawing what is now taken over
+        self.itemsChanged.emit()
+
+    def _load_soon(self) -> None:
+        """Build the held markups once this paint is over, never in it."""
+        if self._load_scheduled:
+            return
+        self._load_scheduled = True
+        QTimer.singleShot(0, self, self.load_held)
+
+    def _place(self, entries: list) -> None:
+        """Build *entries* as markups of this page, as load_items builds
+        what differs: the equations calculated once, at the end."""
+        from ..calc.docsheet import sheet_for
+        with QSignalBlocker(self), sheet_for(self.document).batch():
+            for entry in entries:
+                item = build_item(entry)
+                if item is None:
+                    continue
+                if hasattr(item, "load_from_document"):
+                    item.load_from_document(self.document)
+                item.setParentItem(self)
+            self.refresh_items()
+            self._choose_who_draws_file_markups()
 
     def ordered_markups(self) -> list[MarkupItem]:
         """Reading order: top-left to bottom-right, the way SMath evaluates.
@@ -1476,7 +1593,25 @@ class PageFrame(QGraphicsObject):
         return (max((i.zValue() for i in drawn), default=0.0) + 1.0) if drawn else 1.0
 
     def serialize_items(self) -> list[dict]:
-        return [item.serialize() for item in sorted(self.markups(), key=lambda i: i.zValue())]
+        """Every markup's record, the held ones as they are (nothing is built
+        for a save; the page's annotations not read yet stay the file's, and
+        the page's record says so: Page.annotations_unread)."""
+        written = [item.serialize() for item in self.built_markups()] + list(self.held)
+        return sorted(written, key=lambda record: float(record.get("z", 0) or 0))
+
+    def file_only(self) -> bool:
+        """Nothing of ours on the page yet: its annotations unread, no record
+        held, nothing built — a save leaves the page as its file has it."""
+        return self.unread is not None and not self.held and not self.built_markups()
+
+    def annotation_links(self) -> set:
+        """The numbers of the page's own annotations its markups came out
+        of, built or held — none for annotations not read yet."""
+        numbers = {int(item.from_annotation) for item in self.built_markups()
+                   if getattr(item, "from_annotation", 0)}
+        numbers |= {int(record.get("from_annotation") or 0) for record in self.held
+                    if isinstance(record, dict) and record.get("from_annotation")}
+        return numbers
 
     def load_items(self, data: list[dict]) -> None:
         # Restoring one page is one change. Rebuilding the panels after each
@@ -1484,6 +1619,8 @@ class PageFrame(QGraphicsObject):
         # Equations coming and going are calculated once, at the end, rather
         # than once each (calc/docsheet.py).
         from ..calc.docsheet import sheet_for
+        if self.held or self.unread:
+            self.load_held()                 # (what is here, to compare with)
         with QSignalBlocker(self), sheet_for(self.document).batch():
             # A table or a spreadsheet's cells are put back as they were
             # where they are, changing only the cells that differ: rebuilt,
@@ -1538,7 +1675,7 @@ class PageFrame(QGraphicsObject):
     FILE_DRAWN_FROM = 120
 
     def _choose_who_draws_file_markups(self) -> None:
-        theirs = [item for item in self.markups()
+        theirs = [item for item in self.built_markups()
                   if getattr(item, "still_theirs", False) or getattr(item, "split_theirs", False)]
         self.file_draws = len(theirs) > self.FILE_DRAWN_FROM
         self._annotation_boxes = {}
@@ -1549,7 +1686,7 @@ class PageFrame(QGraphicsObject):
                 box = QRectF(*item.their_box) if item.their_box else covered_rect(item)
                 known = self._annotation_boxes.get(number)
                 self._annotation_boxes[number] = box if known is None else known.united(box)
-        for item in self.markups():
+        for item in self.built_markups():
             if hasattr(item, "sync_their_look"):
                 item.sync_their_look()
 
@@ -1559,7 +1696,7 @@ class PageFrame(QGraphicsObject):
         Settling, not editing: a markup that came in with an appearance of its
         own must still have it afterwards.
         """
-        for item in self.ordered_markups():
+        for item in self.built_in_order():
             item._still_arriving = True
             try:
                 item.refresh(page=self.page)
@@ -1568,8 +1705,10 @@ class PageFrame(QGraphicsObject):
 
     def assets_used(self) -> set[str]:
         used: set[str] = set()
-        for item in self.markups():
+        for item in self.built_markups():
             used |= item.assets_used()
+        for entry in self.held:
+            used |= _assets_in(entry)
         if self.page.background_key:
             used.add(self.page.background_key)
         if self.page.pdf_key:

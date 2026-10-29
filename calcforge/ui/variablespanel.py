@@ -637,9 +637,13 @@ class VariablesPanel(QWidget):
             if listed and row.section != state["section"] and row.section <= len(listed):
                 state["section"] = row.section
                 part = listed[row.section - 1]
-                self._heading(part.label if row.source != "Table" else f"  {part.label}",
-                              "A calc section: what is defined in it is not seen after the next "
-                              "break, unless it is global", BAND.name())
+                # a band across the list, as the break is drawn on the canvas
+                # and in Thumbnails (the user, 2026-10-29)
+                head = self._heading(f"§ {part.label}",
+                                     "A calc section: what is defined in it is not seen after "
+                                     "the next break, unless it is global")
+                head.setBackground(0, QBrush(QColor(BAND)))
+                head.setForeground(0, QBrush(QColor("white")))
 
         def put_book(name: str, entries: list) -> None:
             first = entries[0][1]

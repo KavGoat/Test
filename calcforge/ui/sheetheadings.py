@@ -70,7 +70,7 @@ class SheetHeadings(QWidget):
             # a scroll (2026-10-19)
             if getattr(frame.page, "sheet", None) is None:
                 continue
-            for item in frame.markups():
+            for item in frame.built_markups():
                 if isinstance(item, SheetRunItem) and item.sheet is not None and item.paging:
                     out.append(item)
         return out
@@ -206,20 +206,39 @@ class SheetHeadings(QWidget):
         if not ok:
             return False
         seen = inverse.mapRect(QRectF(rect))
+        # a tile is drawn once and kept until what it shows changes — the
+        # headings' edges, the selection, the zoom — rather than afresh for
+        # every frame of a scroll (the user, 2026-10-29: "make spreadsheets
+        # faster: scrolling")
+        tiles = self.__dict__.setdefault("_tiles", {})
+        sel = tuple(run.selection) if run.opened and run.selection else None
+        stamp = (id(run), scale, ratio, font.key(), sel, hash(tuple(xs)), len(ys))
+
+        def kept(key, draw):
+            got = tiles.get(key)
+            if got is None or got[0] != stamp:
+                if len(tiles) > 64:
+                    tiles.clear()
+                got = tiles[key] = (stamp, draw())
+            return got[1]
         if kind == "col":
             # across: the bands' picture width
             high = max(1, math.ceil(rect.height() * ratio))
             first = max(0, bisect.bisect_right(xs, seen.left()) - 2)
             last = min(len(xs) - 2, bisect.bisect_right(xs, seen.right()) + 1)
-            tile = QPixmap(width, high)
-            tile.fill(HEADING_BG)
-            p = QPainter(tile)
-            p.scale(width / xs[-1], high / HEADING_H)
-            p.translate(0, HEADING_H)
-            p.setRenderHint(QPainter.Antialiasing, False)
-            p.setFont(font)
-            _cells(p, run, "col", first, last, grid)
-            p.end()
+
+            def across():
+                tile = QPixmap(width, high)
+                tile.fill(HEADING_BG)
+                p = QPainter(tile)
+                p.scale(width / xs[-1], high / HEADING_H)
+                p.translate(0, HEADING_H)
+                p.setRenderHint(QPainter.Antialiasing, False)
+                p.setFont(font)
+                _cells(p, run, "col", first, last, grid)
+                p.end()
+                return tile
+            tile = kept(("col", first, last, high), across)
             # placed by the bands' own rule (the same left and right edges,
             # so the same stretch when a band's picture is a pixel off its place)
             top_at = inverse.map(QPointF(0, rect.top())).y()
@@ -240,15 +259,19 @@ class SheetHeadings(QWidget):
             high = int(round((bottom - top) * scale))
             if high <= 0:
                 continue
-            tile = QPixmap(wide, high)
-            tile.fill(HEADING_BG)
-            p = QPainter(tile)
-            p.scale(wide / ROWNUM_W, high / (bottom - top))
-            p.translate(ROWNUM_W, -top)
-            p.setRenderHint(QPainter.Antialiasing, False)
-            p.setFont(font)
-            _cells(p, run, "row", max(a, r0), min(b, r1), grid)
-            p.end()
+
+            def down(a=a, b=b, top=top, bottom=bottom, high=high):
+                tile = QPixmap(wide, high)
+                tile.fill(HEADING_BG)
+                p = QPainter(tile)
+                p.scale(wide / ROWNUM_W, high / (bottom - top))
+                p.translate(ROWNUM_W, -top)
+                p.setRenderHint(QPainter.Antialiasing, False)
+                p.setFont(font)
+                _cells(p, run, "row", a, b, grid)
+                p.end()
+                return tile
+            tile = kept(("row", a, b, wide, hash(tuple(ys[a:b + 2]))), down)
             left_at = inverse.map(QPointF(rect.left(), 0)).x()
             painter.save()
             painter.setTransform(local)

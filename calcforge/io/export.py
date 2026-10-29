@@ -103,8 +103,8 @@ def outline_and_links(document: Document, printed: list) -> tuple[list, list]:
 
     links = []
     for index, page in enumerate(printed):
-        if page.frame is None:
-            continue
+        if page.frame is None or page.frame.file_only():
+            continue                  # (nothing of ours on it yet: no links of ours either)
         height = page.height_pt
         for item in page.frame.markups():
             if getattr(item, "TYPE", "") == "link":

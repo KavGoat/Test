@@ -716,9 +716,13 @@ SHEET = {
     "ISERROR": (_I, "TRUE for any error."),
     "ISEVEN": (_I, "TRUE if the number is even."),
     "ISFORMULA": (_I, "TRUE if the cell holds a formula."),
-    "CALC": (_I, "The CalcForge variable name — an equation's, or a cell named in its "
-                 "Variable box — in force where the sheet is. A bare name in a cell is only "
-                 "ever an Excel name, so the two never clash.", "CALC(name)"),
+    "CALC": (_I, "A CalcForge variable — an equation's, or a cell named in its Variable "
+                 "box — in force where the sheet is, or an expression of theirs (CALC(v1+v2)). "
+                 "A bare name in a cell is only ever an Excel name, so the two never clash; "
+                 "a workbook's own cell is read as its name or address, never through CALC.",
+             "CALC(name or expression)"),
+    "CF": (_I, "CALC in two letters: CF(name) or CF(v1+v2). Excel has no CF.",
+           "CF(name or expression)"),
     "ISLOGICAL": (_I, "TRUE if the value is TRUE or FALSE."),
     "ISNA": (_I, "TRUE if the value is #N/A."),
     "ISNONTEXT": (_I, "TRUE if the value is not text."),
@@ -788,6 +792,11 @@ PREFERENCES = {
     "gpu_drawing": ("Preferences ▸ Canvas", "Draw with the graphics card",
                     "Draws the pages with OpenGL for smooth scrolling on high-density "
                     "screens. Turn it off if pages draw wrongly with your graphics driver."),
+    "crisp_zoomed_out": ("Preferences ▸ Canvas", "Crisp lines zoomed out",
+                         "Below 100 % a page's lines are drawn on the pixels, none thinner "
+                         "than one and none smoothed into grey, so a whole sheet reads "
+                         "clearly at fit-to-page, as in Revu. Off: lines smoothed at every "
+                         "zoom."),
     "markup_style_keys": ("Preferences ▸ Markup", "Number keys pick markup styles",
                           "With a markup tool in hand, 1 to 9 draw the next markup in that "
                           "tool's style 1 to 9; 0 goes back to the default."),

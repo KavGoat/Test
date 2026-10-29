@@ -378,6 +378,8 @@ class Workbook:
         # CALC(name) in a cell: (sheet, name) -> a DefinedName (a cell named
         # in its Variable box) or a value (an equation's); KeyError(why)
         self.calc_variable: Optional[Callable] = None
+        #: and CALC(v1+v2): (sheet, text) -> a cell value (docbook.calc_expression)
+        self.calc_expression: Optional[Callable] = None
         # whether one sheet may read cells of another (from, to, (t, l, b, r)):
         # the document's calculation sections (sheet/docbook.py); None: always
         self.reach: Optional[Callable] = None

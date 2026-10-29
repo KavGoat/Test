@@ -396,6 +396,9 @@ class Page:
         self.written_here: Optional[bool] = None
         self.frame = None                           # set by the UI layer
         self._pending_items: list[dict] = []
+        # a PDF page's own annotations not yet read as markups: (path, page
+        # index, scale onto this paper) — io/pdfio.read_pending_annotations
+        self._pending_annotations = None
         # The spreadsheet section this page is a page of (its run's id), or
         # None for an ordinary page (sheet/pagination.py, items/sheetpage.py).
         self.sheet: Optional[str] = None
@@ -474,7 +477,16 @@ class Page:
             "section_break": self.section_break,
             "section_title": self.section_title,
             "items": items,
+            # a PDF page's own annotations never yet read as markups (the
+            # scale they would be read onto this paper at): read when the
+            # page is looked at, after this save as before it
+            "annotations_unread": self.annotations_unread(),
         }
+
+    def annotations_unread(self):
+        frame = self.frame
+        pending = frame.unread if frame is not None else self._pending_annotations
+        return None if pending is None else float(pending[2])
 
     @classmethod
     def from_dict(cls, data: dict) -> "Page":
@@ -499,6 +511,9 @@ class Page:
         said = data.get("written_here")
         page.written_here = None if said is None else bool(said)
         page._pending_items = data.get("items", [])
+        unread = data.get("annotations_unread")
+        if unread is not None and page.pdf_key and page.pdf_page_index is not None:
+            page._pending_annotations = (page.pdf_key, page.pdf_page_index, float(unread))
         page.sheet = data.get("sheet") or None
         page.section_break = bool(data.get("section_break", False))
         page.section_title = str(data.get("section_title", "") or "")

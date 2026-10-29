@@ -9,8 +9,9 @@ from __future__ import annotations
 import re
 import time
 
-#: {page}, {date:DD.MM.YYYY}, {title} … and {=L.beam}
-FIELD = re.compile(r"\{(=[^{}]+|[a-z]+(?::[^{}]*)?)\}")
+#: {page}, {date:DD.MM.YYYY}, {title} … {=L.beam} — and {\5+2=}, an equation
+#: inside the box (items/inline_equations.py)
+FIELD = re.compile(r"\{(=[^{}]+|\\[^{}]*|[a-z]+(?::[^{}]*)?)\}")
 
 #: How long the values worked out for a box are kept before being asked again.
 FRESH_FOR = 0.5
@@ -47,16 +48,23 @@ def placeholder(body: str) -> str:
     return "«" + PLACEHOLDER_NAMES.get(name, name.capitalize()) + "»"
 
 
-def expand(text: str, document, page_index: int, placeholders: bool = False) -> str:
+def expand(text: str, document, page_index: int, placeholders: bool = False,
+           item=None) -> str:
     """*text* with every field replaced by its value — and, with
-    *placeholders*, a blank one by its name in «»."""
+    *placeholders*, a blank one by its name in «». *item* is the box the
+    text is in, whose inline equations ({\5+2=}) are worked out there."""
     if document is None:
         return text
+    count = [0]
 
     def one(match):
         body = match.group(1)
         if body.startswith("="):
             return variable_value(document, body[1:].strip())
+        if body.startswith("\\"):
+            from .inline_equations import inline_text
+            k, count[0] = count[0], count[0] + 1
+            return inline_text(item, k, body[1:])
         value = document.expand_fields(match.group(0), page_index)
         if placeholders and not value.strip():
             return placeholder(body)
@@ -86,12 +94,30 @@ def shown_document(item, on_screen: bool = False):
         return kept[2]
     copy = doc.clone(item)
     matches = list(FIELD.finditer(raw))
-    for match in reversed(matches):
+    values = []
+    inline = 0
+    for match in matches:
+        body = match.group(1)
+        if body.startswith("\\"):
+            from .inline_equations import inline_text
+            values.append(inline_text(item, inline, body[1:]))
+            inline += 1
+        else:
+            values.append(expand(match.group(0), document, index, on_screen))
+    for match, value in zip(reversed(matches), reversed(values)):
         cursor = QTextCursor(copy)
         cursor.setPosition(match.start())
         cursor.setPosition(match.end(), QTextCursor.KeepAnchor)
         look = cursor.charFormat()
-        cursor.insertText(expand(match.group(0), document, index, on_screen), look)
+        cursor.insertText(value, look)
+    # where each field is in the copy, for a click on it (Show Expression,
+    # a double-click to edit the equation): (shown from, to, raw from, to, body)
+    spans, shift = [], 0
+    for match, value in zip(matches, values):
+        start = match.start() + shift
+        spans.append((start, start + len(value), match.start(), match.end(), match.group(1)))
+        shift += len(value) - (match.end() - match.start())
+    item._field_spans = spans
     copy.setTextWidth(doc.textWidth())
     if kept is not None and kept[2] is not doc:
         kept[2].deleteLater()

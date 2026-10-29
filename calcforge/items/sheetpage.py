@@ -119,7 +119,7 @@ def run_item_for(frame) -> Optional["SheetRunItem"]:
     if run is None:
         return None
     for other in run_frames_from(frame):
-        for item in other.markups():
+        for item in other.built_markups():
             if isinstance(item, SheetRunItem) and item.uid == run:
                 return item
     return None

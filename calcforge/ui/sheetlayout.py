@@ -64,7 +64,7 @@ def _fit_run(window, item, spare: int, label: str) -> bool:
     target = max(1, pages_needed(item.sheet, frames[0].page.setup) + spare)
     going = []
     for frame in reversed(frames[target:]):
-        if any(not isinstance(m, SheetRunItem) for m in frame.markups()):
+        if frame.holds() or any(not isinstance(m, SheetRunItem) for m in frame.built_markups()):
             break                               # something drawn on it: it stays
         going.append(frame)
     adding = max(0, target - len(frames))

@@ -207,6 +207,9 @@ SECTION_ROLE = Qt.UserRole + 1
 #: Whether a thumbnail prints: 0 it does, 1 some of the workbook doesn't,
 #: 2 none of it does.
 NO_PRINT_ROLE = Qt.UserRole + 2
+#: the calc section a page starts (its label), drawn as the break's band over
+#: its thumbnail (the user, 2026-10-29: "show the purple line on the thumbnail too")
+BREAK_ROLE = Qt.UserRole + 4
 
 
 class _ThumbnailDelegate(QStyledItemDelegate):
@@ -232,6 +235,33 @@ class _ThumbnailDelegate(QStyledItemDelegate):
         self.strip = strip
 
     # -- where things go -----------------------------------------------------
+    def _paint_break(self, painter: QPainter, cell: QRect, label: str) -> None:
+        """A calc section break above the page: the band the canvas draws in
+        the gap before the page (calcsections.paint_bands), here along the
+        top of the thumbnail's cell, its name in the tag."""
+        from .calcsections import BAND
+        from PySide6.QtGui import QFont
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        middle = cell.top() + self.TOP // 2
+        pen = QPen(BAND, 1.4, Qt.DashLine)
+        painter.setPen(pen)
+        painter.drawLine(cell.left() + 2, middle, cell.right() - 2, middle)
+        font = QFont(painter.font())
+        font.setPointSizeF(max(6.0, font.pointSizeF() * 0.8))
+        font.setBold(True)
+        painter.setFont(font)
+        text = f" § {label} "
+        width = min(painter.fontMetrics().horizontalAdvance(text), cell.width() - 8)
+        tag = QRect(cell.left() + 4, middle - 6, width, 12)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(BAND)
+        painter.drawRoundedRect(tag, 6, 6)
+        painter.setPen(QColor("white"))
+        painter.drawText(tag, Qt.AlignCenter,
+                         painter.fontMetrics().elidedText(text, Qt.ElideRight, width))
+        painter.restore()
+
     def picture_room(self, cell: QRect) -> QRect:
         """The box a page's picture is fitted into, centred across the cell."""
         size = self.strip.iconSize()
@@ -305,6 +335,9 @@ class _ThumbnailDelegate(QStyledItemDelegate):
                                                                self.FRAME, self.FRAME)
             painter.fillRect(frame, QColor(colours["thumb_picked" if picked
                                                   else "thumb_hover"]))
+        label = index.data(BREAK_ROLE)
+        if label:
+            self._paint_break(painter, cell, str(label))
         if collapsed:
             # a workbook as one entry: its first page on a stack of sheets
             painter.setPen(QPen(QColor(colours["thumb_edge"]), 1))
@@ -1209,6 +1242,18 @@ class PagesPanel(QWidget):
             if row >= 0:
                 self.edit_label(row)
             return True
+        if watched is self.list and event.type() == QEvent.ShortcutOverride \
+                and event.key() in (Qt.Key_Delete, Qt.Key_Backspace) \
+                and not (event.modifiers() & (Qt.ControlModifier | Qt.AltModifier
+                                              | Qt.ShiftModifier)) \
+                and self.list.selectedItems():
+            # Delete over the pages picked out deletes them (keyPressEvent):
+            # claimed here first, or the window's Delete shortcut takes the
+            # key whenever a markup is selected on the page, and the pages
+            # stay (the user, 2026-10-29: "still can't click delete keyboard
+            # to delete multiple selected pages")
+            event.accept()
+            return True
         if watched is self.list and event.type() in (QEvent.ShortcutOverride,
                                                      QEvent.KeyPress):
             copy = event.matches(QKeySequence.Copy)
@@ -1455,6 +1500,9 @@ class PagesPanel(QWidget):
             entry.setToolTip(f"{tip}\n{page.setup.size_name} {page.setup.orientation}"
                              f"\nScale {page.scale.label}")
             entry.setData(NO_PRINT_ROLE, 0 if page.printable else 2)
+            if index > 0 and getattr(page, "section_break", False):
+                from .calcsections import section_of_page
+                entry.setData(BREAK_ROLE, section_of_page(document, index).short)
             self.list.addItem(entry)
         if self._sections_in(document):
             lines = 2                        # a workbook's name over its pages
@@ -1730,7 +1778,7 @@ class PagesPanel(QWidget):
         frame = page.frame
         if frame is None:
             return sheet
-        items = [i for i in frame.markups() if i.isVisible() and not i.from_drawing]
+        items = [i for i in frame.built_markups() if i.isVisible() and not i.from_drawing]
         if not items:
             return sheet
         from PySide6.QtGui import QPainter
@@ -2345,7 +2393,8 @@ class MarkupsPanel(QWidget):
         for index, page in enumerate(document.pages):
             if page.frame is None:
                 continue
-            for item in page.frame.ordered_markups():
+            # (built so far: a page's markups come as it is looked at)
+            for item in page.frame.built_in_order():
                 if getattr(item, "from_drawing", False):
                     continue
                 if getattr(item, "IS_CALC", False):
@@ -2525,14 +2574,14 @@ class MarkupsPanel(QWidget):
                 continue
             listed = shown[1].get(index, ())
             if index not in changed:
-                count = sum(1 for item in page.frame.markups()
+                count = sum(1 for item in page.frame.built_markups()
                             if not getattr(item, "from_drawing", False)
                             and not getattr(item, "IS_CALC", False))
                 if count != len(listed):
                     return False
                 continue
             order = {}
-            for item in page.frame.ordered_markups():
+            for item in page.frame.built_in_order():
                 if not getattr(item, "from_drawing", False) \
                         and not getattr(item, "IS_CALC", False):
                     order[item.uid] = (len(order), item)
@@ -2707,7 +2756,7 @@ class MarkupsPanel(QWidget):
         for page in document.pages:
             if page.frame is None:
                 continue
-            for item in page.frame.markups():
+            for item in page.frame.built_markups():
                 if isinstance(item, CountItem):
                     counts[item.subject] += 1
                 elif isinstance(item, MeasureItem) and item.value is not None:

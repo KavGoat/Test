@@ -30,6 +30,7 @@ from .values import is_unit_text
 
 #: The function a cell reads a CalcForge variable with (evaluate._calc_var).
 CALC = "CALC"
+CF = "CF"                    # the short spelling (the user, 2026-10-29: "calc is very long to type")
 
 
 class FormulaError(ValueError):
@@ -416,10 +417,23 @@ class Name:
 
 @dataclass(frozen=True)
 class DocVar:
-    """CALC(x): the CalcForge variable x (an equation's, or a cell named in
-    its Variable box), never an Excel name."""
+    """CALC(x), CF(x): the CalcForge variable x (an equation's, or a cell
+    named in its Variable box), never an Excel name. *fn* is the spelling
+    typed, written back as typed."""
 
     name: str
+    fn: str = "CALC"
+
+
+@dataclass(frozen=True)
+class DocExpr:
+    """CALC(v1+v2), CF(…): an expression in the equations' own language,
+    worked out by their engine as an equation standing where the sheet is
+    would work it out (the user, 2026-10-29: "allow for something like
+    calc(v1+v2) so I don't have to write calc every time")."""
+
+    text: str
+    fn: str = "CALC"
 
 
 @dataclass(frozen=True)
@@ -482,11 +496,12 @@ _LEFT_ASSOC = True  # Excel: 2^3^2 = 64
 
 
 class _Parser:
-    def __init__(self, tokens: list[Token], row: int, col: int):
+    def __init__(self, tokens: list[Token], row: int, col: int, text: str = ""):
         self.t = tokens
         self.i = 0
         self.row = row
         self.col = col
+        self.text = text              # the formula as typed, for CALC(…)'s expression
         self.names: set = set()
         self.functions: set = set()
         self.tables: set = set()
@@ -659,9 +674,10 @@ class _Parser:
         if name.startswith("_XLWS."):
             name = name[6:]
         self.expect("(")
-        if name == CALC:
-            # CALC(x): a CalcForge variable, by its name alone — one spelt
-            # like a cell (CALC(M20)) or with a subscript (CALC(L.beam)) too
+        if name in (CALC, CF):
+            # CALC(x), CF(x): a CalcForge variable, by its name alone — one
+            # spelt like a cell (CALC(M20)) or with a subscript (CALC(L.beam))
+            # too; CALC(v1+v2): an expression of theirs, as typed
             if self.peek(1).kind == ")" and (
                     (self.peek().kind == "ref" and isinstance(self.peek().ref, CellRef)
                      and self.peek().ref.sheet is None and "$" not in self.peek().text)
@@ -669,8 +685,25 @@ class _Parser:
                 inner = self.take()
                 self.expect(")")
                 self.names.add(inner.text)
-                return DocVar(inner.text)
-            raise FormulaError("CALC takes the name of a CalcForge variable, as CALC(PGA)")
+                return DocVar(inner.text, name)
+            start, depth = self.i, 0
+            while not (self.peek().kind == ")" and depth == 0):
+                tok = self.peek()
+                if tok.kind == "end":
+                    raise FormulaError(f"{name}( is missing its )", tok.pos)
+                depth += {"(": 1, ")": -1}.get(tok.kind, 0)
+                self.take()
+            inside = self.t[start:self.i]
+            self.expect(")")
+            if not inside:
+                raise FormulaError(f"{name} takes a CalcForge variable or expression, "
+                                   f"as {name}(PGA) or {name}(v1+v2)")
+            text = (self.text[inside[0].pos:inside[-1].pos + len(inside[-1].text)]
+                    if self.text else "".join(tok.lead + tok.text for tok in inside)).strip()
+            for tok in inside:
+                if tok.kind in ("name", "ref") and "!" not in tok.text and "$" not in tok.text:
+                    self.names.add(tok.text)          # recalculated when any of them changes
+            return DocExpr(text, name)
         self.functions.add(name)
         args = []
         if self.peek().kind == ")":
@@ -755,7 +788,7 @@ def parse(text: str, row: int = 0, col: int = 0) -> Parsed:
     hit = _by_signature.get(sig)
     if hit is not None:
         return hit
-    p = _Parser(tokens, row, col)
+    p = _Parser(tokens, row, col, text)
     tree = p.parse()
     parsed = Parsed(tree, bool(p.functions & VOLATILE), frozenset(p.names), frozenset(p.functions),
                     frozenset(p.tables))

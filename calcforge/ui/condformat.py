@@ -483,7 +483,7 @@ def apply_document_rules(window, store: dict, renamed: dict | None = None) -> No
         from ..items.calc import CalcItem
         for page in window.document.pages:
             frame = getattr(page, "frame", None)
-            for item in frame.markups() if frame is not None else ():
+            for item in frame.built_markups() if frame is not None else ():
                 if isinstance(item, CalcItem) and item.cond_preset in renamed:
                     item.cond_preset = renamed[item.cond_preset]
             for record in getattr(page, "_pending_items", ()):     # pages not built yet
@@ -501,7 +501,7 @@ def redraw_all(window) -> None:
         frame = getattr(page, "frame", None)
         if frame is None:
             continue
-        for item in frame.markups():
+        for item in frame.built_markups():
             if isinstance(item, CalcItem) and item.region is not None:
                 item.relayout()
                 item.update()

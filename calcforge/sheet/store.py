@@ -23,6 +23,8 @@ def style_to_dict(style: Style) -> dict:
             continue
         if isinstance(value, Border):
             value = [value.style, value.color]
+        elif f.name == "runs" and value:
+            value = [list(run) for run in value]
         out[f.name] = value
     return out
 
@@ -35,6 +37,8 @@ def style_from_dict(data: dict) -> Style:
             continue
         if k in ("left", "right", "top", "bottom", "diagonal_up", "diagonal_down") and v is not None:
             v = Border(*v)
+        elif k == "runs":
+            v = tuple((str(t), str(kind)) for t, kind in v) if v else None
         kw[k] = v
     return Style(**kw)
 

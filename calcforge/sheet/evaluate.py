@@ -322,6 +322,8 @@ def ev(n, ctx: Ctx):
         return _name(n, ctx)
     if t is F.DocVar:
         return _calc_var(n, ctx)
+    if t is F.DocExpr:
+        return _calc_expr(n, ctx)
     if t is F.Apply:
         from .functions import apply
         return apply(n, ctx)
@@ -572,12 +574,22 @@ def _lost_name(name: str, dn, ctx: Ctx) -> str:
 
 def _is_calc_variable(name: str, ctx: Optional["Ctx"]) -> bool:
     """Whether CALC(name) would read something where *ctx* is."""
+    return _calc_refusal(name, ctx) is True
+
+
+def _calc_refusal(name: str, ctx: Optional["Ctx"]):
+    """True when CALC(name) reads something where *ctx* is; the reason it
+    refuses when that reason is worth telling (the workbook's own cell);
+    else False."""
     ask = (ctx.wb.calc_variable or ctx.wb.outside) if ctx is not None else None
     if ask is None:
         return False
     try:
         ask(ctx.sheet, name)
-    except (KeyError, SheetError):
+    except KeyError as e:
+        why = e.args[0] if e.args and isinstance(e.args[0], str) else ""
+        return why if "own cell" in why else False
+    except SheetError:
         return False
     return True
 
@@ -585,10 +597,18 @@ def _is_calc_variable(name: str, ctx: Optional["Ctx"]) -> bool:
 def not_known(name: str, ctx: Optional["Ctx"] = None) -> str:
     """Why a name gives #NAME? (QA, 2026-10-15: errors say what went wrong):
     and when it is a CalcForge variable, how a cell reads one."""
-    if _is_calc_variable(name, ctx):
+    reads = _calc_refusal(name, ctx)
+    if reads is True:
         return (f"'{name}' isn't an Excel name of this workbook or sheet; the CalcForge "
                 f"variable {name} is read as CALC({name})")
+    if reads:
+        return f"'{name}' isn't an Excel name of this workbook or sheet; {reads.partition(': ')[2]}"
     return f"'{name}' isn't a function or an Excel name of this workbook or sheet"
+
+
+def _as_typed(why: str, fn: str) -> str:
+    """The reason with the function as it was typed (CF, not CALC)."""
+    return why.replace("CALC(", f"{fn}(", 1) if fn != F.CALC and why.startswith("CALC(") else why
 
 
 def _calc_var(n: F.DocVar, ctx: Ctx):
@@ -610,13 +630,35 @@ def _calc_var(n: F.DocVar, ctx: Ctx):
     except KeyError as e:
         why = e.args[0] if e.args and isinstance(e.args[0], str) and " " in e.args[0] else \
             f"CALC({n.name}): there's no CalcForge variable {n.name} before this sheet"
-        return NAME.because(why)
+        return NAME.because(_as_typed(why, n.fn))
     except SheetError as e:
         return e.error
     from .workbook import DefinedName
     if isinstance(got, DefinedName):
         return _defined(n.name, got, ctx)
     return got                          # an equation's, as a cell's value
+
+
+_IDENTIFIER = re.compile(r"[A-Za-z_][\w.]*")
+
+
+def _calc_expr(n: F.DocExpr, ctx: Ctx):
+    """CALC(v1+v2), CF(…): the expression worked out by the equations'
+    engine as an equation standing where the sheet is would — its names the
+    CalcForge variables in force there (the user, 2026-10-29)."""
+    for name in _IDENTIFIER.findall(n.text):
+        ctx.reads.add(name.lower())
+    ask = ctx.wb.calc_expression
+    if ask is None:
+        return NAME.because(f"{n.fn}({n.text}): there are no CalcForge equations here")
+    try:
+        return ask(ctx.sheet, n.text)
+    except KeyError as e:
+        why = e.args[0] if e.args and isinstance(e.args[0], str) and " " in e.args[0] else \
+            f"{n.fn}({n.text}) couldn't be worked out"
+        return NAME.because(_as_typed(why, n.fn))
+    except SheetError as e:
+        return e.error
 
 
 def from_engine(value, engineering: bool = True):
@@ -740,7 +782,9 @@ def operand_text(node, ctx: Ctx) -> Optional[str]:
     if t is F.Name:
         return node.name if node.sheet is None else f"{node.sheet}!{node.name}"
     if t is F.DocVar:
-        return f"{F.CALC}({node.name})"
+        return f"{node.fn}({node.name})"
+    if t is F.DocExpr:
+        return f"{node.fn}({node.text})"
     if t is F.Num:
         return general_number(node.value)
     if t is F.Unit:

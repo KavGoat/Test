@@ -75,6 +75,42 @@ ZOOMED_OUT_LINE_PIXELS = 1.4
 ZOOMED_OUT_BELOW = 1.0
 ZOOMED_OUT_FLOOR = 0.25
 
+# Crisp, zoomed out (the user, 2026-10-29: "fuzzy is not good … Bluebeam looks
+# clear when zoomed out"): below 100 % the line work is drawn on the pixels —
+# no anti-aliasing of strokes and fills, every line at least a pixel — so a
+# hairline is one black row rather than two grey ones, as Revu and a CAD
+# viewer draw a sheet at fit-to-page. Text keeps its smoothing (letters a
+# few pixels tall go ragged without it). From 100 % up everything is smoothed
+# as before, which is why zooming in on Revu looks softer than its zoomed-out
+# sheet. Preferences ▸ Crisp lines zoomed out turns it off (configure).
+#
+# Drawn without anti-aliasing a line is the pixels whose centres it covers,
+# and a hairline widened to exactly one pixel misses them along a shallow
+# slope at some zooms (at 25 % and 75 %, every other column): a hair more
+# than a pixel wide covers every column, and a flat hairline is still one
+# row nearly everywhere (CRISP_LINE_PIXELS; 1.5 made every other one two).
+CRISP_ZOOMED_OUT = True
+CRISP_LINE_PIXELS = 1.1
+SMOOTH_AA = 8
+
+
+def configure(crisp_zoomed_out: Optional[bool] = None) -> None:
+    """Rendering settings a renderer process is told about (pdftiles sends
+    them to each of its renderers, and again whenever they change)."""
+    global CRISP_ZOOMED_OUT
+    if crisp_zoomed_out is not None:
+        CRISP_ZOOMED_OUT = bool(crisp_zoomed_out)
+
+
+def settings() -> dict:
+    """What configure() takes, as it stands here."""
+    return {"crisp_zoomed_out": CRISP_ZOOMED_OUT}
+
+
+def crisp_at(scale: float) -> bool:
+    """Whether a tile at *scale* pixels to the point is drawn crisp."""
+    return CRISP_ZOOMED_OUT and scale < ZOOMED_OUT_BELOW - 1e-9
+
 
 def thinnest_line(scale: float) -> float:
     """The thinnest a line is drawn on screen, in device pixels, at *scale*
@@ -562,14 +598,19 @@ def raster_from(drawing, region: tuple[float, float, float, float],
     the screen: zoomed out, no line thinner than thinnest_line."""
     from pymupdf import mupdf
 
-    width = thinnest_line(scale)
+    crisp = crisp_at(scale)
+    width = CRISP_LINE_PIXELS if crisp else thinnest_line(scale)
     before = mupdf.fz_graphics_min_line_width()
+    aa_before = mupdf.fz_graphics_aa_level()
     try:
         clip = pymupdf.Rect(*region).normalize()
         if clip.is_empty:
             return None
         if width != before:
             mupdf.fz_set_graphics_min_line_width(width)
+        if crisp:
+            mupdf.fz_set_graphics_aa_level(0)          # strokes and fills on the pixels
+            mupdf.fz_set_text_aa_level(SMOOTH_AA)       # letters still smoothed
         pixmap = drawing.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
                                     clip=clip, alpha=alpha)
     except Exception:                                  # noqa: BLE001
@@ -578,6 +619,8 @@ def raster_from(drawing, region: tuple[float, float, float, float],
     finally:
         if width != before:
             mupdf.fz_set_graphics_min_line_width(before)
+        if crisp:
+            mupdf.fz_set_graphics_aa_level(aa_before)
     return _raster_of(pixmap)
 
 

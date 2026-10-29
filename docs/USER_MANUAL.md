@@ -39,7 +39,7 @@ adds a workbook.
 | an equation | a cell | `Sheet1.A1` |
 | an equation | a cell named as a **variable** (right-click ▸ **Variable**) | `Load` |
 | an equation | an **Excel name**, dialled in (not in a self-contained workbook) | `Sheet1.Load` |
-| a cell | a **CalcForge variable** (an equation's, or a cell's **Variable**) | `=CALC(height)` |
+| a cell | a **CalcForge variable** (an equation's, or a cell's **Variable**), or any CalcForge expression | `=CF(height)`, `=CF(v1+v2)` (`CALC` is the same) |
 | a cell | an **Excel name** of its own workbook or sheet | `=Load` |
 
 - **Two kinds of named cell.** A **variable** is CalcForge's: name a cell in its
@@ -49,10 +49,13 @@ adds a workbook.
   anything else only by dialling in, `Sheet1.Load` from an equation or
   `=Sheet1!Load` from another sheet's cell — never bare.
 - **In a cell a bare name is only ever an Excel name**; a CalcForge variable is
-  read as `CALC(name)` — even a cell's own **Variable**, even in its own workbook.
-  Excel has no `CALC`, so the two never clash, and `VAR(…)` is always Excel's
-  variance. A document saved before this opens with its cells rewritten so they
-  read what they read: `=w*2` that read the equation's `w` becomes `=CALC(w)*2`.
+  read as `CF(name)` or `CALC(name)` — never a cell's own **Variable** in its own
+  workbook (read that by its address, `=Sheet1!A6`). `CF(…)` takes any CalcForge
+  expression, `=CF(v1+v2)`, `=CF(height+1'm)`, worked out as an equation standing
+  where the sheet is would work it out. Excel has no `CF` or `CALC`, so the two
+  never clash, and `VAR(…)` is always Excel's variance. A document saved before
+  this opens with its cells rewritten so they read what they read: `=w*2` that
+  read the equation's `w` becomes `=CALC(w)*2`.
 - A workbook — one brought in from Excel, or one made with **Insert ▸ Spreadsheet
   Page** — is **self-contained** to start: closed, as a self-contained calculation
   block is. Equations reach it only through its variables and its cells
@@ -108,10 +111,18 @@ page.
 ### Opening, saving and starting a document
 
 - **File ▸ New PDF** (`Ctrl+N`), **New Tab** (`Ctrl+T`), **New Window**
-  (`Ctrl+Alt+Shift+N`).
+  (`Ctrl+Alt+Shift+N`). New opens beside the document you are working on, in a
+  tab of its own, as in Revu; only a blank, untouched window is replaced.
 - **File ▸ Open** (`Ctrl+O`) opens a PDF, or an Excel workbook (`.xlsx`, `.xlsm`,
   or a template, `.xltx`, `.xltm`), in a new tab. Other people's markups come in as markups you can edit. **Open
-  Recent** lists the files opened lately.
+  Recent** lists the files opened lately. A big set opens at once: the markups of
+  the page in view are built first and the rest behind it (the status bar says
+  *Loading markups… n of N pages*); a page not built yet shows as its file draws
+  it, and a save in the meantime keeps every markup.
+- **Drag and drop**: drop a PDF anywhere on the window to open it in a tab; drop
+  an Excel workbook or a picture (`.png`, `.jpg`, …) on a page to put it in after
+  that page. Dropped on a blank, untouched window, a workbook opens as the
+  document.
 - **File ▸ Save** (`Ctrl+S`), **Save As** (`Ctrl+Shift+S`) and **Save All** write the
   PDF. A digitally signed PDF is appended to, so its signature still verifies.
 - **When a file can't be saved** — it is read-only, open in another program, its
@@ -493,6 +504,18 @@ colours you made are kept.
   name, Page number (also `0001` style), Number of pages, Page n of m, four date
   formats, two time formats — and **Variable**, which shows an equation's value
   (`{=name}`) and follows it as it is recalculated.
+- **An equation inside a text box.** Type `\` while writing and `{\ }` opens
+  with the caret inside; type the equation as in Calc mode and `Enter` steps out
+  of it (`}` closes it too). `{\5+2=}` shows **7**, `{\test=}` the value of
+  *test*, `{\t:=5}` defines *t* for every equation, table and cell after the box
+  (the Variables panel lists it as a *Text box*). While the box is being typed
+  into the codes show; otherwise their results, which follow the calculation.
+  Right-click an equation ▸ **Show Expression** shows the working beside the
+  result, `test*test = 50`, rather than the result alone; **Edit Equation**, or a
+  double-click on it, opens the box with the equation picked out to retype. A
+  mistake is said in the box (`zz*2: zz - not defined.`). An equation inside a
+  box is read in the document's order where the box is, as a named measurement
+  is.
 - **Edit Text** puts the cursor in the words; **Bookmark** makes the words a
   bookmark.
 - **Edit ▸ Check Spelling ▸ Check Spelling in Markups…** (`F7`) goes through every
@@ -646,8 +669,10 @@ tool set keep their own drawing.
 ### Pages
 
 **Thumbnails panel** (`Alt+T`). Click a page to go to it; `Delete` deletes the pages
-picked (it asks first); drag pages to reorder them (a blue line in the gap shows
-where); drop a PDF on it to insert its pages. `Ctrl`+wheel, **Larger Thumbnails**
+picked (it asks first; it works with a markup selected on the page too); drag
+pages to reorder them (a blue line in the gap shows where); drop a PDF on it to
+insert its pages. A calc section break is a purple band across the strip above
+the page it starts, its name on a tag. `Ctrl`+wheel, **Larger Thumbnails**
 and **Smaller Thumbnails** change the picture size. **Thumbnails ▾** is its menu;
 the buttons after it are **Add Page**, **Insert Pages**, **Insert Blank Page**,
 **Insert Spreadsheet Page**, **Duplicate Page** and **Delete Pages**. Pages are
@@ -939,7 +964,9 @@ A **calc section break** starts the calculation afresh from a page: right-click
 its thumbnail ▸ **Calc Section Break Above This Page** (also on the page's
 right-click menu in Calc mode). Equations, tables and sheets before the break
 are not seen after it — an equation reading one says so, and a cell gives
-`#REF!`. The break shows as a purple band above its page and never prints.
+`#REF!`. The break shows as a purple band above its page — on the canvas, across
+the Thumbnails strip, and as the section's heading in the Variables panel — and
+never prints.
 
 To carry something past the breaks, make it **Global**: right-click an equation
 ▸ **Global**, or right-click its row in the Variables panel ▸ **Make Global**;
@@ -1419,15 +1446,19 @@ Cells hold units and calculate with them, as the equations do:
 
 ### Equation variables in cells
 
-`CALC(name)` reads a CalcForge variable: an equation's, or a cell named in its
-**Variable** box — the one in force where the sheet is, the latest defined
-**before** it (an earlier page, or higher on the same page), as an equation would
-read it; a **Variable** in the cell's own workbook wherever it is. `=CALC(fc)*2`,
-`=CALC(M20)` (a variable spelt like a cell), `=CALC(L.beam)`. A bare name is only
-ever an Excel name of the workbook or sheet (or a unit, `=10*kN`), so the two never
-clash; `VAR(…)` is always Excel's variance. A name that is neither is `#NAME?`, and
-its tip says when `CALC(name)` would read it. Typing a formula, the list offers a
-**Variable** as `CALC(name)`.
+`CF(name)` — or `CALC(name)`, the same — reads a CalcForge variable: an
+equation's, or a cell named in its **Variable** box — the one in force where the
+sheet is, the latest defined **before** it (an earlier page, or higher on the
+same page), as an equation would read it. `=CF(fc)*2`, `=CF(M20)` (a variable
+spelt like a cell), `=CF(L.beam)`. It takes any CalcForge expression too,
+`=CF(v1+v2)`, `=CF(height+1'm)`, `=CF(Sheet1.A1*2)`, worked out as an equation
+standing where the sheet is would work it out, with the names in force there.
+It never reads the workbook's own **Variable** cell (`CF(ting)` with the
+workbook's own cell named *ting* says to read it by its address, `=Sheet1!A6`).
+A bare name is only ever an Excel name of the workbook or sheet (or a unit,
+`=10*kN`), so the two never clash; `VAR(…)` is always Excel's variance. A name
+that is neither is `#NAME?`, and its tip says when `CF(name)` would read it.
+Typing a formula, the list offers a **Variable** as `CF(name)`.
 
 ### Formatting
 
@@ -1562,7 +1593,7 @@ the equation and R² on the chart). The axis titles carry the cells' units.
 - **Sheet Layout…** (Page Layout menu): Print area, **Rows to repeat at top**,
   **Columns to repeat at left**, Adjust to %, **Fit to** N pages wide, Centre on
   page horizontally and vertically, Print gridlines, Print row and column headings,
-  and Show gridlines on screen.
+  and Show gridlines on screen. An Excel sheet comes in at its own Adjust to %.
 - Turning a spreadsheet page turns the whole sheet between portrait and landscape
   and the page breaks flow again. Paper and orientation belong to the whole sheet.
 - Cell borders always print; gridlines and headings print only when asked.
@@ -1621,9 +1652,14 @@ becomes spreadsheet pages with its cells, formulas, formats, sizes, merges, name
 comments, validation, conditional formatting, page layout, frozen panes and view.
 Its XY scatter, line and column **charts** and its **pictures** come in where Excel
 put them, moving with their cells — every picture, a logo kept as a Windows
-metafile (WMF or EMF) too, cropped as Excel crops it, and pictures grouped together; other chart kinds and a print scale other than
-100 % are left out, and CalcForge says so — with any cell whose answer differs from
-what Excel last showed. A worksheet name already used becomes `Name (2)`; the same
+metafile (WMF or EMF) too, cropped as Excel crops it, and pictures grouped together; other chart kinds are left out, and CalcForge says so — with any cell whose answer differs from
+what Excel last showed. Superscripts and subscripts in a cell's text (kN/m³,
+f'c) are drawn raised and lowered as Excel draws them. Conditional formats Excel
+keeps in its newer extension list (a rule reading another sheet) come in with
+the rest. A sheet's **Adjust to N %** comes across; when its print area at that
+scale runs over the page by a hair (Excel's page breaks fall from printer-pixel
+rounding), the scale comes down the percent or two that fits it on the pages
+the designer saw, rather than its last rows going on a page of their own. A worksheet name already used becomes `Name (2)`; the same
 workbook brought in twice is `Loads` and `Loads (2)`. Nothing is written back to
 Excel.
 
@@ -1694,7 +1730,7 @@ Type `=` and the function's name; the tip shows its arguments (optional ones in
 [brackets]). Every function the engine supports:
 
 <!-- generated:sheet-functions -->
-The engine has **472** spreadsheet functions.
+The engine has **473** spreadsheet functions.
 
 #### Maths and trigonometry
 
@@ -2166,8 +2202,9 @@ The engine has **472** spreadsheet functions.
 
 | Function | What it does |
 |---|---|
-| `CALC(name)` | The CalcForge variable name — an equation's, or a cell named in its Variable box — in force where the sheet is. A bare name in a cell is only ever an Excel name, so the two never clash. |
+| `CALC(name or expression)` | A CalcForge variable — an equation's, or a cell named in its Variable box — in force where the sheet is, or an expression of theirs (CALC(v1+v2)). A bare name in a cell is only ever an Excel name, so the two never clash; a workbook's own cell is read as its name or address, never through CALC. |
 | `CELL(info_type, [reference])` | Information about a cell: its address, row, column, contents, type… |
+| `CF(name or expression)` | CALC in two letters: CF(name) or CF(v1+v2). Excel has no CF. |
 | `ENCODEURL(value)` | Text encoded for use in a web address. |
 | `ERROR.TYPE(value)` | The number of an error value (1 for #NULL! … 7 for #N/A). |
 | `INFO(type_text)` | Information about the working environment. |
@@ -2249,6 +2286,7 @@ rather than to the document; they are the same in every document you open.
 | **Drawing snap** | Preferences ▸ Canvas | On | Corners, midpoints and line ends pull the pointer to them while you draw. |
 | **Autosize text** | Preferences ▸ Writing | On | A text box grows to fit what is typed into it. |
 | **Insertion point** | Preferences ▸ Canvas | Off | A click on empty paper leaves a caret to type at; the arrow keys move it. |
+| **Crisp lines zoomed out** | Preferences ▸ Canvas | On | Below 100 % a page's lines are drawn on the pixels, none thinner than one and none smoothed into grey, so a whole sheet reads clearly at fit-to-page, as in Revu. Off: lines smoothed at every zoom. |
 | **Draw with the graphics card** | Preferences ▸ Canvas | On | Draws the pages with OpenGL for smooth scrolling on high-density screens. Turn it off if pages draw wrongly with your graphics driver. |
 | **Allow Markup Recovery (Unflatten)** | Document ▸ Flatten… dialog | On | Remembered from the Flatten Markups dialog: whether flattened markups can be brought back with Unflatten. Set it there, as in Revu. |
 | **Number keys pick markup styles** | Preferences ▸ Markup | On | With a markup tool in hand, 1 to 9 draw the next markup in that tool's style 1 to 9; 0 goes back to the default. |
