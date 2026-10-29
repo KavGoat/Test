@@ -5159,8 +5159,8 @@ def test_ctrl_b_still_bookmarks_when_there_are_no_words(window, monkeypatch):
 
 def _btx(name):
     import os
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(here, "btx", name)
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(here, "data", "btx", name)
 
 
 def test_importing_a_bluebeam_tool_set_fills_the_tool_chest(window):
@@ -5250,14 +5250,13 @@ def test_every_tool_set_is_showing_at_once(window):
     from calcforge.ui import toolsets
 
     window.import_toolset(_btx("Structures - Timber.btx"))
-    window.import_toolset(_btx("Structures - Welds.btx"))
+    window.import_toolset(_btx("Structural Steel UC Sections - 1-10 @ A1.btx"))
     tree = window.toolsets_panel.tree
 
     headings = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
     assert any(h.startswith(toolsets.MY_TOOLS) for h in headings)
     assert any(h.startswith("Structures - Timber") for h in headings)
-    assert any(h.startswith("Strucutres - Welds") or h.startswith("Structures - Welds")
-               for h in headings)
+    assert any(h.startswith("Structural Steel UC Sections") for h in headings)
     # And each heading says how many are in it, so a set can be judged rolled up.
     assert all("(" in heading for heading in headings)
 
@@ -9557,12 +9556,15 @@ def test_a_clouds_drag_box_in_another_editor_is_the_cloud(window, tmp_path):
 
 
 def test_a_sketch_tool_goes_out_as_bluebeams_nested_group_and_comes_back(window, tmp_path):
+    """A group inside a group — a section mark whose bubble and label are a
+    group of their own — goes out as Bluebeam's /GroupNesting and /IRT and
+    reads back nested. (The tool set is the one tests/test_btx.py writes the
+    way Bluebeam does; the user's Sketch Tools set left the repo 2026-10-29.)"""
     from collections import Counter
     from calcforge.io import btx, pdfmarkups, pdfvector
     from calcforge.items.base import build_item
-    import os
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    section = btx.read(os.path.join(here, "btx", "Structures - Sketch Tools.btx")).tools[6]
+    from tests.test_btx import _a_tool_set_with_a_group_inside_a_group
+    section = btx.read(_a_tool_set_with_a_group_inside_a_group(tmp_path / "nested.btx")).tools[0]
     frame = window.current_page().frame
     for payload in section.payloads:
         item = build_item(dict(payload))
@@ -9571,13 +9573,13 @@ def test_a_sketch_tool_goes_out_as_bluebeams_nested_group_and_comes_back(window,
     leaders = [a for a in pdf[0].annots() if "/GroupNesting" in pdf.xref_object(a.xref)]
     assert len(leaders) == 1
     nesting = pdf.xref_object(leaders[0].xref)
-    assert "(Section)" in nesting and nesting.count("(Group)") == 2
+    assert "(Section mark)" in nesting and nesting.count("(Group)") == 1, "the bubble's own list"
     members = [a for a in pdf[0].annots() if "/RT /Group" in pdf.xref_object(a.xref)]
     assert len(members) == len(section.payloads) - 1
     back = pdfmarkups.markups_of_page(pdfvector.PdfFile.open(path), 0)
     shape = Counter(tuple(p.get("group_path") or ()) for p in back)
-    assert sorted(shape.values()) == [2, 6]
-    assert {p.get("group_title") for p in back} == {"Section"}
+    assert sorted(shape.values()) == [2, 2], "the mark's two parts, and the bubble's two"
+    assert {p.get("group_title") for p in back} == {"Section mark"}
 
 
 def test_a_borderless_text_box_says_so_and_carries_its_rich_text(window, tmp_path):

@@ -194,7 +194,7 @@ def test_child_exit_recovers_and_shutdown_leaves_no_renderer(qapp):
 
 def test_reference_pdf_matches_at_overview_and_detail_zooms(qapp):
     from pathlib import Path
-    path = Path(__file__).resolve().parents[1] / 'btx' / 'Document1.pdf'
+    path = Path(__file__).resolve().parent / 'data' / 'btx' / 'Document1.pdf'
     data = path.read_bytes()
     keys = [pdftiles.TileKey('reference', page, scale, 0, 0, True)
             for page in (0, 1) for scale in (.25, 1., 4.)]

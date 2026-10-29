@@ -101,7 +101,7 @@ The skipped test needs the external PDF corpus, which is not present.
 
 ## Follow-up validation — 2026-09-13
 
-Both pages of `btx/Document1.pdf` and a generated mixed scan/text/vector sheet
+Both pages of `tests/data/btx/Document1.pdf` and a generated mixed scan/text/vector sheet
 were benchmarked with one and four processes. All corresponding pixel hashes
 match. These small reference pages have roughly 8–9 ms warm batches with either
 configuration; their timing differences are not a meaningful speedup claim.
@@ -110,8 +110,8 @@ The mixed sheet measured median warm batches of 48.3 ms (one worker) and
 [`benchmarks/pdf_review_2026-09-13.json`](benchmarks/pdf_review_2026-09-13.json).
 
 ```bash
-python tools/benchmark_pdf.py --pdf btx/Document1.pdf --page 0 --workers 1 4 --rounds 5
-python tools/benchmark_pdf.py --pdf btx/Document1.pdf --page 1 --workers 1 4 --rounds 5
+python tools/benchmark_pdf.py --pdf tests/data/btx/Document1.pdf --page 0 --workers 1 4 --rounds 5
+python tools/benchmark_pdf.py --pdf tests/data/btx/Document1.pdf --page 1 --workers 1 4 --rounds 5
 python tools/benchmark_pdf.py --fixture mixed --workers 1 4 --rounds 5
 ```
 

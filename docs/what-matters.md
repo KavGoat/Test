@@ -105,7 +105,7 @@ responsibility for the review. What the suites in `tests/` do is make specific,
 checkable promises: that `test_format.py` opens what was saved and finds an
 ordinary PDF with the source page untouched, that `test_pdf_engine.py` reads
 real files from other people's software rather than files of its own making,
-that `test_btx.py` reads the actual `.btx` tool sets in `btx/`, and that
+that `test_btx.py` reads the actual `.btx` tool sets in `tests/data/btx/`, and that
 `test_output.py` measures what leaves the printer.
 
 **Check the marked-up set before you issue it.** That is true of every review

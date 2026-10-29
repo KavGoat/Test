@@ -135,7 +135,7 @@ to the job.
 **Bluebeam tool sets import.** **File ▸ Import ▸ Tool Set…** reads a `.btx` file —
 the real thing, not an export of one: each tool's `Raw` field is a
 zlib-compressed, hex-encoded PDF annotation dictionary, and it is parsed as
-one. The sets in `btx/` are what the reader is tested against, so the tools an
+one. The sets in `tests/data/btx/` are what the reader is tested against, so the tools an
 office already has come across with their colours, weights, line types, hatches
 and stamps intact.
 
@@ -428,7 +428,8 @@ calcforge/
   io/          opening and saving PDFs, the calculation layers, the signed-file update, annotation
                writing, Bluebeam tool sets, vector import, links, recolouring,
                export
-btx/           the real Bluebeam tool sets the importer is tested against
+tests/data/btx/  two real Bluebeam tool sets and a marked-up sheet the importer and the
+               renderer are tested against
 tests/         the suite: the engine, the items, the window, and real use
 ```
 
@@ -489,7 +490,7 @@ the PDF that comes out at the end.
 |---|---|
 | `test_pdf_engine.py` | The PDF layer: opening, page geometry under rotation, drawing, object round trips, incremental update, attachments, line work |
 | `test_format.py` | What a saved document is — a PDF, the source page untouched, markups as annotations |
-| `test_btx.py` | Bluebeam tool sets, read from the real `.btx` files in `btx/` |
+| `test_btx.py` | Bluebeam tool sets, read from the two real `.btx` files in `tests/data/btx/` |
 | `test_items.py` | Serialisation, geometry and layout of every markup type |
 | `test_app.py` | The window: tools, panels, undo, files, printing |
 | `test_canvas.py` | One continuous scroll through every page |

@@ -460,8 +460,8 @@ def _a_drawing_marked_up_elsewhere(path: str) -> None:
     document.close()
 
 
-REFERENCE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                         "btx", "Document1.pdf")
+REFERENCE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "data", "btx", "Document1.pdf")
 
 
 @pytest.mark.skipif(not os.path.exists(REFERENCE),

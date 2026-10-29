@@ -6,7 +6,8 @@ non-linear temperature scales) and may take a list of SI prefixes.  Using
 the very same data keeps names, factors and the output-unit choice
 identical to SMath.
 
-    python -m calcforge.calc.tools.gen_units "SMath Studio/entries"
+    python -m calcforge.calc.tools.gen_units            # reads the smath/ folder beside it
+    python -m calcforge.calc.tools.gen_units "C:/Program Files/SMath Studio/entries"
 """
 from __future__ import annotations
 
@@ -167,7 +168,9 @@ def generate(entries: Path) -> str:
 
 
 if __name__ == "__main__":
-    src = Path(sys.argv[1] if len(sys.argv) > 1 else "SMath Studio/entries")
+    # the Units.xml and Constants.xml of an SMath Studio install's entries
+    # folder, kept beside this tool (the install itself is not in the repo)
+    src = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent / "smath"
     dst = Path(__file__).resolve().parent.parent / "engine" / "unitdata.py"
     dst.write_text(generate(src), encoding="utf-8")
     print("wrote", dst)

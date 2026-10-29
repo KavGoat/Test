@@ -1491,7 +1491,7 @@ class _TextBase(MarkupItem):
         the top of the line. Bluebeam's own appearance streams put it 0.776
         of the type size below the inset when the text is top-aligned, and
         centre the capital height (0.718 of the size, Helvetica) when it is
-        middle-aligned. Read off ``btx/Document1.pdf``.
+        middle-aligned. Read off ``tests/data/btx/Document1.pdf``.
         """
         from PySide6.QtGui import QTextBlockFormat
 

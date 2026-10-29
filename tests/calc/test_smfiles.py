@@ -14,7 +14,7 @@ from tests.calc.smfile import NS, load_sm, loads, rpn_to_ast, save_sm
 from calcforge.calc.engine.evaluator import Context, Evaluator
 from calcforge.calc.engine.units import Quantity
 
-EXAMPLES = Path(__file__).resolve().parents[2] / "SMath Studio" / "examples"
+EXAMPLES = Path(__file__).resolve().parents[1] / "data" / "smath_examples"   # SMath Studio's own
 # worksheets whose results need SMath's symbolic engine (not replicated)
 SYMBOLIC = {"HermitePolynomials.sm", "LaguerrePolynomials.sm", "LegendrePolynomials.sm",
             "Hessian.sm", "Jacobian.sm", "RungeKutta5.sm", "Newton.sm", "MaclaurinSeries.sm",

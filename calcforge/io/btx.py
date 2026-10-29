@@ -290,7 +290,7 @@ def _text_look(annotation: dict) -> dict:
             try:
                 # Bluebeam sets its words one point further in than the
                 # margin it states: the appearance streams in
-                # btx/Document1.pdf all start the text at margin + 1.
+                # tests/data/btx/Document1.pdf all start the text at margin + 1.
                 look["padding"] = float(margin.group(1)) + 1.0
             except ValueError:
                 pass

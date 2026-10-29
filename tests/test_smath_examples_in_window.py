@@ -21,13 +21,10 @@ from calcforge.items.calc import CalcItem
 from tests.calc.smfile import load_sm
 from tests.calc.test_smfiles import EXAMPLES, SYMBOLIC, _close, stored_results
 
-BOOK = EXAMPLES.parent / "book"
-
 
 def _files():
-    found = sorted(p for p in EXAMPLES.glob("*.sm") if p.name not in SYMBOLIC)
-    found += sorted(BOOK.glob("*.sm"))           # SMath's own manual, with its results
-    return found
+    # SMath's own manual (its book/ folder) left the repository on 2026-10-29
+    return sorted(p for p in EXAMPLES.glob("*.sm") if p.name not in SYMBOLIC)
 
 
 @pytest.mark.skipif(not EXAMPLES.exists(), reason="SMath Studio examples not present")

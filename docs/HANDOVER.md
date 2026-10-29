@@ -122,7 +122,7 @@ Latest full suite: 920 passed, no skips; native stress: seed 131, 1,000 rounds,
 Escape recovery now handles inline panel editors and stale scene mouse grabs
 (`tests/test_escape_recovery.py`). Use `QWidget.window(widget)` in the event
 filter: `PageView.window` is an owner attribute, not QWidget's window method.
-The real-PDF tests include `btx/Document1.pdf`; optional additional files use
+The real-PDF tests include `tests/data/btx/Document1.pdf`; optional additional files use
 `CALCFORGE_PDF_CORPUS`. Old audit statements moved to `TASK_AUDIT_HISTORY.md`.
 The current outstanding file separates verification from external blockers.
 
@@ -165,9 +165,9 @@ needed to work safely without re-reading earlier chat.
   the WebSMath branch `claude/zealous-clarke-8yiu03` are read-only sources:
   never push to them. Never push to another branch without being asked.
 - The living task list: **`docs/tasklist.md`** — read it, work from it, keep it
-  updated. `docs/tasklist.xlsx` is the user's companion status sheet: column A
-  is blank for open work and `1` for user-confirmed completion. Rules for both
-  are below and repeated in the task-list header.
+  updated. (`docs/tasklist.xlsx`, the user's companion status sheet, was
+  removed at the user's request on 2026-10-29; the Markdown is the one
+  register.) Rules are below and repeated in the task-list header.
 
 ---
 
@@ -291,7 +291,8 @@ calcforge/
                signed file), project (open and save), annotate (markups as real PDF
                annotations), pdfio, pdfvector, pdfmarkups, pdflinks,
                btx (Bluebeam tool sets), recolour, export
-btx/           the real Bluebeam tool sets the importer is tested against
+tests/data/btx/  two real Bluebeam tool sets and a marked-up sheet the importer and the
+               renderer are tested against (the rest left on 2026-10-29)
 tests/         pytest; see §3
 tools/         session_fuzz.py — a long randomised session against the app
 docs/          this file, tasklist.md, interface.md, backlog.md,
@@ -388,7 +389,7 @@ xvfb-run -a python tools/session_fuzz.py 41 300
 |---|---|
 | `test_pdf_engine.py` | The PDF engine, against real files from other software |
 | `test_format.py` | What a saved document is: a PDF, the source page untouched, markups as annotations |
-| `test_btx.py` | Bluebeam tool sets, read from the real `.btx` files in `btx/` |
+| `test_btx.py` | Bluebeam tool sets, read from the two real `.btx` files in `tests/data/btx/` |
 | `test_items.py` | Serialisation, geometry and layout of every markup type |
 | `test_app.py` | The window: tools, panels, undo, files, printing |
 | `test_canvas.py` | One continuous scroll through every page |
@@ -430,9 +431,9 @@ than the crash.
 ### The requirements register and user status sheet
 
 `docs/tasklist.md` holds every feature and bug the user has asked for, grouped
-by topic. `docs/tasklist.xlsx` is a spreadsheet copy where column A is the
-user's completion field and column B is the task text. The Markdown is the
-agent-facing requirements register; the workbook is the user-owned status
+by topic. (`docs/tasklist.xlsx` was a spreadsheet copy where column A was the
+user's completion field and column B the task text; it was removed on
+2026-10-29.) The Markdown is the agent-facing requirements register; status
 record. The rules are:
 
 1. **Nothing is ever deleted.** Not a completed item, not a superseded one, not
@@ -443,8 +444,8 @@ record. The rules are:
 3. **Every new request from the user goes in as soon as it arrives**, before
    you start work on it, so nothing is lost if the session ends.
 4. **Never mark work complete or change status.** Only the user changes
-   completion status in `docs/tasklist.xlsx`; agents instead report their
-   verification result and leave task state unchanged.
+   completion status; agents instead report their verification result and
+   leave task state unchanged.
 5. **When the user withdraws a requirement, move it to the Withdrawn section**
    with the instruction that withdrew it, struck through and kept. A withdrawn
    item is not a completed one and must never be counted as one.
@@ -541,7 +542,7 @@ text box, the first going on makes a call-out (`MainWindow.becomes_a_callout` /
 `becomes_a_text_box`).
 
 **`.btx` import.** Bluebeam tool sets are XML with zlib-compressed, hex-encoded
-PDF annotation dictionaries. Sample files are in `btx/` and the importer is
+PDF annotation dictionaries. Sample files are in `tests/data/btx/` and the importer is
 tested against them, not against synthetic files. X/Y in a `.btx` annotation is
 the **bottom-left** corner.
 
@@ -561,8 +562,9 @@ focus-loss and return paths whenever this area changes.
 
 ## 6. Current status
 
-`docs/tasklist.md` is the active requirements register and `docs/tasklist.xlsx`
-is the user-owned completion record. Agents add and consolidate requirements
+`docs/tasklist.md` is the active requirements register (the user-owned
+completion record, `docs/tasklist.xlsx`, was removed on 2026-10-29). Agents
+add and consolidate requirements
 but never change their status. Begin with the user's newest report, find or add
 its task, then validate behaviour through real canvas, keyboard and menu
 interaction before changing code.
