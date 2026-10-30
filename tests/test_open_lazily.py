@@ -124,3 +124,25 @@ def test_a_save_before_the_markups_are_built_keeps_every_one(w, tmp_path, qapp):
         other.close()
         other.deleteLater()
         pump()
+
+
+def test_every_page_has_its_preview_once_its_markups_are_built(w, tmp_path):
+    """The small picture a page shows of itself before anything sharper is
+    drawn is keyed by the markups the page leaves out, so a page built behind
+    the first screen asks for it again (found by the full check of
+    2026-10-29: the previews made as the set opened served no page once it
+    was built, and a heavy set never settled)."""
+    from calcforge.io import pdftiles
+    w._open_chosen(marked_set(tmp_path / "set.pdf"))
+    wait_until_loaded(w)
+    frames = w.scene.frames
+    assert not any(frame.holds() for frame in frames)
+    assert all(frame.markups_drawn_alone() for frame in frames), "each page leaves its markups out"
+    end = time.monotonic() + 20.0
+    missing = list(frames)
+    while missing and time.monotonic() < end:
+        pump(0.05)
+        missing = [frame for frame in frames
+                   if not pdftiles.TILES.has_preview(frame.page.pdf_key, int(frame.page.pdf_page_index),
+                                                     True, frame.markups_drawn_alone())]
+    assert not missing, f"{len(missing)} pages have no preview of what they now draw"

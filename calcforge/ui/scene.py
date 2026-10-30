@@ -1529,8 +1529,30 @@ class PageFrame(QGraphicsObject):
             held = held + pdfio.read_pending_annotations(self.page, unread, self.document, source)
         if held:
             self._place(held)
+        # the page's small picture leaves out what is now taken over, so the
+        # one asked for as the document opened no longer serves it
+        self.ask_for_preview()
         self.update()                 # the page stops drawing what is now taken over
         self.itemsChanged.emit()
+
+    def ask_for_preview(self, later: bool = True) -> None:
+        """The page's smallest picture (pdftiles.PREVIEW_EDGE), asked for in
+        the background: what a page shows of itself before anything sharper
+        is drawn. It is keyed by the markups the page leaves out, so a page
+        whose markups are built after the document opened asks again (the
+        first picture, with nothing left out, is the one it shows until
+        then)."""
+        from ..io import pdftiles
+
+        page = self.page
+        if page.pdf_key is None or page.pdf_page_index is None or self.is_sheet:
+            return
+        data = self.document.asset(page.pdf_key)
+        if not data:
+            return
+        pdftiles.TILES.preview(page.pdf_key, data, int(page.pdf_page_index), self.page_rect(),
+                               bool(getattr(page, "pdf_annotations", True)),
+                               without=self.markups_drawn_alone(), later=later)
 
     def _load_soon(self) -> None:
         """Build the held markups once this paint is over, never in it."""
@@ -2350,26 +2372,15 @@ class DocumentScene(QGraphicsScene):
         background, behind anything the screen wants, nearest the page in
         view first. However fast the pages go by, each shows itself, soft,
         until its sharper pictures are drawn (the user, 2026-10-19: Bluebeam
-        draws low resolution while zoomed out)."""
-        from ..io import pdftiles
-
+        draws low resolution while zoomed out). A page whose markups are
+        not built yet asks again when they are (PageFrame.load_held)."""
         here = 0
         for view in self.views():
             if hasattr(view, "visible_page_index"):
                 here = view.visible_page_index()
                 break
         for i in sorted(range(len(self.frames)), key=lambda i: abs(i - here)):
-            frame = self.frames[i]
-            page = frame.page
-            if page.pdf_key is None or page.pdf_page_index is None or frame.is_sheet:
-                continue
-            data = self.document.asset(page.pdf_key)
-            if not data:
-                continue
-            pdftiles.TILES.preview(page.pdf_key, data, int(page.pdf_page_index),
-                                   frame.page_rect(),
-                                   bool(getattr(page, "pdf_annotations", True)),
-                                   without=frame.markups_drawn_alone(), later=True)
+            self.frames[i].ask_for_preview()
 
     def pages_near_the_screen(self) -> set:
         """(source, page) of every PDF page in a window, or within a screen
