@@ -69,7 +69,6 @@ def main() -> int:
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "calcforge", tmp / "calcforge", ignore=ignore)
         shutil.copytree(ROOT / "tests", tmp / "tests", ignore=ignore)
-        shutil.copytree(ROOT / "SMath Studio" / "examples", tmp / "SMath Studio" / "examples")
         shutil.copy2(ROOT / "pytest.ini", tmp / "pytest.ini")
         if not run(tmp):
             print("the unmutated copy fails its tests - fix that first")

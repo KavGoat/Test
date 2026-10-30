@@ -17,14 +17,9 @@ from tests.test_usability import click, double_click, drag
 @pytest.fixture(autouse=True)
 def smooth_drawing(window):
     """These compare the page on screen with MuPDF's own smoothed drawing of
-    it, pixel for pixel. Below 100 % the screen draws the line work crisp on
-    the pixels by choice (pdf/engine.CRISP_ZOOMED_OUT, 2026-10-29), which is a
-    different picture on purpose: here it is turned off, as Preferences
-    can, after the window has applied its own."""
-    from calcforge.io import pdftiles
-    pdftiles.TILES.configure(crisp_zoomed_out=False)
+    it, pixel for pixel (the line work is smoothed at every zoom:
+    pdf/engine.thinnest_line)."""
     yield
-    pdftiles.TILES.configure(crisp_zoomed_out=True)
 
 
 @pytest.fixture

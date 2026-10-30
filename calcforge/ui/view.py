@@ -733,6 +733,10 @@ class PageView(QGraphicsView):
 
         self._last_scene_pos = QPointF(60, 60)
         self._insertion_point: Optional[QPointF] = None
+        # the page a workbook or picture being dragged over the canvas would
+        # go in after, marked with a line under it (_show_drop_marker)
+        self._drop_after = None
+        self._drop_hint_shown = False
         # Where the next thing typed, inserted or pasted will go, and
         # what a callout is about to point at.
         # Whether Ctrl is down, as this view saw it. Kept as well as asking
@@ -862,6 +866,10 @@ class PageView(QGraphicsView):
         frames: list = []
 
         def remember(frame):
+            # (an equation inside a text box is the box's child: its page is
+            # further up)
+            while frame is not None and not isinstance(frame, PageFrame):
+                frame = frame.parentItem() if hasattr(frame, "parentItem") else None
             if isinstance(frame, PageFrame) and frame not in frames:
                 frames.append(frame)
 
@@ -1789,16 +1797,23 @@ class PageView(QGraphicsView):
     def dragMoveEvent(self, event) -> None:
         if self._dropped(event):
             event.acceptProposedAction()
+            self._show_drop_marker(event)
             return
         super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:
+        self._clear_drop_marker()
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event) -> None:
         paths = self._dropped(event)
         if not paths:
+            self._clear_drop_marker()
             super().dropEvent(event)
             return
         event.acceptProposedAction()
-        frame = self.frame_at(self.mapToScene(event.position().toPoint()))
+        frame = self.drop_target(self.mapToScene(event.position().toPoint()))
+        self._clear_drop_marker()
         index = None
         if frame is not None:
             try:
@@ -1806,6 +1821,81 @@ class PageView(QGraphicsView):
             except ValueError:
                 index = None
         self.window.drop_files(paths, index)
+
+    def drop_target(self, scene_pos: QPointF):
+        """The page a workbook or a picture dropped at *scene_pos* goes in
+        after: the page under the point, else the nearest page above it (a
+        drop in the gap between two pages goes after the upper one)."""
+        frames = list(getattr(self.scene(), "frames", None) or ())
+
+        def paper(frame) -> QRectF:
+            # the sheet itself, not its shadow: a point in the gap between two
+            # pages is after the upper one, not on the lower one's shadow
+            return frame.mapToScene(frame.page_rect()).boundingRect()
+        for frame in frames:
+            if paper(frame).contains(scene_pos):
+                return frame
+        above = [frame for frame in frames if paper(frame).top() <= scene_pos.y()]
+        return max(above, key=lambda frame: paper(frame).top()) if above else None
+
+    def _show_drop_marker(self, event) -> None:
+        """While a workbook or a picture is dragged over the canvas: a line
+        under the page it would go in after, as the Thumbnails draw for a
+        drop between pages, and the status bar says which page (the user,
+        2026-10-30: the Excel drag "just says copy, it should show the
+        insertion point like the pdf"). A PDF opens in a tab of its own, so
+        it has no place to mark."""
+        window = self.window
+        kinds = {window.droppable(path) for path in self._dropped(event)}
+        target = None
+        if kinds & {"workbook", "image"}:
+            target = self.drop_target(self.mapToScene(event.position().toPoint()))
+        if target is not self._drop_after:
+            self._drop_after = target
+            self.viewport().update()
+        hint = getattr(window, "status_hint", None)
+        if target is not None:
+            try:
+                number = window.document.index_of(target.page) + 1
+            except ValueError:
+                number = 0
+            what = "workbook" if "workbook" in kinds else "picture"
+            if hint is not None and number:
+                hint.setText(f"Drop to put the {what} in after page {number}")
+            self._drop_hint_shown = True
+        elif self._drop_hint_shown:
+            self._drop_hint_shown = False
+            if hint is not None:
+                hint.setText("")
+
+    def _clear_drop_marker(self) -> None:
+        if self._drop_after is not None:
+            self._drop_after = None
+            self.viewport().update()
+        if self._drop_hint_shown:
+            self._drop_hint_shown = False
+            hint = getattr(self.window, "status_hint", None)
+            if hint is not None:
+                hint.setText("")
+
+    def _draw_drop_marker(self, painter: QPainter) -> None:
+        frame = self._drop_after
+        if frame is None:
+            return
+        try:
+            box = frame.sceneBoundingRect()
+        except RuntimeError:                  # the page is gone
+            self._drop_after = None
+            return
+        left = self.mapFromScene(box.bottomLeft())
+        right = self.mapFromScene(box.bottomRight())
+        painter.save()
+        painter.resetTransform()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(QColor("#1971c2"), 3.0, Qt.SolidLine, Qt.RoundCap))
+        y = left.y() + 4
+        painter.drawLine(QPointF(left.x(), y), QPointF(right.x(), y))
+        painter.restore()
 
     def paintEvent(self, event) -> None:
         """Paint the canvas, the pages first saying whether their markups
@@ -4456,13 +4546,8 @@ class PageView(QGraphicsView):
             event.accept()                    # a second click on a box
             return
         if isinstance(item, _TextBase) and not item.locked:
-            # on an equation inside the box, the equation is picked out to
-            # retype (items/inline_equations.py); found before the box opens,
-            # while its results are still in place
-            field = item.inline_field_at(scene_pos) if hasattr(item, "inline_field_at") else None
             self.begin_item_edit(item)
-            if field is None or not item.select_field(field[0]):
-                self.place_caret(item, scene_pos)
+            self.place_caret(item, scene_pos)
             event.accept()
             return
         if isinstance(item, NoteItem) and not item.locked:
@@ -5892,6 +5977,8 @@ class PageView(QGraphicsView):
             self._draw_pending_leader(painter, self._pending_anchor)
         if self._pending_arrow_leader is not None:
             self._draw_arrow_leader_preview(painter)
+        if self._drop_after is not None:
+            self._draw_drop_marker(painter)
         self.crosshair.paint(painter)
 
     def set_search_marks(self, marks) -> None:

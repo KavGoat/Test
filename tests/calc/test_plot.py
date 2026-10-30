@@ -9,7 +9,7 @@ from tests.calc.smfile import dumps, load_sm, loads
 from calcforge.calc.plot import PlotState, axis_layout, sample
 from calcforge.calc.worksheet import Worksheet
 
-EXAMPLES = Path(__file__).resolve().parents[2] / "SMath Studio" / "examples"
+EXAMPLES = Path(__file__).resolve().parents[1] / "data" / "smath_examples"
 
 
 def plot_sheet(*keys_per_curve, defs=()):

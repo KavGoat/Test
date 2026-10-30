@@ -153,7 +153,7 @@ def test_symbolic_results_match_smath_or_are_errors():
     from tests.calc.smfile import NS, load_sm, rpn_to_ast
     from calcforge.calc.engine import ast as A
 
-    folder = Path(__file__).resolve().parents[2] / "SMath Studio" / "examples"
+    folder = Path(__file__).resolve().parents[1] / "data" / "smath_examples"
     if not folder.exists():
         pytest.skip("SMath examples not present")
     matched = 0

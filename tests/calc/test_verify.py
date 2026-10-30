@@ -62,7 +62,7 @@ def test_stale_definition_is_caught():
     assert not double_check(ws).ok
 
 
-EXAMPLES = Path(__file__).resolve().parents[2] / "SMath Studio" / "examples"
+EXAMPLES = Path(__file__).resolve().parents[1] / "data" / "smath_examples"
 
 
 @pytest.mark.skipif(not EXAMPLES.exists(), reason="SMath Studio examples not present")

@@ -1217,6 +1217,11 @@ class TableItem(MarkupItem):
         if box.width() <= 0 or box.height() <= 0:
             return                      # all hidden: nothing to show (Excel)
         painter.setRenderHint(QPainter.Antialiasing, False)
+        # inside the grid only: the box's outer pixel lay over the row and
+        # column headings at A1, where Excel's ends at the grid (the user,
+        # 2026-10-30)
+        xs, ys = self.edges()
+        painter.setClipRect(QRectF(0, 0, xs[-1], ys[-1]), Qt.IntersectClip)
         path = QPainterPath()
         path.addRect(box)
         if self.active is not None:

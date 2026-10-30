@@ -70,7 +70,7 @@ class SheetHeadings(QWidget):
             # a scroll (2026-10-19)
             if getattr(frame.page, "sheet", None) is None:
                 continue
-            for item in frame.built_markups():
+            for item in frame.markups():
                 if isinstance(item, SheetRunItem) and item.sheet is not None and item.paging:
                     out.append(item)
         return out

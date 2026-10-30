@@ -2286,7 +2286,6 @@ rather than to the document; they are the same in every document you open.
 | **Drawing snap** | Preferences ▸ Canvas | On | Corners, midpoints and line ends pull the pointer to them while you draw. |
 | **Autosize text** | Preferences ▸ Writing | On | A text box grows to fit what is typed into it. |
 | **Insertion point** | Preferences ▸ Canvas | Off | A click on empty paper leaves a caret to type at; the arrow keys move it. |
-| **Crisp lines zoomed out** | Preferences ▸ Canvas | On | Below 100 % a page's lines are drawn on the pixels, none thinner than one and none smoothed into grey, so a whole sheet reads clearly at fit-to-page, as in Revu. Off: lines smoothed at every zoom. |
 | **Draw with the graphics card** | Preferences ▸ Canvas | On | Draws the pages with OpenGL for smooth scrolling on high-density screens. Turn it off if pages draw wrongly with your graphics driver. |
 | **Allow Markup Recovery (Unflatten)** | Document ▸ Flatten… dialog | On | Remembered from the Flatten Markups dialog: whether flattened markups can be brought back with Unflatten. Set it there, as in Revu. |
 | **Number keys pick markup styles** | Preferences ▸ Markup | On | With a markup tool in hand, 1 to 9 draw the next markup in that tool's style 1 to 9; 0 goes back to the default. |

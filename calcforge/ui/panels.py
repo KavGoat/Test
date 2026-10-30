@@ -1778,7 +1778,7 @@ class PagesPanel(QWidget):
         frame = page.frame
         if frame is None:
             return sheet
-        items = [i for i in frame.built_markups() if i.isVisible() and not i.from_drawing]
+        items = [i for i in frame.markups() if i.isVisible() and not i.from_drawing]
         if not items:
             return sheet
         from PySide6.QtGui import QPainter
@@ -2394,7 +2394,7 @@ class MarkupsPanel(QWidget):
             if page.frame is None:
                 continue
             # (built so far: a page's markups come as it is looked at)
-            for item in page.frame.built_in_order():
+            for item in page.frame.ordered_markups():
                 if getattr(item, "from_drawing", False):
                     continue
                 if getattr(item, "IS_CALC", False):
@@ -2574,14 +2574,14 @@ class MarkupsPanel(QWidget):
                 continue
             listed = shown[1].get(index, ())
             if index not in changed:
-                count = sum(1 for item in page.frame.built_markups()
+                count = sum(1 for item in page.frame.markups()
                             if not getattr(item, "from_drawing", False)
                             and not getattr(item, "IS_CALC", False))
                 if count != len(listed):
                     return False
                 continue
             order = {}
-            for item in page.frame.built_in_order():
+            for item in page.frame.ordered_markups():
                 if not getattr(item, "from_drawing", False) \
                         and not getattr(item, "IS_CALC", False):
                     order[item.uid] = (len(order), item)
@@ -2756,7 +2756,7 @@ class MarkupsPanel(QWidget):
         for page in document.pages:
             if page.frame is None:
                 continue
-            for item in page.frame.built_markups():
+            for item in page.frame.markups():
                 if isinstance(item, CountItem):
                     counts[item.subject] += 1
                 elif isinstance(item, MeasureItem) and item.value is not None:

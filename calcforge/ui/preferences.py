@@ -86,12 +86,6 @@ class Preferences:
     insertion_point: bool = False
     """Whether an empty-canvas click leaves an insertion point to type at."""
 
-    crisp_zoomed_out: bool = True
-    """Below 100 % the pages' line work is drawn on the pixels, every line a
-    pixel or more and none smoothed into grey, so a whole sheet reads clearly
-    at fit-to-page as it does in Revu (pdf/engine.CRISP_ZOOMED_OUT; the user,
-    2026-10-29). Off: smoothed at every zoom, as before."""
-
     gpu_drawing: bool = True
     """Draw the pages with the graphics card (OpenGL): scrolling and panning
     stay smooth on a high-density display, where moving every pixel on the

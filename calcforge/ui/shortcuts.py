@@ -302,6 +302,37 @@ def clashes_in(assignments: dict) -> dict[str, list[str]]:
     return found
 
 
+class _Sequences(dict):
+    """The key of each action, counting its changes: binding_for's lookup
+    is built once per change, not once per key typed."""
+
+    version = 0
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self.version += 1
+
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        self.version += 1
+
+    def pop(self, *args):
+        self.version += 1
+        return super().pop(*args)
+
+    def setdefault(self, key, default=None):
+        self.version += 1
+        return super().setdefault(key, default)
+
+    def update(self, *args, **kwargs):
+        super().update(*args, **kwargs)
+        self.version += 1
+
+    def clear(self):
+        super().clear()
+        self.version += 1
+
+
 class ShortcutManager(QObject):
     """Holds the current bindings and remembers changes between sessions."""
 
@@ -317,7 +348,10 @@ class ShortcutManager(QObject):
         # stay out of it: those mean bold, italic and underline in a text box
         # in every program there has ever been, and nothing else may take them.
         self._extra: list[Binding] = []
-        self._sequences: dict[str, str] = {b.action_id: b.default for b in DEFAULT_BINDINGS}
+        self._sequences: dict[str, str] = _Sequences(
+            {b.action_id: b.default for b in DEFAULT_BINDINGS})
+        self._by_key: Optional[dict] = None       # binding_for's lookup (_lookup)
+        self._by_key_state = None
         self.load()
 
     def register(self, action_id: str, label: str, default: str,
@@ -401,7 +435,7 @@ class ShortcutManager(QObject):
 
     def reset(self, action_id: Optional[str] = None) -> None:
         if action_id is None:
-            self._sequences = {b.action_id: b.default for b in self.bindings()}
+            self._sequences = _Sequences({b.action_id: b.default for b in self.bindings()})
         elif action_id in BY_ID:
             self._sequences[action_id] = BY_ID[action_id].default
         self.changed.emit()
@@ -436,22 +470,40 @@ class ShortcutManager(QObject):
                 return True
         return False
 
+    def _lookup(self) -> dict:
+        """{a key as written (portable, lower case): its bindings, the
+        meaning outside an equation first}, built once per change of the
+        table. Every key typed in a text box, a cell or an equation is asked
+        about here (the window's ShortcutOverride): sorting the eight
+        hundred bindings and spelling the key of each bound one up to the
+        match took a millisecond a keystroke (the user, 2026-10-30: typing
+        "is clunky and not smooth")."""
+        sequences = self._sequences
+        state = (id(sequences), getattr(sequences, "version", None),
+                 len(self._extra), id(self._extra))
+        if self._by_key is None or state != self._by_key_state \
+                or not isinstance(sequences, _Sequences):
+            table: dict = {}
+            # Without a scope asked for, the meaning outside an equation comes
+            # first: that is where a key is asked about when nothing is being
+            # typed (inside an equation calcedit asks for EQUATION explicitly).
+            ordered = sorted(self.bindings(), key=lambda b: b.scope in (EQUATION, TABLE))
+            for binding in ordered:
+                current = sequences.get(binding.action_id, "")
+                if current:
+                    written = QKeySequence(current).toString(QKeySequence.PortableText).lower()
+                    table.setdefault(written, []).append(binding)
+            self._by_key, self._by_key_state = table, state
+        return self._by_key
+
     def binding_for(self, sequence: "QKeySequence", scopes=None) -> Optional[Binding]:
         """Return the configured binding that owns *sequence*, if any — in one
         of *scopes*, when given."""
         if sequence.isEmpty():
             return None
         wanted = sequence.toString(QKeySequence.PortableText).lower()
-        # Without a scope asked for, the meaning outside an equation comes
-        # first: that is where a key is asked about when nothing is being
-        # typed (inside an equation calcedit asks for EQUATION explicitly).
-        ordered = sorted(self.bindings(), key=lambda b: b.scope in (EQUATION, TABLE))
-        for binding in ordered:
-            if scopes is not None and binding.scope not in scopes:
-                continue
-            current = self._sequences.get(binding.action_id, "")
-            if (current and QKeySequence(current).toString(
-                    QKeySequence.PortableText).lower() == wanted):
+        for binding in self._lookup().get(wanted, ()):
+            if scopes is None or binding.scope in scopes:
                 return binding
         return None
 

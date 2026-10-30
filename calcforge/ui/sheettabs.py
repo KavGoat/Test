@@ -658,7 +658,7 @@ class SheetTabs(QWidget):
     def _item(self, uid: str):
         from ..items.sheetpage import SheetRunItem
         for frame in getattr(self.window.scene, "frames", []) or []:
-            for item in frame.built_markups():
+            for item in frame.markups():
                 if isinstance(item, SheetRunItem) and item.uid == uid:
                     return item
         return None

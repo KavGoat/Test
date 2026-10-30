@@ -98,6 +98,15 @@ def fill(window, menu: QMenu, item) -> None:
     fmt = region.fmt or worksheet.format
     base = worksheet.format
 
+    if getattr(item, "INLINE", False):
+        # an equation inside a text box (items/inline_equations.py): the
+        # result alone in the words, or the expression with it (the user,
+        # 2026-10-30: "the show full equation or just answer toggle")
+        shown = check(menu, "Show Expression", region.show_input,
+                      lambda r: setattr(r, "show_input", not r.show_input), "Show expression")
+        shown.setToolTip("Show the equation with its result (5+2 = 7) in the words, rather "
+                         "than the result alone")
+
     def set_fmt(**changes):
         def apply(r):
             made = dataclasses.replace(r.fmt or worksheet.format, **changes)

@@ -560,6 +560,50 @@ focus-loss and return paths whenever this area changes.
 
 ---
 
+**Equations inside a text box (`items/inline_equations.py`, 2026-10-30).** A
+`\` typed in a box's editor inserts an inline image into the box's
+`QTextDocument` — a blank 1×1 image named `calcforge-inline://<id>`, the
+equation's size in its `QTextImageFormat`, aligned `AlignMiddle`
+(`equation_format`; PySide6 6.11 never calls a Python
+`QTextObjectInterface`, so a custom text object is not an option) — and makes
+an `InlineCalcItem`: a `CalcItem` that is the box's child, neither selectable
+nor movable. The layout makes room for the image where the words put it, and
+the box draws the equation there itself (`paint_equations`, after the words;
+`object_rect` places it as `QTextDocumentLayout::resizeInlineObject` does),
+keeps the child item there (`_sync_inline_positions`), and puts the image's
+size right whenever the equation's changes (`_resize_placeholder`, joined to
+the previous undo step), so `CalcEditing.focus` types into it in place, with
+the caret, the unit list and the suggestions of any equation. Its region is in
+the worksheet at the box's place on the page (reading order; the Variables
+panel says "Text box"). The box's record carries them as `"equations"` (id,
+position, region record): the HTML keeps each image and its name, so
+`_bind_inline_equations` matches by id (a plain placeholder character from a
+migration, or no character at all, is given an image), and a record without
+`"equations"` but with the `{\5+2=}` codes of 29 Oct is migrated
+(`migrate_codes`). `frame.markups()`
+never lists them (they are grandchildren); `scene.items(point)` does, which is
+how a right-click gets the equation's own menu (`calcmenu.fill`, with Show
+Expression toggling `region.show_input`) and a click opens it. `CalcEditing`
+knows them by `INLINE`: `leave` removes an empty one through the box
+(`remove_inline_equation`), `_enter` puts the caret back in the words
+(`resume_typing`). The box's own caret is drawn by `_InlineEditor._paint_caret`:
+Qt's inverts what is under it, and the words are drawn into a clear picture
+first (`markuplayer.paint_words`), so Qt's came out white.
+
+**Lazy markup loading and crisp page rendering were tried on 29 Oct and
+reverted on 30 Oct** at the user's word. Every markup is built as a document
+opens (`frame.load_items`); a file saved that day with a page's annotations
+unread (`annotations_unread` in the page record) reads them as it opens
+(`Page._pending_annotations`, `pdfio.read_pending_annotations`). The page's
+line work is smoothed at every zoom (`engine.thinnest_line`); only
+annotations drawn on their own — somebody else's markups,
+`raster_from(alpha=True)`, `engine.sharp_at` — and our own markups
+(`markuplayer.drawn_sharp`) are drawn on the pixels below 100 %. MuPDF's
+drawing without anti-aliasing loses hairlines inside an annotation's form
+at many positions, so a sharp annotation is drawn twice and the pixels the
+sharp drawing missed are filled from the smoothed one, solid
+(`engine._with_lost_lines`, `LOST_LINE_COVERAGE`).
+
 ## 6. Current status
 
 `docs/tasklist.md` is the active requirements register (the user-owned

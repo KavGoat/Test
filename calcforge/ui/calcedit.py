@@ -281,18 +281,22 @@ class CalcEditing:
         item.focused = False
         item.leave_upright()
         item.region.editor.selection = None
-        frame = item.parentItem()
+        frame = item._page_frame()
         region = item.region
+        inline = bool(getattr(item, "INLINE", False))    # inside a text box
         empty = (region.plot is None and (
             (region.editor.kind == "math" and region.editor.root.is_empty()) or
             (region.editor.kind == "text" and not region.editor.text.strip())))
-        if empty:
+        if empty and inline:
+            item.host.remove_inline_equation(item)
+        elif empty:
             frame.remove_markup(item)
         else:
             region.pending = False
             sheet_for(frame.document).edited(region)
             item.relayout()
-            self.note_overflow(item)
+            if not inline:
+                self.note_overflow(item)
         view.commit_snapshot("Edit equation")
         follow = getattr(view.window, "_scene_selection_changed", None)
         if follow is not None:
@@ -860,6 +864,13 @@ class CalcEditing:
         if item.region.kind == "text" and not shift:
             item.region.editor.key("ENTER")
             self._after_edit(item)
+            return
+        if getattr(item, "INLINE", False):
+            # an equation inside a text box: Enter finishes it and puts the
+            # caret back in the words after it (items/inline_equations.py)
+            host = item.host
+            self.leave()
+            host.resume_typing()
             return
         self.leave(cross_below=True)
 

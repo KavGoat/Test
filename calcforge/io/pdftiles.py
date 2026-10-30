@@ -204,17 +204,7 @@ class _Worker(QThread):
         self._wanted = wanted if wanted is not None else set()
         self._stopping = False
         self._forgotten = set()
-        self._settings: dict = {}            # engine.configure's, for the renderers
-        self._changed = False
         self.stats = {}
-
-    def configure(self, **settings) -> None:
-        """Rendering settings for every renderer, the ones running and the
-        ones started later (pdf/engine.configure)."""
-        with self._lock:
-            self._settings.update(settings)
-            self._changed = True
-        self._ready.set()
 
     def submit(self, key, data, width, height, later=False):
         with self._lock:
@@ -278,10 +268,6 @@ class _Worker(QThread):
                 memory.unlink()
                 raise
             child.close()
-            with self._lock:
-                settings = dict(self._settings)
-            if settings:
-                parent.send(('configure', settings))
             return {'process': process, 'pipe': parent, 'memory': memory,
                     'job': None, 'forgotten': set()}
 
@@ -308,14 +294,6 @@ class _Worker(QThread):
                 while not self._stopping:
                     with self._lock:
                         forgotten, self._forgotten = self._forgotten, set()
-                        settings, self._changed = (dict(self._settings)
-                                                   if self._changed else None), False
-                    if settings:
-                        for slot in slots:
-                            try:
-                                slot['pipe'].send(('configure', settings))
-                            except (OSError, ValueError):
-                                pass
                     for path in list(deferred_deletes):
                         try:
                             os.unlink(path)
@@ -575,26 +553,12 @@ class TileCache(QObject):
         #: keeps a drawing of them (ui/markuplayer.py) knows to draw it again.
         self.short = 0
 
-    def configure(self, **settings) -> None:
-        """Rendering settings (pdf/engine.configure) for this process and
-        every renderer; what was drawn the old way is drawn again."""
-        from ..pdf import engine
-        before = engine.settings()
-        engine.configure(**settings)
-        if engine.settings() == before:
-            return
-        if self._worker is not None:
-            self._worker.configure(**engine.settings())
-        self.forget()
-
     # -- the thread --------------------------------------------------------
     def _started(self) -> _Worker:
         if self._worker is not None:
             return self._worker
         worker = _Worker(self._waiting)
         worker.setObjectName("calcforge-pdf")
-        from ..pdf import engine
-        worker.configure(**engine.settings())      # as this process is set
         worker.tileDone.connect(self._tile_arrived, Qt.QueuedConnection)
         worker.sheetDone.connect(self._sheet_arrived, Qt.QueuedConnection)
         worker.start()

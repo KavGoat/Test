@@ -21,7 +21,7 @@ from calcforge.calc.worksheet import Worksheet
 from tests.calc.smfile import load_sm
 from tests.calc.test_editor_fuzz import KEYS
 
-EXAMPLES = Path(__file__).resolve().parents[2] / "SMath Studio" / "examples"
+EXAMPLES = Path(__file__).resolve().parents[1] / "data" / "smath_examples"
 
 
 def _shown(region) -> str:

@@ -158,9 +158,6 @@ def serve(connection, memory_name, memory_size):
             if request[0] == 'forget':
                 renderer.forget(request[1])
                 continue
-            if request[0] == 'configure':
-                engine.configure(**request[1])
-                continue
             started = time.perf_counter()
             try:
                 if request[0] == 'annotation':

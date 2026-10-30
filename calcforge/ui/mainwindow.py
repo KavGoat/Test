@@ -1293,8 +1293,6 @@ class MainWindow(QMainWindow):
         self.apply_shortcuts()
         from . import preferences as _prefs
         self.view.use_the_graphics_card(_prefs.current().gpu_drawing)
-        from ..io import pdftiles
-        pdftiles.TILES.configure(crisp_zoomed_out=_prefs.current().crisp_zoomed_out)
 
         self._autosave = QTimer(self)
         self._autosave.setInterval(120_000)
@@ -4600,12 +4598,17 @@ class MainWindow(QMainWindow):
             batch = nullcontext()
         with batch:
             for page in self.document.pages:
+                pending = getattr(page, "_pending_annotations", None)
+                if pending is not None:
+                    # a file saved on 29 Oct before this page's own annotations
+                    # were read as markups: read now, with the rest
+                    from ..io import pdfio
+                    page._pending_items = list(page._pending_items) + \
+                        pdfio.read_pending_annotations(page, pending, self.document)
                 if page.frame is None or page.frame.scene() is not self.scene:
                     frame = self.scene.add_frame(page)
                     page.frame = frame
-                    # the calculation's items now, the markups when the page
-                    # is looked at (scene.PageFrame.hold_items, _load_behind)
-                    frame.hold_items(page._pending_items)
+                    frame.load_items(page._pending_items)
                 elif page._pending_items:
                     page.frame.load_items(page._pending_items)
                 page._pending_items = []
@@ -4630,82 +4633,6 @@ class MainWindow(QMainWindow):
         self.pages_panel.rebuild(self.document, self.current_index)
         self.refresh_lists()
         self.refresh_scale_label()
-        self._load_behind_start()
-
-    # -- the pages' markups built behind the first screen ------------------------
-    #
-    # A page's markups are built when it is looked at or asked for
-    # (scene.PageFrame.hold_items): a set of three hundred marked-up sheets
-    # opens in the time its first screen takes rather than the twenty
-    # seconds every markup took (the user, 2026-10-29). The rest are built
-    # here, a few pages at a time between events, nearest the page in view
-    # first; the Markups List fills in once they are all here.
-    _behind = None
-    _loading_behind = False
-
-    def _load_behind_start(self) -> None:
-        scene = self.scene
-        frames = scene.frames if scene is not None else ()
-        # the page in view is built before it is first drawn: what is on
-        # screen is complete at once, and never changes hands under the eye
-        if 0 <= self.current_index < len(frames) and frames[self.current_index].holds():
-            frames[self.current_index].load_held()
-        waiting = [frame for frame in frames if frame.holds()]
-        self._behind = None
-        if not waiting:
-            if self._loading_behind:
-                self._loading_behind = False
-                self.refresh_lists()
-            return
-        self._behind = {"document": self.document, "scene": scene, "waiting": waiting,
-                        "total": len(waiting)}
-        self._loading_behind = True
-        QTimer.singleShot(0, self, self._load_behind_tick)
-
-    def _load_behind_tick(self) -> None:
-        state = self._behind
-        if state is None or state["document"] is not self.document \
-                or state["scene"] is not self.scene:
-            self._behind = None
-            self._loading_behind = False
-            return
-        waiting = [frame for frame in state["waiting"] if frame.holds()]
-        order = {id(frame): index for index, frame in enumerate(self.scene.frames)}
-        current = self.current_index
-        waiting.sort(key=lambda frame: abs(order.get(id(frame), 0) - current))
-        deadline = time.perf_counter() + 0.05
-        source, source_key = None, None
-        try:
-            while waiting and time.perf_counter() < deadline:
-                frame = waiting.pop(0)
-                unread = frame.unread
-                if unread is not None and unread[0] != source_key:
-                    # the file opened once for the pages read in this go
-                    if source is not None:
-                        source.close()
-                    source, source_key = None, unread[0]
-                    try:
-                        from ..io import pdfvector
-                        source = pdfvector.PdfFile.from_bytes(self.document.asset(source_key) or b"")
-                    except Exception:                        # noqa: BLE001
-                        source = None
-                frame.load_held(source)
-        except Exception:                                    # noqa: BLE001
-            waiting = []                  # (a page that won't load is left as its file draws it)
-        finally:
-            if source is not None:
-                source.close()
-        state["waiting"] = waiting
-        if waiting:
-            done = state["total"] - len(waiting)
-            self.status_hint.setText(f"Loading markups… {done} of {state['total']} pages")
-            QTimer.singleShot(10, self, self._load_behind_tick)
-            return
-        self._behind = None
-        self._loading_behind = False
-        if self.status_hint.text().startswith("Loading markups"):
-            self.status_hint.setText("")
-        self.refresh_lists()
 
     def open_document(self) -> None:
         """File ▸ Open: the file in a tab of its own, as Revu opens it."""
@@ -4929,7 +4856,7 @@ class MainWindow(QMainWindow):
         # The page's own line work is a different matter and stays off: that is
         # the drawing, not a markup, and there can be tens of thousands of it.
         pdfio.import_pages(document, path, list(range(count)), pdfio.FIT_ORIGINAL,
-                           pdfio.BEST_DPI, at=0, annotations=True, lazy=True)
+                           pdfio.BEST_DPI, at=0, annotations=True)
         # Opening a PDF is opening a document, not converting one. The page is
         # the PDF's own page, drawn by the PDF renderer; nothing on it is
         # turned into a markup of ours, so what is on screen is what any
@@ -7084,7 +7011,7 @@ class MainWindow(QMainWindow):
         def mutate():
             brought.extend(pdfio.import_pages(self.document, path, indices, fit,
                                               dpi, at=target, vectors=vectors,
-                                              annotations=True, lazy=True))
+                                              annotations=True))
             self.current_index = target
         try:
             self._structural_change(f"Insert {len(indices)} PDF page(s)", mutate)
@@ -7166,7 +7093,7 @@ class MainWindow(QMainWindow):
                         pages = pdfio.import_pages(
                             self.document, path,
                             list(range(pdfio.page_count(path))),
-                            pdfio.FIT_ORIGINAL, at=at, annotations=True, lazy=True)
+                            pdfio.FIT_ORIGINAL, at=at, annotations=True)
                         added += len(pages)
                         at += len(pages)
                     else:
@@ -10208,6 +10135,13 @@ class MainWindow(QMainWindow):
         items = [item for item in with_block_members(self.selected_items())
                  if self.view.editable(item)]
         if not items:
+            # nothing picked on the page, but pages (or a workbook) picked in
+            # Thumbnails: Delete deletes those, wherever the keyboard focus
+            # is (the user, 2026-10-30: "sometimes works and sometimes does
+            # not, maybe when I select a workbook and a page")
+            panel = getattr(self, "pages_panel", None)
+            if panel is not None and panel.picked_rows():
+                panel.delete_picked()
             return
         # A measurement that defines a variable: say what stops being defined
         # (decision 24).
@@ -11955,12 +11889,9 @@ class MainWindow(QMainWindow):
         if timer is not None:
             timer.stop()
         # what an edit says it changed: the Markups List puts in those rows
-        # (and builds itself again if it finds it was not in step); while the
-        # pages' markups are still being built behind the first screen it
-        # waits, and fills in once (_load_behind_tick)
-        if not self._loading_behind:
-            self.markups_panel.refresh(self.document,
-                                       getattr(self.document, "markups_changed", None))
+        # (and builds itself again if it finds it was not in step)
+        self.markups_panel.refresh(self.document,
+                                   getattr(self.document, "markups_changed", None))
         self.sync_text_bookmarks()
         self.bookmarks_panel.rebuild(self.document)
         self.variables_panel.watch(self.document)
@@ -11971,26 +11902,8 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # -- text boxes as bookmarks, fields in text boxes (the user, 2026-10-15) --
     def _text_box_menu(self, menu, item, scene_pos=None) -> None:
-        # an equation inside the box, right-clicked (items/inline_equations.py):
-        # shown with its working, or edited
-        field = None
-        if scene_pos is not None and hasattr(item, "inline_field_at"):
-            try:
-                field = item.inline_field_at(scene_pos)
-            except Exception:  # noqa: BLE001
-                field = None
-        if field is not None:
-            k, _start, _end, body = field
-            show = menu.addAction("Show Expression")
-            show.setCheckable(True)
-            show.setChecked(body.lstrip().startswith("!"))
-            show.setToolTip("Show the equation with its result (test*test = 50) rather "
-                            "than the result alone")
-            show.toggled.connect(lambda on, k=k: self.set_inline_expression_shown(item, k, on))
-            edit = menu.addAction("Edit Equation", lambda k=k: self.edit_inline_equation(item, k))
-            edit.setToolTip("Open the box with the equation picked out, to retype it "
-                            "(a double-click on it does the same)")
-            menu.addSeparator()
+        # (an equation inside the box has a menu of its own: right-clicked, it
+        # is the item under the pointer — items/inline_equations.py)
         mark = menu.addAction("Bookmark")
         mark.setCheckable(True)
         mark.setChecked(bool(getattr(item, "auto_bookmark", False)))
@@ -12021,38 +11934,6 @@ class MainWindow(QMainWindow):
             if row.value != "function" and row.name not in seen:
                 seen.append(row.name)
         return seen
-
-    def set_inline_expression_shown(self, item, k: int, on: bool) -> None:
-        """The k-th equation inside *item* shown with its working (test*test
-        = 50) or as its result alone (50); one undo step."""
-        from PySide6.QtGui import QTextCursor
-        field = item.inline_field(k)
-        if field is None:
-            return
-        start, _end, body = field
-        flagged = body.lstrip().startswith("!")
-        if flagged == bool(on):
-            return
-        self.view.begin_snapshot(self.view.involved_frames(item))
-        cursor = QTextCursor(item.doc)
-        cursor.setPosition(start + 2)                  # just after {\
-        if on:
-            cursor.insertText("!")
-        else:
-            lead = len(body) - len(body.lstrip())
-            cursor.setPosition(start + 2 + lead + 1, QTextCursor.KeepAnchor)
-            cursor.removeSelectedText()
-        item.written = item.doc.toPlainText()
-        item._fields_shown = None
-        item.touch()
-        item.sync_equations()
-        item.update()
-        self.view.commit_snapshot("Show expression" if on else "Hide expression")
-
-    def edit_inline_equation(self, item, k: int) -> None:
-        """Open *item* for typing with its k-th equation picked out."""
-        self.view.begin_item_edit(item)
-        item.select_field(k)
 
     def insert_text_field(self, item, token: str) -> None:
         """A field at the caret of a box being typed in, or at the end of one
@@ -12098,7 +11979,7 @@ class MainWindow(QMainWindow):
             return False
         boxes = {}
         for frame in self.scene.frames:
-            for item in frame.built_markups():
+            for item in frame.markups():
                 if isinstance(item, _TextBase) and getattr(item, "auto_bookmark", False):
                     boxes[item.uid] = (item, frame)
         changed = False
@@ -12758,8 +12639,6 @@ class MainWindow(QMainWindow):
             sheet.recalculate(force=True)
             self.mark_modified()
         self.view.use_the_graphics_card(prefs.gpu_drawing)
-        from ..io import pdftiles
-        pdftiles.TILES.configure(crisp_zoomed_out=prefs.crisp_zoomed_out)
         self.view.viewport().update()
         self.status_hint.setText("Preferences saved")
 

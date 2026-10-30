@@ -792,11 +792,6 @@ PREFERENCES = {
     "gpu_drawing": ("Preferences ▸ Canvas", "Draw with the graphics card",
                     "Draws the pages with OpenGL for smooth scrolling on high-density "
                     "screens. Turn it off if pages draw wrongly with your graphics driver."),
-    "crisp_zoomed_out": ("Preferences ▸ Canvas", "Crisp lines zoomed out",
-                         "Below 100 % a page's lines are drawn on the pixels, none thinner "
-                         "than one and none smoothed into grey, so a whole sheet reads "
-                         "clearly at fit-to-page, as in Revu. Off: lines smoothed at every "
-                         "zoom."),
     "markup_style_keys": ("Preferences ▸ Markup", "Number keys pick markup styles",
                           "With a markup tool in hand, 1 to 9 draw the next markup in that "
                           "tool's style 1 to 9; 0 goes back to the default."),

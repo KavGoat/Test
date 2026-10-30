@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (QAbstractTextDocumentLayout, QBrush, QColor, QFont,
                            QPainter,
                            QPainterPath, QPainterPathStroker, QPalette, QPen,
@@ -58,11 +58,43 @@ class _InlineEditor(QGraphicsTextItem):
 
         def words(onto: QPainter) -> None:
             QGraphicsTextItem.paint(self, onto, trimmed, widget)
+            host = self.parentItem()
+            if getattr(host, "_inline", None):
+                from .inline_equations import paint_equations
+                paint_equations(onto, self.document(), host)
             self._paint_misspellings(onto)
 
         # typed, the words are the same picture as once typed (paint_words)
         paint_words(painter, self, self.boundingRect(), words)
+        self._paint_caret(painter)
         painter.restore()
+
+    def _paint_caret(self, painter: QPainter) -> None:
+        """The caret, drawn here in the words' colour. Qt draws its own by
+        inverting what is under it, and the words are drawn into a clear
+        picture first (paint_words): inverted, nothing is white, and a white
+        caret on a white box is no caret at all (the user, 2026-10-30:
+        "typing in a text box can't see cursor")."""
+        if not self.hasFocus() or not (self.textInteractionFlags() & Qt.TextEditable):
+            return
+        cursor = self.textCursor()
+        block = cursor.block()
+        layout = block.layout()
+        if layout is None or layout.lineCount() == 0:
+            return
+        within = cursor.positionInBlock()
+        line = layout.lineForTextPosition(within)
+        if not line.isValid():
+            return
+        document = self.document()
+        margin = document.documentMargin() if document is not None else 0.0
+        x = layout.position().x() + line.cursorToX(within)[0] + margin
+        top = layout.position().y() + line.y() + margin
+        pen = QPen(self.defaultTextColor(), 1.0)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.drawLine(QPointF(x, top), QPointF(x, top + line.height()))
 
     def _paint_misspellings(self, painter: QPainter) -> None:
         """A red wave under each misspelt word, the same size at any zoom.
@@ -133,27 +165,32 @@ class _InlineEditor(QGraphicsTextItem):
             event.accept()
             return
         if text == "\\" and not (event.modifiers() & Qt.ControlModifier):
-            # an equation inside the box (items/inline_equations.py): {\ }
-            # opened, the caret inside it, to type 5+2= or t:=5 into
-            cursor = self.textCursor()
-            cursor.insertText("{\\}")
-            cursor.movePosition(QTextCursor.Left)
-            self.setTextCursor(cursor)
-            event.accept()
-            return
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not event.modifiers():
-            # Enter inside an open {\…} steps out past its }, as typing on
-            # would; a new line comes from the next Enter
-            cursor = self.textCursor()
-            raw = self.document().toPlainText()
-            at = cursor.position()
-            from .inline_equations import inline_fields
-            for match, _body in inline_fields(raw):
-                if match.start() < at < match.end():
-                    cursor.setPosition(match.end())
-                    self.setTextCursor(cursor)
-                    event.accept()
-                    return
+            # an equation inside the box (items/inline_equations.py): SMath's
+            # editor opens at the caret, as for an equation on the page
+            host = self.parentItem()
+            scene = self.scene()
+            views = scene.views() if scene is not None else []
+            if hasattr(host, "start_inline_equation") and views:
+                item = host.start_inline_equation(self.textCursor())
+                after = self.textCursor()
+                after.setPosition(host._inline_caret)
+                self.setTextCursor(after)
+                view = views[0]
+                from ..ui import preferences
+                prefs = preferences.current()
+                if item.region is not None:
+                    item.region.font_size = float(prefs.equation_font_size)
+                    item.region.color = prefs.equation_colour or "#000000"
+                    item.relayout()
+
+                def open_it(item=item, view=view):
+                    if item.scene() is not None:
+                        view.calc.focus(item)
+                # once this key is done with: opening the equation closes
+                # this editor, which must not go while it is handling a key
+                QTimer.singleShot(0, open_it)
+                event.accept()
+                return
         if text and (text in self.ENDS_A_RUN or event.key() in (Qt.Key_Return,
                                                                 Qt.Key_Enter)):
             self.set_script("")
@@ -461,30 +498,240 @@ class _TextBase(MarkupItem):
         # A bookmark titled with these words, wherever the box is moved to
         # (the user, 2026-10-15; kept in step by MainWindow.sync_text_bookmarks)
         self.auto_bookmark = False
-        # the equations typed inside the box, {\5+2=} (items/inline_equations.py)
-        self._equations_link = None
-        self._field_spans: list = []
+        # the equations inside the box (items/inline_equations.py): by id,
+        # where the words' layout last drew each, the ones typed away (an
+        # undo brings them back), and where the caret goes back to
+        self._inline: dict = {}
+        self._inline_removed: dict = {}
+        self._inline_caret = None
         self.doc.contentsChanged.connect(self._on_contents_changed)
 
-    # -- equations inside the box (the user, 2026-10-29) --------------------------
-    def sync_equations(self) -> None:
-        """The regions the box's inline equations are worked out with, as
-        its words and place now say."""
-        from .inline_equations import InlineEquations, has_inline
-        link = getattr(self, "_equations_link", None)
-        if link is None:
-            doc = getattr(self, "doc", None)
-            if doc is None or not has_inline(doc.toPlainText()):
-                return
-            link = self._equations_link = InlineEquations(self)
-        link.sync()
+    # -- equations inside the box (items/inline_equations.py) ------------------------
+    def inline_equation(self, uid: str):
+        """The equation inside the box with this id (for the words' layout)."""
+        return self._inline.get(str(uid))
+
+    def inline_items(self) -> list:
+        """The equations inside the box, in the order of the words."""
+        from .inline_equations import placeholders
+        return [self._inline[uid] for _pos, uid in placeholders(self.doc) if uid in self._inline]
+
+    def start_inline_equation(self, cursor):
+        """``\\`` typed at *cursor*: a new, empty equation there, for the
+        editor to open (ui/calcedit.CalcEditing.focus)."""
+        from .inline_equations import InlineCalcItem, add_resource, equation_format, new_uid
+        uid = new_uid()
+        item = InlineCalcItem(self, uid)
+        add_resource(self.doc, uid)
+        cursor.insertImage(equation_format(uid, cursor.charFormat(), item.local_rect().size()))
+        self._inline[uid] = item
+        self._inline_caret = cursor.position()
+        self._fields_shown = None
+        self._sync_inline_positions()
+        return item
+
+    def inline_equation_changed(self, item) -> None:
+        """An equation's size or drawing changed (typed into, calculated):
+        the words are laid out round it again."""
+        uid = item.inline_uid
+        if uid not in self._inline:
+            return
+        self._fields_shown = None
+        if self._resize_placeholder(uid, item.local_rect().size()):
+            return                     # the words changed: _on_contents_changed does the rest
+        self.prepareGeometryChange()
+        if not self._editing and self.auto_size and not self.style.font_auto:
+            self._fit_height()
+        self._sync_inline_positions()
+        self.update()
+
+    def _resize_placeholder(self, uid: str, size) -> bool:
+        """The equation's place in the words made its size; True if it was
+        not already."""
+        from .inline_equations import equation_format, fragments, placeholder_cursor
+        for position, found, fmt in fragments(self.doc):
+            if found != uid:
+                continue
+            image = fmt.toImageFormat()
+            if abs(image.width() - max(size.width(), 1.0)) < 0.05 \
+                    and abs(image.height() - max(size.height(), 1.0)) < 0.05:
+                return False
+            cursor = placeholder_cursor(self.doc, position)
+            # with the step before it on the editor's undo stack, never a
+            # step of its own (a size is not something anybody typed)
+            cursor.joinPreviousEditBlock()
+            cursor.setCharFormat(equation_format(uid, fmt.toCharFormat(), size))
+            cursor.endEditBlock()
+            return True
+        return False
+
+    def remove_inline_equation(self, item) -> None:
+        """The equation goes: left empty, or its place in the words deleted."""
+        from .inline_equations import placeholder_cursor
+        uid = item.inline_uid
+        position = self._placeholder_position(uid)
+        if position is not None:
+            placeholder_cursor(self.doc, position).removeSelectedText()
+            self._inline_caret = position
+        self._forget_inline(uid)
+        self.written = self.doc.toPlainText()
+        self._fields_shown = None
+        self.update()
+
+    def resume_typing(self) -> None:
+        """Back to the words, the caret after the equation just finished
+        (ui/calcedit: Enter in an equation inside the box)."""
+        scene = self.scene()
+        views = scene.views() if scene is not None else []
+        if not views:
+            return
+        views[0].begin_item_edit(self)
+        editor = self._editor
+        if editor is None:
+            return
+        last = max(self.doc.characterCount() - 1, 0)
+        at = self._inline_caret if self._inline_caret is not None else last
+        cursor = editor.textCursor()
+        cursor.setPosition(min(max(int(at), 0), last))
+        editor.setTextCursor(cursor)
+
+    def _place_inline(self, item, rect: QRectF) -> None:
+        where = self.text_origin() + rect.topLeft()
+        if (item.pos() - where).manhattanLength() > 0.01:
+            item.setPos(where)
+
+    def _placeholder_position(self, uid: str) -> Optional[int]:
+        from .inline_equations import placeholders
+        for position, found in placeholders(self.doc):
+            if found == uid:
+                return position
+        return None
+
+    def _sync_inline_positions(self) -> None:
+        """Every equation where its placeholder is laid out in the words as
+        they are drawn (their fields filled in; the words as typed while
+        the box is open)."""
+        if not self._inline:
+            return
+        from .fields import shown_document
+        from .inline_equations import fragments, object_rect
+        shown = self.doc if self._editing else shown_document(self, on_screen=True)
+        shown.setTextWidth(max(self.text_rect().width(), 8.0))
+        shown.size()                                   # laid out
+        for position, uid, fmt in fragments(shown):
+            item = self._inline.get(uid)
+            if item is None:
+                continue
+            self._place_inline(item, object_rect(shown, position, fmt, item.local_rect().size()))
+
+    def inline_rect(self, uid: str) -> Optional[QRectF]:
+        """Where the equation is drawn, in the box's coordinates."""
+        from .fields import shown_document
+        from .inline_equations import fragments, object_rect
+        item = self._inline.get(uid)
+        if item is None:
+            return None
+        shown = self.doc if self._editing else shown_document(self, on_screen=True)
+        shown.size()
+        for position, found, fmt in fragments(shown):
+            if found == uid:
+                rect = object_rect(shown, position, fmt, item.local_rect().size())
+                return rect.translated(self.text_origin())
+        return None
+
+    def _move_inline_equations(self) -> None:
+        for item in list(self._inline.values()):
+            item._moved()
+
+    def _reconcile_inline_equations(self) -> None:
+        """A placeholder typed away takes its equation with it; put back
+        (undo), the equation comes back."""
+        if not self._inline and not self._inline_removed:
+            return
+        from .inline_equations import InlineCalcItem, placeholders
+        present = {uid for _pos, uid in placeholders(self.doc)}
+        for uid in [uid for uid in self._inline if uid not in present]:
+            self._inline_removed[uid] = self._inline[uid].source()
+            self._forget_inline(uid)
+        for uid in [uid for uid in present
+                    if uid not in self._inline and uid in self._inline_removed]:
+            self._inline[uid] = InlineCalcItem(self, uid, self._inline_removed.pop(uid))
+
+    def _forget_inline(self, uid: str) -> None:
+        item = self._inline.pop(uid, None)
+        if item is None:
+            return
+        scene = item.scene()
+        item.setParentItem(None)
+        if scene is not None:
+            scene.removeItem(item)
+
+    def _drop_inline_equations(self) -> None:
+        for uid in list(self._inline):
+            self._forget_inline(uid)
+
+    def _inline_records(self) -> list:
+        from .inline_equations import placeholders
+        out = []
+        for position, uid in placeholders(self.doc):
+            item = self._inline.get(uid)
+            if item is not None:
+                out.append({"uid": uid, "pos": position, "calc": item.source()})
+        return out
+
+    def _bind_inline_equations(self, records: list) -> None:
+        """The equations of the box's record put back on their placeholders:
+        the HTML keeps each as an image named for its equation; a plain
+        placeholder character (a migrated code) or none at all is given one."""
+        from .inline_equations import (PLACEHOLDER, InlineCalcItem, add_resource, equation_format,
+                                       is_equation, new_uid, placeholder_cursor, placeholders)
+        self._drop_inline_equations()
+        if not records:
+            for position, _uid in placeholders(self.doc)[::-1]:
+                placeholder_cursor(self.doc, position).removeSelectedText()
+            return
+        wanted = [str(record.get("uid") or new_uid()) for record in records]
+        by_uid = dict(zip(wanted, records))
+        present = {uid: position for position, uid in placeholders(self.doc)}
+        for uid, position in sorted(present.items(), key=lambda pair: -pair[1]):
+            if uid not in by_uid:
+                placeholder_cursor(self.doc, position).removeSelectedText()
+        # a placeholder character that is not yet an equation's: the next
+        # equation without a place takes it, in order
+        plain = [i for i, ch in enumerate(self.doc.toPlainText()) if ch == PLACEHOLDER
+                 and not is_equation(placeholder_cursor(self.doc, i).charFormat())]
+        for uid in wanted:
+            if uid in present:
+                continue
+            record = by_uid[uid]
+            if plain:
+                position = plain.pop(0)
+                placeholder_cursor(self.doc, position).removeSelectedText()
+                plain = [i - 1 for i in plain]
+            else:
+                position = min(max(int(record.get("pos", 0)), 0),
+                               max(self.doc.characterCount() - 1, 0))
+            cursor = QTextCursor(self.doc)
+            cursor.setPosition(position)
+            cursor.insertImage(equation_format(uid, cursor.charFormat()))
+            plain = [i + 1 if i >= position else i for i in plain]
+        for uid in wanted:
+            item = InlineCalcItem(self, uid, by_uid[uid].get("calc"))
+            self._inline[uid] = item
+            add_resource(self.doc, uid)
+        from .inline_equations import fragments
+        for position, uid, fmt in fragments(self.doc):
+            item = self._inline.get(uid)
+            if item is not None:
+                placeholder_cursor(self.doc, position).setCharFormat(
+                    equation_format(uid, fmt.toCharFormat(), item.local_rect().size()))
+        self._fields_shown = None
 
     def itemChange(self, change, value):
         result = super().itemChange(change, value)
-        if change in (QGraphicsItem.ItemParentHasChanged, QGraphicsItem.ItemSceneHasChanged,
-                      QGraphicsItem.ItemPositionHasChanged,
+        if change in (QGraphicsItem.ItemParentHasChanged, QGraphicsItem.ItemPositionHasChanged,
                       QGraphicsItem.ItemRotationHasChanged):
-            self.sync_equations()
+            self._move_inline_equations()
         return result
 
     def text_origin(self) -> QPointF:
@@ -497,66 +744,22 @@ class _TextBase(MarkupItem):
         return QPointF(rect.left(), rect.top() + offset + self._bluebeam_nudge(rect.height(),
                                                                                offset))
 
-    def inline_field_at(self, scene_pos: QPointF) -> Optional[tuple]:
-        """The inline equation under *scene_pos* on the box as it is shown
-        (its results in place): (k, raw from, raw to, body), or None."""
-        from .fields import shown_document
-        if self._editing:
-            return None
-        shown = shown_document(self, on_screen=True)
-        shown.size()                            # laid out, if not drawn yet
-        local = self.mapFromScene(scene_pos) - self.text_origin()
-        at = shown.documentLayout().hitTest(local, Qt.FuzzyHit)
-        if at < 0:
-            return None
-        k = 0
-        for start, end, raw_start, raw_end, body in getattr(self, "_field_spans", []):
-            if not body.startswith("\\"):
-                continue
-            if start <= at <= end:
-                return (k, raw_start, raw_end, body[1:])
-            k += 1
-        return None
-
-    def inline_field(self, k: int) -> Optional[tuple]:
-        """The k-th inline equation in the words as typed: (raw from, raw
-        to, body)."""
-        from .inline_equations import inline_fields
-        fields = inline_fields(self.doc.toPlainText())
-        if 0 <= k < len(fields):
-            match, body = fields[k]
-            return (match.start(), match.end(), body)
-        return None
-
-    def select_field(self, k: int) -> bool:
-        """While being edited: the k-th inline equation's text picked out,
-        ready to be retyped."""
-        editor = self._editor
-        field = self.inline_field(k)
-        if editor is None or field is None:
-            return False
-        start, end, body = field
-        cursor = editor.textCursor()
-        cursor.setPosition(start + 2 + (1 if body.lstrip().startswith("!") else 0))
-        cursor.setPosition(end - 1, QTextCursor.KeepAnchor)
-        editor.setTextCursor(cursor)
-        return True
-
     # -- content -----------------------------------------------------------
     def text(self) -> str:
         return self.doc.toPlainText()
 
     def set_text(self, text: str) -> None:
         self.written = text
+        self._drop_inline_equations()
         self.doc.setPlainText(text)
         self._spacing_applied = 1.0           # plain lines, single-spaced
         self.apply_style()
-        self.sync_equations()
 
     def html(self) -> str:
         return self.doc.toHtml()
 
     def set_html(self, html: str) -> None:
+        self._drop_inline_equations()
         self._load_html(html)
 
     def _load_html(self, html: str, spacing: Optional[float] = None) -> None:
@@ -587,7 +790,6 @@ class _TextBase(MarkupItem):
             self.doc.setDefaultFont(self.style.font())
             self._apply_line_spacing()
             self._fit_height()
-        self.sync_equations()
 
     def _unpin_the_box_size(self) -> None:
         """Let the runs take the box's own size again after loading.
@@ -659,11 +861,13 @@ class _TextBase(MarkupItem):
     def _on_contents_changed(self) -> None:
         if self._spacing_lines:
             return              # apply_style is setting the lines; it fits after
+        self._reconcile_inline_equations()
         self.prepareGeometryChange()
         if self.style.font_auto:
             self._fit_font()
         elif self.auto_size:
             self._fit_height()
+        self._sync_inline_positions()
         self.touch()
         self.update()
         self.contentChanged.emit()
@@ -1462,7 +1666,7 @@ class _TextBase(MarkupItem):
         self._editing = False
         self.apply_style()
         self._restore_after_edit()
-        self.sync_equations()
+        self._sync_inline_positions()
         self.update()
 
     @property
@@ -1562,6 +1766,10 @@ class _TextBase(MarkupItem):
 
         def words(onto: QPainter) -> None:
             shown.documentLayout().draw(onto, context)
+            if self._inline:
+                # its equations, typeset, where the layout left room for them
+                from .inline_equations import paint_equations
+                paint_equations(onto, shown, self)
 
         # on screen, the same picture of the words by every way they are
         # drawn there (ui/markuplayer.paint_words)
@@ -1593,6 +1801,9 @@ class _TextBase(MarkupItem):
             # the spacing the html's line heights were laid out at, so a look
             # put over these words (a tool's, a style's) scales them from it
             data["html_spacing"] = self._spacing_applied
+        equations = self._inline_records()
+        if equations:
+            data["equations"] = equations          # the equations inside the box
         return data
 
     def _has_exact_lines(self) -> bool:
@@ -1629,8 +1840,21 @@ class _TextBase(MarkupItem):
             self._spacing_applied = 1.0
         self.digits = int(data.get("digits", 4))
         self.auto_bookmark = bool(data.get("bookmark", False))
+        records = data.get("equations")
+        if records is None and "{\\" in self.doc.toPlainText():
+            # a document saved on 29 Oct: its {\5+2=} codes become equations
+            from .inline_equations import migrate_codes
+            words, made = migrate_codes(self.doc.toPlainText())
+            if made:
+                self.doc.setPlainText(words)
+                records = []
+                for uid, calc, show in made:
+                    calc = dict(calc)
+                    calc["show_input"] = show
+                    records.append({"uid": uid, "calc": calc})
         self.written = data.get("written") or self.doc.toPlainText()
         self.apply_style()
+        self._bind_inline_equations(records or [])
 
 
 @register_item
@@ -1671,7 +1895,11 @@ class TextItem(_TextBase):
         self.paint_text(painter)
 
     def summary(self) -> str:
-        return self.comment or self.text().strip().replace("\n", " ")[:120]
+        words = self.text()
+        if self._inline:
+            from .fields import shown_text
+            words = shown_text(self)            # its equations as words, not a blank
+        return self.comment or words.strip().replace("\n", " ")[:120]
 
 
 @register_item
@@ -1996,7 +2224,11 @@ class CalloutItem(_TextBase):
                 self.set_cloud_rect(QRectF(*stored))
 
     def summary(self) -> str:
-        return self.comment or self.text().strip().replace("\n", " ")[:120]
+        words = self.text()
+        if self._inline:
+            from .fields import shown_text
+            words = shown_text(self)            # its equations as words, not a blank
+        return self.comment or words.strip().replace("\n", " ")[:120]
 
 
 #: Revu's note icons (a PDF text annotation's /Name), in its Icon ▾ order:

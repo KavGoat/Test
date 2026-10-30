@@ -92,7 +92,7 @@ def test_line_block_sizes_round_trip():
 
     import pathlib
 
-    beam = pathlib.Path(__file__).resolve().parents[2] / "SMath Studio" / "examples" / "Beam.sm"
+    beam = pathlib.Path(__file__).resolve().parents[1] / "data" / "smath_examples" / "Beam.sm"
     if not beam.exists():
         pytest.skip("SMath examples not present")
     from tests.calc.smfile import load_sm

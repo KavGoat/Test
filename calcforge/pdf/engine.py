@@ -75,41 +75,46 @@ ZOOMED_OUT_LINE_PIXELS = 1.4
 ZOOMED_OUT_BELOW = 1.0
 ZOOMED_OUT_FLOOR = 0.25
 
-# Crisp, zoomed out (the user, 2026-10-29: "fuzzy is not good … Bluebeam looks
-# clear when zoomed out"): below 100 % the line work is drawn on the pixels —
-# no anti-aliasing of strokes and fills, every line at least a pixel — so a
-# hairline is one black row rather than two grey ones, as Revu and a CAD
-# viewer draw a sheet at fit-to-page. Text keeps its smoothing (letters a
-# few pixels tall go ragged without it). From 100 % up everything is smoothed
-# as before, which is why zooming in on Revu looks softer than its zoomed-out
-# sheet. Preferences ▸ Crisp lines zoomed out turns it off (configure).
+# Somebody else's markups — a page's own annotations, drawn on their own
+# (raster_from with alpha) — are drawn sharp zoomed out, as the markups made
+# here are (ui/markuplayer.drawn_sharp; the user, 2026-10-30: "only make the
+# markups always sharp and this includes markups from other editors"): below
+# 100 % their strokes and fills are drawn on the pixels, no anti-aliasing,
+# every line at least a pixel, so a hairline is one black row rather than
+# two grey ones. Their words keep their smoothing (letters a few pixels tall
+# go ragged without it). The page's own line work stays smoothed at every
+# zoom (thinnest_line above; the user, 2026-10-30: "revert the pdf line work
+# to what it was").
 #
 # Drawn without anti-aliasing a line is the pixels whose centres it covers,
 # and a hairline widened to exactly one pixel misses them along a shallow
 # slope at some zooms (at 25 % and 75 %, every other column): a hair more
 # than a pixel wide covers every column, and a flat hairline is still one
 # row nearly everywhere (CRISP_LINE_PIXELS; 1.5 made every other one two).
-CRISP_ZOOMED_OUT = True
+#
+# An annotation is a form with a box of its own, and inside a form MuPDF's
+# drawing without anti-aliasing loses a hairline outright at many positions
+# (a flat one in a box a point or two tall most of all, zoomed far out):
+# seven of eighteen at 50 %, fifteen at 12 %, whatever the minimum width.
+# So the annotation is drawn twice, sharp and smoothed, and wherever the
+# sharp drawing has nothing and the smoothed one has LOST_LINE_COVERAGE
+# or more, the smoothed pixel goes in, solid (_with_lost_lines): no
+# hairline vanishes, nothing goes grey, and nearly every one is still a
+# single row.
 CRISP_LINE_PIXELS = 1.1
 SMOOTH_AA = 8
+LOST_LINE_COVERAGE = 112
 
 
-def configure(crisp_zoomed_out: Optional[bool] = None) -> None:
-    """Rendering settings a renderer process is told about (pdftiles sends
-    them to each of its renderers, and again whenever they change)."""
-    global CRISP_ZOOMED_OUT
-    if crisp_zoomed_out is not None:
-        CRISP_ZOOMED_OUT = bool(crisp_zoomed_out)
+#: how far under 100 % a zoom step has to be before it counts as zoomed out
+#: for sharpening (the ladder's step for 100 % is a hair under 1.0)
+SHARP_BELOW = ZOOMED_OUT_BELOW - 0.005
 
 
-def settings() -> dict:
-    """What configure() takes, as it stands here."""
-    return {"crisp_zoomed_out": CRISP_ZOOMED_OUT}
-
-
-def crisp_at(scale: float) -> bool:
-    """Whether a tile at *scale* pixels to the point is drawn crisp."""
-    return CRISP_ZOOMED_OUT and scale < ZOOMED_OUT_BELOW - 1e-9
+def sharp_at(scale: float, alpha: bool) -> bool:
+    """Whether a render at *scale* pixels to the point is drawn on the
+    pixels: a markup of the file's drawn on its own (*alpha*), zoomed out."""
+    return alpha and scale < SHARP_BELOW
 
 
 def thinnest_line(scale: float) -> float:
@@ -595,13 +600,15 @@ def raster_from(drawing, region: tuple[float, float, float, float],
                 scale: float, alpha: bool = False) -> Optional[Raster]:
     """Part of an already-parsed page, at *scale* pixels to the display point
     (*alpha*: on a clear background, for an annotation drawn on its own), for
-    the screen: zoomed out, no line thinner than thinnest_line."""
+    the screen: zoomed out, no line thinner than thinnest_line — and an
+    annotation on its own drawn sharp, on the pixels (sharp_at)."""
     from pymupdf import mupdf
 
-    crisp = crisp_at(scale)
+    crisp = sharp_at(scale, alpha)
     width = CRISP_LINE_PIXELS if crisp else thinnest_line(scale)
     before = mupdf.fz_graphics_min_line_width()
     aa_before = mupdf.fz_graphics_aa_level()
+    smooth = None
     try:
         clip = pymupdf.Rect(*region).normalize()
         if clip.is_empty:
@@ -613,15 +620,51 @@ def raster_from(drawing, region: tuple[float, float, float, float],
             mupdf.fz_set_text_aa_level(SMOOTH_AA)       # letters still smoothed
         pixmap = drawing.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
                                     clip=clip, alpha=alpha)
+        if crisp:
+            # and smoothed, for the hairlines the sharp drawing lost
+            mupdf.fz_set_graphics_aa_level(aa_before)
+            mupdf.fz_set_graphics_min_line_width(MIN_LINE_PIXELS)
+            smooth = drawing.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
+                                        clip=clip, alpha=alpha)
     except Exception:                                  # noqa: BLE001
         drain_messages()
         return None
     finally:
-        if width != before:
+        if width != before or crisp:
             mupdf.fz_set_graphics_min_line_width(before)
         if crisp:
             mupdf.fz_set_graphics_aa_level(aa_before)
-    return _raster_of(pixmap)
+    raster = _raster_of(pixmap)
+    if raster is not None and smooth is not None:
+        raster = _with_lost_lines(raster, smooth)
+    return raster
+
+
+def _with_lost_lines(sharp: Raster, smooth: "pymupdf.Pixmap") -> Raster:
+    """*sharp* with every pixel the smoothed drawing covers by
+    LOST_LINE_COVERAGE or more where the sharp drawing has nothing, put in
+    solid (a hairline the sharp drawing lost inside an annotation's form)."""
+    import numpy as np
+
+    if not sharp.alpha or smooth.n != 4 or smooth.width != sharp.width \
+            or smooth.height != sharp.height:
+        return sharp
+    rows, stride = sharp.height, sharp.stride
+    ours = np.frombuffer(sharp.samples, np.uint8).reshape(rows, stride).copy()
+    theirs = np.frombuffer(smooth.samples, np.uint8).reshape(rows, smooth.stride)
+    width = sharp.width
+    a = ours[:, :width * 4].reshape(rows, width, 4)
+    b = theirs[:, :width * 4].reshape(rows, width, 4)
+    lost = (a[:, :, 3] == 0) & (b[:, :, 3] >= LOST_LINE_COVERAGE)
+    if not lost.any():
+        return sharp
+    cover = b[:, :, 3][lost].astype(np.float64)[:, None]
+    # MuPDF's pixmaps are premultiplied: the colour at full strength is the
+    # colour over its coverage
+    colour = np.clip(b[lost][:, :3].astype(np.float64) * 255.0 / cover, 0, 255)
+    a[lost, :3] = colour.astype(np.uint8)
+    a[lost, 3] = 255
+    return Raster(ours.tobytes(), sharp.width, sharp.height, stride, True, sharp.x, sharp.y)
 
 
 def render_thumbnail(document: "pymupdf.Document", index: int,

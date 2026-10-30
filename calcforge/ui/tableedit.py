@@ -140,7 +140,7 @@ def _frames(item, others: bool = False) -> list:
         for frame in getattr(scene, "frames", []) or []:
             if frame in frames:
                 continue
-            for other in frame.built_markups():
+            for other in frame.markups():
                 if getattr(other, "TYPE", "") == "chart" and sheet.name.lower() in sheets_read(other.spec):
                     frames.append(frame)
                     break
@@ -623,7 +623,7 @@ class TableEditing:
         # rebuilt by undo or redo: the same table under the same uid
         scene = self.view.scene()
         for frame in getattr(scene, "frames", []) or []:
-            for other in frame.built_markups():
+            for other in frame.markups():
                 if isinstance(other, TableItem) and other.uid == self._uid:
                     self._item = other
                     other.opened = True
@@ -3424,7 +3424,7 @@ class TableEditing:
     def _all_tables(self) -> list:
         out = []
         for frame in getattr(self.view.scene(), "frames", []) or []:
-            out.extend(i for i in frame.built_markups() if isinstance(i, TableItem))
+            out.extend(i for i in frame.markups() if isinstance(i, TableItem))
         return out
 
     def _selected_table(self) -> Optional[TableItem]:

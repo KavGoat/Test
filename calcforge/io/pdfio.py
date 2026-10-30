@@ -491,9 +491,10 @@ def markups(path: str, indices: list[int], keep_the_look: bool = True,
 
 
 def read_pending_annotations(page, pending: tuple, document, source=None) -> list[dict]:
-    """The markups a page's own annotations are, read now (import_pages
-    left them unread: *pending* is (the file's asset key, the page's index
-    in it, the scale onto the page's paper)). Which annotations became
+    """The markups a page's own annotations are (*pending*: the file's asset
+    key, the page's index in it, the scale onto the page's paper) — read as
+    the page is imported, or as a file saved on 29 Oct with them unread
+    opens (Page._pending_annotations). Which annotations became
     markups goes on the page — it goes on drawing them, which is what makes
     somebody else's drawing look like theirs, and leaves out the ones taken
     over since. *source*: the file already open (pdfvector.PdfFile), else
@@ -648,7 +649,7 @@ def _bezier(a, b, c, d, t: float) -> list:
 def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINAL,
                  dpi: float = 150.0, at: Optional[int] = None,
                  vectors: bool = False, annotations: bool = False,
-                 bookmarks: bool = True, lazy: bool = False) -> list[Page]:
+                 bookmarks: bool = True) -> list[Page]:
     """Load the chosen PDF pages into *document* as new pages.
 
     **What arrives is the PDF.** Every page is drawn from the file itself, by
@@ -662,10 +663,7 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
 
     *vectors* brings the page's own line work in as real geometry, so a
     measurement can snap to the end of a beam rather than to a guess.
-    *annotations* turns markups already on the page into editable ones —
-    read now, or with *lazy* left for when the page is looked at or asked
-    for (read_pending_annotations; the window opens a set of hundreds of
-    marked-up sheets this way, in the time it took to read them all).
+    *annotations* turns markups already on the page into editable ones.
     """
     source = PdfSource(path)
     with open(path, "rb") as handle:
@@ -676,7 +674,7 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
     created: list[Page] = []
     source_heights: dict[int, float] = {}
     reader = None
-    if annotations and not lazy:
+    if annotations:
         from . import pdfvector
         reader = pdfvector.PdfFile.from_bytes(document.asset(pdf_key) or b"")
     try:
@@ -693,10 +691,8 @@ def import_pages(document, path: str, indices: list[int], fit: str = FIT_ORIGINA
                     drawn[index], page.setup.width_pt / across)
             if annotations:
                 across = info.width_pt or 1.0
-                page._pending_annotations = (pdf_key, index, page.setup.width_pt / across)
-                if reader is not None:
-                    page._pending_items.extend(read_pending_annotations(
-                        page, page._pending_annotations, document, reader))
+                page._pending_items.extend(read_pending_annotations(
+                    page, (pdf_key, index, page.setup.width_pt / across), document, reader))
             page.pdf_key = pdf_key
             page.pdf_page_index = index
             page.source_note = f"{os.path.basename(path)} page {index + 1}"

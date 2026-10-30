@@ -204,7 +204,7 @@ def test_delete_over_the_thumbnails_deletes_the_pages_even_with_a_markup_selecte
     QTest.keyClick(strip, Qt.Key_Delete)
     pump(0.3)
     assert len(w.document.pages) == 2, "the two pages picked out went"
-    assert box.scene() is not None and box in frame.built_markups(), "the markup stayed"
+    assert box.scene() is not None and box in frame.markups(), "the markup stayed"
 
 
 def test_an_ordinary_pages_menu_is_shaped_like_a_workbook_pages(window, tmp_path):

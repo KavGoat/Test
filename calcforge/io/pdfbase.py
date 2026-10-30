@@ -319,7 +319,8 @@ def _file_facts(document, sources: dict, carried: set, layers: dict,
         wanted = set(page.markup_annotations)
         frame = page.frame
         if frame is not None:
-            wanted |= frame.annotation_links()        # (nothing built for the asking)
+            wanted |= {int(item.from_annotation) for item in frame.markups()
+                       if getattr(item, "from_annotation", 0)}
         else:
             wanted |= {int(payload.get("from_annotation") or 0)
                        for payload in page._pending_items if isinstance(payload, dict)}
@@ -476,9 +477,7 @@ def _draw_a_layer(output, document, leftovers: list, opened: list,
     from . import calclayer
 
     written = document.pages if pages is None else pages
-    # (a page whose markups are all still its file's, not even read yet, has
-    # nothing of ours to draw, and is not built for a save)
-    drawn = [page for page in written if page.frame is not None and not page.frame.file_only()]
+    drawn = [page for page in written if page.frame is not None]
     if kind == calclayer.CALC:
         drawn = [page for page in drawn
                  if getattr(page, "sheet", None) is not None
