@@ -68,3 +68,27 @@ Report only. Nothing listed here was changed. Section numbers refer to the WSP A
 - End-of-life wording. Column O uses ">2040", "Before 2040", a year, or blank. "Before 2040" rows at Mawson (51 to 53) were given 2037; others with "Before 2040" were left as No removal. The report asks that justification be recorded where removal is pushed past 10 years (3.2); rows 19, 26, 34 to 39 at Mawson carry "Needs demo" with no year and would benefit from a recorded reason.
 - Complete rows. Three coding conventions exist for Q on Complete rows (see Mawson above).
 - Gaskets. Casey, Davis (except row 13) and Mawson code every gasket as Maintenance / Manage per AMP. Davis 13 and Macquarie 11 and 22 do not.
+
+## Commentary style check (U says why, W says what is removed, Z says what goes back)
+
+Convention taken from the Davis and Mawson entries: U is one or two plain sentences giving the reason for the treatment and timing. W is a short statement of what is removed. Z is a short phrase for what is reinstated. No methodology references, no source notes.
+
+| Station | Row | Issue | Suggested correction |
+|---|---|---|---|
+| Casey | 18 | U "Replace cold-porch partition lining." says what, not why. | e.g. "Full removal achievable due to internal lining, carry out with other works in building." |
+| Casey | 19 | U says what and when (crawlway boards, summer package) but not why the floor rule does not apply. W and Z read as method ("section sheets as needed for extraction", "where required to maintain access"). | U: "Loose crawlway boards accessible from subfloor so full removal achievable, unlike fixed floor sheeting." W: "Remove ACM crawlway boards." Z: "Replace crawlway boards." |
+| Casey | 8, 10, 13, 20, 23, 24 | U carries the source note "Provided by AAD 18/06/2026", which belongs in P (End-of-Life Commentary). Reason itself is fine. | Move the source note to P |
+| Davis | 9, 11, 14, 16 | Same, source note and work order history in U. | Move to P or J (comments) |
+| Davis | 12, 13 | U starts with "AIRP scope of works. Provided by AAD 18/06/2026. Assume full building demo rather than upgrade." before the reason. Mixed source note and reason. | Keep only "Remove season prior to demolition..." / "Required to be operational until demolition" in U |
+| Davis | 12 | W "Sampled tested for rear wall – no asbestos present. Other walls do contain asbestos." is a sample note, not a removal scope. | W: "Remove ACM wall sheets except rear wall." Move the sample note to J |
+| Davis | 18 | W includes method ("including temporary relocation of obstructing equipment"); Z lists fixtures and finishes. Slightly long but acceptable. | Optional shortening |
+| Mawson | 28, 43 | U "Full removal and replacement of fire door." says what, not why. | e.g. "Full removal achievable, carry out with other works in building." (as row 5) |
+| Mawson | 31 | W and Z longer than the rest ("associated fixings within the Main...", "Reinstate affected internal dado walls using asbestos-free lining and finishes"). | W: "Remove ACM dado wall lining." Z: "Replace dado lining and finishes." |
+| Macquarie | 7, 8 | U is a long justification ("progressively eliminated rather than retained solely because it is in good condition"). W includes method ("allow for local opening-up of covering material"). Z over-written. | U: "Full removal achievable due to internal lining, carry out with other works in building." W: "Remove ACM wall lining." Z: "Replace wall lining and finishes." |
+| Macquarie | 11, 22 | U "Assumed gaskets can be removed in season prior to removal" gives timing only; if recoded to Manage per AMP use the gasket wording. | "Gaskets to be removed during next maintenance." |
+| Macquarie | 32 | Source note "Provided by AAD 18/06/2026" in U. | Move to P |
+| Macquarie | 10, 11, 15, 23, 24, 25 | Typos in U or W: "achieveable", "linr", "celing", "Renove", "decomissioning", "operationsl". | Correct spelling |
+| Mawson | 6, 18, 49, 50 | Typos: "visibile", "achieveable", "accesible". | Correct spelling |
+| All | floor rows | Standard text has "strucutre" and "encapsultate". Used on every station so consistent, but misspelt. | Correct once and replace on all stations |
+
+Rows not listed have U giving a reason and W/Z in the short style, or are Manage per AMP rows with W and Z correctly blank.
