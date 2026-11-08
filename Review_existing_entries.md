@@ -92,3 +92,64 @@ Convention taken from the Davis and Mawson entries: U is one or two plain senten
 | All | floor rows | Standard text has "strucutre" and "encapsultate". Used on every station so consistent, but misspelt. | Correct once and replace on all stations |
 
 Rows not listed have U giving a reason and W/Z in the short style, or are Manage per AMP rows with W and Z correctly blank.
+
+## Consistency by item type across all four sheets
+
+Every row on Casey, Davis, Mawson and Macquarie (existing and newly filled) was grouped by item type and the decision columns compared side by side. Items in the same group should carry the same requirement, treatment, season, reinstatement and adjuster pattern unless the commentary says why not.
+
+### Internal wall linings (exposed, painted)
+- Treatment and season are consistent: Preference, Removal - Full, Winter on Casey, Mawson and Macquarie. Davis 18 is Summer (Priority Assessed); acceptable for Davis access but it is the only internal lining in Summer.
+- Reinstatement is consistent by item (Cold Porch Lining, Dado Wall, Plasterboard). Mawson 48 (behind tiles, medical suite) has no reinstatement option and no Z; add Wall Int. – Plasterboard.
+- Complexity is not consistent with area: Macquarie 8 is Low at 264 m2 and Davis 18 is Medium at 360 m2, while Macquarie 52 is High at 396 m2 and Macquarie 33 and 39 are Medium at 120 to 140 m2. Davis 6 is Medium at 98 m2 while Macquarie 19 is Low at 96 m2. Suggest one band: Low under 50 m2, Medium 50 to 200, High over 200. That makes Macquarie 8 High, Davis 18 High, Mawson 31 Medium (97 m2), Macquarie 17 Medium (141 m2).
+- Access: Davis 18 (occupied workshop) is Simple while Casey 12, Mawson 7, 31 and all Macquarie occupied buildings are Challenging. Davis 18 should be Challenging.
+- Station buildings coded as huts. Macquarie rows 26 and 27 (Fire Hut), 31 (Flammable Liquid Hut), 70 (Proton Processing Magnetometer Hut) and 99 to 103 (Transmitter Hut) are Manage per AMP with the "No removal from Huts" commentary. These are station buildings, not field huts; Transmitter Hut row 100 is 68.5 m2 of good painted lining and would be Preference removal under the pattern used for Biology, Bunkhouse and Pump House. Either recode them as Preference removal, or change the commentary to the real reason (for example no quantity, or AAD preference to leave). The genuine field huts (Bauer Bay, Green Gorge, Lusitania Bay, Sandy Bay) are consistent.
+
+### Ceilings
+- Access rating is split three ways: Simple (Macquarie 16, 20), Challenging (Macquarie 5, 10) and Extreme (all newly filled Macquarie ceilings, following Table 5 work at height). Pick one. If Extreme is accepted, change Macquarie 10, 16 and 20; if not, change the new rows.
+- Complexity: Macquarie 10 is High at 155 m2 and Macquarie 16 is Medium at 63 m2 against the band above (Medium and Medium). Macquarie 20 Medium at 102 m2 is fine.
+- End-of-life ceilings (Macquarie 16, 20) correctly have no reinstatement and are the season before demolition. Consistent with the walls in the same buildings.
+
+### Floor sheeting and underfloor
+- Manage per AMP on every sheet, consistent, with one exception: Casey 19 Red Shed crawlway boards is Preference removal (already listed). Confirm or recode.
+- End-of-life floors are removed in the demolition season on all sheets (Casey 11, Macquarie 18, Mawson 52), consistent with the flooring rule.
+- Access for underfloor end-of-life removal differs: Macquarie 18 Challenging, Mawson 52 Extreme. Subfloor work is a confined space, so Extreme on both.
+
+### Cement sheet under external cladding, behind plasterboard, above ceilings
+- Manage per AMP on every sheet, consistent. Only end-of-life items are removed (Macquarie 21, Mawson 53), in the demolition season, no reinstatement, consistent.
+- Mawson 51 and 53 are the same building and the same area (200 m2) but 51 is Medium and 53 is High. Make them the same (High at 200 m2, or Medium if the band is set higher).
+- Macquarie 6 is Manage per AMP with Low/Challenging adjusters (already listed).
+
+### Eave soffits and fascia sheets
+- Macquarie 31 (Flammable Liquid Hut) and 70 (Proton Hut) are Manage per AMP with the hut commentary and no quantity. The newly filled soffits (Hass House 41, Science 86, SAD 89, Mechanical Workshop 53) are Preference removal, Summer, Soffit Boards, Extreme. Rows 31 and 70 should follow the same pattern once a quantity is obtained; the hut commentary is wrong for these buildings.
+- The four filled soffit rows are consistent with each other.
+
+### Gaskets
+- Maintenance, Manage per AMP, no year, no adjusters on all sheets except Davis 13, Macquarie 11 and 22 (already listed). Those three also carry Low/Simple adjusters that no other gasket row has.
+
+### Formwork
+- Requirement differs: Davis 28 is Priority Assessed, Mawson 6, 49, 50, 55, 56 are Preference. Same item type, same reasoning (remove accessible formwork with other site works). Pick one.
+- Season differs: Mawson 6 and 49 are Winter for external formwork, Mawson 50, 55, 56 and Davis 28 are Summer. External excavation at Mawson in winter is unlikely; suggest Summer for 6 and 49.
+- Complexity differs for similar quantities: Mawson 50 is Medium at 54 m2, while Mawson 55 (25 m2) and 56 (15 m2) are High. Suggest Medium for all three.
+- Reinstatement: none on all formwork rows, consistent, though Davis 17 and 28 carry a Z text ("make good concrete") with no Y option. Harmless, but the other formwork rows leave Z blank.
+
+### Fire doors
+- Mawson 5, 28, 43: Winter, Fire Door reinstatement, Simple. Consistent apart from Mawson 43 High complexity (already listed). Mawson 39 (heritage) Manage per AMP is correct.
+
+### Switchboards, panels and pipes
+- Switchboards are Manage per AMP everywhere, consistent. Macquarie 51 and 103 have no reinstatement, correct for Manage rows.
+- End-of-life EPH panels (Macquarie 24, 25) and Davis 8 are removed in the demolition season with no reinstatement, consistent, but Davis 8 has no adjusters.
+- Macquarie 15 and 23 are the two ends of the same cable pipe; 15 is Low and 23 is Medium. Make them the same.
+- Buried pipes (Macquarie 48, 88, Casey 31) are all Manage per AMP, consistent.
+
+### Debris and tip sites
+- Manage per AMP on Casey (15, 29), Davis (16, 27) and Macquarie (38, 68). Mawson 18 is the only tip site with a removal (Partial, 2028). Either justify it in U or recode to match.
+
+### End-of-life timing
+- "Before 2040" in column O has been turned into 2035 on Casey 11 but 2037 on Casey 22 and Mawson 51 to 53. Use one convention for undated "before 2040" demolitions (2037 keeps them inside the programme and is the later of the two).
+- Season-before-demolition is applied correctly on Davis 6, 12, Macquarie 16, 17, 19, 20, 22 and demolition-season on plant, flooring and external items (Davis 7, 8, Casey 11, Macquarie 15, 18, 21, 23 to 25, Mawson 52). Macquarie 22 (EPH gaskets, 2034) is the only plant-room item not in the demolition season.
+
+### Reinstatement on end-of-life rows
+- No end-of-life row on any sheet carries a reinstatement option. Consistent and correct.
+
+### Adjusters on Manage per AMP rows
+- Only Macquarie 4, 5, 6 carry complexity or access on a Manage row (already listed). All other Manage rows on all sheets are blank in S, T, W, X, Y, Z, AK, AL.
