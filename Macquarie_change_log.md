@@ -1,6 +1,6 @@
 # Macquarie change log
 
-Cells entered in Reg_Macquarie of `20261027 Asbestos Removal Programme Tool - Macquarie filled.xlsx`. No existing value was changed. Row 14 column U was left as found. Section numbers refer to the WSP Asbestos Removal Programme report Rev B and are recorded here for traceability only; the tool itself carries plain reasons.
+Cells entered in Reg_Macquarie of `20261027 Asbestos Removal Programme Tool - Macquarie filled.xlsx`. No existing value was changed. Row 14 column U was left as found. Section numbers refer to the WSP Asbestos Removal Programme report Rev B and are recorded here for traceability only; the tool carries plain reasons. Years on Preference rows are planning choices made without an AAD end-of-life date.
 
 Total cells entered: 362 across 63 rows.
 
@@ -9,8 +9,8 @@ Total cells entered: 362 across 63 rows.
 | 12 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 12 | R | Removal - Full | 5.1 Table 1 |
 | 12 | S | Winter | 4.4 seasonal suitability |
-| 12 | T | 2034 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 12 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 12 | T | 2034 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 12 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 12 | W | Remove ACM wall and ceiling lining in sked room. | 5.1 removal scope |
 | 12 | X | Carpenter | 4.4 trade |
 | 12 | AK | Medium | 6.1.4.1 Table 4 |
@@ -22,8 +22,8 @@ Total cells entered: 362 across 63 rows.
 | 28 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 28 | R | Removal - Full | 5.1 Table 1 |
 | 28 | S | Winter | 4.4 seasonal suitability |
-| 28 | T | 2036 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 28 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 28 | T | 2036 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 28 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 28 | W | Remove ACM internal wall lining. | 5.1 removal scope |
 | 28 | X | Carpenter | 4.4 trade |
 | 28 | AK | Low | 6.1.4.1 Table 4 |
@@ -36,8 +36,8 @@ Total cells entered: 362 across 63 rows.
 | 30 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 30 | R | Removal - Full | 5.1 Table 1 |
 | 30 | S | Winter | 4.4 seasonal suitability |
-| 30 | T | 2036 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 30 | U | Full removal achievable, carry out with wall lining removal in the same winter. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 30 | T | 2036 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 30 | U | Full removal achievable, carry out with wall lining removal in the same winter. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 30 | W | Remove ACM ceiling lining. | 5.1 removal scope |
 | 30 | X | Carpenter | 4.4 trade |
 | 30 | AK | Low | 6.1.4.1 Table 4 |
@@ -47,8 +47,8 @@ Total cells entered: 362 across 63 rows.
 | 33 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 33 | R | Removal - Full | 5.1 Table 1 |
 | 33 | S | Winter | 4.4 seasonal suitability |
-| 33 | T | 2033 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 33 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 33 | T | 2033 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 33 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 33 | W | Remove ACM wall lining in bedrooms and hallway. | 5.1 removal scope |
 | 33 | X | Carpenter | 4.4 trade |
 | 33 | AK | Medium | 6.1.4.1 Table 4 |
@@ -58,8 +58,8 @@ Total cells entered: 362 across 63 rows.
 | 34 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 34 | R | Removal - Full | 5.1 Table 1 |
 | 34 | S | Winter | 4.4 seasonal suitability |
-| 34 | T | 2033 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 34 | U | Full removal achievable, carry out with wall lining removal in the same winter. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 34 | T | 2033 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 34 | U | Full removal achievable, carry out with wall lining removal in the same winter. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 34 | W | Remove ACM ceiling lining in wet areas, dark room, drying room and cold porch. | 5.1 removal scope |
 | 34 | X | Carpenter | 4.4 trade |
 | 34 | AK | Low | 6.1.4.1 Table 4 |
@@ -78,8 +78,8 @@ Total cells entered: 362 across 63 rows.
 | 39 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 39 | R | Removal - Full | 5.1 Table 1 |
 | 39 | S | Winter | 4.4 seasonal suitability |
-| 39 | T | 2032 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 39 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 39 | T | 2032 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 39 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 39 | W | Remove ACM wall lining in bedrooms and hall. | 5.1 removal scope |
 | 39 | X | Carpenter | 4.4 trade |
 | 39 | AK | Medium | 6.1.4.1 Table 4 |
@@ -89,8 +89,8 @@ Total cells entered: 362 across 63 rows.
 | 40 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 40 | R | Removal - Full | 5.1 Table 1 |
 | 40 | S | Winter | 4.4 seasonal suitability |
-| 40 | T | 2032 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 40 | U | Full removal achievable, carry out with wall lining removal in the same winter. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 40 | T | 2032 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 40 | U | Full removal achievable, carry out with wall lining removal in the same winter. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 40 | W | Remove ACM ceiling lining in bedrooms and hall. | 5.1 removal scope |
 | 40 | X | Carpenter | 4.4 trade |
 | 40 | AK | Medium | 6.1.4.1 Table 4 |
@@ -100,7 +100,7 @@ Total cells entered: 362 across 63 rows.
 | 41 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 41 | R | Removal - Full | 5.1 Table 1 |
 | 41 | S | Summer | 4.4 seasonal suitability |
-| 41 | T | 2032 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
+| 41 | T | 2032 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
 | 41 | U | Register recommends replacement with planned re-roofing. Remove in summer with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 41 | W | Remove ACM eave soffit sheets. | 5.1 removal scope |
 | 41 | X | Carpenter | 4.4 trade |
@@ -117,8 +117,8 @@ Total cells entered: 362 across 63 rows.
 | 44 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 44 | R | Removal - Full | 5.1 Table 1 |
 | 44 | S | Winter | 4.4 seasonal suitability |
-| 44 | T | 2032 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 44 | U | Partly removed in 2020 renovation. Remove remainder with other works in building. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 44 | T | 2032 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 44 | U | Partly removed in 2020 renovation. Remove remainder with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 44 | W | Remove remaining ACM wall and ceiling lining in laundry and bathrooms. | 5.1 removal scope |
 | 44 | X | Carpenter | 4.4 trade |
 | 44 | AK | Low | 6.1.4.1 Table 4 |
@@ -143,8 +143,8 @@ Total cells entered: 362 across 63 rows.
 | 52 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 52 | R | Removal - Full | 5.1 Table 1 |
 | 52 | S | Winter | 4.4 seasonal suitability |
-| 52 | T | 2031 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 52 | U | Full removal achievable due to internal lining. Large area, stage around workshop use. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 52 | T | 2031 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 52 | U | Full removal achievable due to internal lining. Large area, stage around workshop use. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 52 | W | Remove ACM wall lining throughout workshop. | 5.1 removal scope |
 | 52 | X | Carpenter | 4.4 trade |
 | 52 | AK | High | 6.1.4.1 Table 4 |
@@ -154,8 +154,8 @@ Total cells entered: 362 across 63 rows.
 | 53 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 53 | R | Removal - Full | 5.1 Table 1 |
 | 53 | S | Summer | 4.4 seasonal suitability |
-| 53 | T | 2031 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 53 | U | Remove in summer with workshop wall lining works. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 53 | T | 2031 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 53 | U | Remove in summer with workshop wall lining works. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 53 | W | Remove ACM sheet behind fascia soffit above roller doors. | 5.1 removal scope |
 | 53 | X | Carpenter | 4.4 trade |
 | 53 | AK | Low | 6.1.4.1 Table 4 |
@@ -168,8 +168,8 @@ Total cells entered: 362 across 63 rows.
 | 55 | Q | Preference | 3.5 prioritise meaningful risk reduction; 4.4 packaging |
 | 55 | R | Removal - Full | 5.1 Table 1 |
 | 55 | S | Winter | 4.4 seasonal suitability |
-| 55 | T | 2029 | 3.5 prioritise meaningful risk reduction; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 55 | U | Poor condition lining in occupied workshop, remove early. Remove with ceiling space debris in the same winter. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | 3.5 prioritise meaningful risk reduction; 4.4 packaging |
+| 55 | T | 2029 | 3.5 prioritise meaningful risk reduction; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 55 | U | Poor condition lining in occupied workshop, remove early. Remove with ceiling space debris in the same winter. | 3.5 prioritise meaningful risk reduction; 4.4 packaging |
 | 55 | W | Remove ACM ceiling lining throughout workshop. | 5.1 removal scope |
 | 55 | X | Carpenter | 4.4 trade |
 | 55 | AK | High | 6.1.4.1 Table 4 |
@@ -179,7 +179,7 @@ Total cells entered: 362 across 63 rows.
 | 56 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 56 | R | Removal - Full | 5.1 Table 1 |
 | 56 | S | Winter | 4.4 seasonal suitability |
-| 56 | T | 2029 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
+| 56 | T | 2029 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
 | 56 | U | Loose debris in roof space, remove with workshop ceiling lining so roof space is cleared once. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 56 | W | Collect and bag loose ACM pieces from ceiling space. | 5.1 removal scope |
 | 56 | X | Specialist | 4.4 trade |
@@ -191,8 +191,8 @@ Total cells entered: 362 across 63 rows.
 | 58 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 58 | R | Removal - Full | 5.1 Table 1 |
 | 58 | S | Winter | 4.4 seasonal suitability |
-| 58 | T | 2034 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 58 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 58 | T | 2034 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 58 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 58 | W | Remove ACM wall lining in breezeway. | 5.1 removal scope |
 | 58 | X | Carpenter | 4.4 trade |
 | 58 | AK | Medium | 6.1.4.1 Table 4 |
@@ -235,8 +235,8 @@ Total cells entered: 362 across 63 rows.
 | 71 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 71 | R | Removal - Full | 5.1 Table 1 |
 | 71 | S | Winter | 4.4 seasonal suitability |
-| 71 | T | 2036 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 71 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 71 | T | 2036 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 71 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 71 | W | Remove ACM wall lining in pump house. | 5.1 removal scope |
 | 71 | X | Carpenter | 4.4 trade |
 | 71 | AK | Medium | 6.1.4.1 Table 4 |
@@ -249,8 +249,8 @@ Total cells entered: 362 across 63 rows.
 | 73 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 73 | R | Removal - Full | 5.1 Table 1 |
 | 73 | S | Winter | 4.4 seasonal suitability |
-| 73 | T | 2036 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 73 | U | Full removal achievable, carry out with wall lining removal in the same winter. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 73 | T | 2036 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 73 | U | Full removal achievable, carry out with wall lining removal in the same winter. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 73 | W | Remove ACM ceiling lining in pump house. | 5.1 removal scope |
 | 73 | X | Carpenter | 4.4 trade |
 | 73 | AK | Low | 6.1.4.1 Table 4 |
@@ -269,8 +269,8 @@ Total cells entered: 362 across 63 rows.
 | 78 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 78 | R | Removal - Full | 5.1 Table 1 |
 | 78 | S | Winter | 4.4 seasonal suitability |
-| 78 | T | 2033 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 78 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 78 | T | 2033 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 78 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 78 | W | Remove ACM internal wall lining. | 5.1 removal scope |
 | 78 | X | Carpenter | 4.4 trade |
 | 78 | AK | Medium | 6.1.4.1 Table 4 |
@@ -283,8 +283,8 @@ Total cells entered: 362 across 63 rows.
 | 80 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 80 | R | Removal - Full | 5.1 Table 1 |
 | 80 | S | Winter | 4.4 seasonal suitability |
-| 80 | T | 2033 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 80 | U | Full removal achievable, carry out with wall lining removal in the same winter. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 80 | T | 2033 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 80 | U | Full removal achievable, carry out with wall lining removal in the same winter. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 80 | W | Remove ACM ceiling lining. | 5.1 removal scope |
 | 80 | X | Carpenter | 4.4 trade |
 | 80 | AK | Low | 6.1.4.1 Table 4 |
@@ -303,7 +303,7 @@ Total cells entered: 362 across 63 rows.
 | 86 | Q | Preference | 3.5 prioritise meaningful risk reduction; 4.4 packaging |
 | 86 | R | Removal - Full | 5.1 Table 1 |
 | 86 | S | Summer | 4.4 seasonal suitability |
-| 86 | T | 2028 | 3.5 prioritise meaningful risk reduction; 4.4 packaging; year assumed, no AAD date (3.2) |
+| 86 | T | 2028 | 3.5 prioritise meaningful risk reduction; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
 | 86 | U | Poor damaged external sheet, register already recommends replacement. Remove early in summer with SAD soffits. | 3.5 prioritise meaningful risk reduction; 4.4 packaging |
 | 86 | W | Remove ACM eave soffit sheets on north, south and entry sides. | 5.1 removal scope |
 | 86 | X | Carpenter | 4.4 trade |
@@ -320,7 +320,7 @@ Total cells entered: 362 across 63 rows.
 | 89 | Q | Preference | 3.5 prioritise meaningful risk reduction; 4.4 packaging |
 | 89 | R | Removal - Full | 5.1 Table 1 |
 | 89 | S | Summer | 4.4 seasonal suitability |
-| 89 | T | 2028 | 3.5 prioritise meaningful risk reduction; 4.4 packaging; year assumed, no AAD date (3.2) |
+| 89 | T | 2028 | 3.5 prioritise meaningful risk reduction; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
 | 89 | U | Poor weathered external sheet, remove early in summer with Science Building soffits. | 3.5 prioritise meaningful risk reduction; 4.4 packaging |
 | 89 | W | Remove ACM eave soffit sheets. | 5.1 removal scope |
 | 89 | X | Carpenter | 4.4 trade |
@@ -331,8 +331,8 @@ Total cells entered: 362 across 63 rows.
 | 90 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 90 | R | Removal - Partial | 5.1 Table 1 |
 | 90 | S | Winter | 4.4 seasonal suitability |
-| 90 | T | 2035 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 90 | U | Only partial removal achievable as part of lining is under copper sheeting. Carry out with wall lining removal. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 90 | T | 2035 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 90 | U | Only partial removal achievable as part of lining is under copper sheeting. Carry out with wall lining removal. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 90 | W | Remove accessible ACM ceiling lining, retain sections under copper sheeting. | 5.1 removal scope |
 | 90 | X | Carpenter | 4.4 trade |
 | 90 | AK | Medium | 6.1.4.1 Table 4 |
@@ -342,8 +342,8 @@ Total cells entered: 362 across 63 rows.
 | 91 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 91 | R | Removal - Full | 5.1 Table 1 |
 | 91 | S | Winter | 4.4 seasonal suitability |
-| 91 | T | 2035 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD date (3.2) |
-| 91 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. No end-of-life date provided by AAD, year assumed and to be confirmed with AIRP. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 91 | T | 2035 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year assumed, no AAD end-of-life date (3.2) |
+| 91 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 91 | W | Remove ACM wall lining in cubicles, hallway and cold porch. | 5.1 removal scope |
 | 91 | X | Carpenter | 4.4 trade |
 | 91 | AK | Medium | 6.1.4.1 Table 4 |
