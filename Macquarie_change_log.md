@@ -21,7 +21,7 @@ Total Macquarie cells entered: 362 across 63 rows.
 | 12 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 12 | W | Remove ACM wall and ceiling lining in sked room. | 5.1 removal scope |
 | 12 | X | Carpenter | 4.4 trade |
-| 12 | AK | Medium | 6.1.4.1 Table 4, by nature of work (walls/soffits Low, ceilings Medium, subfloor High) |
+| 12 | AK | Low | 6.1.4.1 Table 4, by nature of work (walls/soffits Low, ceilings Medium, subfloor High) |
 | 12 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 12 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 12 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
