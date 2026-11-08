@@ -100,13 +100,13 @@ Every row on Casey, Davis, Mawson and Macquarie (existing and newly filled) was 
 ### Internal wall linings (exposed, painted)
 - Treatment and season are consistent: Preference, Removal - Full, Winter on Casey, Mawson and Macquarie. Davis 18 is Summer (Priority Assessed); acceptable for Davis access but it is the only internal lining in Summer.
 - Reinstatement is consistent by item (Cold Porch Lining, Dado Wall, Plasterboard). Mawson 48 (behind tiles, medical suite) has no reinstatement option and no Z; add Wall Int. – Plasterboard.
-- Complexity is not consistent with area: Macquarie 8 is Low at 264 m2 and Davis 18 is Medium at 360 m2, while Macquarie 52 is High at 396 m2 and Macquarie 33 and 39 are Medium at 120 to 140 m2. Davis 6 is Medium at 98 m2 while Macquarie 19 is Low at 96 m2. Suggest one band: Low under 50 m2, Medium 50 to 200, High over 200. That makes Macquarie 8 High, Davis 18 High, Mawson 31 Medium (97 m2), Macquarie 17 Medium (141 m2).
-- Access: Davis 18 (occupied workshop) is Simple while Casey 12, Mawson 7, 31 and all Macquarie occupied buildings are Challenging. Davis 18 should be Challenging.
-- Station buildings coded as huts. Macquarie rows 26 and 27 (Fire Hut), 31 (Flammable Liquid Hut), 70 (Proton Processing Magnetometer Hut) and 99 to 103 (Transmitter Hut) are Manage per AMP with the "No removal from Huts" commentary. These are station buildings, not field huts; Transmitter Hut row 100 is 68.5 m2 of good painted lining and would be Preference removal under the pattern used for Biology, Bunkhouse and Pump House. Either recode them as Preference removal, or change the commentary to the real reason (for example no quantity, or AAD preference to leave). The genuine field huts (Bauer Bay, Green Gorge, Lusitania Bay, Sandy Bay) are consistent.
+- Complexity convention adopted: it reflects how hard the work is, not the quantity. Internal wall linings, soffits, doors, gaskets and panels are Low; ceilings and roof-space work are Medium; underfloor, foundations, formwork and structural interfaces are High. Existing wall-lining rows at Medium or High (Casey 12, Davis 6, 18, Macquarie 7 is Low, Macquarie 10 High, Mawson 7, 51, 53) can stay if the commentary gives the reason for the extra difficulty; otherwise Low.
+- Access: Davis 18 (occupied workshop) is Simple while Casey 12, Mawson 7, 31 and the Macquarie workshop are Challenging. The commentary says removal is staged during a planned shutdown; if the shutdown empties the building, Simple is defensible as written. Note only.
+- Buildings named "hut" on station. Macquarie rows 26 and 27 (Fire Hut), 31 (Flammable Liquid Hut), 70 (Proton Processing Magnetometer Hut) and 99 to 103 (Transmitter Hut) are Manage per AMP with the "No removal from Huts" commentary. The hut exclusion is about remote field huts where crews and waste cannot practically be moved; these four are on-station buildings with Maximo numbers and daily access, so that reason does not apply to them. Keep them as Manage per AMP if that is AAD's wish, but the commentary should give the real reason. The field huts (Bauer Bay, Green Gorge, Lusitania Bay, Sandy Bay) are consistent.
 
 ### Ceilings
-- Access rating is split three ways: Simple (Macquarie 16, 20), Challenging (Macquarie 5, 10) and Extreme (all newly filled Macquarie ceilings, following Table 5 work at height). Pick one. If Extreme is accepted, change Macquarie 10, 16 and 20; if not, change the new rows.
-- Complexity: Macquarie 10 is High at 155 m2 and Macquarie 16 is Medium at 63 m2 against the band above (Medium and Medium). Macquarie 20 Medium at 102 m2 is fine.
+- Access convention adopted: ceilings, roof spaces and soffits are Extreme (work at height). All newly filled Macquarie ceilings and soffits follow it. Macquarie 10 (Challenging), 16 and 20 (Simple) are the only ceiling removals that do not; change to Extreme.
+- Complexity convention adopted: ceilings are Medium. Macquarie 10 is High; change to Medium unless the roof-space sandwich construction is the reason, in which case say so in U.
 - End-of-life ceilings (Macquarie 16, 20) correctly have no reinstatement and are the season before demolition. Consistent with the walls in the same buildings.
 
 ### Floor sheeting and underfloor
@@ -116,7 +116,7 @@ Every row on Casey, Davis, Mawson and Macquarie (existing and newly filled) was 
 
 ### Cement sheet under external cladding, behind plasterboard, above ceilings
 - Manage per AMP on every sheet, consistent. Only end-of-life items are removed (Macquarie 21, Mawson 53), in the demolition season, no reinstatement, consistent.
-- Mawson 51 and 53 are the same building and the same area (200 m2) but 51 is Medium and 53 is High. Make them the same (High at 200 m2, or Medium if the band is set higher).
+- Mawson 51 (external cladding) is Medium and 53 (internal cladding on the same walls) is High. Same building, same demolition; if 53 is harder because of the polystyrene sandwich, say so in U, otherwise make them the same.
 - Macquarie 6 is Manage per AMP with Low/Challenging adjusters (already listed).
 
 ### Eave soffits and fascia sheets
@@ -127,10 +127,8 @@ Every row on Casey, Davis, Mawson and Macquarie (existing and newly filled) was 
 - Maintenance, Manage per AMP, no year, no adjusters on all sheets except Davis 13, Macquarie 11 and 22 (already listed). Those three also carry Low/Simple adjusters that no other gasket row has.
 
 ### Formwork
-- Requirement differs: Davis 28 is Priority Assessed, Mawson 6, 49, 50, 55, 56 are Preference. Same item type, same reasoning (remove accessible formwork with other site works). Pick one.
-- Season differs: Mawson 6 and 49 are Winter for external formwork, Mawson 50, 55, 56 and Davis 28 are Summer. External excavation at Mawson in winter is unlikely; suggest Summer for 6 and 49.
-- Complexity differs for similar quantities: Mawson 50 is Medium at 54 m2, while Mawson 55 (25 m2) and 56 (15 m2) are High. Suggest Medium for all three.
-- Reinstatement: none on all formwork rows, consistent, though Davis 17 and 28 carry a Z text ("make good concrete") with no Y option. Harmless, but the other formwork rows leave Z blank.
+- Requirement (Priority Assessed at Davis, Preference at Mawson) and adjusters follow the risk and circumstances of each item and need not match across stations. No finding.
+- Mawson 6 and 49 are external formwork scheduled in Winter; the other formwork rows are Summer. Confirm winter external excavation is intended at Mawson.
 
 ### Fire doors
 - Mawson 5, 28, 43: Winter, Fire Door reinstatement, Simple. Consistent apart from Mawson 43 High complexity (already listed). Mawson 39 (heritage) Manage per AMP is correct.
@@ -138,14 +136,14 @@ Every row on Casey, Davis, Mawson and Macquarie (existing and newly filled) was 
 ### Switchboards, panels and pipes
 - Switchboards are Manage per AMP everywhere, consistent. Macquarie 51 and 103 have no reinstatement, correct for Manage rows.
 - End-of-life EPH panels (Macquarie 24, 25) and Davis 8 are removed in the demolition season with no reinstatement, consistent, but Davis 8 has no adjusters.
-- Macquarie 15 and 23 are the two ends of the same cable pipe; 15 is Low and 23 is Medium. Make them the same.
+- Macquarie 15 and 23 are the two ends of the same cable pipe; 15 is Low and 23 is Medium. Same work, so make them the same.
 - Buried pipes (Macquarie 48, 88, Casey 31) are all Manage per AMP, consistent.
 
 ### Debris and tip sites
 - Manage per AMP on Casey (15, 29), Davis (16, 27) and Macquarie (38, 68). Mawson 18 is the only tip site with a removal (Partial, 2028). Either justify it in U or recode to match.
 
 ### End-of-life timing
-- "Before 2040" in column O has been turned into 2035 on Casey 11 but 2037 on Casey 22 and Mawson 51 to 53. Use one convention for undated "before 2040" demolitions (2037 keeps them inside the programme and is the later of the two).
+- Column O (AAD end-of-life) reads "Before 2040" for Casey 11, Casey 22 and Mawson 51 to 53, the same information on all five. Casey 11 was given 2035 and the other four 2037, and the commentary does not say why Mabel goes two years earlier. Add the reason to U or align the year.
 - Season-before-demolition is applied correctly on Davis 6, 12, Macquarie 16, 17, 19, 20, 22 and demolition-season on plant, flooring and external items (Davis 7, 8, Casey 11, Macquarie 15, 18, 21, 23 to 25, Mawson 52). Macquarie 22 (EPH gaskets, 2034) is the only plant-room item not in the demolition season.
 
 ### Reinstatement on end-of-life rows
