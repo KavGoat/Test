@@ -1,8 +1,16 @@
 # Macquarie change log
 
-Cells entered in Reg_Macquarie of `20261027 Asbestos Removal Programme Tool - Macquarie filled.xlsx`. No existing value was changed. Row 14 column U was left as found. Section numbers refer to the WSP Asbestos Removal Programme report Rev B and are recorded here for traceability only; the tool carries plain reasons.
+Cells entered in Reg_Macquarie of `20261027 Asbestos Removal Programme Tool - Macquarie filled.xlsx`. No existing Macquarie value was changed. Row 14 column U was left as found. Section numbers refer to the WSP Asbestos Removal Programme report Rev B and are recorded here for traceability only; the tool carries plain reasons.
 
-Total cells entered: 362 across 63 rows.
+Corrections applied to other sheets at the user's request:
+
+| Sheet | Cell | Was | Now |
+|---|---|---|---|
+| Reg_Davis | AL18 | Simple | Challenging (occupied workshop, Table 5) |
+| Reg_Mawson | Y48 | blank | Wall Int. – Plasterboard |
+| Reg_Mawson | Z48 | blank | Replace wall lining with plasterboard and re-tile. |
+
+Total Macquarie cells entered: 362 across 63 rows.
 
 | Row | Col | Value | Rule applied |
 |---|---|---|---|
