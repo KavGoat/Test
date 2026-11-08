@@ -10,7 +10,7 @@ Corrections applied to other sheets at the user's request:
 | Reg_Mawson | Y48 | blank | Wall Int. – Plasterboard |
 | Reg_Mawson | Z48 | blank | Replace wall lining with plasterboard and re-tile. |
 
-Total Macquarie cells entered: 402 across 63 rows.
+Total Macquarie cells entered: 410 across 63 rows.
 
 | Row | Col | Value | Rule applied |
 |---|---|---|---|
@@ -21,7 +21,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 12 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 12 | W | Remove ACM wall and ceiling lining in sked room. | 5.1 removal scope |
 | 12 | X | Carpenter | 4.4 trade |
-| 12 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 12 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 12 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 12 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 12 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
@@ -34,7 +34,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 28 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 28 | W | Remove ACM internal wall lining. | 5.1 removal scope |
 | 28 | X | Carpenter | 4.4 trade |
-| 28 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 28 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 28 | AL | Simple | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 28 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 28 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
@@ -48,7 +48,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 30 | U | Full removal achievable, carry out with wall lining removal in the same winter. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 30 | W | Remove ACM ceiling lining. | 5.1 removal scope |
 | 30 | X | Carpenter | 4.4 trade |
-| 30 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 30 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 30 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 30 | Y | Ceiling – Plasterboard | 5.2 reinstatement |
 | 30 | Z | Replace ceiling lining and finishes. | 5.2 reinstatement scope |
@@ -59,7 +59,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 33 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 33 | W | Remove ACM wall lining in bedrooms and hallway. | 5.1 removal scope |
 | 33 | X | Carpenter | 4.4 trade |
-| 33 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 33 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 33 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 33 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 33 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
@@ -70,7 +70,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 34 | U | Full removal achievable, carry out with wall lining removal in the same winter. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 34 | W | Remove ACM ceiling lining in wet areas, dark room, drying room and cold porch. | 5.1 removal scope |
 | 34 | X | Carpenter | 4.4 trade |
-| 34 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 34 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 34 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 34 | Y | Ceiling – Plasterboard | 5.2 reinstatement |
 | 34 | Z | Replace ceiling lining and finishes. | 5.2 reinstatement scope |
@@ -90,7 +90,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 39 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 39 | W | Remove ACM wall lining in bedrooms and hall. | 5.1 removal scope |
 | 39 | X | Carpenter | 4.4 trade |
-| 39 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 39 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 39 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 39 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 39 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
@@ -101,7 +101,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 40 | U | Full removal achievable, carry out with wall lining removal in the same winter. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 40 | W | Remove ACM ceiling lining in bedrooms and hall. | 5.1 removal scope |
 | 40 | X | Carpenter | 4.4 trade |
-| 40 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 40 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 40 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 40 | Y | Ceiling – Plasterboard | 5.2 reinstatement |
 | 40 | Z | Replace ceiling lining and finishes. | 5.2 reinstatement scope |
@@ -112,7 +112,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 41 | U | Register recommends replacement with planned re-roofing. Remove in summer with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 41 | W | Remove ACM eave soffit sheets. | 5.1 removal scope |
 | 41 | X | Carpenter | 4.4 trade |
-| 41 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 41 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 41 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 41 | Y | Wall Ext. – Soffit Boards | 5.2 reinstatement |
 | 41 | Z | Replace soffit sheets and paint. | 5.2 reinstatement scope |
@@ -123,7 +123,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 42 | U | Full removal achievable due to internal lining, covering to be stripped first. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 42 | W | Strip timber lining and remove ACM wall and ceiling lining in cold porch. | 5.1 removal scope |
 | 42 | X | Carpenter | 4.4 trade |
-| 42 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 42 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 42 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 42 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 42 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
@@ -137,7 +137,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 44 | U | Partly removed in 2020 renovation. Remove remainder with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 44 | W | Remove remaining ACM wall and ceiling lining in laundry and bathrooms. | 5.1 removal scope |
 | 44 | X | Carpenter | 4.4 trade |
-| 44 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 44 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 44 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 44 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 44 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
@@ -163,7 +163,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 52 | U | Full removal achievable due to internal lining. Large area, stage around workshop use. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 52 | W | Remove ACM wall lining throughout workshop. | 5.1 removal scope |
 | 52 | X | Carpenter | 4.4 trade |
-| 52 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 52 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 52 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 52 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 52 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
@@ -174,7 +174,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 53 | U | Remove in summer with workshop wall lining works. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 53 | W | Remove ACM sheet behind fascia soffit above roller doors. | 5.1 removal scope |
 | 53 | X | Carpenter | 4.4 trade |
-| 53 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 53 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 53 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 53 | Y | Wall Ext. – Soffit Boards | 5.2 reinstatement |
 | 53 | Z | Replace soffit sheets and paint. | 5.2 reinstatement scope |
@@ -188,7 +188,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 55 | U | Poor condition lining in occupied workshop, remove early. Remove with ceiling space debris in the same winter. | 3.5 prioritise meaningful risk reduction; 4.4 packaging |
 | 55 | W | Remove ACM ceiling lining throughout workshop. | 5.1 removal scope |
 | 55 | X | Carpenter | 4.4 trade |
-| 55 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 55 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 55 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 55 | Y | Ceiling – Plasterboard | 5.2 reinstatement |
 | 55 | Z | Replace ceiling lining and finishes. | 5.2 reinstatement scope |
@@ -199,11 +199,19 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 56 | U | Loose debris in roof space, remove with workshop ceiling lining so roof space is cleared once. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 56 | W | Collect and bag loose ACM pieces from ceiling space. | 5.1 removal scope |
 | 56 | X | Specialist | 4.4 trade |
-| 56 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 56 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 56 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
-| 57 | Q | No removal | 4.5 floor sheeting |
-| 57 | R | Manage per AMP | 4.5 floor sheeting |
-| 57 | U | Floor asbestos difficult to fully remove without demolition of strucutre. Recommend encapsultate as per AMP. Seal exposed edges and label as per register. | 4.5 floor sheeting |
+| 57 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 57 | R | Removal - Partial | 5.1 Table 1 |
+| 57 | S | Winter | 4.4 seasonal suitability |
+| 57 | T | 2031 | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging; year chosen, no AAD end-of-life date (3.2) |
+| 57 | U | Vinyl tiles readily removable. Partial removal assumed as tiles may run under partition walls. Carry out in winter with workshop wall lining works. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
+| 57 | W | Lift ACM vinyl floor tiles in office, tiles under partition walls to remain. | 5.1 removal scope |
+| 57 | X | Carpenter | 4.4 trade |
+| 57 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
+| 57 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
+| 57 | Y | Floor – Vinyl Tiles | 5.2 reinstatement |
+| 57 | Z | Replace with new vinyl floor tiles. | 5.2 reinstatement scope |
 | 58 | Q | Preference | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 58 | R | Removal - Full | 5.1 Table 1 |
 | 58 | S | Winter | 4.4 seasonal suitability |
@@ -211,7 +219,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 58 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 58 | W | Remove ACM wall lining in breezeway. | 5.1 removal scope |
 | 58 | X | Carpenter | 4.4 trade |
-| 58 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 58 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 58 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 58 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 58 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
@@ -222,7 +230,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 59 | U | Full removal achievable due to internal lining, covering to be stripped first. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 59 | W | Strip plasterboard and remove ACM wall lining between kitchen and pantry. | 5.1 removal scope |
 | 59 | X | Carpenter | 4.4 trade |
-| 59 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 59 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 59 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 59 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 59 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
@@ -233,7 +241,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 60 | U | Full removal achievable, covering to be stripped first. Carry out with wall lining removal in the same winter. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 60 | W | Strip plasterboard and remove ACM ceiling lining in pantry. | 5.1 removal scope |
 | 60 | X | Carpenter | 4.4 trade |
-| 60 | AK | High | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 60 | AK | High | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 60 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 60 | Y | Ceiling – Plasterboard | 5.2 reinstatement |
 | 60 | Z | Replace ceiling lining and finishes. | 5.2 reinstatement scope |
@@ -271,7 +279,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 71 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 71 | W | Remove ACM wall lining in pump house. | 5.1 removal scope |
 | 71 | X | Carpenter | 4.4 trade |
-| 71 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 71 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 71 | AL | Simple | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 71 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 71 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
@@ -285,7 +293,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 73 | U | Full removal achievable, carry out with wall lining removal in the same winter. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 73 | W | Remove ACM ceiling lining in pump house. | 5.1 removal scope |
 | 73 | X | Carpenter | 4.4 trade |
-| 73 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 73 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 73 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 73 | Y | Ceiling – Plasterboard | 5.2 reinstatement |
 | 73 | Z | Replace ceiling lining and finishes. | 5.2 reinstatement scope |
@@ -305,7 +313,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 78 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 78 | W | Remove ACM internal wall lining. | 5.1 removal scope |
 | 78 | X | Carpenter | 4.4 trade |
-| 78 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 78 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 78 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 78 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 78 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
@@ -319,7 +327,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 80 | U | Full removal achievable, carry out with wall lining removal in the same winter. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 80 | W | Remove ACM ceiling lining. | 5.1 removal scope |
 | 80 | X | Carpenter | 4.4 trade |
-| 80 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 80 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 80 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 80 | Y | Ceiling – Plasterboard | 5.2 reinstatement |
 | 80 | Z | Replace ceiling lining and finishes. | 5.2 reinstatement scope |
@@ -330,7 +338,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 83 | U | Full removal achievable, timber lining to be stripped first. Carry out in winter with pump house works. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 83 | W | Strip timber ceiling lining and remove ACM ceiling sheet. | 5.1 removal scope |
 | 83 | X | Carpenter | 4.4 trade |
-| 83 | AK | High | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 83 | AK | High | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 83 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 83 | Y | Ceiling – Plasterboard | 5.2 reinstatement |
 | 83 | Z | Replace ceiling lining and finishes. | 5.2 reinstatement scope |
@@ -347,7 +355,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 86 | U | Poor damaged external sheet, register already recommends replacement. Remove early in summer with SAD soffits. | 3.5 prioritise meaningful risk reduction; 4.4 packaging |
 | 86 | W | Remove ACM eave soffit sheets on north, south and entry sides. | 5.1 removal scope |
 | 86 | X | Carpenter | 4.4 trade |
-| 86 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 86 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 86 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 86 | Y | Wall Ext. – Soffit Boards | 5.2 reinstatement |
 | 86 | Z | Replace soffit sheets and paint. | 5.2 reinstatement scope |
@@ -364,7 +372,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 89 | U | Poor weathered external sheet, remove early in summer with Science Building soffits. | 3.5 prioritise meaningful risk reduction; 4.4 packaging |
 | 89 | W | Remove ACM eave soffit sheets. | 5.1 removal scope |
 | 89 | X | Carpenter | 4.4 trade |
-| 89 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 89 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 89 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 89 | Y | Wall Ext. – Soffit Boards | 5.2 reinstatement |
 | 89 | Z | Replace soffit sheets and paint. | 5.2 reinstatement scope |
@@ -375,7 +383,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 90 | U | Only partial removal achievable as part of lining is under copper sheeting. Carry out with wall lining removal. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 90 | W | Remove accessible ACM ceiling lining, retain sections under copper sheeting. | 5.1 removal scope |
 | 90 | X | Carpenter | 4.4 trade |
-| 90 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 90 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 90 | AL | Extreme | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 90 | Y | Ceiling – Plasterboard | 5.2 reinstatement |
 | 90 | Z | Replace ceiling lining and finishes. | 5.2 reinstatement scope |
@@ -386,7 +394,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 91 | U | Full removal achievable due to internal lining. Carry out in winter with other works in building. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 91 | W | Remove ACM wall lining in cubicles, hallway and cold porch. | 5.1 removal scope |
 | 91 | X | Carpenter | 4.4 trade |
-| 91 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 91 | AK | Low | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 91 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 91 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 91 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |
@@ -403,7 +411,7 @@ Total Macquarie cells entered: 402 across 63 rows.
 | 94 | U | Full removal achievable due to internal lining, plasterboard to be stripped first. Carry out in winter with SAD works. | Appendix A tertiary; 3.4 opportunity-driven; 4.4 packaging |
 | 94 | W | Strip plasterboard and remove ACM wall lining in bathroom. | 5.1 removal scope |
 | 94 | X | Carpenter | 4.4 trade |
-| 94 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits Low, ceilings Medium); one step up where a covering must be stripped first |
+| 94 | AK | Medium | 6.1.4.1 Table 4, by material type (walls/soffits/tiles Low, ceilings Medium); one step up where a covering must be stripped first |
 | 94 | AL | Challenging | 6.1.4.2 Table 5 (ceilings and soffits Extreme, occupied Challenging, unoccupied Simple) |
 | 94 | Y | Wall Int. – Plasterboard | 5.2 reinstatement |
 | 94 | Z | Replace wall lining and finishes. | 5.2 reinstatement scope |

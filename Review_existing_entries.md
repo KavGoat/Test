@@ -109,7 +109,8 @@ Every row on Casey, Davis, Mawson and Macquarie (existing and newly filled) was 
 - End-of-life ceilings (Macquarie 16, 20) correctly have no reinstatement and are the season before demolition. Consistent with the walls in the same buildings.
 
 ### Floor sheeting and underfloor
-- Manage per AMP on every sheet, consistent, with one exception: Casey 19 Red Shed crawlway boards is Preference removal (already listed). Confirm or recode.
+- Cement sheet floors are Manage per AMP on every sheet, consistent, with one exception: Casey 19 Red Shed crawlway boards is Preference removal (already listed). Confirm or recode.
+- Vinyl floor tiles are treated as readily removable, not as floor sheeting: Macquarie 57 (workshop office tiles) is Preference, Removal - Partial with vinyl tile reinstatement. Davis 19 (trades office vinyl tiles) is the same item type coded Manage per AMP with the floor-sheeting commentary; recode to match or state why it differs. Macquarie 69 (post office tiles) has no quantity and stays Manage per AMP.
 - End-of-life floors are removed in the demolition season on all sheets (Casey 11, Macquarie 18, Mawson 52), consistent with the flooring rule.
 - Access for underfloor end-of-life removal differs: Macquarie 18 Challenging, Mawson 52 Extreme. Subfloor work is a confined space, so Extreme on both.
 
