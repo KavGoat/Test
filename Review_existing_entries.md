@@ -100,7 +100,7 @@ Every row on Casey, Davis, Mawson and Macquarie (existing and newly filled) was 
 ### Internal wall linings (exposed, painted)
 - Treatment and season are consistent: Preference, Removal - Full, Winter on Casey, Mawson and Macquarie. Davis 18 is Summer (Priority Assessed); acceptable for Davis access but it is the only internal lining in Summer.
 - Reinstatement is consistent by item (Cold Porch Lining, Dado Wall, Plasterboard). Mawson 48 (behind tiles, medical suite) has no reinstatement option and no Z; add Wall Int. – Plasterboard.
-- Complexity convention adopted: it reflects how hard the work is, not the quantity, and is rated by the material type in column V so rows of the same type carry the same rating (mixed wall-and-ceiling rows take the rating of their coded type). Internal wall linings, soffits, doors, gaskets and panels are Low; ceilings and roof-space work are Medium; underfloor, foundations, formwork and structural interfaces are High. Existing wall-lining rows at Medium or High (Casey 12, Davis 6, 18, Macquarie 7 is Low, Macquarie 10 High, Mawson 7, 51, 53) can stay if the commentary gives the reason for the extra difficulty; otherwise Low.
+- Complexity convention adopted: it reflects how hard the work is, not the quantity, and is rated by the material type in column V so rows of the same type carry the same rating (mixed wall-and-ceiling rows take the rating of their coded type). Where a covering must be stripped first the rating goes one step up: walls Medium, ceilings High. Internal wall linings, soffits, doors, gaskets and panels are Low; ceilings and roof-space work are Medium; underfloor, foundations, formwork and structural interfaces are High. Existing wall-lining rows at Medium or High (Casey 12, Davis 6, 18, Macquarie 7 is Low, Macquarie 10 High, Mawson 7, 51, 53) can stay if the commentary gives the reason for the extra difficulty; otherwise Low.
 - Access: Davis 18 (occupied workshop) was Simple while Casey 12, Mawson 7, 31 and the Macquarie workshop are Challenging. Changed to Challenging in the filled copy at the user's request.
 
 ### Ceilings
@@ -113,8 +113,8 @@ Every row on Casey, Davis, Mawson and Macquarie (existing and newly filled) was 
 - End-of-life floors are removed in the demolition season on all sheets (Casey 11, Macquarie 18, Mawson 52), consistent with the flooring rule.
 - Access for underfloor end-of-life removal differs: Macquarie 18 Challenging, Mawson 52 Extreme. Subfloor work is a confined space, so Extreme on both.
 
-### Cement sheet under external cladding, behind plasterboard, above ceilings
-- Manage per AMP on every sheet, consistent. Only end-of-life items are removed (Macquarie 21, Mawson 53), in the demolition season, no reinstatement, consistent.
+### Cement sheet under external cladding
+- Manage per AMP on every sheet, consistent. Internal linings that have plasterboard or timber fixed over them are treated as exposed internal linings (removal with the building's other works, complexity one step up for stripping the covering); on Macquarie that is rows 42, 59, 60, 83 and 94. Covered internal rows with no quantity (67, 76, 77, 93, 95, 96) stay Manage per AMP on the no-quantity rule. Only end-of-life items are removed (Macquarie 21, Mawson 53), in the demolition season, no reinstatement, consistent.
 - Mawson 51 (external cladding) is Medium and 53 (internal cladding on the same walls) is High. Same building, same demolition; if 53 is harder because of the polystyrene sandwich, say so in U, otherwise make them the same.
 - Macquarie 6 is Manage per AMP with Low/Challenging adjusters (already listed).
 
