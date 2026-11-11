@@ -84,3 +84,29 @@ Marcus Dowling: Transmitter Hut, Proton Processing Hut and Magnetic Variometer B
 ## 7. Rules checked and found consistent
 
 Gaskets all Maintenance / Manage per AMP except the new Mawson 27 above. No year after 2037. No reinstatement on end-of-life rows except Macquarie 15. Huts and heritage all Manage per AMP. Floor sheeting Manage per AMP, end-of-life floors in the demolition season at High / Extreme. Covered internal linings removed with complexity stepped up. Ceilings Extreme on all ceiling-coded rows. Complete rows have Q blank except Mawson 60. Removal rows all carry trade, scope, adjusters and quantities.
+
+## 8. Every row has a decision
+
+Checked all 209 rows across the four sheets: every row has a Treatment Type, and every row other than Complete rows has a Requirement for Removal. Nothing missing.
+
+## 9. Strike-through alignment, registers vs tool
+
+| Station | Struck in register v7 | Struck in tool | Result |
+|---|---|---|---|
+| Casey | none | none | Aligned |
+| Davis | Old Garage Site; Slab adjacent to beach house | Rows 15, 21 struck, Complete | Aligned |
+| Mawson | Fume cupboard baffle, fascia and throat; Water Supply pump gaskets | Rows 46, 47, 48, 59 Complete but not struck | Strike rows 46 to 48 and 59 in the tool |
+| Macquarie | Sandy Bay hut, two rows (partly struck) | Rows 81, 82 struck, Complete | Aligned |
+
+Tool rows marked Complete that are not struck in the register, so the register has not yet closed them:
+
+| Sheet | Rows | Note |
+|---|---|---|
+| Reg_Macquarie | 51, 70, 99 to 103 | Demolished after the January 2026 inspection per the 11 Nov email; register will catch up at the next update |
+| Reg_Macquarie | 49, 50 | Lusitania Bay, register text says bagged and removed 2019 but the entry is not struck |
+| Reg_Mawson | 9 | Biscoe entrance ceiling, entry no longer in the register at all; delete the row |
+| Reg_Mawson | 33 | MPH generator gaskets. Register v7 says gaskets inspected in 2017 with no asbestos found but "this register entry remains current – treat gaskets with caution". Tool says Complete, "all gaskets inspected and removed". Register does not support Complete; suggest Maintenance / Manage per AMP with the register wording |
+| Reg_Mawson | 60 | Water Supply switchboard, register v7 still presumed asbestos, condition Good, relabelled. Complete is not supported; suggest No removal / Manage per AMP |
+| Reg_Casey | 18 | Ferroli boiler gasket, entry dropped from the register; delete the row or mark Complete |
+
+The earlier tool had Macquarie rows 9 and 93 struck through; the new tool does not, and the register does not strike them either, so that is now aligned.
