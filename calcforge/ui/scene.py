@@ -565,7 +565,16 @@ class PageFrame(QGraphicsObject):
         when it changes: telling Qt has it go through every markup of the
         page, and draw it whole."""
         changing = now < self._markups_settle_at
-        if not changing and now - self._markups_checked_at < 0.25 \
+        if changing:
+            # A markup is being drawn out, moved or resized: one that goes
+            # off the page says so itself, at once (markup_may_be_outside,
+            # from itemChange and _may_leave_its_page), and measuring every
+            # markup of the page before each paint meanwhile was 7 ms of
+            # every frame on a page with two hundred of them (the user,
+            # 2026-11-06). Whether they are all back inside is looked at
+            # once it has been still a moment.
+            return
+        if now - self._markups_checked_at < 0.25 \
                 and self._markups_checked_at >= self._markups_settle_at:
             return
         self._markups_checked_at = now

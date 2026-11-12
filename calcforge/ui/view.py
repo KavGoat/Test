@@ -1839,6 +1839,7 @@ class PageView(QGraphicsView):
         return max(above, key=lambda frame: paper(frame).top()) if above else None
 
     def _show_drop_marker(self, event) -> None:
+        self._canvas_changed = True
         """While a workbook or a picture is dragged over the canvas: a line
         under the page it would go in after, as the Thumbnails draw for a
         drop between pages, and the status bar says which page (the user,
@@ -1903,6 +1904,7 @@ class PageView(QGraphicsView):
         pass by the markups of a page that is not being repainted."""
         now = time.monotonic()
         self._painted_at = now
+        self._canvas_changed = False
         for frame in getattr(self.scene(), "frames", None) or ():
             frame.say_whether_markups_stay_in(now)
         surface = self.viewport()
@@ -1918,12 +1920,17 @@ class PageView(QGraphicsView):
         super().paintEvent(event)
 
     _watched_scene = None
+    #: whether the canvas has changed since it was last painted (known while
+    #: the scene's changes are heard: on the card, and while pacing frames)
+    _canvas_changed = False
 
     def _watch_scene_changes(self) -> None:
         """On the graphics card, hear what the scene changes, so a paint can
-        draw just that (cardsurface.py). Not otherwise: Qt then has no list
-        of changes to make and hand over."""
-        scene = self.scene() if self.gpu else None
+        draw just that (cardsurface.py); and while the view paces its own
+        frames (_frame_if_due), so a frame is put on the screen only for a
+        change of the canvas. Not otherwise: Qt then has no list of changes
+        to make and hand over."""
+        scene = self.scene() if (self.gpu or self.paces_its_frames) else None
         if scene is self._watched_scene:
             return
         if self._watched_scene is not None:
@@ -1939,6 +1946,7 @@ class PageView(QGraphicsView):
             surface.ask_all()
 
     def _scene_changed(self, rects) -> None:
+        self._canvas_changed = True
         surface = self.viewport()
         if not hasattr(surface, "ask_for"):
             return
@@ -2192,6 +2200,8 @@ class PageView(QGraphicsView):
     def _invalidate_snap_overlay(self, marker=None, guides=()) -> None:
         """Repaint the full length of old/new guides, not only the draft's bounds."""
         viewport = self.viewport()
+        if marker is not None or guides:
+            self._canvas_changed = True
         if marker is not None:
             point = self.mapFromScene(marker)
             viewport.update(QRect(point.x() - 8, point.y() - 8, 17, 17))
@@ -3387,8 +3397,13 @@ class PageView(QGraphicsView):
             return
 
         if self._mode in ("rubber", "lasso") and self._marquee:
+            # only where the marquee was and is: the whole canvas drawn again
+            # on every move was every markup under it drawn again (49 ms a
+            # frame over two hundred of them, 2026-11-06)
+            before = self._marquee_viewport_rect()
             self._marquee[-1] = QPointF(scene_pos)
-            self.viewport().update()
+            self._canvas_changed = True
+            self.viewport().update(before.united(self._marquee_viewport_rect()))
             event.accept()
             return
 
@@ -3571,8 +3586,17 @@ class PageView(QGraphicsView):
         if scene is not None:
             for _ in range(2):              # (and what that call queues in turn)
                 QApplication.sendPostedEvents(scene, QEvent.MetaCall)
+        if self._watched_scene is None:
+            self._watch_scene_changes()     # (pacing turned on after the scene was set)
+        window = QWidget.window(self)
+        if self._canvas_changed and hasattr(window, "write_position_with_the_frame"):
+            # the status bar's coordinates go to the screen with this frame
+            # of the canvas, never in a frame of their own (2026-11-06: a move
+            # that did not move the markup a whole step wrote them alone)
+            window.write_position_with_the_frame()
+        self._canvas_changed = False
         # (the window this view is in: its .window is the main window)
-        QApplication.sendPostedEvents(QWidget.window(self), QEvent.UpdateRequest)
+        QApplication.sendPostedEvents(window, QEvent.UpdateRequest)
 
     def _frame_time(self) -> float:
         """How long the screen shows a frame for, a little less to be sure."""
@@ -4669,9 +4693,15 @@ class PageView(QGraphicsView):
         self.viewport().update()
         self.markupStyleChanged.emit(self.markup_style)
 
-    def set_pending_stamp(self, entry) -> None:
-        """The next click puts this markup down, exactly as it was kept."""
+    #: what a point measured at the held tool's set's scale, in mm (0: none)
+    _pending_set_mm = 0.0
+
+    def set_pending_stamp(self, entry, set_mm_per_pt: float = 0.0) -> None:
+        """The next click puts this markup down, exactly as it was kept —
+        at its real size on a page with a scale, when its set was made at
+        one (*set_mm_per_pt*; toolsets.ToolEntry.size_on)."""
         self._pending_stamp = entry
+        self._pending_set_mm = float(set_mm_per_pt or 0.0)
         self.set_tool("select")
         self.setCursor(Qt.CrossCursor)
 
@@ -4729,7 +4759,7 @@ class PageView(QGraphicsView):
         if not payloads:
             self._pending_stamp = None
             return False
-        factor = entry.size_on(frame.page)          # Revu's Scale
+        factor = entry.size_on(frame.page, self._pending_set_mm)     # Revu's Scale
         origin = self._pending_origin(frame, scene_pos, factor)
         # Fresh names for every group in the tool, keeping the arrangement it
         # was kept in: a tool made of a group inside a group comes down as
@@ -6013,7 +6043,8 @@ class PageView(QGraphicsView):
         frame = self.frame_at(self._last_scene_pos) or self.frame()
         if frame is None:
             return
-        origin = self._pending_origin(frame, self._last_scene_pos)
+        factor = entry.size_on(frame.page, self._pending_set_mm)     # Revu's Scale
+        origin = self._pending_origin(frame, self._last_scene_pos, factor)
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setOpacity(0.55)
@@ -6023,10 +6054,14 @@ class PageView(QGraphicsView):
                 continue
             if hasattr(item, "load_from_document"):
                 item.load_from_document(self.document())
-            at = frame.mapToScene(origin + QPointF(float(data.get("x", 0.0)),
-                                                   float(data.get("y", 0.0))))
+            if factor != 1.0:
+                _resize_by(item, factor)          # as it will come down, scaled
+            at = frame.mapToScene(origin + QPointF(float(data.get("x", 0.0)) * factor,
+                                                   float(data.get("y", 0.0)) * factor))
             painter.save()
             painter.translate(at)
+            if factor != 1.0 and not isinstance(item, MeasureItem):
+                painter.setTransform(item.transform(), True)
             item.paint_visible(painter)
             painter.restore()
         # No box round it. The drawing under the pointer says where it will
@@ -6056,6 +6091,7 @@ class PageView(QGraphicsView):
         self._preview_rects_drawn = now
         viewport = self.viewport()
         if now is None or drawn is None:
+            self._canvas_changed = True
             viewport.update()
             return
         if not now and not drawn:
@@ -6071,6 +6107,7 @@ class PageView(QGraphicsView):
             if where(rect) not in same:
                 region += onto.mapRect(rect).toAlignedRect().adjusted(-3, -3, 3, 3)
         if not region.isEmpty():
+            self._canvas_changed = True
             viewport.update(region)
 
     def _pointer_preview_rects(self) -> Optional[list]:
@@ -6220,6 +6257,13 @@ class PageView(QGraphicsView):
         return getattr(self, "_preview_cache", None)
 
     # -- selecting with a marquee ------------------------------------------
+    def _marquee_viewport_rect(self) -> QRect:
+        """Where the marquee is drawn on the viewport, with its line's room."""
+        polygon = self.marquee_polygon()
+        if polygon.isEmpty():
+            return QRect()
+        return self.mapFromScene(polygon.boundingRect()).boundingRect().adjusted(-3, -3, 3, 3)
+
     def marquee_polygon(self):
         """The marquee as a polygon, whichever shape it is."""
         if len(self._marquee) < 2:

@@ -604,6 +604,46 @@ at many positions, so a sharp annotation is drawn twice and the pixels the
 sharp drawing missed are filled from the smoothed one, solid
 (`engine._with_lost_lines`, `LOST_LINE_COVERAGE`).
 
+**A panel that follows the document (2026-11-06).** The Variables panel is
+on the document's sheet's and book's listener lists (`docsheet.listeners`,
+`docbook.listeners`), one list per document, and two windows can show one
+document (a tab's New Window). A window closed takes its panel's Qt side with
+it: the panel leaves both lists on `destroyed` (`_unwatch`) and checks it is
+still a widget before starting its timer (`_alive`), and both listener loops
+drop a listener that raises Qt's deleted-object error rather than stopping
+(the user's traceback: every equation placed failed on a closed window's
+panel). Any new panel that listens to the sheet or the book must leave the
+lists the same way.
+
+**Frame rate on a crowded page (2026-11-06).** `MarkupItem._bounds_now` keeps
+its answer until what it is made of changes (`_bounds_key`): Qt, the page
+(`keeps_its_markups_in`) and the snapping ask for every markup's bounds
+several times a frame, and a few dozen Python calls each was 20 ms of every
+frame over two hundred markups. The page no longer measures all its markups
+before each paint while one is changing (`say_whether_markups_stay_in`); a
+markup that reaches off the page says so itself (`markup_may_be_outside`,
+from `itemChange` and `_may_leave_its_page`). A marquee repaints only where it
+was and is. The remaining cost of drawing a markup out over a crowd is Qt
+drawing the markups under the growing draft again each frame. On the graphics
+card under a virtual screen (xvfb, Mesa) the probe segfaulted in
+`QGraphicsTextItem.paint` (`_InlineEditor.paint` → `paint_words`) while a text
+box was drawn out; not reproduced on the processor nor reported from Windows.
+
+**PySide6 6.12 and QTest (2026-11-06).** Under PySide6 6.12.0 (offscreen) `QTest.mouseClick` takes a click soon after another for a double-click and `QTest.mouseDClick` sends no first click, so tests that click a tool button's menu twice, or expect a double-click's first click to go somewhere, fail; the checks run on PySide6 6.11.2. The application itself is not affected (real mouse clicks).
+
+**Thumbnails and the workbook view (2026-11-06).** A click on a thumbnail
+goes to its page among the pages (`go_to_page_as_page`, `sheetview.route_as_page`:
+out of the workbook view if it is on, never into it); a double-click on a
+workbook's entry or page opens the workbook view (`workbookWanted`), as a cell
+or a sheet tab does.
+
+**A tool set's scale (2026-11-06).** `ToolSet.scale` is a `PageScale` record
+(Revu's Set Scale on the set); `ToolEntry.size_on(page, set_mm_per_pt)` scales
+a Drawing Mode tool to the page's scale when the set (or the tool's own Scale,
+which goes first) was made at one; the view carries the set's scale with the
+held tool (`set_pending_stamp(entry, set_mm_per_pt)`), for the preview and the
+placing alike.
+
 ## 6. Current status
 
 `docs/tasklist.md` is the active requirements register (the user-owned

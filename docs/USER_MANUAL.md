@@ -632,8 +632,13 @@ once, stacked down the panel; roll one up with its chevron.
 - A tool's right-click menu also has Use Tool, Move Up, Move Down, Copy, Rename…
   and Remove; a set's has Paste, Add Selection, Rename Tool Set… and Delete Tool
   Set. Drag tools to reorder them or move them between sets.
-- A set's gear button changes its view (Symbol, List or Detail) and holds its own
-  commands; the slider under the sets sets how big the tools are drawn. **Tool Sets ▾** at the top: tick which sets show, **Manage Tool
+- A set's gear button changes its view (Symbol, List or Detail), sets the set's
+  scale and holds its own commands; the slider under the sets sets how big the
+  tools are drawn. **Set Scale…** (Revu's) says what drawing scale the set's tools
+  were made at (shown on the set's header, **· 1:50**): a Drawing Mode tool from it
+  put down on a page with a scale comes down at its real size — a door kept at 1:50
+  is half the size on a 1:100 plan — and as kept on a page without one. A tool's
+  own **Scale** goes first. **Remove Scale** takes it off. **Tool Sets ▾** at the top: tick which sets show, **Manage Tool
   Sets…** (show, hide, order, rename and remove), **New Tool Set…** and **Import
   Tool Set…**.
 - **My Tools** is always there; its first nine tools are on the number keys.
@@ -680,8 +685,9 @@ numbered as they print: one that doesn't print (greyed, a crossed-out printer)
 has no number.
 
 **A workbook is one entry**: its first page on a stack, **▸ Loads** over **pages
-2–10**. Click the picture to open it (*The workbook view and sheet tabs*); click
-the ▸ to show its pages one by one. Picked, the entry is the whole workbook —
+2–10**. Click the picture to go to its first page; double-click it to open the
+workbook (*The workbook view and sheet tabs*); click the ▸ to show its pages one
+by one. Picked, the entry is the whole workbook —
 Delete, Cut, Copy, Move, Extract, Print and dragging act on all its pages, and
 **Duplicate Page** copies the whole workbook as **Loads (2)**, a workbook of its
 own. Nothing goes between an Excel workbook's sheets. Its right-click menu is a
@@ -1600,8 +1606,9 @@ the equation and R² on the chart). The axis titles carry the cells' units.
 
 ### The workbook view and sheet tabs
 
-**Opening a workbook.** Click a cell on a spreadsheet page, or its entry in
-Thumbnails: the sheet fills the window as in Excel — an endless grid from A1 with
+**Opening a workbook.** Click a cell on a spreadsheet page, click its sheet tab, or
+double-click its entry (or one of its pages) in Thumbnails — a single click there
+goes to the page among the pages: the sheet fills the window as in Excel — an endless grid from A1 with
 its headings, its print area outlined in blue and its page breaks dashed blue
 (both dragged). Markups on the sheet show and are picked as on its pages. The
 cells are as big as on the pages; `Ctrl`+wheel zooms in Excel's steps (10 % to

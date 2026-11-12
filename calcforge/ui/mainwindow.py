@@ -3576,7 +3576,8 @@ class MainWindow(QMainWindow):
         if application is not None:
             application.installEventFilter(self)
             self._filters_the_application = True     # (PropertiesPanel.show_items)
-        self.pages_panel.pageSelected.connect(self.go_to_page)
+        self.pages_panel.pageSelected.connect(self.go_to_page_as_page)
+        self.pages_panel.workbookWanted.connect(self.go_to_page)
         # (first page, how many, where the run now starts) — move_page takes
         # the last two the other way round
         self.pages_panel.pagesReordered.connect(
@@ -5725,13 +5726,23 @@ class MainWindow(QMainWindow):
         with ViewSync.jumping():
             self._go_to_page(index)
 
-    def _go_to_page(self, index: int) -> None:
+    def go_to_page_as_page(self, index: int) -> None:
+        """Show page *index* among the pages, whatever kind of page it is —
+        a thumbnail clicked (the user, 2026-11-06): out of the workbook view
+        if it is on, never into it (a double-click on the thumbnail, a cell
+        or a sheet tab opens the workbook view)."""
+        from .viewsync import ViewSync
+        with ViewSync.jumping():
+            self._go_to_page(index, as_page=True)
+
+    def _go_to_page(self, index: int, as_page: bool = False) -> None:
         if not 0 <= index < len(self.document.pages):
             return
         # a page of a sheet shows the sheet alone (the workbook view), any
-        # other page the pages again (ui/sheetview.py)
+        # other page the pages again (ui/sheetview.py) — asked for as a
+        # page, the pages, out of the view if need be
         from . import sheetview
-        how = sheetview.route(self, index)
+        how = sheetview.route_as_page(self, index) if as_page else sheetview.route(self, index)
         if index == self.current_index and not how and not sheetview.is_on(self):
             # already in view (a zoom brought it there, leaving a run picked
             # in Thumbnails): asked for, it is the page picked
@@ -11046,8 +11057,10 @@ class MainWindow(QMainWindow):
         self.view.set_pending_stamp(held)
         self.status_hint.setText("Click where it should go · Esc to put it back")
 
-    def use_tool_entry(self, entry) -> None:
-        """Pick up a tool from a set: a copy to place, or a tool to draw with."""
+    def use_tool_entry(self, entry, group=None) -> None:
+        """Pick up a tool from a set: a copy to place, or a tool to draw with.
+        *group*, the set it is from: one made at a scale (Revu's Set Scale)
+        has its tools keep their real size on a page with a scale."""
         if entry.mode == toolsets.PROPERTIES:
             key = self._tool_for_payload(entry.payload)
             if key is None:
@@ -11058,7 +11071,8 @@ class MainWindow(QMainWindow):
             self.status_hint.setText(
                 f"{entry.label}: draw one — it will have this tool's properties")
             return
-        self.view.set_pending_stamp(entry)
+        self.view.set_pending_stamp(entry, set_mm_per_pt=group.mm_per_pt() if group is not None
+                                    else 0.0)
         self.status_hint.setText(
             f"{entry.label}: click where it should go · Esc to put it back")
 
@@ -11097,7 +11111,7 @@ class MainWindow(QMainWindow):
         mine = next((g for g in groups if g.name == toolsets.MY_TOOLS), None)
         if mine is None or not (1 <= number <= len(mine.entries)):
             return False
-        self.use_tool_entry(mine.entries[number - 1])
+        self.use_tool_entry(mine.entries[number - 1], mine)
         return True
 
     # ==================================================================
@@ -13157,6 +13171,13 @@ class MainWindow(QMainWindow):
             timer.setSingleShot(True)
             timer.setInterval(30)
             timer.timeout.connect(self._write_wanted_position)
+        if getattr(self.view, "paces_its_frames", False):
+            # the view puts the frames on the screen itself (Windows): the
+            # coordinates are written with the next frame of the canvas
+            # (write_position_with_the_frame), or by the timer once the
+            # pointer has stopped — never in a frame of their own
+            timer.start()
+            return
         now = time.monotonic()
         if now - getattr(self, "_position_written", -1.0) >= 0.030:
             timer.stop()
@@ -13164,9 +13185,21 @@ class MainWindow(QMainWindow):
         else:
             timer.start()
 
+    def write_position_with_the_frame(self) -> None:
+        """The pointer's place written now, as a frame of the canvas goes to
+        the screen (PageView._frame_if_due), if a move has changed it."""
+        wanted = getattr(self, "_position_wanted", None)
+        if wanted is None or wanted == getattr(self, "_position_shown", None):
+            return
+        timer = getattr(self, "_position_timer", None)
+        if timer is not None:
+            timer.stop()
+        self._write_wanted_position()
+
     def _write_wanted_position(self) -> None:
         import time
         self._position_written = time.monotonic()
+        self._position_shown = QPointF(self._position_wanted)
         self._write_position(self._position_wanted)
 
     def _write_position(self, point: QPointF) -> None:

@@ -45,6 +45,16 @@ def shown(w):
 
 
 def click_thumbnail(w, row: int) -> None:
+    """A double-click on a thumbnail: into the workbook view for a sheet's
+    page (a single click goes to the page among the pages, the user,
+    2026-11-06), to the page for any other."""
+    listed = w.pages_panel.list
+    QTest.mouseDClick(listed.viewport(), Qt.LeftButton, Qt.NoModifier,
+                      listed.picture_rect(row).center())
+    pump()
+
+
+def single_click_thumbnail(w, row: int) -> None:
     listed = w.pages_panel.list
     QTest.mouseClick(listed.viewport(), Qt.LeftButton, Qt.NoModifier,
                      listed.picture_rect(row).center())
@@ -224,7 +234,7 @@ def test_a_workbook_opens_at_the_pages_zoom(w, wb):
     wheel(w, 2)
     assert view.zoom() > 0.7
     assert not others_in_sight(w)
-    click_thumbnail(w, 0)                       # out: the pages' own zoom
+    single_click_thumbnail(w, 0)                # out: the pages' own zoom
     assert shown(w) is None and view.zoom() == pytest.approx(0.7)
     view.set_zoom(1.25)
     pump()
@@ -288,11 +298,15 @@ def test_from_a_dont_print_sheet_its_entry_and_other_pages_can_be_clicked(w, wb)
     pump()
     assert shown(w) == run_named(w, "Factors").uid
     assert not w.document.pages[factors].printable
+    # a single click on the entry: out to its first page, among the pages
+    single_click_thumbnail(w, wb.first)
+    assert w.current_index == wb.first and shown(w) is None
+    # a double-click: the workbook view at that page
     click_thumbnail(w, wb.first)
     assert w.current_index == wb.first and shown(w) == run_named(w, "Loads").uid
     w.go_to_page(factors)
     pump()
-    click_thumbnail(w, 0)
+    single_click_thumbnail(w, 0)
     assert w.current_index == 0 and shown(w) is None
     # with its pages shown one by one, too
     w.pages_panel.set_expanded(wb.key, True)
@@ -300,7 +314,7 @@ def test_from_a_dont_print_sheet_its_entry_and_other_pages_can_be_clicked(w, wb)
     pump()
     click_thumbnail(w, wb.first + 1)
     assert w.current_index == wb.first + 1 and shown(w) == run_named(w, "Loads").uid
-    click_thumbnail(w, len(w.document.pages) - 1)
+    single_click_thumbnail(w, len(w.document.pages) - 1)
     assert shown(w) is None and w.current_index == len(w.document.pages) - 1
 
 
@@ -327,7 +341,7 @@ def test_the_tabs_never_show_outside_a_workbook(w, wb, tmp_path):
     click_thumbnail(w, wb.first)
     type_text(w, "12")
     assert w.view.tables.editor is not None
-    click_thumbnail(w, 0)
+    single_click_thumbnail(w, 0)
     assert shown(w) is None and not tabs_shown(w) and not bar_shown(w)
     assert run_named(w, "Loads").sheet.cells[(0, 0)].input == "12", "what was typed is kept"
     # another document's tab, and back

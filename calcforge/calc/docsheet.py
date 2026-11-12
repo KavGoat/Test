@@ -230,7 +230,16 @@ class DocumentSheet:
         if self.on_changed is not None:
             self.on_changed(changed)
         for listener in list(self.listeners):
-            listener()
+            try:
+                listener()
+            except RuntimeError as problem:
+                # a panel whose window has gone (its Qt side deleted): off
+                # the list, and the others still told — one dead listener
+                # must not stop every equation placed (2026-10-30)
+                if "already deleted" not in str(problem):
+                    raise
+                if listener in self.listeners:
+                    self.listeners.remove(listener)
 
     @contextmanager
     def batch(self):

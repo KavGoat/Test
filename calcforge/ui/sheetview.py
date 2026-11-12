@@ -479,6 +479,20 @@ def route(window, index: int) -> str:
     return ""
 
 
+def route_as_page(window, index: int) -> str:
+    """Before going to page *index* as a page — its thumbnail clicked (the
+    user, 2026-11-06: a click on a workbook's entry opened the workbook
+    view; now a double-click does): out of the workbook view if it is on,
+    never into it. Says what it did, as route does."""
+    pages = window.document.pages
+    if not 0 <= index < len(pages) or window.scene is None:
+        return ""
+    if run_shown(window.scene) is not None:
+        leave(window, to=index)
+        return "left"
+    return ""
+
+
 def after_going(window, index: int, how: str) -> None:
     """After going to page *index* in the workbook view: the sheet where it
     was left (entering), or that page's first row at the top."""

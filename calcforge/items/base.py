@@ -818,6 +818,10 @@ class MarkupItem(QGraphicsObject):
             holder = holder.parentItem()
         if holder is not None:
             holder.markups_may_have_moved()
+            # and if this one now reaches off the page (resized, say: a move
+            # says so through itemChange), the page says so straight away —
+            # it no longer measures every markup on every paint meanwhile
+            holder.markup_may_be_outside(self)
 
     def update(self, *args):                 # (no annotation: a Qt slot)
         self._changing()
@@ -997,17 +1001,39 @@ class MarkupItem(QGraphicsObject):
         margin = self.chrome_margin()
         return rect.adjusted(margin, margin, -margin, -margin) if margin else rect
 
+    #: _bounds_now's last answer and what it was made of (see there)
+    _bounds_box = None
+    _bounds_key = None
+
     def _bounds_now(self) -> QRectF:
+        # Asked of every markup on a page several times a frame — Qt's own
+        # painting and hit tests, the page measuring its children
+        # (PageFrame.keeps_its_markups_in), the snapping's boxes — and made
+        # of a few dozen Python calls each time: with two hundred markups on
+        # the page it was 20 ms of every frame of a markup being drawn out or
+        # moved (the user, 2026-11-06: "fps is reduced"). Worked out again
+        # only when something it is made of has changed.
+        style = self.style
+        rect = self.local_rect().normalized()
+        kind = getattr(self, "kind", "") or getattr(self, "shape_kind", "")
+        key = (rect.x(), rect.y(), rect.width(), rect.height(),
+               float(getattr(style, "width", 0.0) or 0.0), getattr(style, "line_style", ""),
+               self.has_scale_box(), kind,
+               self.cloud_radius if kind == "cloud" else 0.0)
+        if self._bounds_key == key and self._bounds_box is not None:
+            return QRectF(self._bounds_box)
         from .complexlines import reach
         # a Double, Tracks or Road line reaches past its pen
-        margin = self.style.width + HANDLE_SIZE + 4 + reach(self.style)
-        box = self.local_rect().normalized().adjusted(-margin, -margin, margin, margin)
+        margin = style.width + HANDLE_SIZE + 4 + reach(style)
+        box = rect.adjusted(-margin, -margin, margin, margin)
         if self.ROTATABLE:
             # The rotation handle stands off above the box. Left out of here it
             # is painted outside the item's own rectangle, so Qt clips it and
             # leaves a smear of it behind every time the markup moves.
             box.setTop(box.top() - ROTATE_OFFSET - HANDLE_SIZE)
-        return self._with_scale_box(box)
+        box = self._with_scale_box(box)
+        self._bounds_key, self._bounds_box = key, QRectF(box)
+        return box
 
     def _with_scale_box(self, box: QRectF) -> QRectF:
         """*box* grown to hold the scale box and the rotation handle above it."""

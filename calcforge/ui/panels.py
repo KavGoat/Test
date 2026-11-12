@@ -771,6 +771,8 @@ class PagesPanel(QWidget):
     """Thumbnail strip with reordering and page commands."""
 
     pageSelected = Signal(int)
+    #: a workbook's entry (or one of its pages) double-clicked: the workbook view
+    workbookWanted = Signal(int)
     # Where a run of pages was dragged to: the first of them, how many, and
     # the page number the run now starts at. A run, because a block of sheets
     # picked out together is dragged as a block.
@@ -1280,6 +1282,13 @@ class PagesPanel(QWidget):
                             self.list.visualItemRect(entry)).contains(point):
                     self.toggle_section(row)    # its name: show or hide its pages
                     return True
+            if kind == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton \
+                    and not event.modifiers():
+                # (asked here, not of itemDoubleClicked: the first click went
+                # to the page, which rebuilt the strip under the second)
+                entry = self.list.itemAt(event.position().toPoint())
+                if entry is not None and self._double_clicked(entry):
+                    return True
             if kind == QEvent.MouseMove:
                 self._hover_row = self.drop_row(event.position().toPoint())
                 self.list.set_external_drop_row(
@@ -1426,29 +1435,45 @@ class PagesPanel(QWidget):
                 self._following_the_strip = False
 
     def _clicked(self, entry) -> None:
-        """A click on the thumbnail that is already the current row goes
-        there too. Inside a workbook shown as one entry the current row is
-        its entry while the page in view is one of its other pages (sheet
-        two, say), so a click on the entry changed no row and went nowhere:
-        the reader was stuck in the workbook (the user, 2026-10-22)."""
+        """A click on a thumbnail goes to its page, as a page, whatever kind
+        of page it is — out of the workbook view if the page is shown in it
+        (the user, 2026-11-06: a click on a workbook's entry opened the
+        workbook view; a double-click does that now, _double_clicked). A
+        click on the row that is the current one already goes there too:
+        inside a workbook shown as one entry the current row is its entry
+        while the page in view is one of its other pages (sheet two, say),
+        so a click on the entry changed no row and went nowhere, and the
+        reader was stuck in the workbook (the user, 2026-10-22)."""
         row = self.list.row(entry)
         if self._suppress or row < 0:
             return
-        if row == getattr(self.window, "current_index", row):
-            # the page in view already — but a workbook's page clicked opens
-            # the workbook view (sheetview.py), unless it is open
-            from .sheetview import run_shown
-            document = getattr(self.window, "document", None)
-            page = document.pages[row] if document is not None and row < len(document.pages) \
-                else None
-            if page is None or page.sheet is None or \
-                    run_shown(getattr(self.window, "scene", None)) == page.sheet:
-                return
+        from .sheetview import is_on
+        if row == getattr(self.window, "current_index", row) and not is_on(self.window):
+            return                       # the page in view already
         self._following_the_strip = True
         try:
             self.pageSelected.emit(row)
         finally:
             self._following_the_strip = False
+
+    def _double_clicked(self, entry) -> bool:
+        """A double-click on a workbook's entry, or on one of its pages,
+        opens the workbook view at that page (ui/sheetview.py). True when
+        it did; any other page's double-click is left to the list."""
+        row = self.list.row(entry)
+        if self._suppress or row < 0:
+            return False
+        document = getattr(self.window, "document", None)
+        page = document.pages[row] if document is not None and 0 <= row < len(document.pages) \
+            else None
+        if page is None or page.sheet is None:
+            return False
+        self._following_the_strip = True
+        try:
+            self.workbookWanted.emit(row)
+        finally:
+            self._following_the_strip = False
+        return True
 
     def _rows_moved(self, _parent, start, end, _dest, row) -> None:
         """A run of pages has been dragged somewhere else in the strip.
@@ -3613,7 +3638,10 @@ class ToolSetsPanel(QWidget):
         self.tree.clear()
         self.headers: dict = {}
         for group in self.groups:
-            header = QTreeWidgetItem([f"{group.name}  ({len(group.entries)})"])
+            title = f"{group.name}  ({len(group.entries)})"
+            if group.scale_label:
+                title += f"  ·  {group.scale_label}"       # Revu's Set Scale on the set
+            header = QTreeWidgetItem([title])
             header.setData(0, self.SET_ROLE, group.name)
             header.setData(0, self.ENTRY_ROLE, -1)
             header.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
@@ -3772,7 +3800,7 @@ class ToolSetsPanel(QWidget):
         if entry is not None:
             from .widgets import focus_kept
             with focus_kept(unless=self.window.view):    # the chest keeps the keys
-                self.window.use_tool_entry(entry)
+                self.window.use_tool_entry(entry, self.current_set())
 
     def add_selection(self) -> None:
         self.window.add_to_toolset(None, into=self.current_set_name())
@@ -3892,6 +3920,46 @@ class ToolSetsPanel(QWidget):
             toolsets.save_toolsets(self.groups)
             self.rebuild(keep=group.name)
 
+    # -- Revu's Set Scale on a set ----------------------------------------
+    def set_scale_of_set(self) -> None:
+        """The drawing scale the set's tools were made at (Revu's Set Scale
+        dialog): a tool put down exactly on a page with a scale of its own
+        then keeps its real size there — a door kept at 1:50 comes down
+        half the size on a 1:100 plan."""
+        from ..core.document import PageScale
+        from . import dialogs, release
+        group = self.current_set()
+        if group is None:
+            return
+        current = PageScale.from_dict(group.scale) if group.scale else PageScale()
+        dialog = dialogs.ScaleDialog(current, None, self.window, count=1)
+        dialog.setWindowTitle(f"Set Scale — {group.name}")
+        try:
+            if dialog.exec() != dialogs.QDialog.Accepted:
+                return
+            scale = dialog.result_scale()
+        finally:
+            release.done_with(dialog)
+        if scale is not None:
+            self.apply_set_scale(group, scale)
+
+    def remove_scale_of_set(self) -> None:
+        group = self.current_set()
+        if group is not None and group.scale:
+            self.apply_set_scale(group, None)
+
+    def apply_set_scale(self, group, scale) -> None:
+        """*group*'s tools were made at *scale* (a PageScale; None for no
+        scale): kept with the set, shown on its header."""
+        from . import toolsets
+        group.scale = scale.to_dict() if scale is not None else None
+        toolsets.save_toolsets(self.groups)
+        self.rebuild(keep=group.name)
+        self.window.status_hint.setText(
+            f"{group.name}: made at {scale.label} — its tools keep their real size on a "
+            "page with a scale" if scale is not None else
+            f"{group.name}: no scale — its tools come down the size they were kept")
+
     def delete_set(self) -> None:
         from . import toolsets
 
@@ -3969,6 +4037,19 @@ class ToolSetsPanel(QWidget):
                                        lambda _c=False, n=group.name, v=view: self.set_view(n, v))
                 shown.setCheckable(True)
                 shown.setChecked(self.view_of(group.name) == view)
+            menu.addSeparator()
+            # Revu's Set Scale on a tool set (the user, 2026-11-06: "add set
+            # scale to toolsets similar to Bluebeam"): the drawing scale its
+            # tools were made at; put down on a page with a scale of its
+            # own, they keep their real size
+            scaled = menu.addAction("Set Scale…", self.set_scale_of_set)
+            scaled.setToolTip(f"The drawing scale the tools in “{group.name}” were made at: "
+                              "put down on a page with a scale, they keep their real size"
+                              + (f" (now {group.scale_label})" if group.scale_label else ""))
+            if group.scale:
+                remove = menu.addAction("Remove Scale", self.remove_scale_of_set)
+                remove.setToolTip(f"“{group.name}”'s tools come down the size they were kept, "
+                                  "whatever the page's scale")
             menu.addSeparator()
         for action in self.build_menu().actions():
             action.setParent(menu)

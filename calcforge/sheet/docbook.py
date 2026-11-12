@@ -980,7 +980,14 @@ class DocumentBook:
     # -- keeping both up to date ----------------------------------------------------------------------
     def _changed(self, keys: set) -> None:
         for listener in list(self.listeners):
-            listener(keys)
+            try:
+                listener(keys)
+            except RuntimeError as problem:
+                # a panel whose window has gone: off the list (docsheet._report)
+                if "already deleted" not in str(problem):
+                    raise
+                if listener in self.listeners:
+                    self.listeners.remove(listener)
         if not self._syncing:
             sheets = {k[0] for k in keys if isinstance(k[0], int)}
             if sheets:

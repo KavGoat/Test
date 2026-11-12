@@ -415,6 +415,30 @@ class VariablesPanel(QWidget):
         self._timer.setInterval(0)
         self._timer.timeout.connect(self._refresh_if_shown)
         self._stale = False
+        # The document's sheet and book call this panel whenever a value
+        # changes, for as long as it is on their lists. A window closed while
+        # another window shows the same document (New Window on a tab) took
+        # its panel with it and left the calls behind, and every equation
+        # placed and every page pasted in the window still open then failed
+        # on this panel's deleted timer (the user, 2026-10-30).
+        self.destroyed.connect(lambda *_: self._unwatch())
+
+    def _unwatch(self) -> None:
+        """Off the lists of the sheet and the book this panel followed."""
+        watched, self._watched = self._watched, None
+        if watched is not None and self._soon in watched.listeners:
+            watched.listeners.remove(self._soon)
+        book, self._watched_book = self._watched_book, None
+        if book is not None and self._soon_for_tables in book.listeners:
+            book.listeners.remove(self._soon_for_tables)
+
+    def _alive(self) -> bool:
+        """Still a widget — not a panel whose window has gone."""
+        import shiboken6
+        try:
+            return shiboken6.isValid(self) and shiboken6.isValid(self._timer)
+        except Exception:  # noqa: BLE001 - nothing left to ask
+            return False
 
     # -- keeping up -----------------------------------------------------------------
     def watch(self, document) -> None:
@@ -442,9 +466,15 @@ class VariablesPanel(QWidget):
         self._soon()
 
     def _soon_for_tables(self, _keys=None) -> None:
+        if not self._alive():
+            self._unwatch()
+            return
         self._timer.start()
 
     def _soon(self) -> None:
+        if not self._alive():
+            self._unwatch()
+            return
         self._timer.start()
 
     def showEvent(self, event) -> None:

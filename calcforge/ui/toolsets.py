@@ -174,13 +174,18 @@ class ToolEntry:
     def type_name(self) -> str:
         return str(self.payload.get("type", ""))
 
-    def size_on(self, page) -> float:
-        """How much bigger it comes down on *page*, scaled: 1 unless Scale is
-        on and both its own page and this one have a drawing scale."""
-        if not self.scaled or self.mode != COPY or not self.mm_per_pt:
+    def size_on(self, page, set_mm_per_pt: float = 0.0) -> float:
+        """How much bigger it comes down on *page*, scaled: 1 unless *page*
+        has a drawing scale and either its own Scale is on (its own page
+        had one) or its set was made at a scale (*set_mm_per_pt*, Revu's Set
+        Scale on the set; the tool's own goes first)."""
+        if self.mode != COPY:
+            return 1.0
+        kept = self.mm_per_pt if self.scaled and self.mm_per_pt else float(set_mm_per_pt or 0.0)
+        if not kept:
             return 1.0
         here = mm_per_pt(page)
-        return self.mm_per_pt / here if here else 1.0
+        return kept / here if here else 1.0
 
 
 def mm_per_pt(page) -> float:
@@ -217,18 +222,43 @@ class ToolSet:
     name: str
     entries: list = field(default_factory=list)
     hidden: bool = False      # unticked in Manage Tool Sets: kept, not shown
+    # Revu's Set Scale on a tool set (the user, 2026-11-06): the drawing
+    # scale its tools were made at, a PageScale record. A tool put down
+    # exactly (Drawing Mode) on a page with a scale of its own comes down
+    # at its real size there — a door kept at 1:50 is half the size on a
+    # 1:100 plan. A tool's own Scale (ToolEntry.scaled) goes before it.
+    scale: dict | None = None
 
     def to_dict(self) -> dict:
         data = {"name": self.name, "entries": [e.to_dict() for e in self.entries]}
         if self.hidden:
             data["hidden"] = True
+        if self.scale:
+            data["scale"] = dict(self.scale)
         return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "ToolSet":
+        scale = data.get("scale")
         return cls(str(data.get("name", "Tools")),
                    [ToolEntry.from_dict(entry) for entry in data.get("entries", [])],
-                   bool(data.get("hidden", False)))
+                   bool(data.get("hidden", False)),
+                   dict(scale) if isinstance(scale, dict) and scale else None)
+
+    @property
+    def scale_label(self) -> str:
+        """The set's scale as words ("1:100"), or "" without one."""
+        return str(self.scale.get("label", "")) if self.scale else ""
+
+    def mm_per_pt(self) -> float:
+        """What one point measured at the set's scale, in mm — 0 without one."""
+        if not self.scale:
+            return 0.0
+        from ..core.document import PageScale
+        try:
+            return float(PageScale.from_dict(self.scale).length_per_pt.to("mm").magnitude)
+        except Exception:  # noqa: BLE001 - a record that will not read: no scale
+            return 0.0
 
 
 def load_toolsets() -> list:

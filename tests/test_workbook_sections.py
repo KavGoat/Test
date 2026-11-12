@@ -137,13 +137,21 @@ def test_thumbnails_show_the_workbook_as_one_entry_that_expands(w, tmp_path):
     assert head.data(SECTION_ROLE)["collapsed"]
     assert all(listed.isRowHidden(row) for row in section.pages[1:])
     assert not listed.isRowHidden(0) and not listed.isRowHidden(section.last + 1)
-    # its picture goes to its first page
+    # its picture goes to its first page, among the pages (the user,
+    # 2026-11-06); a double-click on it opens the workbook view
+    from calcforge.ui.sheetview import is_on
     w.go_to_page(0)
     pump()
     picture = listed.picture_rect(section.first)
     QTest.mouseClick(listed.viewport(), Qt.LeftButton, Qt.NoModifier, picture.center())
     pump()
-    assert w.current_index == section.first and w.sheet_tabs.isVisible()
+    assert w.current_index == section.first and not is_on(w) and not w.sheet_tabs.isVisible()
+    QTest.mouseDClick(listed.viewport(), Qt.LeftButton, Qt.NoModifier, picture.center())
+    pump()
+    assert w.current_index == section.first and is_on(w) and w.sheet_tabs.isVisible()
+    w.go_to_page(0)
+    pump()
+    assert not is_on(w)
     # its name shows its pages, and hides them again
     words = listed.delegate.toggle_rect(head_rect(w, section))
     QTest.mouseClick(listed.viewport(), Qt.LeftButton, Qt.NoModifier, words.center())
