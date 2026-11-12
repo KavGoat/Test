@@ -52,6 +52,12 @@ def click_thumbnail(w, row: int) -> None:
     QTest.mouseDClick(listed.viewport(), Qt.LeftButton, Qt.NoModifier,
                       listed.picture_rect(row).center())
     pump()
+    if QApplication.mouseButtons() & Qt.LeftButton:
+        # (QTest's double-click leaves the button held: the next move of the
+        # pointer would be a drag, not a hover)
+        QTest.mouseRelease(listed.viewport(), Qt.LeftButton, Qt.NoModifier,
+                           listed.picture_rect(row).center())
+        pump()
 
 
 def single_click_thumbnail(w, row: int) -> None:

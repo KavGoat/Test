@@ -631,6 +631,12 @@ box was drawn out; not reproduced on the processor nor reported from Windows.
 
 **PySide6 6.12 and QTest (2026-11-06).** Under PySide6 6.12.0 (offscreen) `QTest.mouseClick` takes a click soon after another for a double-click and `QTest.mouseDClick` sends no first click, so tests that click a tool button's menu twice, or expect a double-click's first click to go somewhere, fail; the checks run on PySide6 6.11.2. The application itself is not affected (real mouse clicks).
 
+**Keys while typing in a box (2026-11-12).** The window's ShortcutOverride filter lets only `MainWindow.EDITOR_COMMANDS` fire while words are typed; a command that should work mid-typing (Auto-Size's Alt+Z) goes in that set, and must cope with the editor being open (`autosize_text` ends the typing first).
+
+**Files dropped (2026-11-12).** `drop_files(paths, index)`: *index* is the page dropped on (the canvas passes it from `drop_target`); a PDF with one goes in after it (`insert_pdf_file`, every page, FIT_ORIGINAL, annotations), without one it opens in a tab; the window's own `dragMoveEvent` (tab bar, panels) and the canvas's `_show_drop_marker` write the status bar's words, since the OS cursor can only say Copy/Move/Link.
+
+**Offset (2026-11-12).** `OffsetSession.following`: the copy's distance is the pointer's distance from the markup's outline (`pointer_distance`) and is written into the toolbar's Distance box until the user types there (`textEdited`), which fixes it. The right-click menu offers `act_offset` for markups `can_offset` accepts.
+
 **Thumbnails and the workbook view (2026-11-06).** A click on a thumbnail
 goes to its page among the pages (`go_to_page_as_page`, `sheetview.route_as_page`:
 out of the workbook view if it is on, never into it); a double-click on a

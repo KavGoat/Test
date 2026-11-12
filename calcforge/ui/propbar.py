@@ -57,6 +57,7 @@ END_FILL = "end_fill"        # Revu's line-end colour swatch, after End ▾ Auto
 NOTE = "note"                # a note's Color, opacity and Icon ▾ (Revu's)
 CHECKBOX = "checkbox"        # a Checkbox's Box ▾, Mark ▾ and Multiple (checkboxes.py)
 LINE_SPACING = "line_spacing"  # words in a box: Revu's Line Spacing ▾
+EQUATION = "equation"        # an equation's result: Decimal Places, Significant Figures, Trailing Zeros
 
 #: Revu's Line Spacing list: Single, 1.15, 1.5 and Double; any other multiple
 #: can be typed in.
@@ -620,7 +621,7 @@ def build(window) -> QToolBar:
     w._style_widgets = {key: [] for key in (
         STROKE, OPACITY, DASH, CLOUD, WIDTH, CORNER, ARROW_SIZE, FILL, FILL_OPACITY,
         SHAPE, HATCH, HIGHLIGHT, CUTOUT, SYMBOL, UNITS, MEASURE, FONT, AUTO_FONT,
-        TOTALS, END_FILL, NOTE, CHECKBOX, LINE_SPACING)}
+        TOTALS, END_FILL, NOTE, CHECKBOX, LINE_SPACING, EQUATION)}
 
     w._style_action = {}
 
@@ -931,6 +932,35 @@ def build(window) -> QToolBar:
                                    "alignment")
     w.font_style_button.popup_panel = _build_font_style_panel(w)
     put(FONT, w.font_style_button)
+    # -- an equation's result, as the Properties panel and its right-click
+    # menu have it (the user, 2026-11-12: "the property toolbar did not show
+    # important things for the equation"): its size and colour are the font
+    # controls above; here Decimal Places, Significant Figures, Trailing Zeros
+    put(EQUATION, label("Decimals:"))
+    w.equation_decimals = QSpinBox()
+    w.equation_decimals.setObjectName("barEquationDecimals")
+    w.equation_decimals.setRange(0, 15)
+    w.equation_decimals.setToolTip("Decimal Places: how many the result shows")
+    w.equation_decimals.valueChanged.connect(
+        lambda n: w._equation_fmt(f"Decimal places: {n}", decimals=n))
+    put(EQUATION, _number(w.equation_decimals, 44))
+    w.equation_significant = QToolButton()
+    w.equation_significant.setObjectName("barEquationSignificant")
+    w.equation_significant.setText("Sig. figs")
+    w.equation_significant.setCheckable(True)
+    w.equation_significant.setToolTip("Significant Figures: Decimal Places counts significant "
+                                      "figures, not places after the point")
+    w.equation_significant.toggled.connect(
+        lambda on: w._equation_fmt("Significant figures", significant=on))
+    put(EQUATION, w.equation_significant)
+    w.equation_zeros = QToolButton()
+    w.equation_zeros.setObjectName("barEquationTrailingZeros")
+    w.equation_zeros.setText("0.00")
+    w.equation_zeros.setCheckable(True)
+    w.equation_zeros.setToolTip("Trailing Zeros: keep the zeros after the point (2.50)")
+    w.equation_zeros.toggled.connect(
+        lambda on: w._equation_fmt("Trailing Zeros", trailing_zeros=on))
+    put(EQUATION, w.equation_zeros)
     # Revu's Line Spacing ▾, for words in a box
     w.line_spacing_combo = LineSpacingCombo()
     w.line_spacing_combo.setObjectName("lineSpacing")

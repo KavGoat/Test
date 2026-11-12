@@ -158,11 +158,13 @@ def test_a_workbook_dragged_over_the_pages_marks_the_page_it_goes_in_after(w, tm
     from PySide6.QtGui import QDragLeaveEvent
     view.dragLeaveEvent(QDragLeaveEvent())
     assert view._drop_after is None and w.status_hint.text() == ""
-    # a PDF opens in a tab of its own: nothing to mark
+    # a PDF over a page goes in after it too (the user, 2026-11-12), and says so
     pdf = QMimeData()
     pdf.setUrls([QUrl.fromLocalFile(str(tmp_path / "sheet.pdf"))])
     view.dragMoveEvent(QDragMoveEvent(where, Qt.CopyAction, pdf, Qt.LeftButton, Qt.NoModifier))
-    assert view._drop_after is None
+    assert view._drop_after is frame
+    assert w.status_hint.text() == "Drop to put the PDF's pages in after page 2"
+    view.dragLeaveEvent(QDragLeaveEvent())
 
 
 def test_the_caret_shows_in_a_white_text_box_being_typed_in(w):

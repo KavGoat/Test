@@ -9,6 +9,7 @@ the copy down; Esc leaves it.
 """
 from __future__ import annotations
 
+import itertools
 import math
 from typing import Optional
 
@@ -17,6 +18,7 @@ from PySide6.QtGui import QColor, QPainterPath, QPen
 from PySide6.QtWidgets import (QCheckBox, QDoubleSpinBox, QGraphicsPathItem, QLabel,
                                QLineEdit, QToolBar)
 
+from ..core.document import PT_TO_MM
 from ..items.measure import MeasureItem
 from ..items.shapes import PolyItem, RectItem
 
@@ -125,6 +127,37 @@ def _closed(item) -> bool:
     return bool(getattr(item, "closed", False))
 
 
+def _to_segment(p: QPointF, a: QPointF, b: QPointF) -> float:
+    """How far *p* is from the segment a-b."""
+    dx, dy = b.x() - a.x(), b.y() - a.y()
+    length2 = dx * dx + dy * dy
+    if length2 < 1e-12:
+        return math.hypot(p.x() - a.x(), p.y() - a.y())
+    t = max(0.0, min(1.0, ((p.x() - a.x()) * dx + (p.y() - a.y()) * dy) / length2))
+    return math.hypot(p.x() - (a.x() + t * dx), p.y() - (a.y() + t * dy))
+
+
+def pointer_distance(item, local: QPointF) -> float:
+    """How far *local* (in *item*'s coordinates) is from the markup's
+    outline: the offset the pointer asks for (Revu's: move the pointer to
+    the distance wanted and click, or type one)."""
+    if isinstance(item, RectItem):
+        rect = item.local_rect().normalized()
+        dx = max(rect.left() - local.x(), 0.0, local.x() - rect.right())
+        dy = max(rect.top() - local.y(), 0.0, local.y() - rect.bottom())
+        if dx or dy:
+            return math.hypot(dx, dy)
+        return max(min(local.x() - rect.left(), rect.right() - local.x(),
+                       local.y() - rect.top(), rect.bottom() - local.y()), 0.0)
+    points = [QPointF(p) for p in (getattr(item, "points", []) or [])]
+    if len(points) < 2:
+        return 0.0
+    pairs = list(itertools.pairwise(points))
+    if _closed(item):
+        pairs.append((points[-1], points[0]))
+    return min(_to_segment(local, a, b) for a, b in pairs)
+
+
 def side_of(item, local: QPointF) -> bool:
     """True for "outward": outside a closed shape, or the left of a line."""
     if isinstance(item, RectItem):
@@ -197,17 +230,59 @@ class OffsetSession(QObject):
         self.preview: Optional[QGraphicsPathItem] = None
         self.bar = window.offset_toolbar()
         self.bar.show()
+        # Revu's: the copy follows the pointer — as far out as the pointer is —
+        # until a distance is typed in the toolbar, which then holds (the
+        # user, 2026-11-12: "right click then offset does nothing")
+        self.following = True
+        self._pointer_points = 0.0
+        self._shown_text = ""
+        window.offset_distance.setText("")      # (left from the last time: the pointer again)
+        window.offset_distance.textEdited.connect(self._typed)
         self.view.viewport().installEventFilter(self)
         self.view.viewport().setMouseTracking(True)
-        window.status_hint.setText("Offset: move to the side for the copy and click — Esc stops")
+        window.status_hint.setText("Offset: move the pointer out to the distance wanted and "
+                                   "click, or type a distance — Esc stops")
+
+    def _typed(self, _text: str = "") -> None:
+        """A distance typed in the toolbar: it holds; the pointer only says the side."""
+        self.following = False
+
+    def _box_was_set(self) -> bool:
+        """A distance put in the toolbar's box by other means than typing
+        (a test, a script): it holds as a typed one does."""
+        text = self.window.offset_distance.text().strip()
+        if self.following and text and text != getattr(self, "_shown_text", ""):
+            self.following = False
+        return not self.following
 
     # the toolbar's values
     def distance(self) -> float:
+        self._box_was_set()
+        if self.following:
+            return self._pointer_points
         text = self.window.offset_distance.text().strip() or "0"
         try:
             return abs(self.window.distance_in_points(text, self.item_page()))
         except ValueError:
             return 0.0
+
+    def _follow(self, local: QPointF) -> None:
+        """The pointer's distance from the markup, shown in the toolbar."""
+        self._pointer_points = pointer_distance(self.item, local)
+        page = self.item_page()
+        scale = getattr(page, "scale", None)
+        try:
+            if scale is not None and scale.is_calibrated():
+                words = scale.format_length(scale.length(self._pointer_points))
+            else:
+                words = f"{self._pointer_points * PT_TO_MM:.1f} mm"
+        except Exception:  # noqa: BLE001 - a scale that will not format: page mm
+            words = f"{self._pointer_points * PT_TO_MM:.1f} mm"
+        box = self.window.offset_distance
+        box.blockSignals(True)
+        box.setText(words)
+        box.blockSignals(False)
+        self._shown_text = words
 
     def item_page(self):
         frame = self.item.parentItem()
@@ -216,6 +291,8 @@ class OffsetSession(QObject):
     def _redraw(self, scene_pos: QPointF) -> None:
         local = self.item.mapFromScene(scene_pos)
         self.outward = side_of(self.item, local)
+        if not self._box_was_set():
+            self._follow(local)
         geometry = offset_geometry(self.item, self.distance(), self.outward,
                                    self.window.offset_miter.value())
         if self.preview is None:
@@ -243,7 +320,10 @@ class OffsetSession(QObject):
 
     def place(self, scene_pos: Optional[QPointF] = None) -> object:
         if scene_pos is not None:
-            self.outward = side_of(self.item, self.item.mapFromScene(scene_pos))
+            local = self.item.mapFromScene(scene_pos)
+            self.outward = side_of(self.item, local)
+            if not self._box_was_set():
+                self._follow(local)
         distance = self.distance()
         if distance <= 0:
             self.window.status_hint.setText("Offset: give a distance first")
@@ -281,6 +361,10 @@ class OffsetSession(QObject):
         import shiboken6
         if shiboken6.isValid(self.view):
             self.view.viewport().removeEventFilter(self)
+        try:
+            self.window.offset_distance.textEdited.disconnect(self._typed)
+        except (RuntimeError, TypeError):
+            pass
         preview = self.preview
         if preview is not None and shiboken6.isValid(preview) and preview.scene() is not None:
             preview.scene().removeItem(preview)
@@ -318,11 +402,13 @@ def build_toolbar(window) -> QToolBar:
     bar = QToolBar("Offset", window)
     bar.setObjectName("offsetToolbar")
     bar.addWidget(QLabel(" Distance: "))
-    window.offset_distance = QLineEdit("10 mm")
+    window.offset_distance = QLineEdit("")
     window.offset_distance.setObjectName("offsetDistance")
     window.offset_distance.setFixedWidth(90)
+    window.offset_distance.setPlaceholderText("follows the pointer")
     window.offset_distance.setToolTip("How far from the markup the copy goes, in the page's "
-                                      "measurement units (\"300 mm\", \"6 in\")")
+                                      "measurement units (\"300 mm\", \"6 in\"); left to "
+                                      "the pointer, as far out as the pointer is")
     bar.addWidget(window.offset_distance)
     window.offset_replace = QCheckBox("Replace Markup")
     window.offset_replace.setToolTip("Delete the original when the offset copy is placed")

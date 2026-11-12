@@ -119,10 +119,11 @@ page.
   the page in view are built first and the rest behind it (the status bar says
   *Loading markups… n of N pages*); a page not built yet shows as its file draws
   it, and a save in the meantime keeps every markup.
-- **Drag and drop**: drop a PDF anywhere on the window to open it in a tab; drop
-  an Excel workbook or a picture (`.png`, `.jpg`, …) on a page to put it in after
-  that page. Dropped on a blank, untouched window, a workbook opens as the
-  document.
+- **Drag and drop**: drop a PDF, an Excel workbook or a picture (`.png`, `.jpg`, …)
+  on a page to put it in after that page (a line under the page shows where, and
+  the status bar says which page); drop a PDF on the tab bar, a panel or anywhere
+  off the pages to open it in a tab of its own. Dropped on a blank, untouched
+  window, a workbook opens as the document.
 - **File ▸ Save** (`Ctrl+S`), **Save As** (`Ctrl+Shift+S`) and **Save All** write the
   PDF. A digitally signed PDF is appended to, so its signature still verifies.
 - **When a file can't be saved** — it is read-only, open in another program, its
@@ -244,7 +245,8 @@ its default (see *Markup styles and defaults*).
 
 - **Text Box** (`T`) — drag the box, then type; double-click to edit again.
   **Auto-Size** (`Alt+Z`) fits the box round the words (also on callouts and
-  Cloud+, where it is **Fit to text**).
+  Cloud+, where it is **Fit to text**); pressed while typing, it fits the box,
+  ends the typing and leaves the box selected.
 - **Callout** (`Q`) — click what it points at, then click where the words go. Drag
   the orange diamonds to move the leader. Right-click for **Add Arrow Leader**,
   **Add Cloud Leader** (drag or click a cloud round the area) and **Remove Leader**.
@@ -362,8 +364,10 @@ measurement extras too: cut-outs, Units, Caption and Totals.
 - **Cut, Copy, Paste** (`Ctrl+X`, `Ctrl+C`, `Ctrl+V`); **Paste in Place**
   (`Ctrl+Shift+V`); **Paste Here…** (`Ctrl+Alt+V`, carried on the pointer);
   **Duplicate** (`Ctrl+J`); **Delete**.
-- **Offset** (`O`): a copy a set **Distance** away on the pointer's side
-  (**Replace Markup** drops the original). **Multiply…** (`Ctrl+M`): repeat the
+- **Offset** (`O`, also on a markup's right-click menu): a copy on the pointer's
+  side, as far out as the pointer is — move out to the distance wanted and click —
+  or a set **Distance** typed in its toolbar (**Replace Markup** drops the
+  original). **Multiply…** (`Ctrl+M`): repeat the
   selection **Across (x)** and **Down (y)** so many **Times**.
 - **Group** (`Ctrl+G`) / **Ungroup** (`Ctrl+Shift+G`).
 - **Order**: **Bring to Front** (`Ctrl+Shift+]`), **Bring Forward** (`Ctrl+]`),
@@ -395,8 +399,9 @@ right-click menu.
 The **Properties toolbar** reads left to right as Revu's, showing only what
 applies to what is selected (or to the tool in hand). For selected equations (or
 the one being typed in) it shows their font size, colour and **Style ▾** (bold,
-italic, underline): one undo step for all of them; an equation's font family is
-SMath's own and is not offered.
+italic, underline), and the result fields the panel has — **Decimals**, **Sig.
+figs** (Significant Figures) and **0.00** (Trailing Zeros): one undo step for all
+of them; an equation's font family is SMath's own and is not offered.
 
 - **Type ▾** — the markup's kind; its menu holds the Subject, how many markups are
   selected, the dash spacing, the hatch's colour, scale and opacity, and **Set as

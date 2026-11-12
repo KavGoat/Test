@@ -794,12 +794,12 @@ class MarkupItem(QGraphicsObject):
     def _layer(self):
         return getattr(self.parentItem(), "layer", None)
 
-    def _changing(self) -> None:
+    def _changing(self, measure: bool = True) -> None:
         self._bounds = None
         layer = self._layer()
         if layer is not None:
             layer.touched(self)
-        self._may_leave_its_page()
+        self._may_leave_its_page(measure)
 
     def _page_holder(self):
         holder = self.parentItem()
@@ -807,10 +807,15 @@ class MarkupItem(QGraphicsObject):
             holder = holder.parentItem()
         return holder
 
-    def _may_leave_its_page(self) -> None:
+    def _may_leave_its_page(self, measure: bool = True) -> None:
         """Its page stops telling Qt its markups all stay inside it, until
         this one has been still a moment (PageFrame.markups_may_have_moved).
-        Not the page's line work read for snapping to (never drawn)."""
+        Not the page's line work read for snapping to (never drawn).
+        *measure*: and this one is measured now — if it reaches off the page
+        (resized, say; a move says so through itemChange) the page says so
+        straight away, since it no longer measures every markup on every
+        paint meanwhile. Not as it is given its parent: half built, it has
+        no size to ask for yet (the page measures a new child itself)."""
         if self.__dict__.get("line_work"):
             return
         holder = self.parentItem()
@@ -818,10 +823,8 @@ class MarkupItem(QGraphicsObject):
             holder = holder.parentItem()
         if holder is not None:
             holder.markups_may_have_moved()
-            # and if this one now reaches off the page (resized, say: a move
-            # says so through itemChange), the page says so straight away —
-            # it no longer measures every markup on every paint meanwhile
-            holder.markup_may_be_outside(self)
+            if measure:
+                holder.markup_may_be_outside(self)
 
     def update(self, *args):                 # (no annotation: a Qt slot)
         self._changing()
@@ -1747,7 +1750,7 @@ class MarkupItem(QGraphicsObject):
         over gives it back to the file.
         """
         if change in _CHANGES_THAT_SHOW:
-            self._changing()
+            self._changing(measure=False)
         elif change == QGraphicsItem.ItemSelectedChange:
             # picked out or let go: its handles' room comes or goes (not a
             # change to its drawing, so the page's squares keep it)

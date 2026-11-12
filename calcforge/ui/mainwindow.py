@@ -58,6 +58,7 @@ from .shortcuts import MARKUP, COMMAND, INSERT, TOOL, ShortcutManager
 from .shortcuts import SYMBOL as TYPED_SYMBOL
 from .stylecaps import (CLOUD, CORNER, SYMBOL)
 from . import stylecaps
+from .propbar import EQUATION as EQUATION_GROUP
 from .propbar import TOTALS as TOTALS_GROUP
 from .stylecaps import (ARROW_SIZE, DASH, FILL, FILL_OPACITY, FONT, HATCH,
                         OPACITY, STROKE, WIDTH, capabilities,
@@ -1519,7 +1520,9 @@ class MainWindow(QMainWindow):
     RESERVED_FOR_TEXT = ("Ctrl+B", "Ctrl+I", "Ctrl+U")
     EDITOR_COMMANDS = {
         "command.text_left", "command.text_center", "command.text_right",
-        "command.font_increase", "command.font_decrease"}
+        "command.font_increase", "command.font_decrease",
+        # Alt+Z while typing: the box fitted, the typing over (autosize_text)
+        "command.autosize"}
 
     def _act(self, key: str, text: str, slot, shortcut: str = "", icon_name: str = "",
              checkable: bool = False, tip: str = "", name: str = "") -> QAction:
@@ -7180,10 +7183,21 @@ class MainWindow(QMainWindow):
         super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:
-        if self.dropped_paths(event):
+        paths = self.dropped_paths(event)
+        if paths:
             event.acceptProposedAction()
+            # over the tab bar, a panel, a toolbar: the file opens in a tab
+            # (over the pages the canvas says where it goes in: view.py)
+            kinds = {self.droppable(path) for path in paths}
+            what = ("PDF" if "pdf" in kinds else "workbook" if "workbook" in kinds
+                    else "picture")
+            self.status_hint.setText(f"Drop to open the {what} in a tab of its own")
             return
         super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:
+        self.status_hint.setText("")
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event) -> None:
         paths = self.dropped_paths(event)
@@ -7204,7 +7218,14 @@ class MainWindow(QMainWindow):
             kind = self.droppable(path)
             if not kind:
                 continue
-            if kind == "pdf" or (kind == "workbook" and (self._workspace_empty or self._untouched())):
+            # a PDF dropped on a page goes in after it, as Insert Pages puts
+            # it (the user, 2026-11-12: "hovering in the view would be
+            # insert, dragging onto the tab bar would be open"); dropped
+            # anywhere else - the tab bar, a panel - it opens in a tab
+            inserting = kind == "pdf" and index is not None and bool(self.document.pages) \
+                and not self._workspace_empty
+            if (kind == "pdf" and not inserting) \
+                    or (kind == "workbook" and (self._workspace_empty or self._untouched())):
                 self._open_chosen(path)
                 opened.append(os.path.basename(path))
                 index = None                  # (the next goes into the document now in view)
@@ -7212,7 +7233,10 @@ class MainWindow(QMainWindow):
             if self._workspace_empty:
                 self.new_document(confirm=False)
             after = self.page_index(index) if self.document.pages else None
-            if kind == "workbook":
+            if kind == "pdf":
+                if self.insert_pdf_file(path, after):
+                    opened.append(os.path.basename(path))
+            elif kind == "workbook":
                 if self.insert_workbook(path, index=after):
                     opened.append(os.path.basename(path))
             elif self._insert_image_file(path, after):
@@ -7221,6 +7245,37 @@ class MainWindow(QMainWindow):
                 index = self.current_index    # the next drop lands after what just came in
         if len(opened) > 1:
             self.status_hint.setText(f"Dropped in: {', '.join(opened)}")
+
+    def insert_pdf_file(self, path: str, after: Optional[int]) -> bool:
+        """Every page of the PDF at *path* brought in after page *after*
+        (a PDF dropped on that page), at its own size with its markups, as
+        Insert Pages brings them. True when they came in."""
+        import pymupdf
+        try:
+            with pymupdf.open(path) as source:
+                count = source.page_count
+        except Exception as exc:  # noqa: BLE001 - whatever the file is, said plainly
+            QMessageBox.critical(self, "Insert Pages", f"{os.path.basename(path)}: {exc}")
+            return False
+        if not count:
+            return False
+        indices = list(range(count))
+        target = len(self.document.pages) if after is None else after + 1
+        target = max(0, min(target, len(self.document.pages)))
+        if project_io.carries_a_document(path):
+            self.insert_calcforge_pages(path, at=target, indices=indices)
+            return True
+
+        def mutate():
+            pdfio.import_pages(self.document, path, indices, pdfio.FIT_ORIGINAL,
+                               pdfio.BEST_DPI, at=target, vectors=False, annotations=True)
+            self.current_index = target
+        try:
+            self._structural_change(f"Insert {count} PDF page(s)", mutate)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Insert Pages", str(exc))
+            return False
+        return True
 
     def rotate_page(self, index: Optional[int] = None, clockwise: bool = True) -> None:
         """Turn a page a quarter turn, and everything that is drawn on it.
@@ -8554,6 +8609,8 @@ class MainWindow(QMainWindow):
         shown = set(supported or {STROKE, FILL, FILL_OPACITY, WIDTH, DASH, OPACITY})
         from . import propbar
         shown |= propbar.extras_shown(items, active, supported)
+        if equations:
+            shown.add(EQUATION_GROUP)     # its Decimal Places, Significant Figures, Trailing Zeros
         if isinstance(active, MeasureItem) and active.kind in ("area", "volume"):
             # Revu's area bar has no Font (its caption's font is in the
             # Properties panel): Line, Fill, Hatch, Units, Caption, Totals
@@ -8691,9 +8748,14 @@ class MainWindow(QMainWindow):
             button.setVisible(not (equations and name == "strikethrough"))
         if equations:
             region = active.region
+            from ..calc.docsheet import sheet_for
+            fmt = region.fmt or sheet_for(self.document).worksheet.format
             for control, value, method in (
                     (self.font_spin, region.font_size, "setValue"),
-                    (self.text_colour_button, region.color, "set_color")):
+                    (self.text_colour_button, region.color, "set_color"),
+                    (self.equation_decimals, int(fmt.decimals), "setValue"),
+                    (self.equation_significant, bool(fmt.significant), "setChecked"),
+                    (self.equation_zeros, bool(fmt.trailing_zeros), "setChecked")):
                 control.blockSignals(True)
                 getattr(control, method)(value)
                 control.blockSignals(False)
@@ -9791,6 +9853,24 @@ class MainWindow(QMainWindow):
         self._push_style(mutate, description,
                          predicate=lambda item: field in capabilities(item))
 
+    def _equation_fmt(self, description: str, **changes) -> None:
+        """The Properties toolbar's result fields: *changes* to the format of
+        the equations it shows (as calcmenu's Decimal Places and the
+        Properties panel's set it), one undo step."""
+        equations = self._bar_equations()
+        if not equations:
+            return
+        import dataclasses
+
+        from ..calc.docsheet import sheet_for
+        from . import calcmenu
+        base = sheet_for(self.document).worksheet.format
+
+        def apply(region):
+            made = dataclasses.replace(region.fmt or base, **changes)
+            region.fmt = None if made == base else made
+        calcmenu.change(self, equations, description, apply)
+
     def _bar_equations(self) -> list:
         """The equations the Properties toolbar is showing, when that is all
         it shows (picked, or the one being typed in); else []."""
@@ -9868,6 +9948,22 @@ class MainWindow(QMainWindow):
 
     def set_as_default(self, item: MarkupItem) -> None:
         """Draw the next markup of this kind the way this one is drawn."""
+        region = getattr(item, "region", None)
+        if getattr(item, "TYPE", "") == "calc" and region is not None:
+            # an equation: the next ones are typed at its size and in its
+            # colour (Preferences > Equations; the user, 2026-11-12: "set
+            # default not working when I change font size")
+            import dataclasses
+
+            from . import preferences as prefs_module
+            prefs = dataclasses.replace(prefs_module.current(),
+                                        equation_font_size=float(region.font_size),
+                                        equation_colour=str(region.color or "#000000"))
+            prefs_module.apply(prefs)
+            self.status_hint.setText(
+                f"New equations will be {region.font_size:g} pt in this colour "
+                "— Preferences ▸ Equations changes it")
+            return "calc"
         key = toolsets.remember_default(item)
         self.status_hint.setText(
             f"New {item.display_name().lower()}s will look like this one "
@@ -12611,18 +12707,26 @@ class MainWindow(QMainWindow):
         return fresh
 
     def autosize_text(self) -> None:
-        """Alt+Z: bring a text box or callout back in around its words."""
+        """Alt+Z: bring a text box or callout back in around its words.
+        While the box is being typed in, the typing is over first and the
+        box is left picked (the user, 2026-11-12: "it should resize and
+        exit the text box edit mode and go into selected mode")."""
         items = [item for item in self.selected_items()
                  if hasattr(item, "size_to_text")]
         editing = self.view.editing_item()
-        if not items and editing is not None and hasattr(editing, "size_to_text"):
+        if editing is not None and hasattr(editing, "size_to_text"):
             items = [editing]
+            self.view.end_item_edit()
         if not items:
             return
         self.view.begin_snapshot(self.view.involved_frames(*items))
         for item in items:
             item.size_to_text()
         self.view.commit_snapshot("Auto-size text box")
+        if editing is not None and editing.scene() is not None:
+            self.scene.clearSelection()
+            editing.setSelected(True)
+            self.refresh_selection()
 
     def edit_preferences(self) -> None:
         """The settings that stay the same whatever document is open."""
@@ -13451,6 +13555,11 @@ class MainWindow(QMainWindow):
         if not calc_like:
             menu.addAction(self.act_format_painter)
         menutidy.proxy(menu, self.act_delete, "Delete", QKeySequence(Qt.Key_Delete))
+        from .offset import can_offset
+        if can_offset(item):
+            # Offset (the user, 2026-11-12: "right click then offset"), after
+            # Revu's own entries so they keep Revu's order
+            menu.addAction(self.act_offset)
         menu.addSeparator()
         # -- Revu: the outline ----------------------------------------------------
         if self.view.has_an_outline(item) and not is_table and not grouped:

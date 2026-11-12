@@ -1814,6 +1814,9 @@ class PageView(QGraphicsView):
         event.acceptProposedAction()
         frame = self.drop_target(self.mapToScene(event.position().toPoint()))
         self._clear_drop_marker()
+        hint = getattr(self.window, "status_hint", None)
+        if hint is not None:
+            hint.setText("")
         index = None
         if frame is not None:
             try:
@@ -1844,12 +1847,13 @@ class PageView(QGraphicsView):
         under the page it would go in after, as the Thumbnails draw for a
         drop between pages, and the status bar says which page (the user,
         2026-10-30: the Excel drag "just says copy, it should show the
-        insertion point like the pdf"). A PDF opens in a tab of its own, so
-        it has no place to mark."""
+        insertion point like the pdf"); a PDF too, whose pages go in after
+        that page (the user, 2026-11-12: over the pages insert, on the tab
+        bar open). Off the pages the file opens in a tab of its own."""
         window = self.window
         kinds = {window.droppable(path) for path in self._dropped(event)}
         target = None
-        if kinds & {"workbook", "image"}:
+        if kinds & {"workbook", "image", "pdf"}:
             target = self.drop_target(self.mapToScene(event.position().toPoint()))
         if target is not self._drop_after:
             self._drop_after = target
@@ -1860,14 +1864,15 @@ class PageView(QGraphicsView):
                 number = window.document.index_of(target.page) + 1
             except ValueError:
                 number = 0
-            what = "workbook" if "workbook" in kinds else "picture"
+            what = ("the PDF's pages" if "pdf" in kinds else "the workbook"
+                    if "workbook" in kinds else "the picture")
             if hint is not None and number:
-                hint.setText(f"Drop to put the {what} in after page {number}")
+                hint.setText(f"Drop to put {what} in after page {number}")
             self._drop_hint_shown = True
-        elif self._drop_hint_shown:
-            self._drop_hint_shown = False
-            if hint is not None:
-                hint.setText("")
+        elif hint is not None:
+            # off the pages (the canvas's margin): it would open in a tab
+            hint.setText("Drop to open in a tab of its own")
+            self._drop_hint_shown = True
 
     def _clear_drop_marker(self) -> None:
         if self._drop_after is not None:

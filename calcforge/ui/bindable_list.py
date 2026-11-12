@@ -704,6 +704,9 @@ COMMANDS: dict[str, tuple[str, str, str]] = {
     'status.last_page': ('Last Page', 'View', 'always'),
     # -- propbar ---------------------------------------------------------------
     'propbar.highlight': ('Properties toolbar: Highlight', 'Markup', 'always'),
+    # an equation's result on the bar (2026-11-12): as its menu's entries
+    'propbar.sig_figs': ('Properties toolbar: Significant Figures', 'Calculation', 'always'),
+    'propbar.trailing_zeros': ('Properties toolbar: Trailing Zeros', 'Calculation', 'always'),
     'propbar.fit_to_text': ('Properties toolbar: Fit to text', 'Markup', 'always'),
     'propbar.add_a_cut_out': ('Properties toolbar: Add a cut-out', 'Markup', 'always'),
     'propbar.count_subject': ('Properties toolbar: Count subject…', 'Markup', 'always'),
