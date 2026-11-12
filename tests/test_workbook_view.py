@@ -54,9 +54,11 @@ def click_thumbnail(w, row: int) -> None:
     pump()
     if QApplication.mouseButtons() & Qt.LeftButton:
         # (QTest's double-click leaves the button held: the next move of the
-        # pointer would be a drag, not a hover)
-        QTest.mouseRelease(listed.viewport(), Qt.LeftButton, Qt.NoModifier,
-                           listed.picture_rect(row).center())
+        # pointer would be a drag, not a hover) — let go off the entries, or
+        # the release over the thumbnail is a click on it, back to the page
+        viewport = listed.viewport()
+        QTest.mouseRelease(viewport, Qt.LeftButton, Qt.NoModifier,
+                           QPoint(viewport.width() - 1, viewport.height() - 1))
         pump()
 
 
