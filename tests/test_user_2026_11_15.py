@@ -211,3 +211,71 @@ def test_a_drag_says_what_a_drop_does_beside_the_pointer_and_leaves_the_canvas_q
     finally:
         qInstallMessageHandler(old)
     assert not [m for m in messages if "drag leave" in m], messages
+
+
+def test_a_click_or_a_double_click_on_the_equation_while_typing_opens_it(w):
+    """The user, 2026-11-15 (second message): "can't double click on the
+    equation while in text box edit mode to go into equation edit"."""
+    box = a_box(w, "Load ")
+    item = typed_into_box(w, box, "5+2=")             # the words open, the caret after it
+    view = w.view
+    assert view.editing_item() is box
+    at = view.mapFromScene(item.mapToScene(item.local_rect().center()))
+    QTest.mouseDClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, at)
+    pump(0.3)
+    QTest.mouseRelease(view.viewport(), Qt.LeftButton, Qt.NoModifier, at)
+    pump(0.1)
+    assert view.calc.editing() and view.calc.item is item, "the equation opened"
+    assert view.editing_item() is None, "the words' editor stood aside"
+    press_key(view, Qt.Key_Return)
+    pump(0.3)
+    assert view.editing_item() is box
+    # one click does it too, as it does when the box is not being typed in
+    QTest.mouseClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, at)
+    pump(0.3)
+    assert view.calc.editing() and view.calc.item is item
+    press_key(view, Qt.Key_Return)
+    pump(0.3)
+    view.end_item_edit()
+    pump(0.1)
+
+
+def test_an_equation_sits_on_the_words_baseline_a_word_among_words(w):
+    """The user, 2026-11-15 (the picture of "tnfjksdnfk  5 + 2 = 7 fds"):
+    "the equation not lining up correctly". Its baseline is the words',
+    and only a space stands between it and the word before."""
+    import numpy as np
+    from PySide6.QtCore import QRectF
+    from tests.test_inline_equations import render_box
+    box = a_box(w, "Load ")
+    item = typed_into_box(w, box, "5+2=")
+    w.view.end_item_edit()
+    pump(0.3)
+    plain = a_box(w, "Load kN", y=160)              # two words, for the gap a space makes
+
+    def ink(box, image, scale, area: QRectF) -> tuple:
+        """(top, bottom, left, right) of the ink in *area* (box coordinates), in picture pixels."""
+        origin = -box.boundingRect().topLeft()
+        top, bottom = int((origin.y() + area.top()) * scale), int((origin.y() + area.bottom()) * scale)
+        left, right = int((origin.x() + area.left()) * scale), int((origin.x() + area.right()) * scale)
+        rows, cols = np.nonzero(image[top:bottom, left:right] < 128)
+        assert rows.size, f"ink in {area}"
+        return rows.min() + top, rows.max() + top, cols.min() + left, cols.max() + left
+    image, scale = render_box(box)
+    place = box.inline_rect(item.inline_uid)
+    inside = box.text_rect().adjusted(1.5, 1.5, -1.5, -1.5)
+    word = ink(box, image, scale, QRectF(inside.left(), inside.top(), place.left() - inside.left(), inside.height()))
+    equation = ink(box, image, scale, QRectF(place.left(), inside.top(), place.width(), inside.height()))
+    # "Load" and "5+2 = 7" have no descenders: the bottom of their ink is their baseline
+    assert abs(equation[1] - word[1]) <= 2, f"baselines {word[1]} and {equation[1]} (pixels at {scale}/pt)"
+    gap = (equation[2] - word[3]) / scale
+    # and the gap before it is a space's, as between Load and kN: the widest
+    # run of clear columns through the plain box's words
+    image, scale = render_box(plain)
+    origin = -plain.boundingRect().topLeft()
+    inside = plain.text_rect().adjusted(1.5, 1.5, -1.5, -1.5)
+    top, bottom = int((origin.y() + inside.top()) * scale), int((origin.y() + inside.bottom()) * scale)
+    left, right = int((origin.x() + inside.left()) * scale), int((origin.x() + inside.right()) * scale)
+    columns = np.unique(np.nonzero(image[top:bottom, left:right] < 128)[1])
+    space = (np.diff(columns).max() - 1) / scale
+    assert abs(gap - space) <= 1.5, f"the gap before the equation {gap:.1f} pt, a space {space:.1f} pt"

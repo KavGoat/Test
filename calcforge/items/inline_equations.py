@@ -34,7 +34,7 @@ from PySide6.QtGui import (QFontMetrics, QImage, QTextCharFormat, QTextCursor, Q
                            QTextFormat, QTextImageFormat)
 from PySide6.QtWidgets import QGraphicsItem
 
-from ..calc.docsheet import PX_PER_PT
+from ..calc.docsheet import PT_PER_PX, PX_PER_PT
 from .calc import CalcItem
 
 #: the property on the placeholder's format naming the equation (kept
@@ -135,24 +135,70 @@ def placeholders(document) -> list:
     return [(position, uid) for position, uid, _fmt in fragments(document)]
 
 
-def object_rect(document, position: int, fmt, size: QSizeF) -> QRectF:
-    """Where the layout draws the inline object at *position*, in document
-    coordinates — as QTextDocumentLayout::resizeInlineObject places one
-    aligned AlignMiddle: its middle half an x-height above the baseline."""
-    width, height = max(float(size.width()), 1.0), max(float(size.height()), 1.0)
+def _line_of(document, position: int):
+    """The laid-out line holding *position*: (layout, line, position in the
+    block), or None."""
     block = document.findBlock(position)
     layout = block.layout() if block.isValid() else None
     if layout is None:
-        return QRectF(0, 0, width, height)
+        return None
     within = position - block.position()
     line = layout.lineForTextPosition(within)
-    if not line.isValid():
+    return (layout, line, within) if line.isValid() else None
+
+
+def object_rect(document, position: int, fmt, size: QSizeF) -> QRectF:
+    """Where the layout draws the inline object at *position*, in document
+    coordinates. QTextDocumentLayout::resizeInlineObject gives an
+    AlignMiddle object an ascent of half its height plus a quarter x-height
+    (room in the line), but QTextLine::draw then draws it centred in the
+    line's height — not on the baseline at all — so that is where it is
+    (measured: a point lower by the old reckoning, the user's picture of
+    2026-11-15)."""
+    width, height = max(float(size.width()), 1.0), max(float(size.height()), 1.0)
+    found = _line_of(document, position)
+    if found is None:
         return QRectF(0, 0, width, height)
+    layout, line, within = found
     x = layout.position().x() + line.cursorToX(within)[0]
-    baseline = layout.position().y() + line.y() + line.ascent()
+    top = layout.position().y() + line.y() + (line.height() - height) / 2.0
+    return QRectF(x, top, width, height)
+
+
+def line_baseline(document, position: int) -> float:
+    """The baseline of the words on the line holding *position*, in
+    document coordinates."""
+    found = _line_of(document, position)
+    if found is None:
+        return 0.0
+    layout, line, _within = found
+    return layout.position().y() + line.y() + line.ascent()
+
+
+#: the clear each side of an equation among the words, in the box's points
+#: (half a point: with the glyphs' own side bearings, the gap of a space)
+GAP = 0.5
+
+
+def inline_size(item, fmt) -> QSizeF:
+    """The size of the equation's place in the words: its drawing's width
+    with a point of clear each side in place of its frame's padding, and
+    tall enough that the line keeps room above and below the baseline for
+    the drawing (the layout gives an AlignMiddle object half its height
+    plus a quarter x-height above the baseline, the rest below)."""
+    _left, ascent, descent, width, _baseline = item.ink_metrics()
     half_x = QFontMetrics(fmt.toCharFormat().font()).xHeight() / 2.0
-    ascent = (height + half_x) / 2.0
-    return QRectF(x, baseline - ascent, width, height)
+    height = max(2.0 * (ascent - half_x), 2.0 * (descent + half_x), 1.0)
+    return QSizeF(max(width + 2 * GAP, 1.0), height)
+
+
+def frame_corner(item, place: QRectF, baseline: float) -> QPointF:
+    """Where the equation's own frame is drawn, in document coordinates,
+    for its drawing to start a point into its *place* and its baseline to
+    lie on the words' *baseline* (the user, 2026-11-15: "the equation not
+    lining up correctly")."""
+    left, _ascent, _descent, _width, own_baseline = item.ink_metrics()
+    return QPointF(place.left() + GAP - left, baseline - own_baseline)
 
 
 def paint_equations(painter, document, host) -> None:
@@ -162,7 +208,8 @@ def paint_equations(painter, document, host) -> None:
         item = host.inline_equation(uid)
         if item is None or item.focused:
             continue
-        item.paint_inline(painter, object_rect(document, position, fmt, item.local_rect().size()))
+        place = object_rect(document, position, fmt, inline_size(item, fmt))
+        item.paint_inline(painter, frame_corner(item, place, line_baseline(document, position)))
 
 
 # -- the equation ----------------------------------------------------------------
@@ -250,13 +297,28 @@ class InlineCalcItem(CalcItem):
             return              # the words' picture draws it (paint_inline)
         super().paint(painter, option, widget)
 
-    def paint_inline(self, painter, rect: QRectF) -> None:
-        """Drawn where the words' layout left room for it."""
+    def ink_metrics(self) -> tuple:
+        """(left, ascent, descent, width, baseline), in the box's points: how
+        far into the equation's frame its drawing starts, how far the
+        drawing reaches above and below its baseline, how wide it is, and
+        how far down the frame the baseline lies."""
+        from ..calc.ui.region_item import PAD_X
+        view = self._view or self._preview_view()
+        layout = getattr(view, "_layout", None) if view is not None else None
+        if view is None or layout is None:
+            rect = self.local_rect()
+            ascent = rect.height() * 0.7
+            return 0.0, ascent, rect.height() - ascent, rect.width(), ascent
+        return (PAD_X * PT_PER_PX, layout.asc * PT_PER_PX, layout.desc * PT_PER_PX,
+                layout.w * PT_PER_PX, view._baseline * PT_PER_PX)
+
+    def paint_inline(self, painter, corner: QPointF) -> None:
+        """Drawn among the words, its frame's corner at *corner* (frame_corner)."""
         view = self._view or self._preview_view()
         if view is None:
             return
         painter.save()
-        painter.translate(rect.topLeft())
+        painter.translate(corner)
         with self._looking():
             self._paint_view(painter, view)
         painter.restore()

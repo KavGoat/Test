@@ -5780,6 +5780,11 @@ class PageView(QGraphicsView):
         from PySide6.QtWidgets import QGraphicsItem as _GraphicsItem
         if getattr(item, "SHEET_RUN", False):
             return True                # a spreadsheet page's cells: never picked up, always typed in
+        if getattr(item, "INLINE", False):
+            # an equation inside a text box: never moved on its own, typed
+            # in whenever its box can be (the user, 2026-11-15: "can't
+            # double click on the equation while in text box edit mode")
+            return not item.locked and not getattr(item.host, "locked", False)
         return bool(item.flags() & _GraphicsItem.ItemIsMovable) and not item.locked
 
     def text_clipboard(self, action: str) -> bool:

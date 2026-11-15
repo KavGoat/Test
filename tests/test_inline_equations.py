@@ -126,7 +126,12 @@ def test_a_backslash_opens_smaths_editor_and_enter_puts_the_caret_back_in_the_wo
     rect = box.inline_rect(item.inline_uid)                # in the box's coordinates
     assert rect is not None and rect.width() > 10 and rect.height() > 5
     assert item.pos().x() > 10, "after the word Load"
-    assert (item.pos() - rect.topLeft()).manhattanLength() < 0.1
+    # its frame stands where its drawing starts a point into its place, its
+    # baseline within the place (inline_equations.frame_corner)
+    from calcforge.items.inline_equations import GAP
+    left, _ascent, _descent, _width, baseline = item.ink_metrics()
+    assert abs(item.pos().x() + left - (rect.left() + GAP)) < 0.1
+    assert rect.top() < item.pos().y() + baseline < rect.bottom()
     origin = -box.boundingRect().topLeft()
     left = int((origin.x() + rect.left()) * scale)
     top = int((origin.y() + rect.top()) * scale)

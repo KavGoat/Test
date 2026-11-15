@@ -521,12 +521,14 @@ colours you made are kept.
   words, `←` or `→` onto the equation steps back into it. A space in the equation
   goes back to the words: a lone word (`q` and a space) goes back as words, as
   SMath makes a name and a space text; an expression stays an equation and the
-  space follows it. The equation is drawn typeset among the words, follows their
-  font size (the Properties toolbar's size, Auto font size) and is recalculated
-  with the document. Right-click it for its own menu — **Show Expression** shows
-  the working beside the result, `test*test = 50`, rather than the result alone;
-  Decimal Places and the rest as for an equation on the page — and a click on it
-  opens it to retype. A mistake is said in the equation, as on the page. An
+  space follows it. The equation is drawn typeset among the words, on their
+  baseline, follows their font size (the Properties toolbar's size, Auto font
+  size) and is recalculated with the document. Right-click it for its own menu —
+  **Show Expression** shows the working beside the result, `test*test = 50`,
+  rather than the result alone; Decimal Places and the rest as for an equation
+  on the page — and a click on it, or a double-click while the box is being
+  typed in, opens it to retype. A mistake is said in the equation, as on the
+  page. An
   equation inside a box is read in the document's order where the box is, as a
   named measurement is.
 - **Edit Text** puts the cursor in the words; **Bookmark** makes the words a

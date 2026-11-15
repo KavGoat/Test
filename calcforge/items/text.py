@@ -564,11 +564,13 @@ class _TextBase(MarkupItem):
     def start_inline_equation(self, cursor):
         """``\\`` typed at *cursor*: a new, empty equation there, for the
         editor to open (ui/calcedit.CalcEditing.focus)."""
-        from .inline_equations import InlineCalcItem, add_resource, equation_format, new_uid
+        from .inline_equations import (InlineCalcItem, add_resource, equation_format,
+                                       inline_size, new_uid)
         uid = new_uid()
         item = InlineCalcItem(self, uid)
         add_resource(self.doc, uid)
-        cursor.insertImage(equation_format(uid, cursor.charFormat(), item.local_rect().size()))
+        like = cursor.charFormat()
+        cursor.insertImage(equation_format(uid, like, inline_size(item, like)))
         self._inline[uid] = item
         self._inline_caret = cursor.position()
         self._fields_shown = None
@@ -582,7 +584,7 @@ class _TextBase(MarkupItem):
         if uid not in self._inline:
             return
         self._fields_shown = None
-        if self._resize_placeholder(uid, item.local_rect().size()):
+        if self._resize_placeholder(uid, item):
             return                     # the words changed: _on_contents_changed does the rest
         self.prepareGeometryChange()
         if not self._editing and self.auto_size and not self.style.font_auto:
@@ -590,13 +592,14 @@ class _TextBase(MarkupItem):
         self._sync_inline_positions()
         self.update()
 
-    def _resize_placeholder(self, uid: str, size) -> bool:
-        """The equation's place in the words made its size; True if it was
-        not already."""
-        from .inline_equations import equation_format, fragments, placeholder_cursor
+    def _resize_placeholder(self, uid: str, item) -> bool:
+        """The equation's place in the words made its size (inline_size);
+        True if it was not already."""
+        from .inline_equations import equation_format, fragments, inline_size, placeholder_cursor
         for position, found, fmt in fragments(self.doc):
             if found != uid:
                 continue
+            size = inline_size(item, fmt)
             image = fmt.toImageFormat()
             if abs(image.width() - max(size.width(), 1.0)) < 0.05 \
                     and abs(image.height() - max(size.height(), 1.0)) < 0.05:
@@ -687,8 +690,8 @@ class _TextBase(MarkupItem):
                 item.region.font_size = size
                 item.relayout()
 
-    def _place_inline(self, item, rect: QRectF) -> None:
-        where = self.text_origin() + rect.topLeft()
+    def _place_inline(self, item, corner: QPointF) -> None:
+        where = self.text_origin() + corner
         if (item.pos() - where).manhattanLength() > 0.01:
             item.setPos(where)
 
@@ -706,7 +709,7 @@ class _TextBase(MarkupItem):
         if not self._inline:
             return
         from .fields import shown_document
-        from .inline_equations import fragments, object_rect
+        from .inline_equations import frame_corner, fragments, inline_size, line_baseline, object_rect
         shown = self.doc if self._editing else shown_document(self, on_screen=True)
         shown.setTextWidth(max(self.text_rect().width(), 8.0))
         shown.size()                                   # laid out
@@ -714,12 +717,13 @@ class _TextBase(MarkupItem):
             item = self._inline.get(uid)
             if item is None:
                 continue
-            self._place_inline(item, object_rect(shown, position, fmt, item.local_rect().size()))
+            place = object_rect(shown, position, fmt, inline_size(item, fmt))
+            self._place_inline(item, frame_corner(item, place, line_baseline(shown, position)))
 
     def inline_rect(self, uid: str) -> Optional[QRectF]:
         """Where the equation is drawn, in the box's coordinates."""
         from .fields import shown_document
-        from .inline_equations import fragments, object_rect
+        from .inline_equations import fragments, inline_size, object_rect
         item = self._inline.get(uid)
         if item is None:
             return None
@@ -727,7 +731,7 @@ class _TextBase(MarkupItem):
         shown.size()
         for position, found, fmt in fragments(shown):
             if found == uid:
-                rect = object_rect(shown, position, fmt, item.local_rect().size())
+                rect = object_rect(shown, position, fmt, inline_size(item, fmt))
                 return rect.translated(self.text_origin())
         return None
 
