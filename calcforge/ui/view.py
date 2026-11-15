@@ -1788,10 +1788,17 @@ class PageView(QGraphicsView):
         window = getattr(self, "window", None)
         return window.dropped_paths(event) if window is not None else []
 
+    #: whether the drag over the canvas is one of files the canvas took
+    #: itself (the scene never saw it come in, so it is not told it has gone)
+    _drag_taken = False
+
     def dragEnterEvent(self, event) -> None:
         if self._dropped(event):
+            self._drag_taken = True
             event.acceptProposedAction()
+            self._show_drop_marker(event)
             return
+        self._drag_taken = False
         super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:
@@ -1803,6 +1810,12 @@ class PageView(QGraphicsView):
 
     def dragLeaveEvent(self, event) -> None:
         self._clear_drop_marker()
+        if self._drag_taken:
+            # (Qt's "drag leave received before drag enter": the scene was
+            # never told of a drag the canvas took — the user, 2026-11-15)
+            self._drag_taken = False
+            event.accept()
+            return
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event) -> None:
@@ -1811,6 +1824,7 @@ class PageView(QGraphicsView):
             self._clear_drop_marker()
             super().dropEvent(event)
             return
+        self._drag_taken = False
         event.acceptProposedAction()
         frame = self.drop_target(self.mapToScene(event.position().toPoint()))
         self._clear_drop_marker()
@@ -1842,37 +1856,44 @@ class PageView(QGraphicsView):
         return max(above, key=lambda frame: paper(frame).top()) if above else None
 
     def _show_drop_marker(self, event) -> None:
+        """While a workbook or a picture is dragged over the canvas: the
+        page it would go in after outlined, a line under it, as the
+        Thumbnails draw for a drop between pages — and the Thumbnails draw
+        theirs too — the words beside the pointer and in the status bar (the
+        user, 2026-10-30: the Excel drag "just says copy, it should show the
+        insertion point like the pdf"; 2026-11-15: the OS cursor can only
+        say Copy, Move or Link); a PDF too, whose pages go in after that page
+        (the user, 2026-11-12: over the pages insert, on the tab bar open).
+        Off the pages the file opens in a tab of its own."""
         self._canvas_changed = True
-        """While a workbook or a picture is dragged over the canvas: a line
-        under the page it would go in after, as the Thumbnails draw for a
-        drop between pages, and the status bar says which page (the user,
-        2026-10-30: the Excel drag "just says copy, it should show the
-        insertion point like the pdf"); a PDF too, whose pages go in after
-        that page (the user, 2026-11-12: over the pages insert, on the tab
-        bar open). Off the pages the file opens in a tab of its own."""
         window = self.window
         kinds = {window.droppable(path) for path in self._dropped(event)}
         target = None
+        point = event.position().toPoint()
         if kinds & {"workbook", "image", "pdf"}:
-            target = self.drop_target(self.mapToScene(event.position().toPoint()))
+            target = self.drop_target(self.mapToScene(point))
         if target is not self._drop_after:
             self._drop_after = target
             self.viewport().update()
-        hint = getattr(window, "status_hint", None)
+        number = 0
         if target is not None:
             try:
                 number = window.document.index_of(target.page) + 1
             except ValueError:
                 number = 0
+        panel = getattr(window, "pages_panel", None)
+        if panel is not None and hasattr(panel, "list"):
+            panel.list.set_external_drop_row(number if number else None)
+        if number:
             what = ("the PDF's pages" if "pdf" in kinds else "the workbook"
                     if "workbook" in kinds else "the picture")
-            if hint is not None and number:
-                hint.setText(f"Drop to put {what} in after page {number}")
-            self._drop_hint_shown = True
-        elif hint is not None:
+            words, hint = f"Insert after page {number}", f"Drop to put {what} in after page {number}"
+        else:
             # off the pages (the canvas's margin): it would open in a tab
-            hint.setText("Drop to open in a tab of its own")
-            self._drop_hint_shown = True
+            words, hint = "Open in a tab of its own", "Drop to open in a tab of its own"
+        self._drop_hint_shown = True
+        if hasattr(window, "show_drop_words"):
+            window.show_drop_words(words, hint, self.viewport().mapToGlobal(point))
 
     def _clear_drop_marker(self) -> None:
         if self._drop_after is not None:
@@ -1880,16 +1901,20 @@ class PageView(QGraphicsView):
             self.viewport().update()
         if self._drop_hint_shown:
             self._drop_hint_shown = False
-            hint = getattr(self.window, "status_hint", None)
-            if hint is not None:
-                hint.setText("")
+            window = self.window
+            if hasattr(window, "hide_drop_words"):
+                window.hide_drop_words()
+            else:
+                hint = getattr(window, "status_hint", None)
+                if hint is not None:
+                    hint.setText("")
 
     def _draw_drop_marker(self, painter: QPainter) -> None:
         frame = self._drop_after
         if frame is None:
             return
         try:
-            box = frame.sceneBoundingRect()
+            box = frame.mapToScene(frame.page_rect()).boundingRect()
         except RuntimeError:                  # the page is gone
             self._drop_after = None
             return
@@ -1898,7 +1923,13 @@ class PageView(QGraphicsView):
         painter.save()
         painter.resetTransform()
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setPen(QPen(QColor("#1971c2"), 3.0, Qt.SolidLine, Qt.RoundCap))
+        colour = QColor("#1971c2")
+        # the page itself outlined: seen however far in the view is zoomed,
+        # when its bottom edge is off the screen
+        painter.setPen(QPen(colour, 2.0))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(QRectF(self.mapFromScene(box.topLeft()), right).adjusted(1, 1, -1, -1))
+        painter.setPen(QPen(colour, 3.0, Qt.SolidLine, Qt.RoundCap))
         y = left.y() + 4
         painter.drawLine(QPointF(left.x(), y), QPointF(right.x(), y))
         painter.restore()
@@ -3542,8 +3573,12 @@ class PageView(QGraphicsView):
 
     def viewportEvent(self, event) -> bool:
         kind = event.type()
-        if kind == QEvent.Wheel or (kind == QEvent.MouseMove and event.buttons()):
-            # the page's markup squares are drawn when the hand is still
+        if kind == QEvent.Wheel or (kind == QEvent.MouseMove
+                                    and (event.buttons() or self._pointer_followed())):
+            # the page's markup squares are drawn when the hand is still —
+            # and a hand placing a call-out's box after its leader, or a
+            # held stamp, is not still, though no button is down (the user,
+            # 2026-11-12/15: the box "laggy after placing leader")
             from .markuplayer import busy
             busy()
         if kind == QEvent.Leave:
@@ -3557,6 +3592,15 @@ class PageView(QGraphicsView):
             self._frame_if_due()
             return done
         return super().viewportEvent(event)
+
+    def _pointer_followed(self) -> bool:
+        """Whether a preview rides the pointer with no button held: a
+        call-out's box after its leader, a leader being added, a held stamp
+        or a click-placed tool's shape."""
+        return (self._pending_anchor is not None or self._pending_stamp is not None
+                or self._pending_arrow_leader is not None
+                or self._pending_cloud_leader is not None
+                or self._mode in ("draw_click", "draw_poly"))
 
     #: when the canvas was last painted (time.monotonic)
     _painted_at = 0.0
@@ -6095,10 +6139,15 @@ class PageView(QGraphicsView):
         now = self._pointer_preview_rects()
         self._preview_rects_drawn = now
         viewport = self.viewport()
-        if now is None or drawn is None:
+        if now is None or (drawn is None and not now):
             self._canvas_changed = True
             viewport.update()
             return
+        if drawn is None:
+            # the first move of a preview (a call-out's box after its leader):
+            # only where it is drawn, not the whole canvas — on the graphics
+            # card that drew every page's squares again (the user, 2026-11-15)
+            drawn = []
         if not now and not drawn:
             return
         # a piece drawn in the same place before and now (a Cloud+'s cloud,

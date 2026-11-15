@@ -7091,7 +7091,16 @@ class MainWindow(QMainWindow):
         exactly which page it will land in front of. Says how many went in.
         """
         row = max(0, min(int(row), len(self.document.pages)))
+        from .xlsximport import is_workbook
         added = 0
+        for path in [path for path in paths if is_workbook(path)]:
+            # a workbook's sheets too (the user, 2026-11-15: "dragging an
+            # excel doesn't show where it will insert")
+            added += self._insert_workbook_at(path, row + added)
+        paths = [path for path in paths if not is_workbook(path)]
+        if not paths:
+            return added
+        row += added
 
         def mutate():
             nonlocal added
@@ -7124,6 +7133,24 @@ class MainWindow(QMainWindow):
             self.status_hint.setText(
                 f"Inserted {added} page(s) as page {row + 1}")
         return added
+
+    def _insert_workbook_at(self, path: str, row: int) -> int:
+        """A workbook dropped on the Thumbnails: its sheets in front of page
+        *row* (after the last page, dropped below them), never splitting a
+        workbook already there; into a blank, untouched window it opens as a
+        document of its own, as it does dropped on the canvas. How many pages
+        came in."""
+        if self._workspace_empty or self._untouched():
+            self._open_chosen(path)
+            return len(self.document.pages)
+        pages = len(self.document.pages)
+        if not pages:
+            done = self.insert_workbook(path)
+        elif row >= pages:
+            done = self.insert_workbook(path, index=pages - 1)
+        else:
+            done = self.insert_workbook(path, index=row, before=True)
+        return len(self.document.pages) - pages if done else 0
 
     #: what a dropped or inserted picture may be
     IMAGE_FILES = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp")
@@ -7191,12 +7218,14 @@ class MainWindow(QMainWindow):
             kinds = {self.droppable(path) for path in paths}
             what = ("PDF" if "pdf" in kinds else "workbook" if "workbook" in kinds
                     else "picture")
-            self.status_hint.setText(f"Drop to open the {what} in a tab of its own")
+            self.show_drop_words("Open in a tab of its own",
+                                 f"Drop to open the {what} in a tab of its own",
+                                 self.mapToGlobal(event.position().toPoint()))
             return
         super().dragMoveEvent(event)
 
     def dragLeaveEvent(self, event) -> None:
-        self.status_hint.setText("")
+        self.hide_drop_words()
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event) -> None:
@@ -7204,8 +7233,26 @@ class MainWindow(QMainWindow):
         if not paths:
             super().dropEvent(event)
             return
+        self.hide_drop_words()
         event.acceptProposedAction()
         self.drop_files(paths)
+
+    def show_drop_words(self, words: str, hint: str, where) -> None:
+        """What a drop would do, said beside the pointer (at the global point
+        *where*) and in the status bar: the OS cursor itself can only say
+        Copy, Move or Link (the user, 2026-11-15: "drag a file from explorer
+        says copy instead of open")."""
+        from PySide6.QtWidgets import QToolTip
+        self.status_hint.setText(hint)
+        QToolTip.showText(where + QPoint(16, 20), words, self)
+
+    def hide_drop_words(self) -> None:
+        from PySide6.QtWidgets import QToolTip
+        self.status_hint.setText("")
+        QToolTip.hideText()
+        panel = getattr(self, "pages_panel", None)
+        if panel is not None and hasattr(panel, "list"):
+            panel.list.set_external_drop_row(None)
 
     def drop_files(self, paths: list, index: Optional[int] = None) -> None:
         """Files dropped on the window: a PDF opens in a tab of its own

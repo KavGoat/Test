@@ -120,10 +120,13 @@ page.
   *Loading markups… n of N pages*); a page not built yet shows as its file draws
   it, and a save in the meantime keeps every markup.
 - **Drag and drop**: drop a PDF, an Excel workbook or a picture (`.png`, `.jpg`, …)
-  on a page to put it in after that page (a line under the page shows where, and
-  the status bar says which page); drop a PDF on the tab bar, a panel or anywhere
-  off the pages to open it in a tab of its own. Dropped on a blank, untouched
-  window, a workbook opens as the document.
+  on a page to put it in after that page — the page is outlined, a line under it
+  shows where, the Thumbnails show the gap it goes into, and the words beside the
+  pointer and in the status bar say so (*Insert after page 3*; Windows' own drag
+  cursor can only say Copy, Move or Link). Drop it on the Thumbnails between two
+  pages to put it there. Drop a PDF on the tab bar, a panel or anywhere off the
+  pages to open it in a tab of its own (*Open in a tab of its own*). Dropped on a
+  blank, untouched window, a workbook opens as the document.
 - **File ▸ Save** (`Ctrl+S`), **Save As** (`Ctrl+Shift+S`) and **Save All** write the
   PDF. A digitally signed PDF is appended to, so its signature still verifies.
 - **When a file can't be saved** — it is read-only, open in another program, its
@@ -509,18 +512,23 @@ colours you made are kept.
   name, Page number (also `0001` style), Number of pages, Page n of m, four date
   formats, two time formats — and **Variable**, which shows an equation's value
   (`{=name}`) and follows it as it is recalculated.
-- **An equation inside a text box.** Type `\` while writing and `{\ }` opens
-  with the caret inside; type the equation as in Calc mode and `Enter` steps out
-  of it (`}` closes it too). `{\5+2=}` shows **7**, `{\test=}` the value of
-  *test*, `{\t:=5}` defines *t* for every equation, table and cell after the box
-  (the Variables panel lists it as a *Text box*). While the box is being typed
-  into the codes show; otherwise their results, which follow the calculation.
-  Right-click an equation ▸ **Show Expression** shows the working beside the
-  result, `test*test = 50`, rather than the result alone; **Edit Equation**, or a
-  double-click on it, opens the box with the equation picked out to retype. A
-  mistake is said in the box (`zz*2: zz - not defined.`). An equation inside a
-  box is read in the document's order where the box is, as a named measurement
-  is.
+- **An equation inside a text box.** Type `\` while writing and SMath's equation
+  editor opens at the caret, at the size of the words round it; type the equation
+  as in Calc mode: `5+2=` shows **7**, `test=` the value of *test*, `t:5` defines
+  *t* for every equation, table and cell after the box (the Variables panel lists
+  it as a *Text box*). `Enter`, or `→` at the end of the equation, steps out of it
+  with the caret after it; `←` at its start steps out in front of it; in the
+  words, `←` or `→` onto the equation steps back into it. A space in the equation
+  goes back to the words: a lone word (`q` and a space) goes back as words, as
+  SMath makes a name and a space text; an expression stays an equation and the
+  space follows it. The equation is drawn typeset among the words, follows their
+  font size (the Properties toolbar's size, Auto font size) and is recalculated
+  with the document. Right-click it for its own menu — **Show Expression** shows
+  the working beside the result, `test*test = 50`, rather than the result alone;
+  Decimal Places and the rest as for an equation on the page — and a click on it
+  opens it to retype. A mistake is said in the equation, as on the page. An
+  equation inside a box is read in the document's order where the box is, as a
+  named measurement is.
 - **Edit Text** puts the cursor in the words; **Bookmark** makes the words a
   bookmark.
 - **Edit ▸ Check Spelling ▸ Check Spelling in Markups…** (`F7`) goes through every
@@ -680,8 +688,9 @@ tool set keep their own drawing.
 
 **Thumbnails panel** (`Alt+T`). Click a page to go to it; `Delete` deletes the pages
 picked (it asks first; it works with a markup selected on the page too); drag
-pages to reorder them (a blue line in the gap shows where); drop a PDF on it to
-insert its pages. A calc section break is a purple band across the strip above
+pages to reorder them (a blue line in the gap shows where); drop a PDF, an Excel
+workbook or a picture on it to put it in where the line is (*Insert as page 4*
+beside the pointer). A calc section break is a purple band across the strip above
 the page it starts, its name on a tag. `Ctrl`+wheel, **Larger Thumbnails**
 and **Smaller Thumbnails** change the picture size. **Thumbnails ▾** is its menu;
 the buttons after it are **Add Page**, **Insert Pages**, **Insert Blank Page**,

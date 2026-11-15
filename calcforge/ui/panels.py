@@ -1012,13 +1012,32 @@ class PagesPanel(QWidget):
     WELCOME = (".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff")
 
     def _files_in(self, event) -> list[str]:
-        """The paths being dragged that this panel can do something with."""
+        """The paths being dragged that this panel can do something with:
+        PDFs, pictures and workbooks (the user, 2026-11-15: "dragging an
+        excel doesn't show where it will insert")."""
         data = event.mimeData()
         if not data.hasUrls():
             return []
         paths = [url.toLocalFile() for url in data.urls()]
+        window = getattr(self, "window", None)
+        if window is not None and hasattr(window, "droppable"):
+            return [path for path in paths if window.droppable(path)]
         return [path for path in paths
                 if path.lower().endswith(self.WELCOME)]
+
+    def _say_where(self, row: int, position) -> None:
+        """Beside the pointer: which page the files would go in as (the OS
+        cursor can only say Copy)."""
+        window = getattr(self, "window", None)
+        if window is not None and hasattr(window, "show_drop_words"):
+            window.show_drop_words(f"Insert as page {row + 1}",
+                                   f"Drop to put the file in as page {row + 1}",
+                                   self.list.viewport().mapToGlobal(position))
+
+    def _stop_saying(self) -> None:
+        window = getattr(self, "window", None)
+        if window is not None and hasattr(window, "hide_drop_words"):
+            window.hide_drop_words()
 
     def _ours(self, event) -> bool:
         """Pages of this strip being dragged along it."""
@@ -1032,8 +1051,9 @@ class PagesPanel(QWidget):
             event.accept()
             return
         if self._files_in(event):
-            self.list.set_external_drop_row(
-                self.drop_row(event.position().toPoint()))
+            row = self.drop_row(event.position().toPoint())
+            self.list.set_external_drop_row(row)
+            self._say_where(row, event.position().toPoint())
             event.setDropAction(Qt.CopyAction)
             event.acceptProposedAction()
             return
@@ -1049,8 +1069,9 @@ class PagesPanel(QWidget):
             self._scroll_near_the_edge(event.position().toPoint())
             return
         if self._files_in(event):
-            self.list.set_external_drop_row(
-                self.drop_row(event.position().toPoint()))
+            row = self.drop_row(event.position().toPoint())
+            self.list.set_external_drop_row(row)
+            self._say_where(row, event.position().toPoint())
             event.setDropAction(Qt.CopyAction)
             event.acceptProposedAction()
             return
@@ -1059,6 +1080,7 @@ class PagesPanel(QWidget):
 
     def _drag_leave(self, event) -> None:
         self.list.set_external_drop_row(None)
+        self._stop_saying()
         event.accept()
 
     def drop_row(self, position) -> int:
@@ -1113,6 +1135,7 @@ class PagesPanel(QWidget):
             return
         row = self.drop_row(event.position().toPoint())
         self.list.set_external_drop_row(None)
+        self._stop_saying()
         event.setDropAction(Qt.CopyAction)
         event.accept()
         self.window.insert_files_at(files, row)

@@ -164,6 +164,15 @@ class _InlineEditor(QGraphicsTextItem):
             self.set_script("sub" if text == "_" else "super")
             event.accept()
             return
+        key = event.key()
+        if key in (Qt.Key_Left, Qt.Key_Right) and not (event.modifiers() & (
+                Qt.ShiftModifier | Qt.ControlModifier | Qt.AltModifier)):
+            # the caret stepping onto an equation steps into it (the user,
+            # 2026-11-15: "left right arrow after typing enter should let me
+            # go back into edit mode")
+            if self._step_into_equation(key == Qt.Key_Right):
+                event.accept()
+                return
         if text == "\\" and not (event.modifiers() & Qt.ControlModifier):
             # an equation inside the box (items/inline_equations.py): SMath's
             # editor opens at the caret, as for an equation on the page
@@ -179,7 +188,10 @@ class _InlineEditor(QGraphicsTextItem):
                 from ..ui import preferences
                 prefs = preferences.current()
                 if item.region is not None:
-                    item.region.font_size = float(prefs.equation_font_size)
+                    # at the size of the words round it (the user, 2026-11-15:
+                    # "equation in text box should follow font size of text
+                    # there"), in the colour equations are typed in
+                    item.region.font_size = host.font_size_at(host._inline_caret - 1)
                     item.region.color = prefs.equation_colour or "#000000"
                     item.relayout()
 
@@ -195,6 +207,39 @@ class _InlineEditor(QGraphicsTextItem):
                                                                 Qt.Key_Enter)):
             self.set_script("")
         super().keyPressEvent(event)
+
+    def _step_into_equation(self, forward: bool) -> bool:
+        """Left or Right with an equation next to the caret: the caret goes
+        into the equation (at its end from the right, its start from the
+        left) instead of over it. True when it did."""
+        from .inline_equations import PLACEHOLDER, uid_of
+        host = self.parentItem()
+        cursor = self.textCursor()
+        if cursor.hasSelection() or not hasattr(host, "inline_equation"):
+            return False
+        doc = self.document()
+        at = cursor.position() if forward else cursor.position() - 1
+        if at < 0 or doc.characterAt(at) != PLACEHOLDER:
+            return False
+        probe = QTextCursor(doc)
+        probe.setPosition(at + 1)                 # (charFormat: the character before the cursor)
+        item = host.inline_equation(uid_of(probe.charFormat()))
+        scene = self.scene()
+        views = scene.views() if scene is not None else []
+        if item is None or item.region is None or not views:
+            return False
+        view = views[0]
+
+        def open_it(item=item, view=view, forward=forward):
+            if item.scene() is None or item.region is None:
+                return
+            view.calc.focus(item)
+            item.region.editor.key("HOME" if forward else "END")
+            item.relayout()
+        # once this key is done with: opening the equation closes this
+        # editor, which must not go while it is handling a key
+        QTimer.singleShot(0, open_it)
+        return True
 
     def set_script(self, level: str) -> None:
         """Put the caret into subscript, superscript or back on the line."""
@@ -578,22 +623,69 @@ class _TextBase(MarkupItem):
         self._fields_shown = None
         self.update()
 
-    def resume_typing(self) -> None:
-        """Back to the words, the caret after the equation just finished
-        (ui/calcedit: Enter in an equation inside the box)."""
+    def resume_typing(self, item=None, before: bool = False) -> None:
+        """Back to the words, the caret after the equation *item* just
+        finished — before it with *before* (ui/calcedit: Enter, Right at
+        the end or Left at the start of an equation inside the box)."""
         scene = self.scene()
         views = scene.views() if scene is not None else []
         if not views:
             return
+        at = None
+        if item is not None:
+            position = self._placeholder_position(getattr(item, "inline_uid", ""))
+            if position is not None:
+                at = position if before else position + 1
         views[0].begin_item_edit(self)
         editor = self._editor
         if editor is None:
             return
         last = max(self.doc.characterCount() - 1, 0)
-        at = self._inline_caret if self._inline_caret is not None else last
+        if at is None:
+            at = self._inline_caret if self._inline_caret is not None else last
         cursor = editor.textCursor()
         cursor.setPosition(min(max(int(at), 0), last))
         editor.setTextCursor(cursor)
+
+    def insert_words(self, words: str) -> None:
+        """*words* typed at the caret while the box is being typed in
+        (ui/calcedit: a space in an equation inside the box)."""
+        editor = self._editor
+        if editor is None or not words:
+            return
+        cursor = editor.textCursor()
+        cursor.insertText(words)
+        editor.setTextCursor(cursor)
+
+    def font_size_at(self, position: int) -> float:
+        """The size of the words round the equation at *position*: the
+        character before it, else the one after, else the box's font (the
+        user, 2026-11-15: an equation in a box "should follow font size of
+        text there")."""
+        doc = self.doc
+        last = max(doc.characterCount() - 1, 0)
+        for at in (position, position + 2):      # (charFormat: the character before the cursor)
+            if 0 < at <= last:
+                cursor = QTextCursor(doc)
+                cursor.setPosition(at)
+                size = cursor.charFormat().fontPointSize()
+                if size > 0:
+                    return float(size)
+        size = doc.defaultFont().pointSizeF()
+        return float(size if size > 0 else self.style.font_size)
+
+    def _size_inline_equations(self) -> None:
+        """Every equation inside the box at the size of the words round it,
+        after the box's font changed (the Properties toolbar, Auto font size)."""
+        from .inline_equations import placeholders
+        for position, uid in placeholders(self.doc):
+            item = self._inline.get(uid)
+            if item is None or item.region is None:
+                continue
+            size = self.font_size_at(position)
+            if abs(float(item.region.font_size) - size) > 0.05:
+                item.region.font_size = size
+                item.relayout()
 
     def _place_inline(self, item, rect: QRectF) -> None:
         where = self.text_origin() + rect.topLeft()
@@ -865,6 +957,7 @@ class _TextBase(MarkupItem):
         self.prepareGeometryChange()
         if self.style.font_auto:
             self._fit_font()
+            self._size_inline_equations()        # the equations follow the fitted size
         elif self.auto_size:
             self._fit_height()
         self._sync_inline_positions()
@@ -891,6 +984,7 @@ class _TextBase(MarkupItem):
             self._fit_font()
         elif self.auto_size:
             self._fit_height()
+        self._size_inline_equations()
         self.update()
 
     # Revu's Superscript and Subscript for the whole box: every run set above

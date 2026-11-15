@@ -798,6 +798,15 @@ class CalcEditing:
         item = self.item
         if name in ("LEFT", "RIGHT", "UP", "DOWN") and self._block_for_clash(item):
             return
+        if name in ("LEFT", "RIGHT") and getattr(item, "INLINE", False) \
+                and self._at_inline_edge(item, name):
+            # out of an equation inside a text box, into the words beside it
+            # (the user, 2026-11-15: Right at the end "should act like
+            # pressing enter"; Left at the start leaves before it)
+            host = item.host
+            self.leave()
+            host.resume_typing(item, before=name == "LEFT")
+            return
         if name in ("UP", "DOWN") and item.region.kind != "text":
             # Up/Down move to the previous/next region (observed on SMath Cloud)
             self._step_region(-1 if name == "UP" else 1)
@@ -809,6 +818,9 @@ class CalcEditing:
         if text and not _word_char(text[0]) and self._block_for_clash(item):
             return                            # m is a variable and a unit: pick one first
         for ch in text:
+            if ch == " " and getattr(item, "INLINE", False) and item.region.plot is None:
+                self._inline_back_to_words(item)
+                return
             item.region.editor.key(ch)
             if item.region.editor.kind == "text" and item.region.plot is None:
                 # SMath: a lone word and a space make a text region; here that
@@ -816,6 +828,39 @@ class CalcEditing:
                 self._becomes_calc_text(item)
                 return
         self._after_edit(item, typed=True)
+
+    def _inline_back_to_words(self, item: CalcItem) -> None:
+        """A space in an equation inside a text box: back to the box's words
+        (the user, 2026-11-15: "space inside equation inside text box should
+        swap back to normal text"). A lone word goes back as words (SMath: a
+        name and a space are text); an expression stays an equation, with
+        the space typed after it."""
+        editor = item.region.editor
+        host = item.host
+        editor.key(" ")
+        words = " "
+        if editor.kind == "text":
+            words = editor.text or " "
+            host.remove_inline_equation(item)      # its word goes back among the words
+        else:
+            editor.selection = None                # (the space would have picked a term)
+        self.leave()
+        host.resume_typing(item)
+        host.insert_words(words)
+
+    @staticmethod
+    def _at_inline_edge(item: CalcItem, name: str) -> bool:
+        """Whether the caret is at the start (LEFT) or the end (RIGHT) of the
+        equation with nothing picked: the next step would leave it."""
+        editor = item.region.editor
+        if editor.kind == "text":
+            if editor.text_selection():
+                return False
+            return editor.text_pos == (0 if name == "LEFT" else len(editor.text))
+        if editor.selection is not None or editor.node is not None \
+                or editor.row is not editor.root:
+            return False
+        return editor.pos == (0 if name == "LEFT" else len(editor.expression_items()))
 
     def _becomes_calc_text(self, item: CalcItem) -> None:
         """Turn the equation just typed into Calculation text with the same
@@ -870,7 +915,7 @@ class CalcEditing:
             # caret back in the words after it (items/inline_equations.py)
             host = item.host
             self.leave()
-            host.resume_typing()
+            host.resume_typing(item)
             return
         self.leave(cross_below=True)
 
